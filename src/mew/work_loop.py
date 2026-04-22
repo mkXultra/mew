@@ -63,7 +63,7 @@ WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
 WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
-WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v1"
+WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -1848,11 +1848,6 @@ def build_write_ready_tiny_draft_model_context(context):
         cached_window_texts = [
             {
                 "path": item.get("path"),
-                "line_start": item.get("line_start"),
-                "line_end": item.get("line_end"),
-                "tool_call_id": item.get("tool_call_id"),
-                "window_sha256": item.get("window_sha256") or "",
-                "file_sha256": item.get("file_sha256") or "",
                 "text": item.get("text") or "",
             }
             for item in recent_windows
@@ -1864,26 +1859,16 @@ def build_write_ready_tiny_draft_model_context(context):
         cached_window_texts = [
             {
                 "path": item.get("path"),
-                "line_start": item.get("line_start"),
-                "line_end": item.get("line_end"),
-                "tool_call_id": item.get("tool_call_id"),
-                "window_sha256": item.get("window_sha256") or "",
-                "file_sha256": item.get("file_sha256") or "",
                 "text": item.get("text") or "",
             }
             for item in recent_windows
         ]
     return {
         "active_work_todo": {
-            "id": active_work_todo.get("id"),
-            "status": active_work_todo.get("status"),
             "source": {
                 "plan_item": active_todo_plan_item,
                 "target_paths": active_todo_target_paths,
-                "verify_command": str(((active_work_todo.get("source") or {}).get("verify_command") or "")).strip(),
             },
-            "attempts": dict(active_work_todo.get("attempts") or {}),
-            "blocker": dict(active_work_todo.get("blocker") or {}),
         },
         "write_ready_fast_path": {
             "active": True,
@@ -1893,7 +1878,6 @@ def build_write_ready_tiny_draft_model_context(context):
         "allowed_roots": {
             "write": list(((write_ready_context.get("allowed_roots") or {}).get("write") or [])),
         },
-        "focused_verify_command": str(write_ready_context.get("focused_verify_command") or "").strip(),
     }
 
 
@@ -2067,7 +2051,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         '  "code": "blocker code when kind=patch_blocker",\n'
         '  "detail": "why drafting cannot proceed"\n'
         "}\n\n"
-        f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
+        f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
     )
 
 

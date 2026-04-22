@@ -146,11 +146,13 @@ Current next action:
 10. Start M6.11 Phase 0 first: land refusal separation, freeze blocker and
    recovery enums, keep tiny write-ready draft context anchored to the first
    actionable plan-item surface, and add the draft metrics/placeholders that the
-   design depends on.
+   design depends on. The same follow-up is now the tiny write-ready prompt
+   contract shrink: keep the tiny context to minimal fields and compact JSON to
+   reduce tiny retry pressure.
 11. Calibration checkpoint evaluator for M6.11 phase2/3 is now implemented via
-    `mew proof-summary --m6_11-phase2-calibration`, scanning
-    `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure
-    bundles.
+   `mew proof-summary --m6_11-phase2-calibration`, scanning
+   `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure
+   bundles.
 12. Do not let mew self-author roadmap-status or milestone-close edits; those
     remain reviewer-controlled until a later milestone explicitly moves that
     boundary.

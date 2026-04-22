@@ -6330,6 +6330,122 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Pair commands.py and tests/test_memory.py edits", tiny_prompt)
         self.assertNotIn("src/mew/cli.py", tiny_prompt)
 
+    def test_tiny_write_ready_draft_context_and_prompt_are_minimal_contract(self):
+        from mew.work_loop import (
+            build_write_ready_tiny_draft_model_context,
+            build_work_write_ready_tiny_draft_prompt,
+        )
+
+        context = {
+            "guidance": "draft a paired dry-run batch",
+            "task": {"id": 1, "title": "minimal prompt", "status": "todo", "kind": "coding"},
+            "work_session": {
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "blocked",
+                        "source": {
+                            "plan_item": "Scope-limited paired draft",
+                            "target_paths": ["src/mew/commands.py", "tests/test_memory.py"],
+                            "verify_command": "uv run python -m unittest tests.test_memory",
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                        "blocker": {"code": "missing_exact_cached_window_texts"},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "plan_item": "Scope-limited paired draft",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "tool_call_id": 11,
+                                    "line_start": 101,
+                                    "line_end": 122,
+                                },
+                                {
+                                    "path": "tests/test_memory.py",
+                                    "tool_call_id": 12,
+                                    "line_start": 33,
+                                    "line_end": 54,
+                                },
+                            ],
+                            "edit_ready": True,
+                        }
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "path": "src/mew/commands.py",
+                        "tool_call_id": 11,
+                        "line_start": 101,
+                        "line_end": 122,
+                        "text": "source_before\nsource_after\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "path": "tests/test_memory.py",
+                        "tool_call_id": 12,
+                        "line_start": 33,
+                        "line_end": 54,
+                        "text": "test_before\ntest_after\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {
+                "allowed_read_roots": ["/"],
+                "allowed_write_roots": ["src/mew", "tests"],
+            },
+        }
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        self.assertEqual(set(tiny_context.keys()), {"active_work_todo", "write_ready_fast_path", "allowed_roots"})
+        self.assertEqual(set(tiny_context["active_work_todo"].keys()), {"source"})
+        self.assertEqual(
+            set(tiny_context["active_work_todo"]["source"].keys()),
+            {"plan_item", "target_paths"},
+        )
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_memory.py"],
+        )
+        for forbidden in (
+            "id",
+            "status",
+            "attempts",
+            "blocker",
+            "verify_command",
+            "focused_verify_command",
+        ):
+            self.assertNotIn(forbidden, tiny_context["active_work_todo"])
+
+        for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]:
+            self.assertEqual(set(item.keys()), {"path", "text"})
+            self.assertNotIn("line_start", item)
+            self.assertNotIn("line_end", item)
+            self.assertNotIn("tool_call_id", item)
+            self.assertNotIn("window_sha256", item)
+            self.assertNotIn("file_sha256", item)
+
+        tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
+        self.assertIn("Write-ready tiny draft lane is active.", tiny_prompt)
+        focused_context = tiny_prompt.split("FocusedContext JSON:\n", 1)[1].strip()
+        self.assertNotIn("\n", focused_context)
+        for forbidden in (
+            "\"id\":",
+            "\"status\":",
+            "\"attempts\":",
+            "\"blocker\":",
+            "\"verify_command\":",
+            "\"focused_verify_command\":",
+            "\"line_start\":",
+            "\"line_end\":",
+            "\"tool_call_id\":",
+            "\"window_sha256\":",
+            "\"file_sha256\":",
+        ):
+            self.assertNotIn(forbidden, focused_context)
+
     def test_write_ready_prompt_v2_stays_bounded_for_two_cached_windows_fixture(self):
         from mew.work_loop import _write_ready_draft_prompt_chars, build_work_write_ready_think_prompt
 
@@ -7021,6 +7137,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(planned["model_metrics"]["draft_prompt_contract_version"], "v2")
         self.assertGreater(planned["model_metrics"]["draft_prompt_static_chars"], 0)
         self.assertGreater(planned["model_metrics"]["draft_prompt_dynamic_chars"], 0)
+        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_prompt_contract_version"], "v2")
         self.assertTrue(planned["model_metrics"]["tiny_write_ready_draft_attempted"])
         self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_outcome"], "fallback")
         self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_fallback_reason"], "invalid_shape")
