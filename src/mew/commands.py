@@ -6567,6 +6567,99 @@ def _work_follow_status_session_state_newer(snapshot_updated_at, session_updated
     return False
 
 
+def _work_follow_status_session_state_equal(snapshot_updated_at, session_updated_at):
+    snapshot_time = parse_time(snapshot_updated_at)
+    session_time = parse_time(session_updated_at)
+    if snapshot_time and session_time:
+        return session_time == snapshot_time
+    if snapshot_updated_at and session_updated_at:
+        return str(session_updated_at) == str(snapshot_updated_at)
+    return False
+
+
+def _work_follow_status_continuity_score(continuity):
+    value = (continuity or {}).get("score")
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if "/" in text:
+            numerator_and_remainder = text.split("/")
+            if len(numerator_and_remainder) != 2:
+                return None
+            try:
+                return int(numerator_and_remainder[0].strip())
+            except (TypeError, ValueError):
+                return None
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            return None
+    try:
+        if isinstance(value, float):
+            return int(value)
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _work_follow_status_todo_has_blocker(todo):
+    blocker = (todo or {}).get("blocker") or {}
+    return bool((blocker.get("code") or "").strip())
+
+
+def _work_follow_status_next_recovery_action(active_work_todo, recovery_plan):
+    blocker = (active_work_todo or {}).get("blocker") or {}
+    recovery_action = str(blocker.get("recovery_action") or "").strip()
+    if recovery_action:
+        return recovery_action
+    recovery_items = (recovery_plan or {}).get("items") or []
+    if recovery_items:
+        action = str((recovery_items[0] or {}).get("action") or "").strip()
+        if action:
+            return action
+    return ""
+
+
+def _work_follow_status_resume_is_richer(snapshot_resume, session_resume, session=None):
+    snapshot_phase = str((snapshot_resume or {}).get("phase") or "")
+    session_phase = str((session_resume or {}).get("phase") or "")
+    if not session_phase and session:
+        session_phase = str((session.get("active_work_todo") or {}).get("status") or "")
+    if session_phase == "blocked_on_patch" and snapshot_phase in ("drafting", "idle"):
+        return True
+    session_todo = (session_resume or {}).get("active_work_todo") or {}
+    if not session_todo and session:
+        session_todo = (session or {}).get("active_work_todo") or {}
+    snapshot_todo = (snapshot_resume or {}).get("active_work_todo") or {}
+    if _work_follow_status_todo_has_blocker(session_todo) and not _work_follow_status_todo_has_blocker(
+        snapshot_todo
+    ):
+        return True
+    snapshot_recovery_plan = (snapshot_resume or {}).get("recovery_plan") or {}
+    session_recovery_plan = (session_resume or {}).get("recovery_plan") or {}
+    if not session_recovery_plan and session:
+        session_recovery_plan = (session or {}).get("recovery_plan") or {}
+    if (session_recovery_plan.get("items") or []) and not (snapshot_recovery_plan.get("items") or []):
+        return True
+    session_score = _work_follow_status_continuity_score((session_resume or {}).get("continuity") or {})
+    snapshot_score = _work_follow_status_continuity_score((snapshot_resume or {}).get("continuity") or {})
+    if session_score is not None and snapshot_score is None:
+        return True
+    return session_score is not None and snapshot_score is not None and session_score > snapshot_score
+
+
+def _work_follow_status_session_task(state, task_id):
+    if not state or task_id is None:
+        return None
+    for task in state.get("tasks") or []:
+        if str(task.get("id")) == str(task_id):
+            return task
+    return None
+
+
 def _latest_failed_model_turn(model_turns):
     for turn in reversed(model_turns or []):
         turn_status = turn.get("status")
@@ -6613,7 +6706,7 @@ def _latest_failed_model_turn(model_turns):
     return None
 
 
-def _work_follow_status_latest_model_failure(snapshot_turns, session_turns):
+def _work_follow_status_latest_model_failure(snapshot_turns, session_turns, prefer_session=False):
     snapshot_failure = _latest_failed_model_turn(snapshot_turns)
     session_failure = _latest_failed_model_turn(session_turns)
     if not snapshot_failure:
@@ -6623,6 +6716,9 @@ def _work_follow_status_latest_model_failure(snapshot_turns, session_turns):
     if not session_failure:
         snapshot_failure["source"] = "snapshot"
         return snapshot_failure
+    if prefer_session:
+        session_failure["source"] = "session"
+        return session_failure
     snapshot_id = snapshot_failure.get("model_turn_id")
     session_id = session_failure.get("model_turn_id")
     if isinstance(snapshot_id, int) and isinstance(session_id, int):
@@ -6633,7 +6729,7 @@ def _work_follow_status_latest_model_failure(snapshot_turns, session_turns):
     return chosen
 
 
-def _work_follow_status_from_snapshot(path, task_id=None, session=None):
+def _work_follow_status_from_snapshot(path, task_id=None, session=None, state=None):
     overdue_grace_seconds = 10.0
     checkpoint = compact_context_checkpoint(latest_context_checkpoint())
     current_git = current_git_reentry_state()
@@ -6694,21 +6790,49 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
     working_memory_stale = bool(
         working_memory.get("stale_after_model_turn_id") or working_memory.get("stale_after_tool_call_id")
     )
-    latest_model_failure = _work_follow_status_latest_model_failure(
-        ((data.get("session") or {}).get("model_turns") or []),
-        ((session or {}).get("model_turns") or []),
-    )
-    checkpoint = compact_context_checkpoint(data.get("latest_context_checkpoint") or checkpoint)
-    current_git = data.get("current_git") or current_git
     snapshot_session_updated_at = data.get("session_updated_at")
     current_session_updated_at = (session or {}).get("updated_at")
+    session_task_id = (session or {}).get("task_id")
+    session_task = _work_follow_status_session_task(state, session_task_id)
+    session_resume = build_work_session_resume(session, task=session_task, state=state) if session else {}
     session_state_newer = _work_follow_status_session_state_newer(
         snapshot_session_updated_at,
         current_session_updated_at,
     )
+    session_state_equal = _work_follow_status_session_state_equal(
+        snapshot_session_updated_at,
+        current_session_updated_at,
+    )
+    use_session_overlay = bool(
+        session
+        and (
+            session_state_newer
+            or (
+                session_state_equal
+                and _work_follow_status_resume_is_richer(resume, session_resume, session=session)
+            )
+        )
+    )
+    effective_resume = session_resume if use_session_overlay else resume
+    resume_source = "session_overlay" if use_session_overlay else "snapshot"
+    latest_model_failure = _work_follow_status_latest_model_failure(
+        ((data.get("session") or {}).get("model_turns") or []),
+        ((session or {}).get("model_turns") or []),
+        prefer_session=use_session_overlay,
+    )
+    checkpoint = compact_context_checkpoint(data.get("latest_context_checkpoint") or checkpoint)
+    current_git = data.get("current_git") or current_git
+    active_work_todo = (effective_resume or {}).get("active_work_todo") or {}
+    if use_session_overlay and not active_work_todo:
+        active_work_todo = (session or {}).get("active_work_todo") or {}
+    recovery_plan = (effective_resume or {}).get("recovery_plan") or {}
+    pending_approvals = (effective_resume or {}).get("pending_approvals") or []
+    blocker_code = str((active_work_todo.get("blocker") or {}).get("code") or "")
+    next_recovery_action = _work_follow_status_next_recovery_action(active_work_todo, recovery_plan)
+    session_state_newer = _work_follow_status_session_state_newer(snapshot_session_updated_at, current_session_updated_at)
     suggested_recovery = work_follow_status_suggested_recovery(
         status,
-        snapshot_data=data,
+        snapshot_data={**data, "resume": effective_resume},
         task_id=task_id,
         session=session,
     )
@@ -6732,20 +6856,30 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None):
         "producer_pid": producer_pid,
         "producer_alive": producer_alive,
         "producer_health": work_follow_producer_health(status, heartbeat_at, age, producer_pid, producer_alive),
-        "phase": resume.get("phase") or data.get("phase") or "",
+        "resume_source": resume_source,
+        "phase": (
+            "blocked_on_patch"
+            if use_session_overlay and str((active_work_todo or {}).get("status") or "") == "blocked_on_patch"
+            else effective_resume.get("phase") or resume.get("phase") or data.get("phase") or ""
+        ),
         "model_timeout_seconds": model_timeout_seconds or None,
-        "next_action": resume.get("next_action") or "",
+        "next_action": effective_resume.get("next_action") or resume.get("next_action") or "",
         "working_memory_stale": working_memory_stale,
         "latest_model_failure": latest_model_failure,
         "latest_context_checkpoint": checkpoint,
         "current_git": current_git,
         "suggested_recovery": suggested_recovery,
-        "verification_coverage_warning": resume.get("verification_coverage_warning") or {},
-        "verification_confidence": resume.get("verification_confidence") or {},
-        "continuity": resume.get("continuity") or data.get("continuity") or {},
+        "verification_coverage_warning": effective_resume.get("verification_coverage_warning") or {},
+        "verification_confidence": effective_resume.get("verification_confidence") or {},
+        "continuity": effective_resume.get("continuity") or resume.get("continuity") or data.get("continuity") or {},
+        "active_work_todo": active_work_todo,
+        "blocker_code": blocker_code,
+        "next_recovery_action": next_recovery_action,
         "stop_reason": data.get("stop_reason"),
         "step_count": data.get("step_count"),
-        "pending_approval_count": len(data.get("pending_approvals") or []),
+        "pending_approval_count": len(pending_approvals)
+        if use_session_overlay
+        else len(data.get("pending_approvals") or []),
         "session_updated_at": snapshot_session_updated_at,
         "current_session_updated_at": current_session_updated_at,
         "session_state_newer": session_state_newer,
@@ -6809,6 +6943,7 @@ def format_work_follow_status(data):
         if producer_health.get("reason"):
             health_line += f" ({producer_health.get('reason')})"
         lines.append(health_line)
+    lines.append(f"resume_source: {data.get('resume_source') or 'snapshot'}")
     if data.get("working_memory_stale"):
         lines.append("working_memory: stale")
     latest_model_failure = data.get("latest_model_failure") or {}
@@ -6861,6 +6996,15 @@ def format_work_follow_status(data):
             lines.append("latest_model_failure_metrics: " + " ".join(metrics_bits))
     if data.get("next_action"):
         lines.append(f"next_action: {data.get('next_action')}")
+    if data.get("active_work_todo"):
+        todo = data.get("active_work_todo") or {}
+        attempts = (todo.get("attempts") or {}).get("draft")
+        attempts_text = f" draft_attempts={attempts}" if attempts is not None else ""
+        lines.append(
+            f"active_work_todo: id={todo.get('id') or '-'} status={todo.get('status') or '-'}{attempts_text}"
+        )
+    if data.get("next_recovery_action"):
+        lines.append(f"next_recovery_action: {data.get('next_recovery_action')}")
     _append_work_follow_status_checkpoint_lines(lines, data)
     recovery = data.get("suggested_recovery") or {}
     if recovery:
@@ -6893,7 +7037,9 @@ def cmd_work_follow_status(args):
         state = load_state()
         session = _work_follow_status_session_for_args(args, state)
         path = _work_follow_snapshot_path_for_args(args, state, session=session)
-        data = _work_follow_status_from_snapshot(path, task_id=getattr(args, "task_id", None), session=session)
+        data = _work_follow_status_from_snapshot(
+            path, task_id=getattr(args, "task_id", None), session=session, state=state
+        )
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"mew: invalid follow snapshot: {exc}", file=sys.stderr)
         return 1

@@ -24101,7 +24101,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(data["session_state_newer"])
                 self.assertEqual(data["session_updated_at"], "2026-04-18T00:00:00Z")
                 self.assertEqual(data["current_session_updated_at"], "2026-04-18T00:10:00Z")
-                self.assertEqual(data["pending_approval_count"], 1)
+                self.assertEqual(data["pending_approval_count"], 0)
                 self.assertEqual(data["latest_model_failure"]["model_turn_id"], 9)
                 self.assertEqual(data["latest_model_failure"]["status"], "failed")
                 self.assertEqual(data["latest_model_failure"]["summary"], "live session timeout")
@@ -24245,12 +24245,10 @@ class WorkSessionTests(unittest.TestCase):
                     data["latest_model_failure"]["write_ready_fast_path_reason"],
                     "missing_exact_cached_window_texts",
                 )
-                self.assertEqual(data["suggested_recovery"]["kind"], "replannable")
+                self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
                 self.assertEqual(
                     data["suggested_recovery"]["command"],
-                    "mew work 1 --live --auth auth.json --model-backend codex --allow-read . --allow-write . "
-                    "--allow-verify --verify-command 'uv run python -m unittest tests.test_work_session tests.test_commands' "
-                    "--act-mode deterministic --compact-live --no-prompt-approval --max-steps 1",
+                    "mew work 1 --session --resume --allow-read . --auto-recover-safe",
                 )
 
                 with patch("mew.commands.pid_alive", return_value=False):
@@ -24268,13 +24266,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("cached_window_ref_count=1", text)
                 self.assertIn("draft_runtime_mode=guarded", text)
                 self.assertIn("draft_prompt_contract_version=v2", text)
-                self.assertIn(
-                    "recovery_command: mew work 1 --live --auth auth.json --model-backend codex --allow-read . "
-                    "--allow-write . --allow-verify --verify-command 'uv run python -m unittest "
-                    "tests.test_work_session tests.test_commands' --act-mode deterministic --compact-live "
-                    "--no-prompt-approval --max-steps 1",
-                    text,
-                )
+                self.assertIn("recovery_command: mew work 1 --session --resume --allow-read . --auto-recover-safe", text)
             finally:
                 os.chdir(old_cwd)
 
@@ -24692,6 +24684,449 @@ class WorkSessionTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 self.assertEqual(data["status"], "absent")
                 self.assertTrue(data["snapshot_path"].endswith(".mew/follow/session-7.json"))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_overlays_equal_timestamp_session_resume_on_richer_blocker(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    task = state["tasks"][0]
+                    session, _ = create_work_session(state, task)
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    session["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "attempts": {"draft": 2},
+                        "blocker": {"code": "missing_exact_cached_window_texts"},
+                    }
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "session_updated_at": "2026-04-18T00:00:00Z",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                            "resume": {
+                                "phase": "drafting",
+                                "next_action": "Continue from snapshot todo.",
+                                "continuity": {"score": 3, "status": "weak"},
+                            },
+                            "pending_approvals": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=True):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["resume_source"], "session_overlay")
+                self.assertFalse(data["session_state_newer"])
+                self.assertEqual(data["phase"], "blocked_on_patch")
+                self.assertEqual(data["blocker_code"], "missing_exact_cached_window_texts")
+                self.assertEqual(data["active_work_todo"]["status"], "blocked_on_patch")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_blocker_resume_surfaces_suggested_recovery(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    task = state["tasks"][0]
+                    session, _ = create_work_session(state, task)
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    session["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "attempts": {"draft": 1},
+                        "blocker": {"code": "stale_cached_window_text"},
+                    }
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "session_updated_at": "2026-04-18T00:00:00Z",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                            "resume": {
+                                "phase": "drafting",
+                                "next_action": "Inspect snapshot state.",
+                                "continuity": {"score": 1, "status": "weak"},
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                live_resume = {
+                    "phase": "blocked_on_patch",
+                    "next_action": "inspect patch blocker and refresh exact windows",
+                    "verification_coverage_warning": {},
+                    "verification_confidence": {},
+                    "continuity": {"score": 9, "status": "strong"},
+                    "active_work_todo": {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "blocker": {
+                            "code": "stale_cached_window_text",
+                            "recovery_action": "refresh_cached_window",
+                        },
+                    },
+                    "recovery_plan": {
+                        "next_action": "retry read with the corrected window",
+                        "items": [
+                            {
+                                "kind": "tool_call",
+                                "action": "retry_tool",
+                                "tool_call_id": 11,
+                                "effect_classification": "no_action",
+                                "auto_hint": "work 1 --session --resume --allow-read . --auto-recover-safe",
+                            }
+                        ],
+                    },
+                }
+                with patch("mew.commands.pid_alive", return_value=True), patch(
+                    "mew.commands.build_work_session_resume", return_value=live_resume
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["resume_source"], "session_overlay")
+                self.assertEqual(data["suggested_recovery"]["kind"], "retry_read")
+                self.assertEqual(data["next_recovery_action"], "refresh_cached_window")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_overlay_prefers_live_continuity(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                live_resume = {
+                    "phase": "drafting",
+                    "next_action": "continue drafting",
+                    "verification_coverage_warning": {},
+                    "verification_confidence": {},
+                    "continuity": {"score": "9/9", "status": "strong"},
+                }
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    task = state["tasks"][0]
+                    session, _ = create_work_session(state, task)
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "session_updated_at": "2026-04-18T00:00:00Z",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                            "resume": {
+                                "phase": "drafting",
+                                "next_action": "follow draft",
+                                "continuity": {"score": "1/9", "status": "weak"},
+                                "active_work_todo": {"id": "todo-1-1", "status": "drafting"},
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with patch("mew.commands.pid_alive", return_value=True), patch(
+                    "mew.commands.build_work_session_resume", return_value=live_resume
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["resume_source"], "session_overlay")
+                self.assertEqual((data.get("continuity") or {}).get("score"), "9/9")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_overlay_uses_effective_resume_pending_approval_count(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    task = state["tasks"][0]
+                    session, _ = create_work_session(state, task)
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "session_updated_at": "2026-04-18T00:00:00Z",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                            "resume": {
+                                "phase": "drafting",
+                                "next_action": "snapshot stale action",
+                                "continuity": {"score": 1, "status": "weak"},
+                                "pending_approvals": [],
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                live_resume = {
+                    "phase": "blocked_on_patch",
+                    "next_action": "resume blocked todo",
+                    "verification_coverage_warning": {},
+                    "verification_confidence": {},
+                    "continuity": {"score": 3, "status": "usable"},
+                    "active_work_todo": {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "blocker": {"code": "stale_cached_window_text"},
+                    },
+                    "pending_approvals": [
+                        {"tool_call_id": 21, "path": "README.md", "line_start": 1, "line_count": 2},
+                        {"tool_call_id": 22, "path": "README.md", "line_start": 1, "line_count": 2},
+                    ],
+                    "recovery_plan": {"items": [], "next_action": "pause and inspect"},
+                }
+
+                with patch("mew.commands.pid_alive", return_value=True), patch(
+                    "mew.commands.build_work_session_resume", return_value=live_resume
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["resume_source"], "session_overlay")
+                self.assertEqual(data["pending_approval_count"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_keeps_snapshot_when_fresher_than_live_session(self):
+        from mew.timeutil import now_iso
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    task = state["tasks"][0]
+                    session, _ = create_work_session(state, task)
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    session["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "attempts": {"draft": 4},
+                        "blocker": {"code": "missing_exact_cached_window_texts"},
+                    }
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "session_updated_at": "2026-04-19T00:00:00Z",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                            "resume": {
+                                "phase": "drafting",
+                                "next_action": "snapshot still valid",
+                                "active_work_todo": {"id": "todo-1-1", "status": "drafting"},
+                                "continuity": {"score": "8/9", "status": "strong"},
+                                "recovery_plan": {},
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=True):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["resume_source"], "snapshot")
+                self.assertEqual(data["phase"], "drafting")
+                self.assertEqual(data["blocker_code"], "")
+                self.assertEqual((data.get("active_work_todo") or {}).get("status"), "drafting")
+                self.assertNotIn("missing_exact_cached_window_texts", json.dumps(data.get("active_work_todo") or {}))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_overlay_prefers_live_latest_model_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.timeutil import now_iso
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    task = state["tasks"][0]
+                    session, _ = create_work_session(state, task)
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    session["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "attempts": {"draft": 1},
+                        "blocker": {"code": "stale_cached_window_text"},
+                    }
+                    session["model_turns"] = [
+                        {
+                            "id": 2,
+                            "status": "failed",
+                            "summary": "live session draft failure",
+                            "error": "live session failure",
+                            "model_metrics": {"think": {"prompt_chars": 100}},
+                        }
+                    ]
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "session_updated_at": "2026-04-18T00:00:00Z",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                            "resume": {
+                                "phase": "drafting",
+                                "next_action": "follow snapshot draft",
+                                "continuity": {"score": 1, "status": "weak"},
+                                "active_work_todo": {"id": "todo-1-1", "status": "drafting"},
+                            },
+                            "session": {
+                                "model_turns": [
+                                    {
+                                        "model_turn_id": 9,
+                                        "status": "failed",
+                                        "summary": "snapshot stale timeout",
+                                        "error": "older failure",
+                                        "model_metrics": {"think": {"prompt_chars": 2}},
+                                    }
+                                ]
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+                with patch("mew.commands.pid_alive", return_value=True):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["resume_source"], "session_overlay")
+                failure = data["latest_model_failure"]
+                self.assertEqual(failure["source"], "session")
+                self.assertEqual(failure["model_turn_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_follow_status_human_output_includes_active_work_todo_and_next_recovery_action(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.timeutil import now_iso
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    task = state["tasks"][0]
+                    session, _ = create_work_session(state, task)
+                    session["updated_at"] = "2026-04-18T00:00:00Z"
+                    save_state(state)
+                follow_dir = Path(".mew/follow")
+                follow_dir.mkdir(parents=True)
+                (follow_dir / "session-1.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "mode": "follow",
+                            "session_id": 1,
+                            "task_id": 1,
+                            "session_updated_at": "2026-04-18T00:00:00Z",
+                            "heartbeat_at": now_iso(),
+                            "producer": {"pid": os.getpid()},
+                            "resume": {"phase": "drafting", "next_action": "snapshot fallback"},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                live_resume = {
+                    "phase": "blocked_on_patch",
+                    "next_action": "inspect the blocker",
+                    "verification_coverage_warning": {},
+                    "verification_confidence": {},
+                    "continuity": {"score": 8, "status": "strong"},
+                    "active_work_todo": {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "attempts": {"draft": 1},
+                        "blocker": {"code": "stale_cached_window_text"},
+                    },
+                    "recovery_plan": {
+                        "next_action": "refresh blocked cache from source",
+                        "items": [{"kind": "tool_call", "action": "retry_tool", "tool_call_id": 7}],
+                    },
+                }
+                with patch("mew.commands.pid_alive", return_value=True), patch(
+                    "mew.commands.build_work_session_resume", return_value=live_resume
+                ):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["work", "1", "--follow-status"]), 0)
+                text = stdout.getvalue()
+                self.assertIn("active_work_todo: id=todo-1-1 status=blocked_on_patch draft_attempts=1", text)
+                self.assertIn("next_recovery_action: retry_tool", text)
             finally:
                 os.chdir(old_cwd)
 

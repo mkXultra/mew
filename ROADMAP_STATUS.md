@@ -2005,16 +2005,28 @@ Missing proof:
   `#399/#401` incidence gate, and a Phase 2/3 replay-bundle calibration
   checkpoint. These strengthen close verification but do not widen the
   implementation scope beyond Phases 0-4
+- Phase 4 follow-status parity is now landed. `work --follow-status` overlays
+  fresher or equal-timestamp-but-richer live session resume state over stale
+  follow snapshots, surfaces `resume_source`, `active_work_todo`,
+  `blocker_code`, and canonical `next_recovery_action`, and keeps
+  `pending_approval_count` aligned to the effective resume source. Live `#402`
+  now reports `resume_source=session_overlay`, `phase=blocked_on_patch`,
+  `blocker_code=insufficient_cached_context`,
+  `next_recovery_action=refresh_cached_window`, and a populated
+  `suggested_recovery` command while preserving snapshot-owned metadata. Final
+  codex-ultra and claude-ultra reviews approved this bounded slice.
 
 Next action:
 
-- continue M6.11 with the post-tiny-draft follow-up:
-  run live collection on task `#402` and confirm the tiny write-ready lane can
-  produce non-zero compiler bundles and acceptable tiny-lane
-  attempted/outcome/fallback distributions before widening recovery work
-- keep the Phase 2/3 calibration checkpoint active during Phase 3 rollout and
-  pause if replay-bundle off-schema/refusal incidence crosses the configured
-  thresholds
+- keep the Phase 2/3 calibration checkpoint active and move from Phase 4
+  surface parity into close-gate evidence collection:
+  register/refresh the `m6_11-*` dogfood scenarios, run bounded live slices
+  against `#399/#401` buckets, and use the now-authoritative follow-status
+  surface to measure whether timeout concentration and combined `#399/#401`
+  incidence are actually dropping
+- if live evidence still shows the stale-timeout `latest_model_failure` field
+  obscuring blocker-backed recovery despite `resume_source=session_overlay`,
+  cut one more bounded operator-surface slice before starting Phase 5/6 work
 
 ### M7: Senses - Inbound Signals
 
