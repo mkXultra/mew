@@ -1973,6 +1973,11 @@ Missing proof:
   observations plus replay paths without changing outer action semantics, but
   the real write-ready prompt swap and live compiler/recovery path that
   consumes either artifact does not yet exist
+- the write-ready prompt envelope is now reduced and versioned as `v2`, and
+  live shadow collection on task `#402` cut write-ready `think.prompt_chars`
+  from roughly `41k-42k` to about `20k`, but the collected bundles remain
+  `work-loop-model-failure.request_timed_out` with `compiler_bundles=0`, so
+  prompt reduction landed as bounded progress rather than a complete fix
 - the first fixture lane under `tests/fixtures/work_loop/patch_draft/` now
   exists for happy-path, ambiguous-old-text, and stale-cache offline compiler
   scenarios, and compiler replay bundles now persist canonical compiler
@@ -1984,8 +1989,10 @@ Missing proof:
   gate thresholds
 - draft-related model failures and offline compiler captures now share the same
   replay root, and the Phase 2/3 calibration checker for off-schema/refusal
-  incidence from those bundles now exists, but the live replay root is still
-  empty so the gate is wired rather than yet exercised on real Phase 3 output
+  incidence from those bundles now exists; the live replay root is now
+  populated, but the current sample is still `100% request_timed_out`, so the
+  calibration gate is failing on concentration before any compiler bundles are
+  produced
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
@@ -1996,11 +2003,11 @@ Missing proof:
 
 Next action:
 
-- continue Phase 3 from the landed shadow-only bridge:
-  replace `build_work_write_ready_think_prompt()` with the tiny patch
-  contract and promote the live bridge from observational replay/metrics into
-  the real write-ready draft path while keeping `write_tools.py` semantics
-  unchanged
+- continue M6.11 with the post-v2 follow-up:
+  add a dedicated tiny write-ready draft lane that attempts a
+  `patch_proposal | patch_blocker` call first and falls back to the current
+  generic runtime path when that tiny lane times out or returns unusable
+  output; do not spend another slice on prompt trimming alone
 - keep the Phase 2/3 calibration checkpoint active during Phase 3 rollout and
   pause if replay-bundle off-schema/refusal incidence crosses the configured
   thresholds

@@ -6214,15 +6214,72 @@ class WorkSessionTests(unittest.TestCase):
             ["src/mew/workbench.py", "tests/test_workbench.py"],
         )
         self.assertEqual(
-            fast_context["work_session"]["resume"]["plan_item_observations"],
-            [resume["plan_item_observations"][0]],
+            fast_context["active_work_todo"]["source"]["plan_item"],
+            resume["plan_item_observations"][0]["plan_item"],
         )
         fast_prompt = build_work_write_ready_think_prompt(fast_context)
         self.assertIn("Write-ready fast path is active.", fast_prompt)
         self.assertIn("Use write_ready_fast_path.cached_window_texts as the exact old text source", fast_prompt)
         self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
+        self.assertIn(
+            '"type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
+            fast_prompt,
+        )
+        self.assertNotIn("patch_proposal", fast_prompt)
+        self.assertNotIn("patch_blocker", fast_prompt)
         self.assertLess(len(fast_prompt), len(prompt))
+
+    def test_write_ready_prompt_v2_stays_bounded_for_two_cached_windows_fixture(self):
+        from mew.work_loop import _write_ready_draft_prompt_chars, build_work_write_ready_think_prompt
+
+        prompt = build_work_write_ready_think_prompt(
+            {
+                "active_work_todo": {
+                    "id": "todo-1-1",
+                    "status": "drafting",
+                    "source": {
+                        "plan_item": "Capture the failing approval transcript.",
+                        "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
+                        "verify_command": "uv run python -m unittest tests.test_workbench",
+                    },
+                    "attempts": {"draft": 1, "review": 0},
+                    "blocker": {"code": "", "recovery_action": ""},
+                },
+                "write_ready_fast_path": {
+                    "active": True,
+                    "reason": "paired cached windows are edit-ready; draft one dry-run batch or report one exact blocker",
+                    "cached_window_texts": [
+                        {
+                            "path": "src/mew/workbench.py",
+                            "line_start": 144,
+                            "line_end": 160,
+                            "tool_call_id": 2,
+                            "text": "".join(f"source_after_{index}\n" for index in range(17)),
+                        },
+                        {
+                            "path": "tests/test_workbench.py",
+                            "line_start": 32,
+                            "line_end": 43,
+                            "tool_call_id": 3,
+                            "text": "".join(f"test_line_{index}\n" for index in range(12)),
+                        },
+                    ],
+                },
+                "allowed_roots": {
+                    "read": ["."],
+                    "write": ["src/mew", "tests"],
+                },
+                "focused_verify_command": "uv run python -m unittest tests.test_workbench",
+            }
+        )
+        static_chars, dynamic_chars = _write_ready_draft_prompt_chars(prompt)
+
+        # This mirrors the existing two-window write-ready fixture; v2 should stay well below the
+        # 40k+ timeout regime and small enough that reintroducing broad resume/tool history fails fast.
+        self.assertLessEqual(static_chars, 6000)
+        self.assertLessEqual(dynamic_chars, 3000)
+        self.assertLessEqual(len(prompt), 9000)
 
     def test_write_ready_fast_path_falls_back_to_recent_target_path_windows(self):
         from mew.work_loop import build_write_ready_work_model_context
@@ -6856,7 +6913,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(
             all(str(item).startswith("sha1:") for item in planned["model_metrics"]["cached_window_hashes"])
         )
-        self.assertEqual(planned["model_metrics"]["draft_prompt_contract_version"], "v1")
+        self.assertEqual(planned["model_metrics"]["draft_prompt_contract_version"], "v2")
         self.assertGreater(planned["model_metrics"]["draft_prompt_static_chars"], 0)
         self.assertGreater(planned["model_metrics"]["draft_prompt_dynamic_chars"], 0)
         self.assertEqual(
@@ -7203,7 +7260,7 @@ class WorkSessionTests(unittest.TestCase):
                         "cached_window_ref_count": 2,
                         "cached_window_hashes": ["sha1:one", "sha1:two"],
                         "draft_runtime_mode": "guarded",
-                        "draft_prompt_contract_version": "v1",
+                        "draft_prompt_contract_version": "v2",
                         "draft_prompt_static_chars": 123,
                         "draft_prompt_dynamic_chars": 456,
                         "draft_retry_same_prefix": False,
@@ -7220,7 +7277,7 @@ class WorkSessionTests(unittest.TestCase):
                         "cached_window_ref_count": 1,
                         "cached_window_hashes": ["sha1:three"],
                         "draft_runtime_mode": "guarded",
-                        "draft_prompt_contract_version": "v1",
+                        "draft_prompt_contract_version": "v2",
                         "draft_prompt_static_chars": 100,
                         "draft_prompt_dynamic_chars": 200,
                         "draft_retry_same_prefix": True,
@@ -7235,7 +7292,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resume["cached_window_ref_count"], 1)
         self.assertEqual(resume["cached_window_hashes"], ["sha1:three"])
         self.assertEqual(resume["draft_runtime_mode"], "guarded")
-        self.assertEqual(resume["draft_prompt_contract_version"], "v1")
+        self.assertEqual(resume["draft_prompt_contract_version"], "v2")
         self.assertEqual(resume["draft_prompt_static_chars"], 100)
         self.assertEqual(resume["draft_prompt_dynamic_chars"], 200)
         self.assertTrue(resume["draft_retry_same_prefix"])
@@ -7348,7 +7405,7 @@ class WorkSessionTests(unittest.TestCase):
                         "cached_window_ref_count": 1,
                         "cached_window_hashes": ["sha1:turn-window"],
                         "draft_runtime_mode": "guarded",
-                        "draft_prompt_contract_version": "v1",
+                        "draft_prompt_contract_version": "v2",
                         "draft_prompt_static_chars": 100,
                         "draft_prompt_dynamic_chars": 200,
                         "draft_retry_same_prefix": True,
@@ -7389,7 +7446,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(len(resume["cached_window_hashes"]), 2)
         self.assertTrue(all(item.startswith("sha1:") for item in resume["cached_window_hashes"]))
         self.assertEqual(resume["draft_runtime_mode"], "guarded")
-        self.assertEqual(resume["draft_prompt_contract_version"], "v1")
+        self.assertEqual(resume["draft_prompt_contract_version"], "v2")
         self.assertEqual(resume["draft_prompt_static_chars"], 100)
         self.assertEqual(resume["draft_prompt_dynamic_chars"], 200)
         self.assertTrue(resume["draft_retry_same_prefix"])
@@ -22696,7 +22753,7 @@ class WorkSessionTests(unittest.TestCase):
                                 "cached_window_ref_count": 2,
                                 "cached_window_hashes": ["sha1:window-a", "sha1:window-b"],
                                 "draft_runtime_mode": "fallback_unguarded",
-                                "draft_prompt_contract_version": "v1",
+                                "draft_prompt_contract_version": "v2",
                                 "draft_prompt_static_chars": 1000,
                                 "draft_prompt_dynamic_chars": 75,
                                 "draft_retry_same_prefix": False,
@@ -22753,7 +22810,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["latest_model_failure"]["draft_attempts"], 2)
                 self.assertEqual(data["latest_model_failure"]["cached_window_ref_count"], 2)
                 self.assertEqual(data["latest_model_failure"]["draft_runtime_mode"], "fallback_unguarded")
-                self.assertEqual(data["latest_model_failure"]["draft_prompt_contract_version"], "v1")
+                self.assertEqual(data["latest_model_failure"]["draft_prompt_contract_version"], "v2")
                 self.assertEqual(data["suggested_recovery"]["kind"], "inspect_resume")
                 self.assertIn("current session state is newer", data["suggested_recovery"]["reason"])
                 self.assertIn("mew work 1 --session --resume", data["suggested_recovery"]["command"])
@@ -22779,7 +22836,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("draft_attempts=2", text)
                 self.assertIn("cached_window_ref_count=2", text)
                 self.assertIn("draft_runtime_mode=fallback_unguarded", text)
-                self.assertIn("draft_prompt_contract_version=v1", text)
+                self.assertIn("draft_prompt_contract_version=v2", text)
                 self.assertIn("recovery: inspect_resume", text)
                 self.assertIn("recovery_command: mew work 1 --session --resume", text)
             finally:
@@ -22823,7 +22880,7 @@ class WorkSessionTests(unittest.TestCase):
                                 "cached_window_ref_count": 1,
                                 "cached_window_hashes": ["sha1:only"],
                                 "draft_runtime_mode": "guarded",
-                                "draft_prompt_contract_version": "v1",
+                                "draft_prompt_contract_version": "v2",
                                 "draft_prompt_static_chars": 120,
                                 "draft_prompt_dynamic_chars": 44,
                                 "draft_retry_same_prefix": True,
@@ -22880,7 +22937,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(data["latest_model_failure"]["draft_attempts"], 1)
                 self.assertEqual(data["latest_model_failure"]["cached_window_ref_count"], 1)
                 self.assertEqual(data["latest_model_failure"]["draft_runtime_mode"], "guarded")
-                self.assertEqual(data["latest_model_failure"]["draft_prompt_contract_version"], "v1")
+                self.assertEqual(data["latest_model_failure"]["draft_prompt_contract_version"], "v2")
                 self.assertEqual(
                     data["latest_model_failure"]["write_ready_fast_path_reason"],
                     "missing_exact_cached_window_texts",
@@ -22907,7 +22964,7 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("draft_attempts=1", text)
                 self.assertIn("cached_window_ref_count=1", text)
                 self.assertIn("draft_runtime_mode=guarded", text)
-                self.assertIn("draft_prompt_contract_version=v1", text)
+                self.assertIn("draft_prompt_contract_version=v2", text)
                 self.assertIn(
                     "recovery_command: mew work 1 --live --auth auth.json --model-backend codex --allow-read . "
                     "--allow-write . --allow-verify --verify-command 'uv run python -m unittest "

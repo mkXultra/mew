@@ -61,7 +61,7 @@ WORK_RECOVERY_DECISION_GUIDANCE_LIMIT = 120
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
-WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v1"
+WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -1424,6 +1424,66 @@ def _shadow_compile_patch_draft_for_write_ready_turn(
     return observation
 
 
+def _write_ready_prompt_target_paths(active_work_todo, recent_windows):
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    target_paths = []
+    for path in source.get("target_paths") or []:
+        if not isinstance(path, str) or not path:
+            continue
+        if any(_work_paths_match(path, existing) for existing in target_paths):
+            continue
+        target_paths.append(path)
+    for item in recent_windows:
+        path = item.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        if any(_work_paths_match(path, existing) for existing in target_paths):
+            continue
+        target_paths.append(path)
+    return target_paths
+
+
+def _write_ready_prompt_active_work_todo(resume, recent_windows):
+    resume = resume if isinstance(resume, dict) else {}
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    blocker = active_work_todo.get("blocker") if isinstance(active_work_todo.get("blocker"), dict) else {}
+    attempts = active_work_todo.get("attempts") if isinstance(active_work_todo.get("attempts"), dict) else {}
+    plan_item_observations = resume.get("plan_item_observations") or []
+    first_observation = plan_item_observations[0] if plan_item_observations else {}
+    suggested_verify_command = resume.get("suggested_verify_command") or {}
+    verify_command = str(
+        source.get("verify_command")
+        or (
+            suggested_verify_command.get("command")
+            if isinstance(suggested_verify_command, dict)
+            else ""
+        )
+        or ""
+    ).strip()
+    target_paths = _write_ready_prompt_target_paths(active_work_todo, recent_windows)
+    status = str(active_work_todo.get("status") or "").strip()
+    if not status and (target_paths or first_observation.get("plan_item")):
+        status = "drafting"
+    return {
+        "id": str(active_work_todo.get("id") or "").strip(),
+        "status": status,
+        "source": {
+            "plan_item": str(source.get("plan_item") or first_observation.get("plan_item") or "").strip(),
+            "target_paths": target_paths,
+            "verify_command": verify_command,
+        },
+        "attempts": {
+            "draft": attempts.get("draft") or 0,
+            "review": attempts.get("review") or 0,
+        },
+        "blocker": {
+            "code": str(blocker.get("code") or "").strip(),
+            "recovery_action": str(blocker.get("recovery_action") or "").strip(),
+        },
+    }
+
+
 def build_write_ready_work_model_context(context):
     fast_path = _work_write_ready_fast_path_details(context)
     if not fast_path.get("active"):
@@ -1431,49 +1491,29 @@ def build_write_ready_work_model_context(context):
     work_session = (context or {}).get("work_session") or {}
     resume = work_session.get("resume") or {}
     recent_windows = fast_path.get("recent_windows") or []
-    cached_paths = fast_path.get("cached_paths") or []
-    resume_context = {
-        "working_memory": resume.get("working_memory") or {},
-        "plan_item_observations": [fast_path.get("plan_item")],
-        "target_path_cached_window_observations": [
-            item
-            for item in (resume.get("target_path_cached_window_observations") or [])
-            if any(_work_paths_match(item.get("path"), path) for path in cached_paths)
-        ],
-        "pending_steer": resume.get("pending_steer") or {},
-        "next_action": resume.get("next_action") or "",
-        "suggested_verify_command": resume.get("suggested_verify_command") or {},
-        "verification_confidence": resume.get("verification_confidence") or {},
-        "recent_decisions": compact_recent_decisions_for_prompt(
-            (resume.get("recent_decisions") or [])[-1:],
-            item_limit=1,
-            text_limit=160,
-            guidance_limit=120,
-        ),
-        "notes": compact_resume_notes_for_prompt((resume.get("notes") or [])[-2:]),
-    }
+    active_work_todo = _write_ready_prompt_active_work_todo(resume, recent_windows)
+    capabilities = (context or {}).get("capabilities") or {}
     return {
-        "date": (context or {}).get("date") or {},
-        "task": {
-            "id": ((context or {}).get("task") or {}).get("id"),
-            "title": ((context or {}).get("task") or {}).get("title"),
-            "description": clip_output((((context or {}).get("task") or {}).get("description") or ""), 240),
-            "status": ((context or {}).get("task") or {}).get("status"),
-            "kind": ((context or {}).get("task") or {}).get("kind"),
-        },
-        "work_session": {
-            "id": work_session.get("id"),
-            "status": work_session.get("status"),
-            "resume": resume_context,
-            "recent_read_file_windows": recent_windows,
-        },
-        "capabilities": (context or {}).get("capabilities") or {},
-        "guidance": clip_output((context or {}).get("guidance") or "", 500),
+        "active_work_todo": active_work_todo,
         "write_ready_fast_path": {
             "active": True,
             "reason": "paired cached windows are edit-ready; draft one dry-run batch or report one exact blocker",
-            "cached_window_texts": recent_windows,
+            "cached_window_texts": [
+                {
+                    "path": item.get("path"),
+                    "line_start": item.get("line_start"),
+                    "line_end": item.get("line_end"),
+                    "tool_call_id": item.get("tool_call_id"),
+                    "text": item.get("text") or "",
+                }
+                for item in recent_windows
+            ],
         },
+        "allowed_roots": {
+            "read": capabilities.get("allowed_read_roots") or [],
+            "write": capabilities.get("allowed_write_roots") or [],
+        },
+        "focused_verify_command": str(((active_work_todo.get("source") or {}).get("verify_command") or "")).strip(),
     }
 
 
@@ -1612,13 +1652,16 @@ def build_work_write_ready_think_prompt(context):
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Write-ready fast path is active.\n"
-        "The paired src/test windows are already cached and edit-ready.\n"
+        "The active_work_todo already names the paired src/test slice to draft.\n"
+        "Return the standard work JSON schema below and exactly one next action.\n"
         "Use write_ready_fast_path.cached_window_texts as the exact old text source for edit_file/edit_file_hunks.\n"
-        "Do not add read or search actions unless those cached texts are insufficient for exact old/new text.\n"
+        "Keep the action inside active_work_todo.source.target_paths and allowed_roots.write.\n"
         "Prefer one paired dry-run batch under tests/** and src/mew/** now.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
+        "Do not add read, search, glob, git, shell, or verification actions on this fast path.\n"
+        "Do not broaden scope, roots, or the focused verify command.\n"
         "If you still cannot draft the dry-run batch, return wait with one exact blocker tied to the cached windows.\n"
-        "Do not broaden scope, roots, or verification.\n"
+        "Do not invent uncached old text and do not propose a partial sibling edit set.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
