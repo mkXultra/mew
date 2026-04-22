@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,11 @@ from types import SimpleNamespace
 
 from .brief import recent_activity, next_move
 from .config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
+from .patch_draft import (
+    PATCH_BLOCKER_RECOVERY_ACTIONS,
+    PATCH_DRAFT_VALIDATOR_VERSION,
+    compile_patch_draft,
+)
 from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
@@ -68,6 +74,11 @@ DOGFOOD_SCENARIOS = (
     "m6-daemon-watch",
     "m6-daemon-restart",
     "m6-daemon-loop",
+    "m6_11-compiler-replay",
+    "m6_11-draft-timeout",
+    "m6_11-refusal-separation",
+    "m6_11-drafting-recovery",
+    "m6_11-phase4-regression",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -81,6 +92,8 @@ M2_FRESH_CLI_CONTEXT_MODES = ("true_restart", "same_session_resume", "unknown")
 DOGFOOD_OBSERVED_TEXT_LIMIT = 400
 DOGFOOD_OBSERVED_LIST_LIMIT = 5
 DOGFOOD_OBSERVED_DICT_LIMIT = 40
+DOGFOOD_REPO_ROOT = Path(__file__).resolve().parents[2]
+PATCH_DRAFT_FIXTURE_ROOT = DOGFOOD_REPO_ROOT / "tests" / "fixtures" / "work_loop" / "patch_draft"
 
 
 DOGFOOD_README = """# Mew Dogfood Workspace
@@ -344,6 +357,369 @@ def _scenario_report(name, workspace, commands, checks):
         "commands": [compact_command_result(command) for command in commands],
         "checks": checks,
     }
+
+
+def _load_json_file(path):
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def _iter_fixture_dirs(root):
+    if not Path(root).is_dir():
+        return []
+    return sorted((path for path in Path(root).iterdir() if path.is_dir()), key=lambda item: item.name)
+
+
+def _run_patch_draft_fixture(fixture_dir):
+    scenario = _load_json_file(fixture_dir / "scenario.json")
+    return scenario
+
+
+def _extract_patch_draft_payload_paths(scenario):
+    paths = []
+    todo = scenario.get("todo") if isinstance(scenario, dict) else {}
+    raw_todo_paths = (todo.get("source") or {}).get("target_paths") if isinstance(todo.get("source"), dict) else []
+    if isinstance(raw_todo_paths, list):
+        for raw_path in raw_todo_paths:
+            path = (str(raw_path) if raw_path is not None else "").strip()
+            if path and path not in paths:
+                paths.append(path)
+
+    model_output = scenario.get("model_output") if isinstance(scenario, dict) else {}
+    for raw_file in (model_output.get("files") or []) if isinstance(model_output, dict) else []:
+        if not isinstance(raw_file, dict):
+            continue
+        path = (str(raw_file.get("path") or "")).strip()
+        if path and path not in paths:
+            paths.append(path)
+
+    cached_paths = scenario.get("cached_windows") if isinstance(scenario, dict) else {}
+    if not paths and isinstance(cached_paths, dict):
+        paths = sorted(str(path).strip() for path in cached_paths.keys() if str(path).strip())
+
+    live_paths = scenario.get("live_files") if isinstance(scenario, dict) else {}
+    if not paths and isinstance(live_paths, dict):
+        paths = sorted(str(path).strip() for path in live_paths.keys() if str(path).strip())
+
+    return paths
+
+
+def _extract_cached_windows_for_path(cached_windows, path):
+    if not isinstance(cached_windows, dict):
+        return []
+    raw_windows = cached_windows.get(path)
+    if isinstance(raw_windows, list):
+        return [window for window in raw_windows if isinstance(window, dict)]
+    if isinstance(raw_windows, dict):
+        return [raw_windows]
+    return []
+
+
+def _expected_patch_draft_artifact_id(artifact):
+    payload = {
+        "todo_id": str(artifact.get("todo_id") or ""),
+        "summary": str(artifact.get("summary") or ""),
+        "files": artifact.get("files") or [],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return f"draft-{hashlib.sha1(encoded.encode('utf-8')).hexdigest()[:12]}"
+
+
+def _scenario_patch_draft_fixture_checks(checks, fixture_name, scenario):
+    prefix = f"m6_11_compiler_replay_{fixture_name}"
+    cached_windows = scenario.get("cached_windows")
+    live_files = scenario.get("live_files")
+    paths = _extract_patch_draft_payload_paths(scenario)
+    missing_window_data = []
+    missing_cached_windows = []
+    missing_live_hashes = []
+
+    for path in paths:
+        path_windows = _extract_cached_windows_for_path(cached_windows, path)
+        if not path_windows:
+            missing_cached_windows.append(path)
+            continue
+
+        for index, window in enumerate(path_windows):
+            window_sha256 = str(window.get("window_sha256") or "").strip()
+            file_sha256 = str(window.get("file_sha256") or "").strip()
+            if not window_sha256:
+                missing_window_data.append(f"{path}:{index}:window_sha256")
+            if not file_sha256:
+                missing_window_data.append(f"{path}:{index}:file_sha256")
+
+    if isinstance(live_files, dict):
+        for path in paths:
+            live_entry = live_files.get(path)
+            if not isinstance(live_entry, dict) or not str(live_entry.get("sha256") or "").strip():
+                missing_live_hashes.append(path)
+
+    _scenario_check(
+        checks,
+        f"{prefix}_fixture_paths",
+        bool(paths),
+        observed=paths,
+        expected="fixture includes at least one target path",
+    )
+    _scenario_check(
+        checks,
+        f"{prefix}_fixture_cached_window_hashes",
+        bool(not missing_window_data and not missing_cached_windows),
+        observed={
+            "paths": paths,
+            "missing_windows": sorted(set(missing_cached_windows)),
+            "missing_window_hashes": sorted(set(missing_window_data)),
+        },
+        expected="cached window entries include window_sha256 and file_sha256 for each target path",
+    )
+    _scenario_check(
+        checks,
+        f"{prefix}_fixture_live_file_hashes",
+        bool(not missing_live_hashes),
+        observed=sorted(set(missing_live_hashes)),
+        expected="live file entries include sha256 for each target path",
+    )
+
+
+def _append_patch_draft_expected_checks(checks, fixture_name, scenario, artifact):
+    expected = scenario.get("expected") or {}
+    expected_kind = str(expected.get("kind") or "")
+    actual_kind = str(artifact.get("kind") or "")
+    prefix = f"m6_11_compiler_replay_{fixture_name}"
+
+    _scenario_check(
+        checks,
+        f"{prefix}_kind",
+        actual_kind == expected_kind,
+        observed=actual_kind,
+        expected=expected_kind,
+    )
+    if actual_kind == "patch_draft":
+        _scenario_check(
+            checks,
+            f"{prefix}_validator_version",
+            artifact.get("validator_version") == PATCH_DRAFT_VALIDATOR_VERSION,
+            observed=artifact.get("validator_version"),
+            expected=PATCH_DRAFT_VALIDATOR_VERSION,
+        )
+        _scenario_check(
+            checks,
+            f"{prefix}_artifact_id",
+            artifact.get("id") == _expected_patch_draft_artifact_id(artifact),
+            observed=artifact.get("id"),
+            expected=_expected_patch_draft_artifact_id(artifact),
+        )
+
+    if expected_kind == "patch_draft":
+        _scenario_check(
+            checks,
+            f"{prefix}_status",
+            artifact.get("status") == expected.get("status"),
+            observed=artifact.get("status"),
+            expected=expected.get("status"),
+        )
+        _scenario_check(
+            checks,
+            f"{prefix}_todo_id",
+            artifact.get("todo_id") == expected.get("todo_id", scenario.get("todo", {}).get("id")),
+            observed=artifact.get("todo_id"),
+            expected=expected.get("todo_id", scenario.get("todo", {}).get("id")),
+        )
+        if "file_count" in expected:
+            _scenario_check(
+                checks,
+                f"{prefix}_file_count",
+                len(artifact.get("files") or []) == expected.get("file_count"),
+                observed=len(artifact.get("files") or []),
+                expected=expected.get("file_count"),
+            )
+        if "file_kinds" in expected:
+            _scenario_check(
+                checks,
+                f"{prefix}_file_kinds",
+                [item.get("kind") for item in artifact.get("files") or []] == expected.get("file_kinds"),
+                observed=[item.get("kind") for item in artifact.get("files") or []],
+                expected=expected.get("file_kinds"),
+            )
+        for index, file_item in enumerate(artifact.get("files") or []):
+            file_path = str(file_item.get("path") or "")
+            live_file = (scenario.get("live_files") or {}).get(file_path) if isinstance(scenario.get("live_files"), dict) else {}
+            expected_window_hashes = [
+                str(window.get("window_sha256") or "").strip()
+                for window in _extract_cached_windows_for_path(scenario.get("cached_windows") or {}, file_path)
+            ]
+            expected_pre_sha = str((live_file or {}).get("sha256") or "").strip()
+            post_sha = str(file_item.get("post_file_sha256") or "").strip()
+
+            _scenario_check(
+                checks,
+                f"{prefix}_file_{index}_window_sha256s",
+                [str(item or "") for item in (file_item.get("window_sha256s") or [])] == expected_window_hashes,
+                observed=file_item.get("window_sha256s"),
+                expected=expected_window_hashes,
+            )
+            _scenario_check(
+                checks,
+                f"{prefix}_file_{index}_pre_file_sha256",
+                str(file_item.get("pre_file_sha256") or "") == expected_pre_sha,
+                observed=file_item.get("pre_file_sha256"),
+                expected=expected_pre_sha,
+            )
+            _scenario_check(
+                checks,
+                f"{prefix}_file_{index}_post_file_sha256",
+                bool(post_sha) and post_sha != expected_pre_sha,
+                observed=post_sha,
+                expected="non-empty hash that differs from pre_file_sha256",
+            )
+        for index, fragment in enumerate(expected.get("diff_contains", []), start=1):
+            _scenario_check(
+                checks,
+                f"{prefix}_diff_contains_{index}",
+                fragment in (artifact.get("unified_diff") or ""),
+                observed=(artifact.get("unified_diff") or "")[:DOGFOOD_OBSERVED_TEXT_LIMIT],
+                expected=fragment,
+            )
+    elif expected_kind == "patch_blocker":
+        _scenario_check(
+            checks,
+            f"{prefix}_code",
+            artifact.get("code") == expected.get("code"),
+            observed=artifact.get("code"),
+            expected=expected.get("code"),
+        )
+        if "detail_contains" in expected:
+            _scenario_check(
+                checks,
+                f"{prefix}_detail_contains",
+                expected.get("detail_contains") in (artifact.get("detail") or ""),
+                observed=artifact.get("detail"),
+                expected=expected.get("detail_contains"),
+            )
+        if "path" in expected:
+            _scenario_check(
+                checks,
+                f"{prefix}_path",
+                artifact.get("path") == expected.get("path"),
+                observed=artifact.get("path"),
+                expected=expected.get("path"),
+            )
+        _scenario_check(
+            checks,
+            f"{prefix}_recovery_action",
+            artifact.get("recovery_action")
+            == PATCH_BLOCKER_RECOVERY_ACTIONS.get(str(artifact.get("code") or ""), "inspect_blocker"),
+            observed=artifact.get("recovery_action"),
+            expected=PATCH_BLOCKER_RECOVERY_ACTIONS.get(
+                str(artifact.get("code") or ""),
+                "inspect_blocker",
+            ),
+        )
+
+
+def run_m6_11_compiler_replay_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    fixture_names = []
+    for fixture_dir in _iter_fixture_dirs(PATCH_DRAFT_FIXTURE_ROOT):
+        fixture_names.append(fixture_dir.name)
+        scenario = _run_patch_draft_fixture(fixture_dir)
+        _scenario_check(
+            checks,
+            f"m6_11_compiler_replay_{fixture_dir.name}_scenario_loaded",
+            bool(scenario.get("todo")) and bool(scenario.get("model_output")),
+            observed={
+                "has_todo": bool(scenario.get("todo")),
+                "has_model_output": bool(scenario.get("model_output")),
+                "fixture_name": scenario.get("name"),
+            },
+            expected=f"fixture {fixture_dir.name} loads with todo and model_output",
+        )
+        _scenario_check(
+            checks,
+            f"m6_11_compiler_replay_{fixture_dir.name}_expected_shape",
+            bool(scenario.get("expected")),
+            observed=bool(scenario.get("expected")),
+            expected=f"fixture {fixture_dir.name} includes expected",
+        )
+        _scenario_patch_draft_fixture_checks(checks, fixture_dir.name, scenario)
+        artifact = compile_patch_draft(
+            todo=scenario["todo"],
+            proposal=scenario["model_output"],
+            cached_windows=scenario.get("cached_windows") or {},
+            live_files=scenario.get("live_files") or {},
+            allowed_write_roots=scenario.get("allowed_write_roots", ["."]),
+        )
+        _append_patch_draft_expected_checks(checks, fixture_dir.name, scenario, artifact)
+    _scenario_check(
+        checks,
+        "m6_11_compiler_replay_fixtures_found",
+        bool(fixture_names),
+        observed=fixture_names,
+        expected="at least one fixture directory is present",
+    )
+    report = _scenario_report("m6_11-compiler-replay", workspace, commands, checks)
+    report["artifacts"] = {
+        "fixtures": fixture_names,
+        "fixture_count": len(fixture_names),
+    }
+    return report
+
+
+def run_m6_11_draft_timeout_scenario(workspace, env=None):
+    return _scenario_not_implemented_report(
+        "m6_11-draft-timeout",
+        workspace,
+        "#401 timeout-before-draft recovery coverage is not implemented in this slice",
+    )
+
+
+def _scenario_not_implemented_report(name, workspace, reason):
+    checks = []
+    _scenario_check(
+        checks,
+        "scenario_implementation_status",
+        False,
+        observed={"status": "not_implemented", "reason": reason},
+        expected="scenario implemented and executable",
+    )
+    return {
+        "name": name,
+        "status": "not_implemented",
+        "workspace": str(workspace),
+        "command_count": 0,
+        "commands": [],
+        "checks": checks,
+        "artifacts": {
+            "status": "not_implemented",
+            "reason": reason,
+        },
+    }
+
+
+def run_m6_11_refusal_separation_scenario(workspace, env=None):
+    return _scenario_not_implemented_report(
+        "m6_11-refusal-separation",
+        workspace,
+        "scenario is not implemented in this slice",
+    )
+
+
+def run_m6_11_drafting_recovery_scenario(workspace, env=None):
+    return _scenario_not_implemented_report(
+        "m6_11-drafting-recovery",
+        workspace,
+        "scenario is not implemented in this slice",
+    )
+
+
+def run_m6_11_phase4_regression_scenario(workspace, env=None):
+    return _scenario_not_implemented_report(
+        "m6_11-phase4-regression",
+        workspace,
+        "scenario is not implemented in this slice",
+    )
 
 
 def run_interrupted_focus_scenario(workspace, env=None):
@@ -10223,6 +10599,16 @@ def run_dogfood_scenario(args):
                     time_dilation=getattr(args, "time_dilation", None),
                 )
             )
+        elif name == "m6_11-compiler-replay":
+            reports.append(run_m6_11_compiler_replay_scenario(scenario_workspace, env=env))
+        elif name == "m6_11-draft-timeout":
+            reports.append(run_m6_11_draft_timeout_scenario(scenario_workspace, env=env))
+        elif name == "m6_11-refusal-separation":
+            reports.append(run_m6_11_refusal_separation_scenario(scenario_workspace, env=env))
+        elif name == "m6_11-drafting-recovery":
+            reports.append(run_m6_11_drafting_recovery_scenario(scenario_workspace, env=env))
+        elif name == "m6_11-phase4-regression":
+            reports.append(run_m6_11_phase4_regression_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":

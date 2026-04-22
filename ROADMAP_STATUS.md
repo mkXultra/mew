@@ -2015,15 +2015,26 @@ Missing proof:
   `next_recovery_action=refresh_cached_window`, and a populated
   `suggested_recovery` command while preserving snapshot-owned metadata. Final
   codex-ultra and claude-ultra reviews approved this bounded slice.
+- The first close-gate evidence slice is now landed in `src/mew/dogfood.py`:
+  five `m6_11-*` scenarios are registered, `m6_11-compiler-replay` passes as
+  deterministic offline `#399` evidence using the patch-draft fixtures, and
+  `m6_11-draft-timeout`, `m6_11-refusal-separation`,
+  `m6_11-drafting-recovery`, and `m6_11-phase4-regression` are explicitly
+  `not_implemented`. The aggregate `m6_11-*` subset intentionally fails while
+  the implemented compiler replay sub-report passes, and focused dogfood tests
+  now lock that contract. `claude-ultra` approved the slice as honest
+  registration; `codex-ultra` initially objected on breadth, then approved
+  after reconciliation once the slice was explicitly framed as `1 implemented +
+  4 not_implemented` rather than a misleading `#401` coverage claim.
 
 Next action:
 
 - keep the Phase 2/3 calibration checkpoint active and move from Phase 4
   surface parity into close-gate evidence collection:
-  register/refresh the `m6_11-*` dogfood scenarios, run bounded live slices
-  against `#399/#401` buckets, and use the now-authoritative follow-status
-  surface to measure whether timeout concentration and combined `#399/#401`
-  incidence are actually dropping
+  continue implementing the deferred `m6_11-*` scenarios and then run bounded
+  live slices against `#399/#401` buckets, using the now-authoritative
+  follow-status surface to measure whether timeout concentration and combined
+  `#399/#401` incidence are actually dropping
 - if live evidence still shows the stale-timeout `latest_model_failure` field
   obscuring blocker-backed recovery despite `resume_source=session_overlay`,
   cut one more bounded operator-surface slice before starting Phase 5/6 work
