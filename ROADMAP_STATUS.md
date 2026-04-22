@@ -1961,12 +1961,13 @@ Missing proof:
 - refusal separation is landed in `src/mew/codex_api.py`, but the later
   drafting path still needs to consume `model_returned_refusal` through the
   new blocker/recovery contract
-- `WorkTodo` now exists as a bounded session-state frontier skeleton, but the
-  compiler/recovery path that consumes it does not yet exist
-- `PatchDraftCompiler` does not yet exist
+- `WorkTodo` now exists as a bounded session-state frontier skeleton, and the
+  first offline `PatchDraftCompiler` scaffold now exists in
+  `src/mew/patch_draft.py`, but the live compiler/recovery path that consumes
+  it does not yet exist
 - draft-related model failures now emit replay bundles under
   `.mew/replays/work-loop/...`, but compiler inputs/outputs and validator
-  blockers are not yet captured because `PatchDraftCompiler` does not exist
+  blockers are not yet captured because the compiler is still offline-only
 - draft-time recovery still collapses to generic `replan`
 - no bounded implementation slice has yet passed through the new drafting path
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
@@ -1978,9 +1979,10 @@ Missing proof:
 Next action:
 
 - continue Phase 2:
-  add the first `PatchDraftCompiler` scaffolding and fixture lane so `#399`
-  stops as a live-loop timeout/refusal problem and becomes a deterministic
-  compiler/blocker problem offline
+  finish the compiler contract by reconciling recovery-action vocabulary,
+  adding the first fixture lane, and preparing compiler input/output capture so
+  `#399` stays an offline deterministic compiler/blocker problem before live
+  Phase 3 wiring starts
 - do not start Phase 3 until the Phase 2/3 calibration checkpoint is wired and
   ready to gate rollout using replay-bundle off-schema/refusal ratios
 

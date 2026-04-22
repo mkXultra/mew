@@ -1,0 +1,535 @@
+import difflib
+import hashlib
+import json
+from pathlib import Path
+
+from .read_tools import _is_relative_to
+from .test_discovery import convention_test_path_for_mew_source, normalize_work_path
+
+
+PATCH_DRAFT_VALIDATOR_VERSION = 1
+PATCH_BLOCKER_RECOVERY_ACTIONS = {
+    "missing_exact_cached_window_texts": "refresh_cached_window",
+    "cached_window_text_truncated": "refresh_cached_window",
+    "stale_cached_window_text": "refresh_cached_window",
+    "old_text_not_found": "refresh_cached_window",
+    "ambiguous_old_text_match": "narrow_old_text",
+    "overlapping_hunks": "merge_or_split_hunks",
+    "no_material_change": "revise_patch",
+    "unpaired_source_edit_blocked": "add_paired_test_edit",
+    "write_policy_violation": "revise_patch_scope",
+    "model_returned_non_schema": "retry_with_schema",
+    "model_returned_refusal": "inspect_refusal",
+    "review_rejected": "revise_patch_from_review_findings",
+}
+
+
+def sha1_text(text):
+    return "sha1:" + hashlib.sha1((text or "").encode("utf-8")).hexdigest()
+
+
+def sha256_text(text):
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def build_patch_blocker(todo_id, code, *, path="", line_start=None, line_end=None, detail=""):
+    blocker = {
+        "kind": "patch_blocker",
+        "todo_id": str(todo_id or "").strip(),
+        "code": str(code or "").strip(),
+        "detail": str(detail or "").strip(),
+        "recovery_action": PATCH_BLOCKER_RECOVERY_ACTIONS.get(str(code or "").strip(), "inspect_blocker"),
+    }
+    normalized_path = normalize_work_path(path)
+    if normalized_path:
+        blocker["path"] = normalized_path
+    if isinstance(line_start, int) and line_start > 0:
+        blocker["line_start"] = line_start
+    if isinstance(line_end, int) and line_end > 0:
+        blocker["line_end"] = line_end
+    return blocker
+
+
+def compile_patch_draft(*, todo, proposal, cached_windows, live_files, allowed_write_roots=None):
+    todo = _normalize_todo(todo)
+    todo_id = todo.get("id") or ""
+    normalized = _normalize_proposal(proposal, todo_id=todo_id)
+    if normalized.get("kind") == "patch_blocker":
+        return normalized
+
+    edited_paths = [item["path"] for item in normalized["files"]]
+    pairing_blocker = _validate_pairing(
+        todo,
+        edited_paths,
+        allowed_write_roots=allowed_write_roots,
+    )
+    if pairing_blocker:
+        return pairing_blocker
+
+    compiled_files = []
+    diff_parts = []
+    for proposal_file in normalized["files"]:
+        compiled_file = _compile_file(
+            todo=todo,
+            proposal_file=proposal_file,
+            cached_windows=cached_windows,
+            live_files=live_files,
+        )
+        if compiled_file.get("kind") == "patch_blocker":
+            return compiled_file
+        compiled_files.append(compiled_file)
+        diff_parts.append(compiled_file.pop("_unified_diff"))
+
+    payload = {
+        "todo_id": todo_id,
+        "summary": normalized["summary"],
+        "files": compiled_files,
+    }
+    draft_id = _stable_artifact_id("draft", payload)
+    return {
+        "kind": "patch_draft",
+        "id": draft_id,
+        "todo_id": todo_id,
+        "status": "validated",
+        "summary": normalized["summary"],
+        "files": compiled_files,
+        "unified_diff": "".join(part for part in diff_parts if part),
+        "validator_version": PATCH_DRAFT_VALIDATOR_VERSION,
+    }
+
+
+def _normalize_todo(todo):
+    todo = todo if isinstance(todo, dict) else {}
+    source = todo.get("source") if isinstance(todo.get("source"), dict) else {}
+    return {
+        "id": str(todo.get("id") or "").strip(),
+        "source": {
+            "target_paths": [
+                normalize_work_path(path)
+                for path in (source.get("target_paths") or [])
+                if normalize_work_path(path)
+            ]
+        },
+    }
+
+
+def _normalize_proposal(proposal, *, todo_id):
+    if not isinstance(proposal, dict):
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="proposal must be an object",
+        )
+
+    kind = str(proposal.get("kind") or "").strip()
+    if kind == "patch_blocker":
+        return _normalize_blocker_proposal(proposal, todo_id=todo_id)
+    if kind != "patch_proposal":
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="proposal.kind must be patch_proposal or patch_blocker",
+        )
+
+    files = proposal.get("files")
+    if not isinstance(files, list) or not files:
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="patch_proposal.files must be a non-empty array",
+        )
+
+    normalized_files = []
+    seen_paths = set()
+    for file_index, file_item in enumerate(files, start=1):
+        if not isinstance(file_item, dict):
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail=f"files[{file_index}] must be an object",
+            )
+        path = normalize_work_path(file_item.get("path"))
+        if not path:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail=f"files[{file_index}].path must be a non-empty string",
+            )
+        if path in seen_paths:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail=f"duplicate files entry for path: {path}",
+            )
+        seen_paths.add(path)
+
+        edits = file_item.get("edits")
+        if not isinstance(edits, list) or not edits:
+            return build_patch_blocker(
+                todo_id,
+                "model_returned_non_schema",
+                detail=f"files[{file_index}].edits must be a non-empty array",
+            )
+        normalized_edits = []
+        for edit_index, edit in enumerate(edits, start=1):
+            if not isinstance(edit, dict):
+                return build_patch_blocker(
+                    todo_id,
+                    "model_returned_non_schema",
+                    detail=f"files[{file_index}].edits[{edit_index}] must be an object",
+                )
+            old = edit.get("old")
+            new = edit.get("new")
+            if not isinstance(old, str) or not old:
+                return build_patch_blocker(
+                    todo_id,
+                    "model_returned_non_schema",
+                    detail=f"files[{file_index}].edits[{edit_index}].old must be a non-empty string",
+                )
+            if not isinstance(new, str):
+                return build_patch_blocker(
+                    todo_id,
+                    "model_returned_non_schema",
+                    detail=f"files[{file_index}].edits[{edit_index}].new must be a string",
+                )
+            normalized_edits.append({"old": old, "new": new})
+        normalized_files.append({"path": path, "edits": normalized_edits})
+
+    return {
+        "kind": "patch_proposal",
+        "summary": str(proposal.get("summary") or "").strip(),
+        "files": normalized_files,
+    }
+
+
+def _normalize_blocker_proposal(proposal, *, todo_id):
+    code = str(proposal.get("code") or "").strip()
+    if not code:
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="patch_blocker.code must be a non-empty string",
+        )
+    return build_patch_blocker(
+        todo_id,
+        code,
+        path=proposal.get("path") or "",
+        detail=proposal.get("detail") or proposal.get("summary") or "",
+    )
+
+
+def _validate_pairing(todo, edited_paths, *, allowed_write_roots=None):
+    target_paths = set(todo.get("source", {}).get("target_paths") or [])
+    edited_path_set = set(edited_paths)
+
+    if not allowed_write_roots:
+        return build_patch_blocker(
+            todo.get("id") or "",
+            "write_policy_violation",
+            detail="allowed_write_roots is required for validation",
+        )
+
+    for path in edited_paths:
+        if not _path_under_allowed_roots(path, allowed_write_roots):
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "write_policy_violation",
+                path=path,
+                detail="proposal path is outside allowed_write_roots",
+            )
+
+    for path in edited_paths:
+        if path not in target_paths:
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "write_policy_violation",
+                path=path,
+                detail="proposal path is outside the active WorkTodo target_paths",
+            )
+
+    for path in edited_paths:
+        if not path.startswith("src/mew/"):
+            continue
+        paired_test_path = convention_test_path_for_mew_source(path)
+        if paired_test_path and paired_test_path not in edited_path_set:
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "unpaired_source_edit_blocked",
+                path=path,
+                detail=f"missing paired test edit for {paired_test_path}",
+            )
+    return {}
+
+
+def _compile_file(*, todo, proposal_file, cached_windows, live_files):
+    path = proposal_file["path"]
+    window_bundle = _normalize_cached_window_bundle(cached_windows, path)
+    if not window_bundle["windows"]:
+        return build_patch_blocker(
+            todo.get("id") or "",
+            "missing_exact_cached_window_texts",
+            path=path,
+            detail="missing cached window text for target path",
+        )
+    if any(window.get("context_truncated") for window in window_bundle["windows"]):
+        window = window_bundle["windows"][0]
+        return build_patch_blocker(
+            todo.get("id") or "",
+            "cached_window_text_truncated",
+            path=path,
+            line_start=window.get("line_start"),
+            line_end=window.get("line_end"),
+            detail="cached window text is truncated",
+        )
+
+    first_window = window_bundle["windows"][0] if window_bundle["windows"] else {}
+    live_file = _normalize_live_file(
+        live_files,
+        path,
+        todo_id=todo.get("id") or "",
+        line_start=first_window.get("line_start"),
+        line_end=first_window.get("line_end"),
+    )
+    if live_file.get("kind") == "patch_blocker":
+        return live_file
+
+    stale_blocker = _validate_live_file_against_cached_window(path, window_bundle, live_file, todo_id=todo.get("id") or "")
+    if stale_blocker:
+        return stale_blocker
+
+    before_text = live_file["text"]
+    placements = []
+    for index, edit in enumerate(proposal_file["edits"], start=1):
+        if edit["old"] not in window_bundle["text"]:
+            window = _first_window_containing(window_bundle["windows"], edit["old"]) or window_bundle["windows"][0]
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "old_text_not_found",
+                path=path,
+                line_start=window.get("line_start"),
+                line_end=window.get("line_end"),
+                detail=f"edit hunk #{index} old text was not found in cached window text",
+            )
+        count = before_text.count(edit["old"])
+        if count == 0:
+            window = _first_window_containing(window_bundle["windows"], edit["old"]) or window_bundle["windows"][0]
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "old_text_not_found",
+                path=path,
+                line_start=window.get("line_start"),
+                line_end=window.get("line_end"),
+                detail=f"edit hunk #{index} old text was not found in live file text",
+            )
+        if count > 1:
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "ambiguous_old_text_match",
+                path=path,
+                detail=f"edit hunk #{index} old text matched {count} times in the live file",
+            )
+        start = before_text.find(edit["old"])
+        placements.append(
+            {
+                "index": index,
+                "old": edit["old"],
+                "new": edit["new"],
+                "start": start,
+                "end": start + len(edit["old"]),
+            }
+        )
+
+    placements.sort(key=lambda item: (item["start"], item["end"], item["index"]))
+    for previous, current in zip(placements, placements[1:]):
+        if current["start"] < previous["end"]:
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "overlapping_hunks",
+                path=path,
+                detail="same-path edit hunks overlap in the live file",
+            )
+
+    after_text = _apply_placements(before_text, placements)
+    if after_text == before_text:
+        return build_patch_blocker(
+            todo.get("id") or "",
+            "no_material_change",
+            path=path,
+            detail="compiled patch does not change the file",
+        )
+
+    return {
+        "path": path,
+        "kind": "edit_file" if len(proposal_file["edits"]) == 1 else "edit_file_hunks",
+        "edits": proposal_file["edits"],
+        "window_sha256s": window_bundle["window_sha256s"],
+        "pre_file_sha256": sha256_text(before_text),
+        "post_file_sha256": sha256_text(after_text),
+        "_unified_diff": _unified_diff_text(path, before_text, after_text),
+    }
+
+
+def _normalize_cached_window_bundle(cached_windows, path):
+    windows = []
+    if isinstance(cached_windows, dict):
+        raw_windows = cached_windows.get(path)
+    else:
+        raw_windows = cached_windows
+    if isinstance(raw_windows, dict):
+        raw_windows = [raw_windows]
+
+    for raw_window in raw_windows or []:
+        if not isinstance(raw_window, dict):
+            continue
+        window_path = normalize_work_path(raw_window.get("path") or path)
+        if window_path != path:
+            continue
+        text = raw_window.get("text")
+        if not isinstance(text, str):
+            continue
+        line_start = raw_window.get("line_start")
+        line_end = raw_window.get("line_end")
+        try:
+            line_start = int(line_start) if line_start is not None else None
+            line_end = int(line_end) if line_end is not None else None
+        except (TypeError, ValueError):
+            line_start = None
+            line_end = None
+        windows.append(
+            {
+                "path": window_path,
+                "text": text,
+                "line_start": line_start,
+                "line_end": line_end,
+                "context_truncated": bool(raw_window.get("context_truncated")),
+                "window_sha256": str(raw_window.get("window_sha256") or sha256_text(text)),
+                "file_sha256": str(raw_window.get("file_sha256") or "").strip(),
+            }
+        )
+
+    windows.sort(key=lambda item: ((item.get("line_start") or 0), (item.get("line_end") or 0)))
+    return {
+        "windows": windows,
+        "text": "\n".join(window["text"] for window in windows),
+        "window_sha256s": [window["window_sha256"] for window in windows],
+    }
+
+
+def _normalize_live_file(live_files, path, *, todo_id, line_start=None, line_end=None):
+    raw_live = live_files.get(path) if isinstance(live_files, dict) else None
+    if not isinstance(raw_live, dict):
+        return build_patch_blocker(
+            todo_id,
+            "stale_cached_window_text",
+            path=path,
+            line_start=line_start,
+            line_end=line_end,
+            detail="missing live file payload",
+        )
+    text = raw_live.get("text")
+    if not isinstance(text, str):
+        return build_patch_blocker(
+            todo_id,
+            "stale_cached_window_text",
+            path=path,
+            line_start=line_start,
+            line_end=line_end,
+            detail="missing live file text",
+        )
+    sha256 = str(raw_live.get("sha256") or "").strip()
+    if not sha256:
+        return build_patch_blocker(
+            todo_id,
+            "stale_cached_window_text",
+            path=path,
+            line_start=line_start,
+            line_end=line_end,
+            detail="missing live file sha256",
+        )
+    return {"text": text, "sha256": sha256}
+
+
+def _validate_live_file_against_cached_window(path, window_bundle, live_file, *, todo_id):
+    computed_live_sha = sha256_text(live_file["text"])
+    if live_file["sha256"] != computed_live_sha:
+        window = window_bundle["windows"][0]
+        return build_patch_blocker(
+            todo_id,
+            "stale_cached_window_text",
+            path=path,
+            line_start=window.get("line_start"),
+            line_end=window.get("line_end"),
+            detail="provided live file text/hash mismatch",
+        )
+
+    for window in window_bundle["windows"]:
+        expected_sha = str(window.get("file_sha256") or "").strip()
+        if expected_sha and expected_sha != live_file["sha256"]:
+            return build_patch_blocker(
+                todo_id,
+                "stale_cached_window_text",
+                path=path,
+                line_start=window.get("line_start"),
+                line_end=window.get("line_end"),
+                detail="live file hash differs from cached window hash",
+            )
+    return {}
+
+
+def _first_window_containing(windows, text):
+    for window in windows or []:
+        if text in (window.get("text") or ""):
+            return window
+    return {}
+
+
+def _apply_placements(before_text, placements):
+    pieces = []
+    cursor = 0
+    for placement in placements:
+        pieces.append(before_text[cursor : placement["start"]])
+        pieces.append(placement["new"])
+        cursor = placement["end"]
+    pieces.append(before_text[cursor:])
+    return "".join(pieces)
+
+
+def _unified_diff_text(path, before_text, after_text):
+    return "".join(
+        difflib.unified_diff(
+            before_text.splitlines(keepends=True),
+            after_text.splitlines(keepends=True),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+        )
+    )
+
+
+def _path_under_allowed_roots(path, allowed_roots):
+    resolved_path = _resolve_workspace_path(path)
+    if not resolved_path:
+        return False
+
+    for allowed_root in allowed_roots or []:
+        resolved_root = _resolve_workspace_path(allowed_root)
+        if not resolved_root:
+            continue
+        if resolved_path == resolved_root or _is_relative_to(resolved_path, resolved_root):
+            return True
+    return False
+
+
+def _resolve_workspace_path(path):
+    raw_path = str(path or "").strip().replace("\\", "/")
+    if not raw_path:
+        return None
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    return candidate.resolve(strict=False)
+
+
+def _stable_artifact_id(prefix, payload):
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha1(encoded.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}-{digest}"
