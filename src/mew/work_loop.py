@@ -2,15 +2,19 @@ import json
 import multiprocessing
 import hashlib
 import os
+from pathlib import Path
 import shlex
 import time
 
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .errors import MewError, ModelBackendError
+from .patch_draft import compile_patch_draft, compile_patch_draft_previews
 from .reasoning_policy import codex_reasoning_effort_scope, select_work_reasoning_policy
 from .tasks import clip_output
+from .test_discovery import normalize_work_path
 from .timeutil import now_iso
+from .work_replay import write_patch_draft_compiler_replay
 from .work_session import (
     GIT_WORK_TOOLS,
     READ_ONLY_WORK_TOOLS,
@@ -1242,6 +1246,184 @@ def _work_write_ready_fast_path_details(context):
     }
 
 
+def _shadow_compile_patch_draft_for_write_ready_turn(
+    *,
+    session,
+    context,
+    action_plan,
+    action,
+    write_ready_fast_path,
+    allowed_write_roots=None,
+):
+    def canonical_path(path):
+        return normalize_work_path(path)
+
+    observation = {
+        "patch_draft_compiler_ran": False,
+        "patch_draft_compiler_artifact_kind": "",
+        "patch_draft_compiler_replay_path": "",
+        "patch_draft_compiler_error": "",
+    }
+    action = action if isinstance(action, dict) else {}
+    action_plan = action_plan if isinstance(action_plan, dict) else {}
+    fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
+    recent_windows = fast_path.get("recent_windows") or []
+    resume = ((context or {}).get("work_session") or {}).get("resume") or {}
+    active_work_todo = resume.get("active_work_todo") or (session or {}).get("active_work_todo") or {}
+    todo_source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    target_paths = []
+    for path in todo_source.get("target_paths") or []:
+        normalized_path = canonical_path(path)
+        if normalized_path:
+            target_paths.append(normalized_path)
+    if not target_paths:
+        working_memory = resume.get("working_memory") if isinstance(resume.get("working_memory"), dict) else {}
+        for path in working_memory.get("target_paths") or []:
+            normalized_path = canonical_path(path)
+            if normalized_path:
+                target_paths.append(normalized_path)
+    if not target_paths:
+        for item in recent_windows:
+            if not isinstance(item, dict):
+                continue
+            normalized_path = canonical_path(item.get("path"))
+            if normalized_path:
+                target_paths.append(normalized_path)
+    todo = {
+        "id": str(active_work_todo.get("id") or "").strip(),
+        "source": {"target_paths": target_paths},
+    }
+
+    summary = (
+        str(action_plan.get("summary") or action.get("summary") or action.get("reason") or "").strip()
+        or "shadow write-ready compiler proposal"
+    )
+    action_type = str(action.get("type") or "").strip()
+    if action_type == "batch":
+        candidate_tools = action.get("tools") or []
+    elif action_type in {"edit_file", "edit_file_hunks"}:
+        candidate_tools = [action]
+    else:
+        observation["patch_draft_compiler_artifact_kind"] = "unadapted"
+        return observation
+
+    proposal_files = []
+    for tool in candidate_tools:
+        if not isinstance(tool, dict):
+            observation["patch_draft_compiler_artifact_kind"] = "unadapted"
+            return observation
+        tool_type = str(tool.get("type") or "").strip()
+        path = canonical_path(tool.get("path"))
+        if not path:
+            observation["patch_draft_compiler_artifact_kind"] = "unadapted"
+            return observation
+        if tool_type == "edit_file":
+            old = tool.get("old")
+            new = tool.get("new")
+            if not isinstance(old, str) or old == "" or not isinstance(new, str):
+                observation["patch_draft_compiler_artifact_kind"] = "unadapted"
+                return observation
+            proposal_files.append({"path": path, "edits": [{"old": old, "new": new}]})
+            continue
+        if tool_type == "edit_file_hunks":
+            edits = tool.get("edits")
+            valid_edits = (
+                isinstance(edits, list)
+                and bool(edits)
+                and all(
+                    isinstance(item, dict)
+                    and isinstance(item.get("old"), str)
+                    and item.get("old") != ""
+                    and isinstance(item.get("new"), str)
+                    for item in edits
+                )
+            )
+            if not valid_edits:
+                observation["patch_draft_compiler_artifact_kind"] = "unadapted"
+                return observation
+            proposal_files.append(
+                {
+                    "path": path,
+                    "edits": [{"old": item.get("old"), "new": item.get("new")} for item in edits],
+                }
+            )
+            continue
+        observation["patch_draft_compiler_artifact_kind"] = "unadapted"
+        return observation
+
+    proposal = {
+        "kind": "patch_proposal",
+        "summary": summary,
+        "files": proposal_files,
+    }
+    cached_windows = {}
+    for window in recent_windows:
+        if not isinstance(window, dict):
+            continue
+        path = canonical_path(window.get("path"))
+        if not path:
+            continue
+        cached_window = {
+            "path": path,
+            "line_start": window.get("line_start"),
+            "line_end": window.get("line_end"),
+            "text": window.get("text") or "",
+            "context_truncated": bool(window.get("context_truncated")),
+        }
+        if window.get("window_sha256"):
+            cached_window["window_sha256"] = window.get("window_sha256")
+        if window.get("file_sha256"):
+            cached_window["file_sha256"] = window.get("file_sha256")
+        cached_windows.setdefault(path, []).append(cached_window)
+
+    live_files = {}
+    for path in cached_windows:
+        file_path = Path(path)
+        if not file_path.exists():
+            continue
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = file_path.read_bytes().decode("utf-8", errors="replace")
+        live_files[path] = {
+            "text": text,
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
+
+    try:
+        validator_result = compile_patch_draft(
+            todo=todo,
+            proposal=proposal,
+            cached_windows=cached_windows,
+            live_files=live_files,
+            allowed_write_roots=allowed_write_roots or [],
+        )
+        observation["patch_draft_compiler_ran"] = True
+        observation["patch_draft_compiler_artifact_kind"] = str(validator_result.get("kind") or "").strip()
+        if observation["patch_draft_compiler_artifact_kind"] == "patch_draft":
+            compile_patch_draft_previews(
+                validator_result,
+                allowed_write_roots=allowed_write_roots or [],
+            )
+        replay_path = write_patch_draft_compiler_replay(
+            session_id=(session or {}).get("id"),
+            todo_id=todo.get("id") or "",
+            todo=todo,
+            proposal=proposal,
+            cached_windows=cached_windows,
+            live_files=live_files,
+            allowed_write_roots=list(allowed_write_roots or []),
+            validator_result=validator_result,
+        )
+        if replay_path:
+            observation["patch_draft_compiler_replay_path"] = str(Path(replay_path).resolve())
+    except Exception as exc:
+        observation["patch_draft_compiler_artifact_kind"] = "exception"
+        observation["patch_draft_compiler_replay_path"] = ""
+        observation["patch_draft_compiler_error"] = clip_output(str(exc), 500)
+    return observation
+
+
 def build_write_ready_work_model_context(context):
     fast_path = _work_write_ready_fast_path_details(context)
     if not fast_path.get("active"):
@@ -2022,6 +2204,10 @@ def plan_work_model_turn(
                 "draft_prompt_static_chars": think_prompt_static_chars,
                 "draft_prompt_dynamic_chars": think_prompt_dynamic_chars,
                 "draft_retry_same_prefix": False,
+                "patch_draft_compiler_ran": False,
+                "patch_draft_compiler_artifact_kind": "",
+                "patch_draft_compiler_replay_path": "",
+                "patch_draft_compiler_error": "",
             }
         )
     if pre_model_metrics_sink:
@@ -2090,6 +2276,17 @@ def plan_work_model_turn(
         verify_command=verify_command,
         suggested_verify_command=suggested_verify_command,
     )
+    if write_ready_fast_path.get("active"):
+        model_metrics.update(
+            _shadow_compile_patch_draft_for_write_ready_turn(
+                session=session,
+                context=context,
+                action_plan=action_plan,
+                action=action,
+                write_ready_fast_path=write_ready_fast_path,
+                allowed_write_roots=allowed_write_roots,
+            )
+        )
     model_metrics["total_model_seconds"] = _round_seconds(
         (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
         + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)

@@ -84,6 +84,68 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    PATCH_DRAFT_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "work_loop" / "patch_draft"
+
+    def _load_patch_draft_fixture_scenario(self, name):
+        with (self.PATCH_DRAFT_FIXTURE_DIR / name / "scenario.json").open(encoding="utf-8") as fp:
+            return json.load(fp)
+
+    def _seed_write_ready_shadow_session(self, state, scenario):
+        from mew.work_session import finish_work_model_turn, start_work_model_turn
+
+        task = add_coding_task(state)
+        task["title"] = f"Shadow compiler {scenario['name']}"
+        task["description"] = "Exercise shadow-mode live bridge."
+        session, _created = create_work_session(state, task)
+        target_paths = list((scenario.get("todo") or {}).get("source", {}).get("target_paths") or [])
+        session["tool_calls"] = []
+        for index, path in enumerate(target_paths, start=1):
+            window = ((scenario.get("cached_windows") or {}).get(path) or {}).copy()
+            session["tool_calls"].append(
+                {
+                    "id": index,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {
+                        "path": path,
+                        "line_start": window.get("line_start"),
+                        "line_count": max(1, (window.get("line_end") or 1) - (window.get("line_start") or 1) + 1),
+                    },
+                    "result": {
+                        "path": path,
+                        "line_start": window.get("line_start"),
+                        "line_end": window.get("line_end"),
+                        "text": window.get("text") or "",
+                        "next_line": (window.get("line_end") or 0) + 1,
+                        "context_truncated": bool(window.get("context_truncated")),
+                        "source_truncated": False,
+                        "truncated": False,
+                    },
+                }
+            )
+        decision_plan = {
+            "summary": "prepare write-ready shadow bridge turn",
+            "working_memory": {
+                "hypothesis": "Exact source/test windows are cached for a paired dry-run edit.",
+                "next_step": "Draft one paired dry-run edit batch from the cached windows.",
+                "plan_items": [
+                    "Draft one paired dry-run edit batch for " + " and ".join(target_paths),
+                    "Run the focused verifier after apply",
+                ],
+                "target_paths": target_paths,
+                "last_verified_state": "Exact cached windows are available for the active paired target paths.",
+            },
+        }
+        turn = start_work_model_turn(
+            state,
+            session,
+            decision_plan,
+            {"summary": decision_plan["summary"]},
+            {"type": "wait", "reason": "ready for the write-ready draft step"},
+        )
+        finish_work_model_turn(state, session["id"], turn["id"])
+        return task, session
+
     def test_compact_running_search_summary_uses_parameters_before_result(self):
         summary = compact_work_tool_summary(
             {
@@ -6802,6 +6864,295 @@ class WorkSessionTests(unittest.TestCase):
             WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS,
         )
         self.assertEqual(planned["model_metrics"]["draft_runtime_mode"], "guarded")
+
+    def test_patch_draft_compiler_shadow_bridge_records_validated_replay_for_write_ready_batch(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {
+                        "summary": "draft paired dry-run batch",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "edit_file",
+                                    "path": "tests/test_patch_draft.py",
+                                    "old": "meaning(), 41",
+                                    "new": "meaning(), 42",
+                                },
+                                {
+                                    "type": "edit_file",
+                                    "path": "src/mew/patch_draft.py",
+                                    "old": "return 41",
+                                    "new": "return 42",
+                                },
+                            ],
+                        },
+                    }
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "batch")
+                self.assertEqual(
+                    [tool["path"] for tool in planned["action"]["tools"]],
+                    ["tests/test_patch_draft.py", "src/mew/patch_draft.py"],
+                )
+                metrics = planned["model_metrics"]
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_draft")
+                self.assertTrue(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(Path(metrics["patch_draft_compiler_replay_path"]).is_file())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_patch_draft_compiler_shadow_bridge_records_blocker_without_changing_outer_action(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    live_text = payload["text"]
+                    if path == "src/mew/patch_draft.py":
+                        live_text = "def meaning():\n    return 99\n"
+                    file_path.write_text(live_text, encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {
+                        "summary": "draft paired dry-run batch",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "edit_file",
+                                    "path": "tests/test_patch_draft.py",
+                                    "old": "meaning(), 41",
+                                    "new": "meaning(), 42",
+                                },
+                                {
+                                    "type": "edit_file",
+                                    "path": "src/mew/patch_draft.py",
+                                    "old": "return 41",
+                                    "new": "return 42",
+                                },
+                            ],
+                        },
+                    }
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "batch")
+                metrics = planned["model_metrics"]
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_blocker")
+                self.assertTrue(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(Path(metrics["patch_draft_compiler_replay_path"]).is_file())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_patch_draft_compiler_shadow_bridge_marks_unadapted_wait_without_replay(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {"summary": "wait for a narrower next step", "action": {"type": "wait", "reason": "need a narrower slice"}}
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                metrics = planned["model_metrics"]
+                self.assertFalse(metrics["patch_draft_compiler_ran"])
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "unadapted")
+                self.assertEqual(metrics["patch_draft_compiler_replay_path"], "")
+                self.assertFalse((Path(".mew") / "replays" / "work-loop").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_patch_draft_compiler_shadow_bridge_replay_writer_exception_does_not_escape(self):
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, _session = self._seed_write_ready_shadow_session(state, scenario)
+                    save_state(state)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {
+                        "summary": "draft paired dry-run batch",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "edit_file",
+                                    "path": "tests/test_patch_draft.py",
+                                    "old": "meaning(), 41",
+                                    "new": "meaning(), 42",
+                                },
+                                {
+                                    "type": "edit_file",
+                                    "path": "src/mew/patch_draft.py",
+                                    "old": "return 41",
+                                    "new": "return 42",
+                                },
+                            ],
+                        },
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with patch(
+                            "mew.work_loop.write_patch_draft_compiler_replay",
+                            side_effect=RuntimeError("disk full"),
+                        ):
+                            with redirect_stdout(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            str(task["id"]),
+                                            "--ai",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-write",
+                                            ".",
+                                            "--allow-verify",
+                                            "--verify-command",
+                                            "uv run python -m unittest tests.test_patch_draft",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                turn = session["model_turns"][-1]
+                self.assertEqual(turn["status"], "completed")
+                self.assertEqual(turn["action"]["type"], "batch")
+                self.assertEqual(
+                    [tool["path"] for tool in turn["action"]["tools"]],
+                    ["tests/test_patch_draft.py", "src/mew/patch_draft.py"],
+                )
+                metrics = turn.get("model_metrics") or {}
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "exception")
+                self.assertIn("disk full", metrics["patch_draft_compiler_error"])
+                self.assertEqual(metrics["patch_draft_compiler_replay_path"], "")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_patch_draft_compiler_shadow_bridge_is_skipped_when_write_ready_fast_path_is_inactive(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("shadow compiler inactive\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.work_loop._shadow_compile_patch_draft_for_write_ready_turn", side_effect=AssertionError("shadow helper should not run")):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        planned = plan_work_model_turn(
+                            state,
+                            session,
+                            task,
+                            {"path": "auth.json"},
+                            allowed_read_roots=["."],
+                            allowed_write_roots=["."],
+                            act_mode="deterministic",
+                        )
+
+                self.assertEqual(planned["action"]["type"], "read_file")
+                self.assertNotIn("patch_draft_compiler_ran", planned["model_metrics"])
+                self.assertFalse((Path(".mew") / "replays" / "work-loop").exists())
+            finally:
+                os.chdir(old_cwd)
 
     def test_write_ready_draft_runtime_mode_contract(self):
         from mew.work_loop import _write_ready_draft_runtime_mode

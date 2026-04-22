@@ -1968,7 +1968,10 @@ Missing proof:
 - `WorkTodo` now exists as a bounded session-state frontier skeleton, and the
   first offline `PatchDraftCompiler` scaffold now exists in
   `src/mew/patch_draft.py`; the first offline `PatchDraft` -> dry-run preview
-  translator also now exists there, but the live compiler/recovery path that
+  translator also now exists there, and the first shadow-only live bridge in
+  `src/mew/work_loop.py` now records validated/blocker/exception compiler
+  observations plus replay paths without changing outer action semantics, but
+  the real write-ready prompt swap and live compiler/recovery path that
   consumes either artifact does not yet exist
 - the first fixture lane under `tests/fixtures/work_loop/patch_draft/` now
   exists for happy-path, ambiguous-old-text, and stale-cache offline compiler
@@ -1993,10 +1996,11 @@ Missing proof:
 
 Next action:
 
-- begin Phase 3 live bridging:
-  route validated `PatchDraft` / `PatchBlocker` artifacts into the existing
-  dry-run preview path in `src/mew/work_loop.py` and `src/mew/commands.py`
-  without changing `write_tools.py` semantics
+- continue Phase 3 from the landed shadow-only bridge:
+  replace `build_work_write_ready_think_prompt()` with the tiny patch
+  contract and promote the live bridge from observational replay/metrics into
+  the real write-ready draft path while keeping `write_tools.py` semantics
+  unchanged
 - keep the Phase 2/3 calibration checkpoint active during Phase 3 rollout and
   pause if replay-bundle off-schema/refusal incidence crosses the configured
   thresholds
