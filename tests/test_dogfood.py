@@ -536,14 +536,17 @@ class DogfoodTests(unittest.TestCase):
             text = format_dogfood_scenario_report(report)
             scenario = report["scenarios"][0]
 
-            self.assertEqual(report["status"], "fail")
+            self.assertEqual(report["status"], "pass")
             self.assertEqual(scenario["name"], "m6_11-draft-timeout")
-            self.assertEqual(scenario["status"], "not_implemented")
-            self.assertEqual(scenario["artifacts"]["status"], "not_implemented")
-            self.assertIn("401", scenario["artifacts"]["reason"])
-            self.assertFalse(scenario["checks"][0]["passed"])
-            self.assertIn("not implemented", scenario["checks"][0]["observed"]["reason"])
-            self.assertIn("scenario_implementation_status", text)
+            self.assertEqual(scenario["status"], "pass")
+            self.assertEqual(scenario["artifacts"]["resume_source"], "session_overlay")
+            self.assertIs(scenario["artifacts"]["session_state_newer"], False)
+            self.assertEqual(scenario["artifacts"]["follow_status"], "stale")
+            self.assertEqual(scenario["artifacts"]["next_recovery_action"], "resume_draft_from_cached_windows")
+            self.assertEqual(scenario["artifacts"]["recovery_plan_item_action"], "resume_draft_from_cached_windows")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertIn("m6_11_draft_timeout_scenario_command_succeeds", {item["name"] for item in scenario["checks"]})
+            self.assertIn("m6_11-draft-timeout: pass", text)
 
     def test_run_dogfood_m6_11_drafting_recovery_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -574,7 +577,6 @@ class DogfoodTests(unittest.TestCase):
 
     def test_run_dogfood_m6_11_not_implemented_scenarios(self):
         for scenario_name in (
-            "m6_11-draft-timeout",
             "m6_11-refusal-separation",
             "m6_11-phase4-regression",
         ):
@@ -601,14 +603,14 @@ class DogfoodTests(unittest.TestCase):
     def test_run_dogfood_m6_11_all_subset_aggregate_reflects_not_implemented(self):
         with tempfile.TemporaryDirectory() as tmp, patch(
             "mew.dogfood.DOGFOOD_SCENARIOS",
-            (
-                "m6_11-compiler-replay",
-                "m6_11-drafting-recovery",
-                "m6_11-draft-timeout",
-                "m6_11-refusal-separation",
-                "m6_11-phase4-regression",
-            ),
-        ):
+                (
+                    "m6_11-compiler-replay",
+                    "m6_11-drafting-recovery",
+                    "m6_11-draft-timeout",
+                    "m6_11-refusal-separation",
+                    "m6_11-phase4-regression",
+                ),
+            ):
             args = SimpleNamespace(
                 workspace=str(Path(tmp) / "dog"),
                 scenario="all",
@@ -632,15 +634,15 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertEqual(by_name["m6_11-compiler-replay"]["status"], "pass")
             self.assertEqual(by_name["m6_11-drafting-recovery"]["status"], "pass")
+            self.assertEqual(by_name["m6_11-draft-timeout"]["status"], "pass")
             for scenario_name in (
-                "m6_11-draft-timeout",
                 "m6_11-refusal-separation",
                 "m6_11-phase4-regression",
             ):
                 self.assertEqual(by_name[scenario_name]["status"], "not_implemented")
                 self.assertEqual(by_name[scenario_name]["artifacts"]["status"], "not_implemented")
             self.assertIn("m6_11-compiler-replay: pass", text)
-            self.assertIn("m6_11-draft-timeout: not_implemented", text)
+            self.assertIn("m6_11-draft-timeout: pass", text)
             self.assertIn("m6_11-drafting-recovery: pass", text)
 
     def test_run_dogfood_native_advance_scenario(self):

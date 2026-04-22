@@ -963,6 +963,43 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(suggestion["source_index"], 0)
         self.assertEqual(suggestion["command"], "mew work 1 --session --resume --allow-read .")
 
+    def test_work_recovery_suggestion_prefers_resume_draft_from_cached_windows_action(self):
+        plan = {
+            "items": [
+                {
+                    "action": "needs_user_review",
+                    "review_hint": "mew work 1 --session --resume --allow-read .",
+                    "effect_classification": "rollback_needed",
+                    "reason": "interrupted read side-effect requires confirmation",
+                },
+                {
+                    "action": "resume_draft_from_cached_windows",
+                    "cached_window_refs": [
+                        {"path": "src/mew/work_session.py", "tool_call_id": 10},
+                        {"path": "tests/test_work_session.py", "tool_call_id": 11},
+                    ],
+                    "hint": (
+                        "mew work 1 --session --resume --allow-read src/mew/work_session.py "
+                        "--allow-read tests/test_work_session.py --auto-recover-safe"
+                    ),
+                }
+            ]
+        }
+
+        suggestion = work_recovery_suggestion_from_plan(plan, task_id=1)
+        self.assertEqual(suggestion["kind"], "needs_human_review")
+        self.assertEqual(suggestion["source_index"], 0)
+        self.assertEqual(suggestion["source_action"], "needs_user_review")
+
+        suggestion = work_recovery_suggestion_from_plan(plan, task_id=1, preferred_action="resume_draft_from_cached_windows")
+        self.assertEqual(suggestion["kind"], "resume_draft_from_cached_windows")
+        self.assertEqual(
+            suggestion["command"],
+            "mew work 1 --session --resume --allow-read src/mew/work_session.py --allow-read tests/test_work_session.py --auto-recover-safe",
+        )
+        self.assertEqual(suggestion["source_action"], "resume_draft_from_cached_windows")
+        self.assertEqual(suggestion["source_index"], 1)
+
     def test_work_recovery_suggestion_uses_session_defaults_for_replan(self):
         plan = {
             "items": [
@@ -8416,6 +8453,256 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(session["active_work_todo"]["id"], "todo-1-1")
         self.assertEqual(first["active_work_todo"]["attempts"], {"draft": 1, "review": 0})
 
+    def test_build_work_session_resume_builds_timeout_before_draft_recovery_item_with_exact_frontier(self):
+        session = {
+            "id": 401,
+            "task_id": 401,
+            "status": "active",
+            "title": "Timeout before edit frontier",
+            "goal": "Recover write-ready timeout before drafting while preserving cached frontier.",
+            "updated_at": "2026-04-22T00:00:10Z",
+            "tool_calls": [
+                {
+                    "id": 10,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py"},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 4350,
+                        "line_end": 4400,
+                        "text": "source window",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 11,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_work_session.py"},
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 8400,
+                        "line_end": 8445,
+                        "text": "test window",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 101,
+                    "status": "failed",
+                    "summary": "write-ready draft timed out before tool batch was emitted",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Draft one paired edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                    "action_plan": {
+                        "summary": "write-ready draft timed out before edits",
+                        "kind": "patch_proposal",
+                        "act_mode": "tiny_write_ready_draft",
+                        "todo_id": "todo-401-1",
+                    },
+                    "action": {"type": "wait", "reason": "exact windows present, write-ready timed out"},
+                    "model_metrics": {
+                        "draft_attempts": 2,
+                        "write_ready_fast_path": True,
+                        "draft_phase": "write_ready",
+                        "cached_window_ref_count": 2,
+                        "think": {"timeout_seconds": 90},
+                    },
+                },
+                {
+                    "id": 101,
+                    "status": "failed",
+                    "summary": "write-ready draft timed out before tool batch was emitted",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Draft one paired edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                    "action_plan": {
+                        "summary": "write-ready draft timed out before edits",
+                        "kind": "patch_proposal",
+                        "act_mode": "tiny_write_ready_draft",
+                        "todo_id": "todo-401-1",
+                    },
+                    "action": {"type": "wait", "reason": "exact windows present, write-ready timed out"},
+                    "model_metrics": {
+                        "draft_attempts": 2,
+                        "write_ready_fast_path": True,
+                        "draft_phase": "write_ready",
+                        "cached_window_ref_count": 2,
+                        "think": {"timeout_seconds": 90},
+                    },
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-401-1",
+                "status": "blocked_on_patch",
+                "source": {
+                    "plan_item": "Draft one paired edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                    "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                    "verify_command": "uv run pytest tests/test_work_session.py -q",
+                },
+                "cached_window_refs": [
+                    {
+                        "path": "src/mew/work_session.py",
+                        "tool_call_id": 10,
+                        "line_start": 4350,
+                        "line_end": 4400,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:source-window",
+                    },
+                    {
+                        "path": "tests/test_work_session.py",
+                        "tool_call_id": 11,
+                        "line_start": 8400,
+                        "line_end": 8445,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:test-window",
+                    },
+                ],
+                "attempts": {"draft": 2, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {
+                    "code": "missing_exact_cached_window_texts",
+                    "detail": "write-ready timeout happened before drafting began",
+                    "recovery_action": "refresh_cached_window",
+                },
+                "created_at": "2026-04-22T00:00:00Z",
+                "updated_at": "2026-04-22T00:00:10Z",
+            },
+        }
+
+        resume = build_work_session_resume(session)
+        recovery_items = [
+            item
+            for item in (resume["recovery_plan"] or {}).get("items", [])
+            if item.get("action") == "resume_draft_from_cached_windows"
+        ]
+
+        self.assertEqual(len(recovery_items), 1)
+        item = recovery_items[0]
+        self.assertEqual(item["active_work_todo_id"], "todo-401-1")
+        self.assertEqual(
+            [
+                (window["path"], window["line_start"], window["line_end"])
+                for window in item["cached_window_refs"]
+            ],
+            [
+                (window["path"], window["line_start"], window["line_end"])
+                for window in session["active_work_todo"]["cached_window_refs"]
+            ],
+        )
+        self.assertIn("--allow-read src/mew/work_session.py", item["hint"])
+        self.assertIn("--allow-read tests/test_work_session.py", item["hint"])
+        self.assertIn("--auto-recover-safe", item["hint"])
+        self.assertEqual(
+            resume["recovery_plan"]["next_action"],
+            "resume the write-ready draft using the exact cached window frontier before retrying",
+        )
+
+    def test_build_work_session_resume_does_not_add_timeout_recovery_without_timeout_signal(self):
+        session = {
+            "id": 402,
+            "task_id": 402,
+            "status": "active",
+            "title": "Non-timeout failed write-ready turn keeps refresh blocker",
+            "goal": "Timeout recovery should only trigger on explicit timeout evidence.",
+            "updated_at": "2026-04-22T00:20:10Z",
+            "tool_calls": [
+                {
+                    "id": 12,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py"},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 4350,
+                        "line_end": 4400,
+                        "text": "source window",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 205,
+                    "status": "failed",
+                    "summary": "write-ready draft failed due to a validation mismatch",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": ["Draft one edit batch for src/mew/work_session.py"],
+                            "target_paths": ["src/mew/work_session.py"],
+                        }
+                    },
+                    "action_plan": {
+                        "summary": "write-ready draft rejected by validator",
+                        "kind": "patch_proposal",
+                        "act_mode": "tiny_write_ready_draft",
+                        "todo_id": "todo-402-1",
+                    },
+                    "action": {"type": "wait", "reason": "write-ready draft produced failed response"},
+                    "model_metrics": {
+                        "draft_attempts": 1,
+                        "write_ready_fast_path": True,
+                        "draft_phase": "write_ready",
+                        "cached_window_ref_count": 1,
+                        "think": {"timeout_seconds": 90},
+                    },
+                },
+            ],
+            "active_work_todo": {
+                "id": "todo-402-1",
+                "status": "blocked_on_patch",
+                "source": {
+                    "plan_item": "Draft one edit batch for src/mew/work_session.py",
+                    "target_paths": ["src/mew/work_session.py"],
+                    "verify_command": "uv run pytest tests/test_work_session.py -q",
+                },
+                "cached_window_refs": [
+                    {
+                        "path": "src/mew/work_session.py",
+                        "tool_call_id": 12,
+                        "line_start": 4350,
+                        "line_end": 4400,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:source-window",
+                    },
+                ],
+                "attempts": {"draft": 1, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {
+                    "code": "stale_cached_window_text",
+                    "detail": "write-ready failed without timeout signal",
+                    "recovery_action": "refresh_cached_window",
+                },
+                "created_at": "2026-04-22T00:20:00Z",
+                "updated_at": "2026-04-22T00:20:10Z",
+            },
+        }
+
+        resume = build_work_session_resume(session)
+        recovery_plan = resume.get("recovery_plan") or {}
+        recovery_items = recovery_plan.get("items") or []
+
+        self.assertEqual(
+            resume["active_work_todo"]["blocker"]["recovery_action"],
+            "refresh_cached_window",
+        )
+        self.assertFalse(any(item.get("action") == "resume_draft_from_cached_windows" for item in recovery_items))
+        self.assertTrue(any(item.get("action") == "needs_user_review" for item in recovery_items))
     def test_build_work_session_resume_clears_tiny_write_ready_draft_blocker_on_succeeded(self):
         session = {
             "id": 1,

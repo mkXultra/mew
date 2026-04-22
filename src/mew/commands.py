@@ -2191,11 +2191,16 @@ def _work_session_continue_command(task_id, session=None, max_steps=1, follow=Fa
     return shlex.join(parts)
 
 
-def work_recovery_suggestion_from_plan(recovery_plan, task_id=None, session=None):
+def work_recovery_suggestion_from_plan(recovery_plan, task_id=None, session=None, preferred_action=None):
     items = (recovery_plan or {}).get("items") or []
     if not items:
         return {}
-    item = select_work_recovery_plan_item(recovery_plan)
+    preferred_action = str(preferred_action or "").strip()
+    if preferred_action:
+        matching_items = [candidate for candidate in items if str(candidate.get("action") or "").strip() == preferred_action]
+        item = matching_items[-1] if matching_items else select_work_recovery_plan_item(recovery_plan)
+    else:
+        item = select_work_recovery_plan_item(recovery_plan)
     source_index = next((index for index, candidate in enumerate(items) if candidate is item), None)
     action = item.get("action") or "review"
     if action == "retry_tool":
@@ -2252,6 +2257,16 @@ def work_recovery_suggestion_from_plan(recovery_plan, task_id=None, session=None
             _work_session_continue_command(task_id, session=session, max_steps=1)
             if session
             else (item.get("hint") or _work_task_command(task_id, "--live", "--allow-read", "."))
+        )
+    elif action == "resume_draft_from_cached_windows":
+        kind = "resume_draft_from_cached_windows"
+        command = item.get("hint") or item.get("review_hint") or _work_task_command(
+            task_id,
+            "--session",
+            "--resume",
+            "--allow-read",
+            ".",
+            "--auto-recover-safe",
         )
     else:
         kind = action
@@ -6509,10 +6524,18 @@ def work_follow_status_suggested_recovery(status, snapshot_data=None, task_id=No
     snapshot_data = snapshot_data or {}
     task_id = snapshot_data.get("task_id") or task_id or (session or {}).get("task_id")
     resume = snapshot_data.get("resume") or {}
+    recovery_plan = resume.get("recovery_plan") or {}
+    recovery_items = recovery_plan.get("items") or []
+    preferred_recovery_action = str(
+        ((resume.get("active_work_todo") or {}).get("blocker") or {}).get("recovery_action") or ""
+    ).strip()
+    if any(item.get("action") == "resume_draft_from_cached_windows" for item in recovery_items):
+        preferred_recovery_action = "resume_draft_from_cached_windows"
     planned = work_recovery_suggestion_from_plan(
-        (resume.get("recovery_plan") or {}),
+        recovery_plan,
         task_id=task_id,
         session=session,
+        preferred_action=preferred_recovery_action,
     )
     if planned:
         return planned
@@ -6612,10 +6635,12 @@ def _work_follow_status_todo_has_blocker(todo):
 
 def _work_follow_status_next_recovery_action(active_work_todo, recovery_plan):
     blocker = (active_work_todo or {}).get("blocker") or {}
+    recovery_items = (recovery_plan or {}).get("items") or []
+    if any(item.get("action") == "resume_draft_from_cached_windows" for item in recovery_items):
+        return "resume_draft_from_cached_windows"
     recovery_action = str(blocker.get("recovery_action") or "").strip()
     if recovery_action:
         return recovery_action
-    recovery_items = (recovery_plan or {}).get("items") or []
     if recovery_items:
         action = str((recovery_items[0] or {}).get("action") or "").strip()
         if action:

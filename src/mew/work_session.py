@@ -50,6 +50,7 @@ WORK_TODO_STATUSES = {
 WORK_TODO_PHASE_STATUSES = {"drafting", "blocked_on_patch"}
 _TINY_WRITE_READY_DRAFT_BLOCKER_UNKNOWN_RECOVERY_ACTION = "refresh_cached_window"
 _TINY_WRITE_READY_DRAFT_BLOCKER_REASON_PREFIX = "write-ready tiny draft blocker:"
+_RESUME_DRAFT_FROM_CACHED_WINDOWS_ACTION = "resume_draft_from_cached_windows"
 
 
 def _tiny_write_ready_draft_recovery_action(blocker_code):
@@ -253,6 +254,7 @@ RECOVERY_PLAN_ACTION_PRIORITY = (
     "retry_tool",
     "retry_dry_run_write",
     "retry_verification",
+    "resume_draft_from_cached_windows",
     "replan",
 )
 WORK_RECOVERY_EFFECT_PRIORITY = (
@@ -4180,6 +4182,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
     items = []
     task_id = (session or {}).get("task_id")
     task_arg = f" {task_id}" if task_id is not None else ""
+    active_work_todo = _normalize_active_work_todo((session or {}).get("active_work_todo") or {})
     interrupted_tool_ids = {
         call.get("id")
         for call in calls
@@ -4398,7 +4401,26 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         items.append(item)
 
     for turn in turns:
-        if turn.get("status") != "interrupted" or turn.get("recovery_status"):
+        if (turn.get("status") not in {"interrupted", "failed"}) or turn.get("recovery_status"):
+            continue
+        if turn.get("status") in {"interrupted", "failed"}:
+            timeout_recovery_turn_plan_item = _timeout_before_draft_model_recovery_plan_item(
+                active_work_todo,
+                turn=turn,
+                task_id=task_id,
+                fallback_turn_id=session.get("last_model_turn_id"),
+            )
+            if timeout_recovery_turn_plan_item:
+                timeout_turn_id = timeout_recovery_turn_plan_item.get("model_turn_id")
+                already_has_timeout_recovery = any(
+                    item.get("action") == _RESUME_DRAFT_FROM_CACHED_WINDOWS_ACTION
+                    and item.get("model_turn_id") == timeout_turn_id
+                    for item in items
+                )
+                if not already_has_timeout_recovery:
+                    items.append(timeout_recovery_turn_plan_item)
+                continue
+        if turn.get("status") != "interrupted":
             continue
         if turn.get("tool_call_id") in interrupted_tool_ids:
             continue
@@ -4432,6 +4454,10 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         next_action = "verify the world, then retry interrupted dry-run write preview after checking write roots"
     elif any(item.get("action") == "retry_verification" for item in items):
         next_action = "verify the world, then rerun the interrupted verifier with the same explicit command"
+    elif any(item.get("action") == "resume_draft_from_cached_windows" for item in items):
+        next_action = (
+            "resume the write-ready draft using the exact cached window frontier before retrying"
+        )
     else:
         next_action = "verify world state and replan the interrupted model step"
     return {"next_action": next_action, "items": items}
@@ -4474,6 +4500,127 @@ def _tiny_write_ready_draft_recovery_plan_item(
         ],
     }
     return item
+
+
+def _normalize_active_work_todo_cached_window_roots(active_work_todo):
+    roots = []
+    seen = set()
+    for window in (active_work_todo or {}).get("cached_window_refs") or []:
+        if not isinstance(window, dict):
+            continue
+        path = str(window.get("path") or "").strip()
+        if not path or path in seen:
+            continue
+        roots.append(path)
+        seen.add(path)
+    if roots:
+        return roots
+    source = (active_work_todo or {}).get("source") or {}
+    for path in source.get("target_paths") or []:
+        candidate = str(path or "").strip()
+        if not candidate or candidate in seen:
+            continue
+        roots.append(candidate)
+        seen.add(candidate)
+    return roots
+
+
+def _contains_timeout_signal(*parts):
+    for part in parts:
+        candidate = str(part or "").strip().lower()
+        if "timeout" in candidate or "timed out" in candidate:
+            return True
+    return False
+
+
+def _is_write_ready_timeout_candidate_turn(turn):
+    if not isinstance(turn, dict):
+        return False
+    metrics = turn.get("model_metrics") or {}
+    if str(metrics.get("draft_phase") or "").strip() != "write_ready":
+        return False
+    if str(metrics.get("tiny_write_ready_draft_outcome") or "").strip():
+        return False
+    if not bool(metrics.get("write_ready_fast_path")):
+        return False
+    if _coerce_non_negative_int(metrics.get("cached_window_ref_count"), 0) <= 0:
+        return False
+    status = str(turn.get("status") or "").strip()
+    if status == "interrupted":
+        return True
+    if status != "failed":
+        return False
+    if _contains_timeout_signal(str(turn.get("summary") or ""), str(turn.get("error") or "")):
+        return True
+    think = metrics.get("think") or {}
+    if _contains_timeout_signal(str(think.get("termination_reason") or ""), str(think.get("timeout_reason") or "")):
+        return True
+    if _contains_timeout_signal(str((turn.get("action") or {}).get("type") or ""), str((turn.get("action") or {}).get("reason") or "")):
+        return True
+    error = turn.get("error")
+    if isinstance(error, dict):
+        if _contains_timeout_signal(
+            error.get("code"),
+            error.get("name"),
+            error.get("type"),
+            error.get("reason"),
+            error.get("message"),
+        ):
+            return True
+    if isinstance(think.get("timeout_seconds"), (int, float)):
+        if _contains_timeout_signal(str(think.get("timeout_reason") or "")):
+            return True
+        return False
+    failure_bits = f"{turn.get('summary') or ''} {turn.get('error') or ''}"
+    return _contains_timeout_signal(failure_bits)
+
+
+def _timeout_before_draft_model_recovery_plan_item(
+    active_work_todo,
+    *,
+    turn,
+    task_id=None,
+    fallback_turn_id=None,
+):
+    todo = _normalize_active_work_todo(active_work_todo)
+    if todo.get("status") != "blocked_on_patch":
+        return {}
+    if not todo.get("cached_window_refs"):
+        return {}
+    if not _is_write_ready_timeout_candidate_turn(turn):
+        return {}
+    task_arg = f" {task_id}" if task_id is not None else ""
+    read_roots = _normalize_active_work_todo_cached_window_roots(todo)
+    if not read_roots:
+        read_roots = ["."]
+    parts = [mew_executable(), "work", task_arg.strip(), "--session", "--resume"]
+    for root in read_roots:
+        parts.extend(["--allow-read", shlex.quote(root)])
+    parts.append("--auto-recover-safe")
+    command = " ".join(part for part in parts if part)
+    model_turn_id = (turn or {}).get("id") or fallback_turn_id
+    return {
+        "kind": "model_turn",
+        "model_turn_id": model_turn_id,
+        "action": _RESUME_DRAFT_FROM_CACHED_WINDOWS_ACTION,
+        "safety": "read_only",
+        "effect_classification": "unknown",
+        "active_work_todo_id": todo.get("id") or "",
+        "cached_window_refs": list(todo.get("cached_window_refs") or []),
+        "reason": (
+            "write-ready draft was interrupted/failed before emitting any edits; "
+            "resume with the exact cached window frontier before retrying"
+        ),
+        "source_summary": str((turn or {}).get("summary") or "write-ready draft timeout before edits"),
+        "source_error": str((turn or {}).get("error") or ""),
+        "hint": command,
+        "review_hint": command,
+        "review_steps": [
+            "open the resume with live world state",
+            "refresh the exact cached window frontier before retrying",
+            "resume the write-ready draft with the same exact windows",
+        ],
+    }
 
 
 def _append_unique_recovery_plan_item(recovery_plan, item):
