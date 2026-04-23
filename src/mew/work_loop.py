@@ -1836,6 +1836,74 @@ def _work_write_ready_fast_path_details(context):
     }
 
 
+def _work_write_ready_preflight_block(context, write_ready_fast_path):
+    fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
+    if fast_path.get("active"):
+        return {}
+    if str(fast_path.get("reason") or "") != "insufficient_cached_window_context":
+        return {}
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    observations = resume.get("plan_item_observations") or []
+    first = observations[0] if observations and isinstance(observations[0], dict) else {}
+    if not first.get("edit_ready"):
+        return {}
+    cached_windows = [
+        item
+        for item in (first.get("cached_windows") or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+    if len(cached_windows) < 2:
+        return {}
+    target_paths = []
+    has_source = False
+    has_tests = False
+    for item in cached_windows:
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        if not any(_work_paths_match(path, existing) for existing in target_paths):
+            target_paths.append(path)
+        has_source = has_source or _work_batch_path_is_mew_source(path)
+        has_tests = has_tests or _work_batch_path_is_tests(path)
+    if not (has_source and has_tests):
+        return {}
+    summary = (
+        "Write-ready preflight blocked: paired cached windows are not structurally complete enough "
+        "for a draft turn."
+    )
+    next_step = "Refresh the paired exact cached windows before drafting again."
+    decision_plan = {
+        "summary": summary,
+        "working_memory": {
+            "hypothesis": summary,
+            "next_step": next_step,
+            "plan_items": [
+                next_step,
+                "Retry the paired dry-run draft after the refreshed windows are exact and complete.",
+            ],
+            "target_paths": target_paths,
+            "last_verified_state": "Drafting was preflight-blocked before a model call.",
+        },
+    }
+    action = {
+        "type": "wait",
+        "reason": (
+            "write-ready preflight blocker: paired cached windows are not structurally complete; "
+            "refresh cached windows before drafting"
+        ),
+    }
+    return {
+        "decision_plan": decision_plan,
+        "action_plan": {
+            "summary": action["reason"],
+            "action": action,
+            "act_mode": "deterministic",
+        },
+        "action": action,
+    }
+
+
 def _shadow_compile_patch_draft_for_write_ready_turn(
     *,
     session,
@@ -3305,6 +3373,33 @@ def plan_work_model_turn(
         "write_ready_fast_path": bool(write_ready_fast_path.get("active")),
         "write_ready_fast_path_reason": write_ready_fast_path.get("reason") or "",
     }
+    preflight_block = _work_write_ready_preflight_block(context, write_ready_fast_path)
+    if preflight_block:
+        model_metrics["think"] = {
+            "prompt_chars": 0,
+            "timeout_seconds": 0.0,
+            "elapsed_seconds": 0.0,
+        }
+        model_metrics["act"] = {
+            "prompt_chars": 0,
+            "elapsed_seconds": 0.0,
+            "mode": "deterministic",
+        }
+        model_metrics["total_model_seconds"] = 0.0
+        if pre_model_metrics_sink:
+            pre_model_metrics_sink(dict(model_metrics))
+        if progress:
+            progress(
+                f"session #{session.get('id')}: preflight blocker {write_ready_fast_path.get('reason') or 'unknown'}"
+            )
+        return {
+            "decision_plan": preflight_block.get("decision_plan") or {},
+            "action_plan": preflight_block.get("action_plan") or {},
+            "action": preflight_block.get("action") or {"type": "wait", "reason": "preflight blocker"},
+            "context": context,
+            "model_metrics": model_metrics,
+            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+        }
     if write_ready_fast_path.get("active"):
         draft_windows = (
             write_ready_fast_path.get("recent_windows")
