@@ -588,6 +588,13 @@ def _append_patch_draft_expected_checks(checks, fixture_name, scenario, artifact
             observed=artifact.get("todo_id"),
             expected=expected.get("todo_id", scenario.get("todo", {}).get("id")),
         )
+        _scenario_check(
+            checks,
+            f"{prefix}_file_paths",
+            [item.get("path") for item in artifact.get("files") or []] == _extract_patch_draft_payload_paths(scenario),
+            observed=[item.get("path") for item in artifact.get("files") or []],
+            expected=_extract_patch_draft_payload_paths(scenario),
+        )
         if "file_count" in expected:
             _scenario_check(
                 checks,

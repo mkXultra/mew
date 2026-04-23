@@ -508,6 +508,10 @@ class DogfoodTests(unittest.TestCase):
                 {item["name"] for item in scenario["checks"]},
             )
             self.assertIn(
+                "m6_11_compiler_replay_paired_src_test_happy_file_paths",
+                {item["name"] for item in scenario["checks"]},
+            )
+            self.assertIn(
                 "m6_11_compiler_replay_paired_src_test_happy_file_0_window_sha256s",
                 {item["name"] for item in scenario["checks"]},
             )
