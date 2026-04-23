@@ -16,7 +16,49 @@ PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON = (
 )
 
 
-def _is_draft_related_failure(session, model_turn):
+def _is_calibration_measured_patch_draft_task(task):
+    task = task or {}
+    text = " ".join(
+        str(task.get(field) or "").strip().lower()
+        for field in ("title", "description", "notes")
+        if task.get(field) is not None
+    ).strip()
+    if not text:
+        return False
+    has_sample_marker = "sample" in text
+    has_current_head_marker = any(
+        marker in text
+        for marker in (
+            "current-head",
+            "current head",
+            "current_head",
+        )
+    )
+    has_patch_draft_marker = any(
+        marker in text
+        for marker in ("patchdraft", "patch draft", "patch_draft")
+    )
+    has_measurement_contract_marker = any(
+        marker in text
+        for marker in (
+            "replay bundle",
+            "get one live replay result",
+            "count the sample only if",
+            "calibration ledger row",
+            "counted replay bundle",
+            "exact non-counted conclusion",
+            "do not finish from a passing verifier alone",
+        )
+    )
+    return (
+        has_sample_marker
+        and has_current_head_marker
+        and has_patch_draft_marker
+        and has_measurement_contract_marker
+    )
+
+
+def _is_draft_related_failure(session, model_turn, task=None):
     if not session or not isinstance(model_turn, dict):
         return False
     model_metrics = model_turn.get("model_metrics") or {}
@@ -33,11 +75,12 @@ def _is_draft_related_failure(session, model_turn):
     has_target_paths = isinstance(target_paths, (list, tuple)) and any(
         isinstance(path, str) and path.strip() for path in target_paths
     )
-    return (
-        has_target_paths
-        and str(model_metrics.get("write_ready_fast_path_reason") or "").strip()
-        == "first_plan_item_not_edit_ready"
-    )
+    failure_reason = str(model_metrics.get("write_ready_fast_path_reason") or "").strip()
+    if failure_reason == "first_plan_item_not_edit_ready":
+        return has_target_paths
+    if failure_reason == "missing_plan_item_observations":
+        return has_target_paths and _is_calibration_measured_patch_draft_task(task)
+    return False
 
 
 def _task_id_for_report(session, task):
@@ -234,7 +277,7 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
     if not isinstance(session, dict) or not isinstance(model_turn, dict):
         return None
 
-    if not _is_draft_related_failure(session, model_turn):
+    if not _is_draft_related_failure(session, model_turn, task=task):
         return None
 
     session_id = session.get("id")
