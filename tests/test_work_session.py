@@ -6729,6 +6729,292 @@ class WorkSessionTests(unittest.TestCase):
             [6890, 19433],
         )
 
+    def test_write_ready_fast_path_recovers_active_work_todo_pair_when_plan_item_only_has_one_window(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            build_write_ready_tiny_draft_model_context,
+            build_write_ready_work_model_context,
+        )
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Draft one paired dry-run edit from the recovered frontier.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "repair active frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "line_start": 6960,
+                                    "line_end": 7010,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+        fast_context = build_write_ready_work_model_context(context)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_fallback")
+        self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+        self.assertEqual(
+            fast_context["write_ready_fast_path"]["activation_source"],
+            "active_work_todo_fallback",
+        )
+        self.assertEqual(
+            [item["tool_call_id"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            [11, 12],
+        )
+        self.assertEqual(
+            [item["line_start"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            [6890, 19433],
+        )
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_work_session.py"],
+        )
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            ["src/mew/commands.py", "tests/test_work_session.py"],
+        )
+
+    def test_write_ready_fast_path_does_not_activate_without_plan_item_observations(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Require current frontier evidence before drafting.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "repair active frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_plan_item_observations")
+
+    def test_write_ready_fast_path_does_not_replace_nonpaired_frontier_with_active_todo_pair(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Keep the current frontier authoritative.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "older paired frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "different frontier",
+                            "cached_windows": [
+                                {"path": "src/mew/commands.py", "line_start": 1, "line_end": 10},
+                                {"path": "src/mew/other.py", "line_start": 20, "line_end": 40},
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "src/mew/other.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_source_test_pair")
+
+    def test_write_ready_fast_path_does_not_bypass_not_edit_ready_plan_item(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Planner not-ready must still win.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "repair active frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": False,
+                            "plan_item": "frontier still needs inspection",
+                            "cached_windows": [
+                                {"path": "src/mew/commands.py", "line_start": 6960, "line_end": 7010},
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "first_plan_item_not_edit_ready")
+
     def test_write_ready_fast_path_reports_missing_exact_cached_window_texts_reason(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 
