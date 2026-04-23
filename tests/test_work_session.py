@@ -94,6 +94,46 @@ class WorkSessionTests(unittest.TestCase):
         with (self.PATCH_DRAFT_FIXTURE_DIR / name / "scenario.json").open(encoding="utf-8") as fp:
             return json.load(fp)
 
+    def _write_patch_draft_replay_metadata(
+        self,
+        path,
+        *,
+        session_id,
+        todo_id,
+        calibration_counted=True,
+    ):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload_files = {
+            "todo": "todo.json",
+            "proposal": "proposal.json",
+            "cached_windows": "cached_windows.json",
+            "live_files": "live_files.json",
+            "allowed_write_roots": "allowed_write_roots.json",
+            "validator_result": "validator_result.json",
+        }
+        for filename in payload_files.values():
+            (path.parent / filename).write_text("{}", encoding="utf-8")
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "bundle": "patch_draft_compiler",
+                    "session_id": str(session_id),
+                    "todo_id": str(todo_id),
+                    "attempt": 1,
+                    "calibration_counted": bool(calibration_counted),
+                    "calibration_exclusion_reason": (
+                        "" if calibration_counted else "test fixture non-counted measured replay"
+                    ),
+                    "files": payload_files,
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
     def _seed_write_ready_shadow_session(self, state, scenario):
         from mew.work_session import finish_work_model_turn, start_work_model_turn
 
@@ -9377,11 +9417,14 @@ class WorkSessionTests(unittest.TestCase):
             os.chdir(tmp)
             try:
                 replay_path = Path(".mew/replays/work-loop/measurement-replay.json")
-                replay_path.parent.mkdir(parents=True, exist_ok=True)
-                replay_path.write_text("{}", encoding="utf-8")
                 with state_lock():
                     state = load_state()
                     task, session = self._seed_write_ready_shadow_session(state, scenario)
+                self._write_patch_draft_replay_metadata(
+                    replay_path,
+                    session_id=session["id"],
+                    todo_id=f"todo-{session['id']}-1",
+                )
                 task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
                 task["description"] = (
                     "Collect one fresh current-head live work-loop replay bundle on the fenced patch_draft surface."
@@ -9415,6 +9458,276 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(planned["action"]["type"], "finish")
             finally:
                 os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_allows_calibration_measured_patch_draft_finish_with_prior_replay_artifact(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                replay_path = Path(".mew/replays/work-loop/session-1/todo-1/attempt-1/replay_metadata.json")
+                state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+                task = add_coding_task(state)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Goal: get one live replay result on this pair. Stop only after one replay bundle, "
+                    "one reviewer-visible paired dry-run patch, or one live exact blocker from the draft lane. "
+                    "Do not finish from a passing verifier alone."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+                task["scope"] = {"target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]}
+                session, _created = create_work_session(state, task)
+                self._write_patch_draft_replay_metadata(
+                    replay_path,
+                    session_id=session["id"],
+                    todo_id=f"todo-{session['id']}-1",
+                    calibration_counted=False,
+                )
+                session["model_turns"] = [
+                    {
+                        "id": 7,
+                        "status": "completed",
+                        "action": {"type": "edit_file", "path": "src/mew/patch_draft.py"},
+                        "model_metrics": {
+                            "patch_draft_compiler_replay_path": str(replay_path),
+                            "patch_draft_compiler_artifact_kind": "patch_draft",
+                            "write_ready_fast_path": True,
+                            "write_ready_fast_path_reason": "ready",
+                        },
+                    }
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "replay captured"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "finish")
+                self.assertEqual(planned["action"]["reason"], "replay captured")
+                latest_replay = planned["context"]["work_session"]["resume"]["latest_patch_draft_compiler_replay"]
+                self.assertEqual(latest_replay["model_turn_id"], 7)
+                self.assertEqual(latest_replay["path"], str(replay_path))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_blocks_calibration_measured_patch_draft_finish_with_stale_prior_replay_path(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                replay_path = Path(".mew/replays/work-loop/session-1/todo-1/attempt-1/replay_metadata.json")
+                state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+                task = add_coding_task(state)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Collect one fresh current-head live work-loop replay bundle on the fenced patch_draft surface. "
+                    "Do not finish from a passing verifier alone."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+                task["scope"] = {"target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]}
+                session, _created = create_work_session(state, task)
+                session["model_turns"] = [
+                    {
+                        "id": 7,
+                        "status": "completed",
+                        "action": {"type": "edit_file", "path": "src/mew/patch_draft.py"},
+                        "model_metrics": {
+                            "patch_draft_compiler_replay_path": str(replay_path),
+                            "patch_draft_compiler_artifact_kind": "patch_draft",
+                            "write_ready_fast_path": True,
+                        },
+                    }
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "stale replay"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("same-session replay artifact", planned["action"]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_blocks_calibration_measured_patch_draft_finish_after_later_write_without_replay(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                replay_path = Path(".mew/replays/work-loop/session-1/todo-1/attempt-1/replay_metadata.json")
+                state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+                task = add_coding_task(state)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Goal: get one live replay result on this pair. Stop only after one replay bundle, "
+                    "one reviewer-visible paired dry-run patch, or one live exact blocker from the draft lane. "
+                    "Do not finish from a passing verifier alone."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+                task["scope"] = {"target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]}
+                session, _created = create_work_session(state, task)
+                self._write_patch_draft_replay_metadata(
+                    replay_path,
+                    session_id=session["id"],
+                    todo_id=f"todo-{session['id']}-1",
+                )
+                session["model_turns"] = [
+                    {
+                        "id": 7,
+                        "status": "completed",
+                        "action": {"type": "edit_file", "path": "src/mew/patch_draft.py"},
+                        "model_metrics": {
+                            "patch_draft_compiler_replay_path": str(replay_path),
+                            "patch_draft_compiler_artifact_kind": "patch_draft",
+                            "write_ready_fast_path": True,
+                        },
+                    },
+                    {
+                        "id": 8,
+                        "status": "completed",
+                        "action": {"type": "edit_file", "path": "src/mew/patch_draft.py"},
+                        "model_metrics": {"write_ready_fast_path": False},
+                    },
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "later write"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("same-session replay artifact", planned["action"]["reason"])
+                self.assertEqual(planned["context"]["work_session"]["resume"]["latest_patch_draft_compiler_replay"], {})
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_blocks_calibration_measured_patch_draft_finish_with_wrong_prior_replay_todo(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                replay_path = Path(".mew/replays/work-loop/session-1/todo-other/attempt-1/replay_metadata.json")
+                state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+                task = add_coding_task(state)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Collect one fresh current-head live work-loop replay bundle on the fenced patch_draft surface. "
+                    "Do not finish from a passing verifier alone."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+                task["scope"] = {"target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]}
+                session, _created = create_work_session(state, task)
+                self._write_patch_draft_replay_metadata(
+                    replay_path,
+                    session_id=session["id"],
+                    todo_id="todo-other",
+                )
+                session["model_turns"] = [
+                    {
+                        "id": 7,
+                        "status": "completed",
+                        "action": {"type": "edit_file", "path": "src/mew/patch_draft.py"},
+                        "model_metrics": {
+                            "patch_draft_compiler_replay_path": str(replay_path),
+                            "patch_draft_compiler_artifact_kind": "patch_draft",
+                            "write_ready_fast_path": True,
+                        },
+                    }
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "wrong todo"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("same-session replay artifact", planned["action"]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_resume_ignores_patch_draft_replay_from_failed_model_turn(self):
+        replay_path = ".mew/replays/work-loop/session-1/todo-1/attempt-1/replay_metadata.json"
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "tool_calls": [],
+            "model_turns": [
+                {
+                    "id": 7,
+                    "status": "failed",
+                    "model_metrics": {
+                        "patch_draft_compiler_replay_path": replay_path,
+                        "patch_draft_compiler_artifact_kind": "patch_draft",
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session, task={"id": 1, "title": "task"})
+
+        self.assertEqual(resume["latest_patch_draft_compiler_replay"], {})
 
     def test_plan_work_model_turn_allows_calibration_measured_patch_draft_finish_after_verifier_closeout(self):
         from mew.work_loop import plan_work_model_turn

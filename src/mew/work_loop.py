@@ -1630,10 +1630,63 @@ def _is_calibration_measured_patch_draft_task(task):
 
 
 def _calibration_measured_patch_draft_finish_allowed(context, model_metrics):
+    def valid_replay_path(candidate):
+        replay_path = str(candidate or "").strip()
+        if not replay_path:
+            return False
+        path = Path(replay_path)
+        if not path.is_file():
+            return False
+        try:
+            metadata = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return False
+        if not isinstance(metadata, dict):
+            return False
+        if metadata.get("schema_version") != 1:
+            return False
+        if metadata.get("bundle") != "patch_draft_compiler":
+            return False
+        files = metadata.get("files") if isinstance(metadata.get("files"), dict) else {}
+        for key in (
+            "todo",
+            "proposal",
+            "cached_windows",
+            "live_files",
+            "allowed_write_roots",
+            "validator_result",
+        ):
+            relative_path = str(files.get(key) or "").strip()
+            if not relative_path or Path(relative_path).is_absolute():
+                return False
+            payload_path = path.parent / relative_path
+            if not payload_path.is_file():
+                return False
+        work_session = (context or {}).get("work_session") or {}
+        resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+        session_id = str(work_session.get("id") or resume.get("session_id") or "").strip()
+        if session_id and str(metadata.get("session_id") or "").strip() != session_id:
+            return False
+        active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+        todo_id = str(active_work_todo.get("id") or "").strip()
+        if todo_id and str(metadata.get("todo_id") or "").strip() != todo_id:
+            return False
+        return True
+
     if _write_ready_fast_path_verifier_closeout_passed(context):
         return True
     replay_path = str((model_metrics or {}).get("patch_draft_compiler_replay_path") or "").strip()
-    return bool(replay_path)
+    if valid_replay_path(replay_path):
+        return True
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    latest_replay = (
+        resume.get("latest_patch_draft_compiler_replay")
+        if isinstance(resume.get("latest_patch_draft_compiler_replay"), dict)
+        else {}
+    )
+    replay_path = str(latest_replay.get("path") or "").strip()
+    return valid_replay_path(replay_path)
 
 
 def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action, model_metrics):
@@ -1647,7 +1700,7 @@ def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action,
         "type": "wait",
         "reason": (
             "finish is blocked: calibration-measured patch_draft tasks require "
-            "a passed focused verifier closeout or current-turn replay artifact before no-change"
+            "a passed focused verifier closeout or same-session replay artifact before no-change"
         ),
     }
 

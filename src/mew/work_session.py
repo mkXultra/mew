@@ -5215,6 +5215,42 @@ def _latest_verifier_closeout_summary(calls, turns):
     }
 
 
+def _work_model_turn_action_has_write(action):
+    action = action if isinstance(action, dict) else {}
+    action_type = str(action.get("type") or action.get("tool") or "").strip()
+    if action_type in WRITE_WORK_TOOLS:
+        return True
+    if action_type != "batch":
+        return False
+    for sub_action in action.get("tools") or []:
+        if not isinstance(sub_action, dict):
+            continue
+        sub_action_type = str(sub_action.get("type") or sub_action.get("tool") or "").strip()
+        if sub_action_type in WRITE_WORK_TOOLS:
+            return True
+    return False
+
+
+def _latest_patch_draft_compiler_replay_summary(turns):
+    for turn in reversed(list(turns or [])):
+        if str(turn.get("status") or "").strip() != "completed":
+            continue
+        metrics = turn.get("model_metrics") if isinstance(turn.get("model_metrics"), dict) else {}
+        replay_path = str(metrics.get("patch_draft_compiler_replay_path") or "").strip()
+        if not replay_path:
+            if _work_model_turn_action_has_write(turn.get("action")):
+                return {}
+            continue
+        return {
+            "model_turn_id": turn.get("id"),
+            "path": replay_path,
+            "artifact_kind": str(metrics.get("patch_draft_compiler_artifact_kind") or "").strip(),
+            "write_ready_fast_path": metrics.get("write_ready_fast_path"),
+            "write_ready_fast_path_reason": str(metrics.get("write_ready_fast_path_reason") or "").strip(),
+        }
+    return {}
+
+
 def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):
     if not session:
         return None
@@ -5462,6 +5498,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         )
     compressed_prior_think = build_compressed_prior_think(turns_for_prompt, recent_limit=limit, limit=4)
     latest_verifier_closeout = _latest_verifier_closeout_summary(calls, turns)
+    latest_patch_draft_compiler_replay = _latest_patch_draft_compiler_replay_summary(turns)
 
     latest_call = calls[-1] if calls else None
     latest_failed = bool(
@@ -5787,6 +5824,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
         "latest_verifier_closeout": latest_verifier_closeout,
+        "latest_patch_draft_compiler_replay": latest_patch_draft_compiler_replay,
         "compressed_prior_think": compressed_prior_think,
         "working_memory": working_memory,
         "user_preferences": user_preferences,
