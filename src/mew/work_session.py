@@ -20,7 +20,13 @@ from .state import next_id
 from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
 from .timeutil import now_iso, parse_time
-from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
+from .toolbox import (
+    format_command_record,
+    is_resident_mew_loop_command,
+    run_command_record,
+    run_command_record_streaming,
+    run_git_tool,
+)
 from .typed_memory import FileMemoryBackend, entry_to_dict
 from .patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
 from .write_tools import (
@@ -1786,6 +1792,15 @@ def reject_shell_control_tokens(command, *, tool_name="run_tests"):
     )
 
 
+def reject_resident_mew_loop_command(command, *, tool_name="run_command"):
+    if not is_resident_mew_loop_command(command):
+        return
+    raise ValueError(
+        f"{tool_name} must not invoke resident mew loops such as mew do, mew chat, mew run, or mew work; "
+        "use native work tools, finish, remember, or ask_user instead"
+    )
+
+
 def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
@@ -1855,6 +1870,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
     command = parameters.get("command") or ""
     if not command:
         raise ValueError("run_command command is empty")
+    reject_resident_mew_loop_command(command, tool_name="run_command")
     return run_command_for_work(
         command,
         cwd=parameters.get("cwd") or ".",
@@ -4337,6 +4353,7 @@ def build_work_recovery_plan(session, calls, turns, limit=8):
         )
         command_review_needed = (
             call.get("tool") == "run_command"
+            and effect_classification == "action_committed"
             and not call.get("recovery_status")
             and (call.get("status") == "failed" or bool(work_tool_failure_record(call)))
         )
@@ -4777,6 +4794,8 @@ def work_recovery_effect_classification(call):
     if tool == "run_tests":
         return "verify_pending"
     if tool == "run_command":
+        if call.get("status") == "failed" and not result and call.get("error"):
+            return "no_action"
         return "action_committed"
     if tool in WRITE_WORK_TOOLS:
         verification = result.get("verification") or {}

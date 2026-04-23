@@ -34,6 +34,132 @@ def split_command_env(command):
     return parts, env_overrides
 
 
+def _resident_loop_python_module_args(parts):
+    index = 1
+    while index < len(parts):
+        token = parts[index]
+        if token == "-m" and index + 1 < len(parts):
+            if parts[index + 1] == "mew":
+                return parts[index + 2 :]
+            return []
+        if token in {"-c", "-"}:
+            return []
+        if not token.startswith("-"):
+            return []
+        if token in {"-W", "-X"} and index + 1 < len(parts):
+            index += 2
+            continue
+        index += 1
+    return []
+
+
+def _resident_loop_unwrap_command(parts):
+    parts = list(parts or [])
+    while parts:
+        executable = Path(parts[0]).name
+        if executable == "env":
+            index = 1
+            split_string_parts = None
+            while index < len(parts):
+                token = parts[index]
+                if token == "--":
+                    index += 1
+                    break
+                if token in {"-i", "--ignore-environment", "-0", "--null"}:
+                    index += 1
+                    continue
+                if token in {"-u", "--unset", "-C", "--chdir"}:
+                    index += 2
+                    continue
+                if token.startswith("-u") and token != "-u":
+                    index += 1
+                    continue
+                if token.startswith("-C") and token != "-C":
+                    index += 1
+                    continue
+                if token.startswith("--unset=") or token.startswith("--chdir="):
+                    index += 1
+                    continue
+                if token in {"-S", "--split-string"} and index + 1 < len(parts):
+                    try:
+                        split_string_parts = shlex.split(parts[index + 1] or "")
+                    except ValueError:
+                        return []
+                    index += 2
+                    break
+                if token.startswith("-S") and token != "-S":
+                    try:
+                        split_string_parts = shlex.split(token[2:] or "")
+                    except ValueError:
+                        return []
+                    index += 1
+                    break
+                if token.startswith("--split-string="):
+                    try:
+                        split_string_parts = shlex.split(token.split("=", 1)[1] or "")
+                    except ValueError:
+                        return []
+                    index += 1
+                    break
+                if "=" in token and not token.startswith("-"):
+                    index += 1
+                    continue
+                break
+            if split_string_parts is not None:
+                parts = split_string_parts + parts[index:]
+                continue
+            parts = parts[index:]
+            continue
+        if executable == "uv" and len(parts) >= 2 and parts[1] == "run":
+            index = 2
+            while index < len(parts) and parts[index].startswith("-"):
+                token = parts[index]
+                index += 1
+                if token in {
+                    "--with",
+                    "--python",
+                    "--project",
+                    "--directory",
+                    "--env-file",
+                    "--index",
+                    "--default-index",
+                    "--extra-index-url",
+                    "--find-links",
+                } and index < len(parts):
+                    index += 1
+            parts = parts[index:]
+            continue
+        break
+    return parts
+
+
+def is_resident_mew_loop_command(command):
+    try:
+        parts, _ = split_command_env(command or "")
+    except ValueError:
+        return False
+    parts = _resident_loop_unwrap_command(parts)
+    if not parts:
+        return False
+    executable = Path(parts[0]).name
+    if executable == "mew":
+        trailing = parts[1:]
+    elif executable.startswith("python"):
+        trailing = _resident_loop_python_module_args(parts)
+    else:
+        return False
+    if not trailing:
+        return False
+    subcommand = trailing[0]
+    if subcommand in {"attach", "chat", "do", "run", "session"}:
+        return True
+    if subcommand == "work":
+        trailing = trailing[1:]
+        if "--ai" in trailing or "--live" in trailing:
+            return True
+    return False
+
+
 def _terminate_process_group(process):
     try:
         os.killpg(process.pid, signal.SIGTERM)

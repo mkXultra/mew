@@ -1211,6 +1211,17 @@ class WorkSessionTests(unittest.TestCase):
             ),
             "rollback_needed",
         )
+        self.assertEqual(
+            work_recovery_effect_classification(
+                {
+                    "tool": "run_command",
+                    "status": "failed",
+                    "parameters": {"command": "./mew work 1 --live"},
+                    "error": "run_command must not invoke resident mew loops",
+                }
+            ),
+            "no_action",
+        )
 
     def test_live_work_progress_flushes_stdout_before_stderr(self):
         from mew.commands import work_ai_progress
@@ -5366,6 +5377,73 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("phase: failed", resume)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_session_rejects_run_command_resident_mew_loop(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                "./mew work 1 --live",
+                                "--allow-shell",
+                            ]
+                        ),
+                        1,
+                    )
+
+                self.assertIn("must not invoke resident mew loops", stdout.getvalue())
+                calls = load_state()["work_sessions"][0].get("tool_calls") or []
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0]["tool"], "run_command")
+                self.assertEqual(calls[0]["status"], "failed")
+                self.assertIsNone(calls[0]["result"])
+                self.assertIn("must not invoke resident mew loops", calls[0]["error"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_reject_resident_mew_loop_command_recognizes_wrappers(self):
+        from mew.work_session import reject_resident_mew_loop_command
+
+        for command in (
+            "./mew work 1 --live",
+            "PYTHONPATH=. ./mew work 1 --live",
+            "/usr/bin/env mew work 1 --live",
+            "env -- ./mew work 1 --live",
+            "env -i ./mew work 1 --live",
+            "env -S './mew work 1 --live'",
+            "FOO=1 /usr/bin/env mew work 1 --live",
+            "/usr/bin/env --split-string='python -m mew run'",
+            "uv run mew work 1 --live",
+            "FOO=1 uv run mew work 1 --live",
+            "uv run --with foo mew work 1 --live",
+            "uv run -- mew work 1 --live",
+            "python -m mew run",
+            "python3 -I -m mew work 1 --live",
+            "A=1 python -m mew run",
+        ):
+            with self.assertRaisesRegex(ValueError, "resident mew loops"):
+                reject_resident_mew_loop_command(command)
+
+        reject_resident_mew_loop_command("uv run pytest -q")
+        reject_resident_mew_loop_command("/usr/bin/env python -V")
+        reject_resident_mew_loop_command("env -- echo mew work 1 --live")
+        reject_resident_mew_loop_command("echo mew work 1 --live")
+        reject_resident_mew_loop_command("python helper.py mew work 1 --live")
 
     def test_work_session_git_tools_are_read_only_and_gated(self):
         if not shutil.which("git"):
@@ -15527,6 +15605,32 @@ class WorkSessionTests(unittest.TestCase):
         controls = format_work_cockpit_controls(state={"work_sessions": [session], "tasks": []}, session=session)
         self.assertIn("Recovery\n- ./mew work 1 --session --resume --allow-read .", controls)
 
+    def test_work_recovery_plan_skips_preexec_run_command_guard_failure(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Avoid recursive mew loop invocation.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "failed",
+                    "parameters": {"command": "./mew work 1 --live", "cwd": "."},
+                    "error": "run_command must not invoke resident mew loops",
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["recovery_plan"].get("items", []), [])
+
     def test_work_recovery_plan_surfaces_failed_write_rollback_review(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -20767,6 +20871,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer a module-level command unless you have confirmed the exact class and method name", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
+        self.assertIn("Do not use run_command to invoke resident mew loops", prompt)
+        self.assertIn("printed Next CLI controls", prompt)
         self.assertIn("same_surface_audit.status indicates a sibling-surface audit is still needed", prompt)
         self.assertIn("do one narrow audit step or record why the sibling surface is already covered or out of scope before finish", prompt)
         self.assertIn("do not finish merely because the next edit is clear", prompt)
@@ -21117,6 +21223,10 @@ class WorkSessionTests(unittest.TestCase):
             "./mew chat",
             "python -m mew run",
             "uv run mew work 1 --live",
+            "PYTHONPATH=. ./mew work 1 --live",
+            "env -i ./mew work 1 --live",
+            "FOO=1 uv run mew work 1 --live",
+            "python3 -I -m mew work 1 --live",
         ):
             action = normalize_work_model_action(
                 {"summary": "verify", "action": {"type": "run_tests", "command": command}}

@@ -1,9 +1,7 @@
 import json
 import multiprocessing
 import hashlib
-import os
 from pathlib import Path
-import shlex
 import time
 from io import StringIO
 import tokenize
@@ -16,6 +14,7 @@ from .reasoning_policy import codex_reasoning_effort_scope, select_work_reasonin
 from .tasks import clip_output
 from .test_discovery import normalize_work_path
 from .timeutil import now_iso
+from .toolbox import is_resident_mew_loop_command
 from .work_replay import write_patch_draft_compiler_replay
 from .work_session import (
     APPROVAL_STATUS_INDETERMINATE,
@@ -2612,32 +2611,8 @@ def _work_action_schema_text():
     )
 
 
-def _mew_subcommand_positions(parts):
-    positions = []
-    for index, token in enumerate(parts[:-1]):
-        executable = os.path.basename(token)
-        if executable == "mew":
-            positions.append((index, index + 1))
-        if token == "-m" and index + 1 < len(parts) and parts[index + 1] == "mew":
-            positions.append((index, index + 2))
-    return positions
-
-
 def is_resident_loop_command(command):
-    try:
-        parts = shlex.split(command or "")
-    except ValueError:
-        return False
-    resident_subcommands = {"attach", "chat", "do", "run", "session"}
-    for _, subcommand_index in _mew_subcommand_positions(parts):
-        subcommand = parts[subcommand_index] if subcommand_index < len(parts) else ""
-        if subcommand in resident_subcommands:
-            return True
-        if subcommand == "work":
-            trailing = parts[subcommand_index + 1 :]
-            if "--ai" in trailing or "--live" in trailing:
-                return True
-    return False
+    return is_resident_mew_loop_command(command)
 
 
 def build_work_think_prompt(context):
@@ -2677,6 +2652,7 @@ def build_work_think_prompt(context):
         "For unittest verification, prefer a module-level command unless you have confirmed the exact class and method name in the current file or just created that method in the applied write. "
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
         "Use run_command only when shell is explicitly allowed. run_command is parsed with shlex and executed without a shell, so do not use pipes, redirection, &&, ||, or ; unless you wrap the behavior in an interpreter such as python -c. "
+        "Do not use run_command to invoke resident mew loops or the printed Next CLI controls such as mew work, mew do, mew chat, or mew run; those controls are for a human operator outside the active session. "
         "Use finish when the task is done or when an investigation/recommendation task has a concrete conclusion. "
         "If work_session.resume.same_surface_audit.status indicates a sibling-surface audit is still needed after src/mew edits, do one narrow audit step or record why the sibling surface is already covered or out of scope before finish. "
         "For implementation tasks with allowed write roots, do not finish merely because the next edit is clear; if exact old/new text or file content is available, propose the dry-run edit_file/write_file action instead. "
