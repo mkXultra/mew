@@ -62,13 +62,14 @@ def _is_draft_related_failure(session, model_turn, task=None):
     if not session or not isinstance(model_turn, dict):
         return False
     model_metrics = model_turn.get("model_metrics") or {}
+    measured_patch_draft_task = _is_calibration_measured_patch_draft_task(task)
     if bool(model_metrics.get("write_ready_fast_path")):
         return True
     active_work_todo = session.get("active_work_todo") or {}
     todo_status = str(active_work_todo.get("status") or "").strip()
     if todo_status in WORK_TODO_PHASE_STATUSES:
         return True
-    if todo_status != "queued":
+    if todo_status not in {"", "queued"}:
         return False
     source = active_work_todo.get("source") or {}
     target_paths = source.get("target_paths") or []
@@ -79,12 +80,18 @@ def _is_draft_related_failure(session, model_turn, task=None):
     if failure_reason == "first_plan_item_not_edit_ready":
         return has_target_paths
     if failure_reason == "missing_plan_item_observations":
-        return has_target_paths and _is_calibration_measured_patch_draft_task(task)
+        return has_target_paths and measured_patch_draft_task
     if failure_reason in {
         "insufficient_cached_window_context",
         "missing_exact_cached_window_texts",
     }:
-        return has_target_paths and _is_calibration_measured_patch_draft_task(task)
+        if has_target_paths and measured_patch_draft_task:
+            return True
+        try:
+            recent_read_window_count = int(model_metrics.get("recent_read_window_count") or 0)
+        except (TypeError, ValueError):
+            recent_read_window_count = 0
+        return measured_patch_draft_task and recent_read_window_count > 0
     return False
 
 

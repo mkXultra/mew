@@ -664,6 +664,84 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_write_work_model_failure_replay_writes_for_measured_context_gap_without_active_todo(self):
+        task = {
+            "id": "task-21",
+            "title": "current-head patch_draft sample",
+            "description": "Get one live replay result; do not finish from a passing verifier alone.",
+        }
+
+        for reason in ("insufficient_cached_window_context", "missing_exact_cached_window_texts"):
+            with self.subTest(reason=reason):
+                session = {"id": 21, "active_work_todo": {}}
+                model_turn = {
+                    "id": 99,
+                    "summary": "model planning timed out after scoped reads",
+                    "model_metrics": {
+                        "write_ready_fast_path": False,
+                        "write_ready_fast_path_reason": reason,
+                        "recent_read_window_count": 2,
+                    },
+                }
+
+                with tempfile.TemporaryDirectory() as tmp:
+                    old_cwd = os.getcwd()
+                    os.chdir(tmp)
+                    try:
+                        with patch("mew.work_replay.now_date_iso", return_value="2026-04-23"):
+                            with patch("mew.work_replay.now_iso", return_value="2026-04-23T10:00:00Z"):
+                                report_path = write_work_model_failure_replay(
+                                    session=session,
+                                    model_turn=model_turn,
+                                    exc=RuntimeError("request timed out"),
+                                    task=task,
+                                )
+
+                        self.assertTrue(report_path)
+                        report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                        self.assertEqual(report["bundle"], "work-loop-model-failure")
+                        self.assertEqual(report["session_id"], 21)
+                        self.assertEqual(report["model_turn_id"], 99)
+                        self.assertEqual(
+                            report["model_metrics"]["write_ready_fast_path_reason"],
+                            reason,
+                        )
+                        self.assertEqual(report["resume_context"]["phase"], "idle")
+                    finally:
+                        os.chdir(old_cwd)
+
+    def test_write_work_model_failure_replay_skips_non_measured_context_gap_without_active_todo(self):
+        session = {"id": 22, "active_work_todo": {}}
+        model_turn = {
+            "id": 100,
+            "summary": "ordinary model planning timeout after reads",
+            "model_metrics": {
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "missing_exact_cached_window_texts",
+                "recent_read_window_count": 2,
+            },
+        }
+        task = {
+            "id": "task-22",
+            "title": "Regular coding task",
+            "description": "Make the requested change without calibration accounting.",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                report_path = write_work_model_failure_replay(
+                    session=session,
+                    model_turn=model_turn,
+                    exc=RuntimeError("request timed out"),
+                    task=task,
+                )
+                self.assertIsNone(report_path)
+                self.assertFalse((Path(tmp) / REPLAYS_ROOT).exists())
+            finally:
+                os.chdir(old_cwd)
+
     def test_write_patch_draft_compiler_replay_persists_cohort_fields(self):
         session_id = "s-11"
         todo_id = "todo-11-1"
