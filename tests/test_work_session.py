@@ -6946,6 +6946,88 @@ class WorkSessionTests(unittest.TestCase):
             ["src/mew/commands.py", "tests/test_work_session.py"],
         )
 
+    def test_write_ready_preflight_block_recovers_active_work_todo_pair_when_first_item_has_one_window(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/work_loop.py", "tests/test_work_session.py"]
+        context = {
+            "task": {
+                "id": 486,
+                "title": "Recover write-ready preflight active todo pair",
+                "description": "Block before drafting when recovered windows are structurally incomplete.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 473,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-486",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one paired source/test dry-run edit batch",
+                            "target_paths": target_paths,
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/work_loop.py",
+                                    "line_start": 2226,
+                                    "line_end": 2244,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/work_loop.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/work_loop.py",
+                        "line_start": 2226,
+                        "line_end": 2244,
+                        "text": "def _work_write_ready_preflight_block(context, write_ready_fast_path):\n    if ready:\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 6851,
+                        "line_end": 6908,
+                        "text": "def test_write_ready_preflight_block(self):\n    self.assertEqual(\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(fast_path["activation_source"], "active_work_todo_fallback")
+        self.assertEqual(preflight_block["action"]["type"], "wait")
+        self.assertEqual(
+            preflight_block["decision_plan"]["working_memory"]["target_paths"],
+            target_paths,
+        )
+
     def test_write_ready_fast_path_does_not_activate_without_plan_item_observations(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 

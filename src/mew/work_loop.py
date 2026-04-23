@@ -2241,6 +2241,8 @@ def _work_write_ready_preflight_block(context, write_ready_fast_path):
         if isinstance(item, dict) and item.get("path")
     ]
     if len(cached_windows) < 2:
+        cached_windows = _write_ready_recent_windows_from_active_work_todo(work_session, resume)
+    if len(cached_windows) < 2:
         return {}
     target_paths = []
     has_source = False
