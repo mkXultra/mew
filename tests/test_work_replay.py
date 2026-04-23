@@ -6,6 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mew.patch_draft import compile_patch_draft
+from mew.proof_summary import summarize_m6_11_replay_calibration
+from mew.work_loop import (
+    _compile_write_ready_patch_draft_proposal,
+    _work_write_ready_fast_path_details,
+    _work_write_ready_fast_path_state,
+    _write_ready_tiny_draft_observation_target_paths,
+)
 from mew.work_replay import (
     REPLAYS_ROOT,
     mark_patch_draft_compiler_replay_non_counted,
@@ -23,6 +30,96 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
             encoding="utf-8",
         ) as fp:
             return json.load(fp)
+
+    @staticmethod
+    def _build_write_ready_replay_context(
+        scenario,
+        *,
+        session_id=438,
+        observation_paths=None,
+    ):
+        target_paths = list((scenario.get("todo") or {}).get("source", {}).get("target_paths") or [])
+        observation_target_paths = (
+            list(observation_paths) if observation_paths is not None else list(target_paths)
+        )
+        cached_windows = scenario.get("cached_windows") or {}
+        observation_windows = []
+        recent_read_file_windows = []
+        for index, path in enumerate(target_paths, start=11):
+            window = dict(cached_windows.get(path) or {})
+            recent_read_file_windows.append(
+                {
+                    "tool_call_id": index,
+                    "path": path,
+                    "line_start": window.get("line_start"),
+                    "line_end": window.get("line_end"),
+                    "text": window.get("text") or "",
+                    "context_truncated": bool(window.get("context_truncated")),
+                    "window_sha256": window.get("window_sha256"),
+                    "file_sha256": window.get("file_sha256"),
+                }
+            )
+            if path not in observation_target_paths:
+                continue
+            observation_windows.append(
+                {
+                    "path": path,
+                    "line_start": window.get("line_start"),
+                    "line_end": window.get("line_end"),
+                }
+            )
+
+        plan_item = "Draft one paired dry-run edit batch for " + " and ".join(target_paths)
+        return {
+            "task": {
+                "id": session_id,
+                "title": "Write-ready replay harness",
+                "description": "Deterministically exercise the write-ready fast-path replay seam.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": session_id,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": (scenario.get("todo") or {}).get("id") or f"todo-{session_id}",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": plan_item,
+                            "target_paths": target_paths,
+                            "verify_command": "uv run python -m unittest tests.test_patch_draft",
+                        },
+                        "attempts": {"draft": 0, "review": 0},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "plan_item": plan_item,
+                            "target_path": observation_target_paths[0] if observation_target_paths else "",
+                            "edit_ready": True,
+                            "cached_windows": observation_windows,
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": path} for path in target_paths
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "recent_read_file_windows": recent_read_file_windows,
+            },
+            "capabilities": {
+                "allowed_write_roots": list(scenario.get("allowed_write_roots") or ["."]),
+            },
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+    @staticmethod
+    def _materialize_live_files(scenario):
+        for path, payload in (scenario.get("live_files") or {}).items():
+            file_path = Path(path)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text((payload or {}).get("text") or "", encoding="utf-8")
 
     def test_patch_draft_compiler_replay_path_shape_and_attempt_increment(self):
         session_id = 3
@@ -517,6 +614,92 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(payload["validator_result"], scenario["expected"])
             finally:
                 os.chdir(old_cwd)
+
+    def test_write_ready_fast_path_emits_counted_bundle_from_synthesized_resume(self):
+        scenario = self._load_fixture_scenario("paired_src_test_happy")
+        target_paths = list((scenario.get("todo") or {}).get("source", {}).get("target_paths") or [])
+        context = self._build_write_ready_replay_context(scenario, session_id=438)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                self._materialize_live_files(scenario)
+
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-23"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-23T10:00:00Z"):
+                        with patch("mew.work_replay._current_git_head", return_value="HEAD-438"):
+                            with patch("mew.proof_summary._current_git_head", return_value="HEAD-438"):
+                                fast_path = _work_write_ready_fast_path_state(context)
+                                details = _work_write_ready_fast_path_details(context)
+                                replay = _compile_write_ready_patch_draft_proposal(
+                                    session={
+                                        "id": context["work_session"]["id"],
+                                        "active_work_todo": context["work_session"]["resume"]["active_work_todo"],
+                                    },
+                                    context=context,
+                                    proposal=scenario["model_output"],
+                                    write_ready_fast_path=details,
+                                    allowed_write_roots=scenario["allowed_write_roots"],
+                                )
+                                calibration = summarize_m6_11_replay_calibration(
+                                    Path(tmp) / REPLAYS_ROOT
+                                )["calibration"]
+
+                self.assertTrue(fast_path["active"])
+                self.assertEqual(fast_path["reason"], "paired_cached_windows_edit_ready")
+                self.assertEqual(fast_path["activation_source"], "plan_item_observations")
+                self.assertTrue(details["active"])
+                self.assertEqual(
+                    [item["path"] for item in details["recent_windows"]],
+                    target_paths,
+                )
+                self.assertEqual(
+                    _write_ready_tiny_draft_observation_target_paths(
+                        context["work_session"]["resume"]
+                    ),
+                    target_paths,
+                )
+
+                observation = replay["observation"]
+                validator_result = replay["validator_result"]
+                self.assertTrue(observation["patch_draft_compiler_ran"])
+                self.assertEqual(observation["patch_draft_compiler_artifact_kind"], "patch_draft")
+                self.assertTrue(observation["patch_draft_compiler_replay_path"])
+                self.assertEqual(validator_result["kind"], "patch_draft")
+                self.assertEqual(validator_result["status"], "validated")
+
+                metadata_path = Path(observation["patch_draft_compiler_replay_path"])
+                self.assertTrue(metadata_path.is_file())
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                self.assertEqual(metadata["bundle"], "patch_draft_compiler")
+                self.assertTrue(metadata["calibration_counted"])
+                self.assertEqual(metadata["git_head"], "HEAD-438")
+
+                current_head = calibration["cohorts"]["current_head"]
+                self.assertEqual(calibration["total_bundles"], 1)
+                self.assertEqual(current_head["total_bundles"], 1)
+                self.assertEqual(current_head["compiler_bundles"], 1)
+                self.assertEqual(
+                    current_head["bundle_type_counts"],
+                    {"patch_draft_compiler.other": 1},
+                )
+                self.assertEqual(current_head["malformed_relevant_bundle_count"], 0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_ready_tiny_draft_target_paths_fall_back_to_active_work_todo_pair(self):
+        scenario = self._load_fixture_scenario("paired_src_test_happy")
+        target_paths = list((scenario.get("todo") or {}).get("source", {}).get("target_paths") or [])
+        resume = self._build_write_ready_replay_context(
+            scenario,
+            observation_paths=target_paths[:1],
+        )["work_session"]["resume"]
+
+        self.assertEqual(
+            _write_ready_tiny_draft_observation_target_paths(resume),
+            target_paths,
+        )
 
 
 if __name__ == "__main__":
