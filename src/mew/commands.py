@@ -276,7 +276,11 @@ from .work_session import (
     work_session_task,
     work_write_pairing_status,
 )
-from .work_loop import plan_work_model_turn, work_tool_parameters_from_action
+from .work_loop import (
+    _is_calibration_measured_patch_draft_task,
+    plan_work_model_turn,
+    work_tool_parameters_from_action,
+)
 from .work_replay import (
     mark_patch_draft_compiler_replay_non_counted,
     write_work_model_failure_replay,
@@ -5708,6 +5712,25 @@ def _work_reject_error(source_call):
     return ""
 
 
+def _should_preserve_patch_draft_replay_for_reject_reason(task, reason):
+    if not _is_calibration_measured_patch_draft_task(task):
+        return False
+    normalized_reason = str(reason or "").strip().lower()
+    if not normalized_reason:
+        return False
+    return any(
+        marker in normalized_reason
+        for marker in (
+            "speculative follow-on",
+            "speculative follow on",
+            "measurement stop already satisfied",
+            "measurement already satisfied",
+            "measurement stop was already satisfied",
+            "replay artifact already captured",
+        )
+    )
+
+
 def reject_work_tool_call(session, source_call, reason=""):
     current_time = now_iso()
     source_call["approval_status"] = "rejected"
@@ -5756,7 +5779,10 @@ def cmd_work_reject_tool(args):
             replay_path = (model_turn.get("model_metrics") or {}).get(
                 "patch_draft_compiler_replay_path"
             )
-        if replay_path:
+        task = work_session_task(state, session)
+        if replay_path and not _should_preserve_patch_draft_replay_for_reject_reason(
+            task, reason
+        ):
             mark_patch_draft_compiler_replay_non_counted(
                 replay_path,
                 reason=reason,
