@@ -1588,13 +1588,27 @@ def _write_ready_fast_path_verifier_closeout_passed(context):
     return turn_tool_call_id == tool_call_id
 
 
-def _is_calibration_measured_patch_draft_task(task):
+def _calibration_measured_contract_text(task, context=None):
     task = task or {}
-    text = " ".join(
-        str(task.get(field) or "").strip().lower()
+    parts = [
+        str(task.get(field) or "").strip()
         for field in ("title", "description", "notes")
         if task.get(field) is not None
-    ).strip()
+    ]
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    pending_steer = resume.get("pending_steer") if isinstance(resume.get("pending_steer"), dict) else {}
+    steer_text = str(pending_steer.get("text") or "").strip()
+    if steer_text:
+        parts.append(steer_text)
+    guidance = str((context or {}).get("guidance") or "").strip()
+    if guidance:
+        parts.append(guidance)
+    return " ".join(part for part in parts if part).lower().strip()
+
+
+def _is_calibration_measured_patch_draft_task(task, context=None):
+    text = _calibration_measured_contract_text(task, context)
     if not text:
         return False
     has_sample_marker = "sample" in text
@@ -1630,24 +1644,27 @@ def _is_calibration_measured_patch_draft_task(task):
     )
 
 
-def _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task):
-    return _calibration_measured_task_forbids_verifier_only_finish(task)
+def _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task, context=None):
+    return _calibration_measured_task_forbids_verifier_only_finish(task, context)
 
 
-def _calibration_measured_task_forbids_verifier_only_finish(task):
-    task = task or {}
-    text = " ".join(
-        str(task.get(field) or "").strip().lower()
-        for field in ("title", "description", "notes")
-        if task.get(field) is not None
+def _calibration_measured_task_forbids_verifier_only_finish(task, context=None):
+    text = _calibration_measured_contract_text(task, context)
+    return any(
+        marker in text
+        for marker in (
+            "do not finish from a passing verifier alone",
+            "do not finish from a passing unit test alone",
+            "do not finish from a passing test alone",
+        )
     )
-    return "do not finish from a passing verifier alone" in text
 
 
-def _is_calibration_measured_finish_gated_task(task):
+def _is_calibration_measured_finish_gated_task(task, context=None):
     return _is_calibration_measured_patch_draft_task(
-        task
-    ) or _calibration_measured_task_forbids_verifier_only_finish(task)
+        task,
+        context,
+    ) or _calibration_measured_task_forbids_verifier_only_finish(task, context)
 
 
 def _calibration_measured_patch_draft_has_paired_patch_evidence(context):
@@ -1744,7 +1761,7 @@ def _calibration_measured_patch_draft_finish_allowed(task, context, model_metric
         return True
     if (
         _write_ready_fast_path_verifier_closeout_passed(context)
-        and not _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task)
+        and not _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task, context)
     ):
         return True
     return False
@@ -1753,7 +1770,7 @@ def _calibration_measured_patch_draft_finish_allowed(task, context, model_metric
 def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action, model_metrics):
     if str((action or {}).get("type") or "") != "finish":
         return action
-    if not _is_calibration_measured_finish_gated_task(task):
+    if not _is_calibration_measured_finish_gated_task(task, context):
         return action
     if _calibration_measured_patch_draft_finish_allowed(task, context, model_metrics):
         return action

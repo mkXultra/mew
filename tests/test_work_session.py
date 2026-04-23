@@ -9910,6 +9910,111 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_plan_work_model_turn_blocks_patch_draft_finish_when_guidance_supplies_measurement_contract(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        verify_command = "uv run python -m unittest tests.test_patch_draft.PatchDraftTests.test_compile_patch_draft_blocks_missing_exact_cached_window_texts"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "Current-head replay sample: patch_draft compiler on b948071"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Continue until the draft lane emits either one reviewer-visible paired dry-run patch "
+                    "or one exact blocker, then stop. Keep reads minimal and stay on this pair. "
+                    "Use PatchDraftTests as the verifier class."
+                )
+                target_paths = ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0], "line_start": 404, "line_count": 20},
+                        "result": {
+                            "path": target_paths[0],
+                            "line_start": 404,
+                            "line_end": 423,
+                            "text": "def compile_patch_draft(...):\n    return {'kind': 'patch_blocker'}\n",
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[1], "line_start": 542, "line_count": 21},
+                        "result": {
+                            "path": target_paths[1],
+                            "line_start": 542,
+                            "line_end": 562,
+                            "text": "def test_compile_patch_draft_blocks_missing_exact_cached_window_texts(self):\n    pass\n",
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 3,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": verify_command},
+                        "result": {"command": verify_command, "exit_code": 0},
+                    },
+                ]
+                session["model_turns"] = [
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "tool_call_id": 3,
+                        "decision_plan": {
+                            "working_memory": {
+                                "plan_items": ["Stop on the exact blocker if the verifier passes"],
+                                "target_paths": target_paths,
+                            },
+                        },
+                        "action": {"type": "run_tests", "command": verify_command},
+                        "model_metrics": {
+                            "write_ready_fast_path": False,
+                            "write_ready_fast_path_reason": "insufficient_cached_windows",
+                        },
+                    }
+                ]
+                guidance = (
+                    "Do not finish from a passing unit test alone. "
+                    "This run counts only if it emits a replay bundle or another reviewer-visible live draft-lane artifact."
+                )
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "verified blocker"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=target_paths,
+                        allow_verify=True,
+                        verify_command=verify_command,
+                        guidance=guidance,
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("verifier-only closeout is not enough", planned["action"]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_plan_work_model_turn_blocks_calibration_measured_dogfood_finish_after_fixture_only_verifier(self):
         from mew.work_loop import plan_work_model_turn
 
@@ -10067,6 +10172,68 @@ class WorkSessionTests(unittest.TestCase):
                         allowed_write_roots=target_paths,
                         allow_verify=True,
                         verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "finish")
+                self.assertEqual(planned["action"]["reason"], "paired patch captured")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_allows_paired_patch_finish_when_guidance_supplies_measurement_contract(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        target_paths = ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "Current-head replay sample: patch_draft compiler on b948071"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Continue until the draft lane emits either one reviewer-visible paired dry-run patch "
+                    "or one exact blocker, then stop. Keep reads minimal and stay on this pair."
+                )
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0]},
+                        "result": {"path": target_paths[0], "changed": True, "dry_run": True, "written": False},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[1]},
+                        "result": {"path": target_paths[1], "changed": True, "dry_run": True, "written": False},
+                    },
+                ]
+                guidance = (
+                    "Do not finish from a passing unit test alone. "
+                    "This run counts only if it emits a replay bundle or another reviewer-visible live draft-lane artifact."
+                )
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "paired patch captured"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=target_paths,
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        guidance=guidance,
                         act_mode="deterministic",
                     )
 

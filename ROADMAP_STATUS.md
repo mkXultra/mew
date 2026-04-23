@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-22
+Last updated: 2026-04-24
 
 This file is the operational roadmap dashboard. It should stay short enough to
 survive context compression and long-session reentry. Historical detail through
@@ -2094,6 +2094,18 @@ Missing proof:
   `m6_11-*` subset is honestly `5 pass`.
   Final codex-ultra and claude-ultra reviews both approved the
   `m6_11-phase4-regression` slice after a small follow-up fix pass.
+- Fresh post-`395f9b4` current-head measurement now exists again on the
+  `patch_draft` pair. Task `#466` / session `#456` reached exact
+  non-truncated paired cached windows at
+  `src/mew/patch_draft.py:416-451` and
+  `tests/test_patch_draft.py:576-603`, then emitted a counted
+  `work-loop-model-failure.request_timed_out` replay bundle at
+  `.mew/replays/work-loop/2026-04-23/session-456/todo-no-todo-456/turn-2173/attempt-1/report.json`.
+  `mew proof-summary --m6_11-phase2-calibration` now reports
+  `cohort[current_head]: total=1` with
+  `bundles=work-loop-model-failure.request_timed_out=1`. This is honest
+  current-head evidence after the guidance-aware finish-gate fix, but it also
+  means timeout incidence on the active head is no longer zero.
 
 Next action:
 
@@ -2103,8 +2115,9 @@ Next action:
   current-head source landed, continue the bounded live incidence gate against
   `#399/#401`; use the cohort-aware replay summaries plus the additive
   `blocker_code_breakdown` output to collect the remaining current-head slices
-  and measure whether current-head timeout incidence stays at zero while the
-  combined `#399/#401` blocker mix actually drops versus the pre-M6.11 sample
+  and measure whether the new current-head timeout incidence drops below the
+  initial `1/1` sample while the combined `#399/#401` blocker mix actually
+  drops versus the pre-M6.11 sample
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
