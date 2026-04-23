@@ -2137,6 +2137,14 @@ Missing proof:
   `cohort[current_head]: total=1`,
   `bundles=work-loop-model-failure.request_timed_out=1`, and
   `cohort[current_head]_non_counted: total=2` on `e9a13f9`.
+- Commit `ca9e52b` only records roadmap/ledger/review evidence; it does not
+  change the runtime surface. However, `mew proof-summary` cohorts are keyed
+  to the literal current git HEAD, so after `ca9e52b` those `e9a13f9` replay
+  bundles move under `cohort[legacy]` and literal
+  `cohort[current_head]: total=0` again. Treat `e9a13f9` as the last runtime
+  measurement head, but do not claim current-head coverage on `ca9e52b`
+  without a fresh replay/model-failure bundle or an explicit future
+  measurement-head override.
 
 Next action:
 
@@ -2145,12 +2153,13 @@ Next action:
   with the full `m6_11-*` dogfood subset now green and the first non-`#402`
   current-head source landed, continue the bounded live incidence gate against
   `#399/#401`; use the cohort-aware replay summaries plus the additive
-  `blocker_code_breakdown` output to collect the remaining current-head slices
-  on `e9a13f9`. The head is no longer empty, but it is still timeout-only
-  (`current_head.total_bundles=1`, dominant
-  `work-loop-model-failure.request_timed_out=1.0000`) and it still has two
-  non-counted `patch_draft` replays, so do not advance on timeout-only or
-  reviewer/non-native non-counted evidence alone
+  `blocker_code_breakdown` output to collect the remaining runtime slices.
+  Because docs-only commit `ca9e52b` reset literal `current_head` cohorting to
+  zero, the next concrete step is to re-establish a fresh bundle on `ca9e52b`
+  without another evidence-only commit in between, ideally on a non-timeout
+  surface. Keep the `e9a13f9` results as the last runtime-head evidence, but
+  do not advance on legacy timeout-only evidence or reviewer/non-native
+  non-counted replays alone
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
