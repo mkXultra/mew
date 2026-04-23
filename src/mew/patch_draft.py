@@ -396,6 +396,13 @@ def _validate_pairing(todo, edited_paths, *, allowed_write_roots=None):
         if not path.startswith("src/mew/"):
             continue
         paired_test_path = convention_test_path_for_mew_source(path)
+        if paired_test_path and paired_test_path not in target_paths:
+            return build_patch_blocker(
+                todo.get("id") or "",
+                "write_policy_violation",
+                path=paired_test_path,
+                detail="paired test path is outside the active WorkTodo target_paths",
+            )
         if paired_test_path and paired_test_path not in edited_path_set:
             return build_patch_blocker(
                 todo.get("id") or "",

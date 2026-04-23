@@ -374,6 +374,40 @@ class PatchDraftTests(unittest.TestCase):
         self.assertIn("+    self.assertEqual(meaning(), 42)", artifact["unified_diff"])
         self.assertTrue(all(item["pre_file_sha256"] != item["post_file_sha256"] for item in artifact["files"]))
 
+    def test_compile_patch_draft_blocks_src_edit_when_paired_test_outside_target_paths(self):
+        source_path = "src/mew/patch_draft.py"
+        test_path = "tests/test_patch_draft.py"
+        source_before = "def meaning():\n    return 41\n"
+        proposal = {
+            "kind": "patch_proposal",
+            "files": [
+                {
+                    "path": source_path,
+                    "edits": [{"old": "return 41", "new": "return 42"}],
+                }
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo=_todo(source_path),
+            proposal=proposal,
+            cached_windows={
+                source_path: _window(source_path, source_before),
+            },
+            live_files={
+                source_path: _live_file(source_before),
+            },
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_blocker")
+        self.assertEqual(artifact["code"], "write_policy_violation")
+        self.assertEqual(artifact["path"], test_path)
+        self.assertEqual(
+            artifact["detail"],
+            "paired test path is outside the active WorkTodo target_paths",
+        )
+
     def test_compile_patch_draft_blocks_overlapping_same_path_hunks(self):
         path = "tests/test_patch_draft.py"
         before_text = "abcdef\n"
