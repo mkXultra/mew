@@ -431,6 +431,9 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
 
 def work_model_turn_for_model(turn, *, prompt_context_mode="full"):
     action = turn.get("action") or {}
+    model_metrics = turn.get("model_metrics") or {}
+    decision_plan = turn.get("decision_plan") or {}
+    working_memory = decision_plan.get("working_memory") if isinstance(decision_plan.get("working_memory"), dict) else {}
     compact_prompt = prompt_context_mode != "full"
     text_limit = 1000 if compact_prompt else WORK_RESULT_TEXT_LIMIT
     item = {
@@ -439,7 +442,20 @@ def work_model_turn_for_model(turn, *, prompt_context_mode="full"):
         "action": {
             key: value
             for key, value in action.items()
-            if key in ("type", "tool", "path", "query", "pattern", "reason", "summary", "note", "text", "question")
+            if key
+            in (
+                "type",
+                "tool",
+                "path",
+                "query",
+                "pattern",
+                "reason",
+                "summary",
+                "note",
+                "text",
+                "question",
+                "command",
+            )
         },
         "guidance_snapshot": clip_output(work_turn_guidance_snapshot(turn), text_limit),
         "tool_call_id": turn.get("tool_call_id"),
@@ -449,6 +465,13 @@ def work_model_turn_for_model(turn, *, prompt_context_mode="full"):
         "error": clip_output(turn.get("error") or "", text_limit),
         "started_at": turn.get("started_at"),
         "finished_at": turn.get("finished_at"),
+        "target_paths": [
+            str(path)
+            for path in (working_memory.get("target_paths") or [])
+            if isinstance(path, str) and path
+        ],
+        "write_ready_fast_path": model_metrics.get("write_ready_fast_path"),
+        "write_ready_fast_path_reason": str(model_metrics.get("write_ready_fast_path_reason") or ""),
     }
     if compact_prompt:
         item["prompt_context_compacted"] = True
@@ -1358,6 +1381,135 @@ def _write_ready_recent_windows_are_structurally_complete(recent_windows):
     return True
 
 
+def _work_write_ready_fast_path_verify_command(context):
+    resume = (context or {}).get("work_session", {}).get("resume") or {}
+    active_work_todo = resume.get("active_work_todo") or {}
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    return str(source.get("verify_command") or "").strip()
+
+
+def _work_write_ready_fast_path_latest_completed_verifier_tool_call(context):
+    work_session = (context or {}).get("work_session") or {}
+    latest_call = {}
+    for call in reversed(list(work_session.get("tool_calls") or [])):
+        if str(call.get("status") or "").strip() == "completed":
+            latest_call = call
+            break
+    if latest_call.get("tool") != "run_tests":
+        return {}
+    result = latest_call.get("result") or {}
+    verification = result.get("verification")
+    if isinstance(verification, dict):
+        command = str(verification.get("command") or "").strip()
+        exit_code = verification.get("exit_code")
+    else:
+        command = str(result.get("command") or (latest_call.get("parameters") or {}).get("command") or "").strip()
+        exit_code = result.get("exit_code")
+    if exit_code is None or not command:
+        return {}
+    try:
+        passed = int(exit_code) == 0
+    except (TypeError, ValueError):
+        passed = False
+    return {
+        "id": latest_call.get("id"),
+        "command": command,
+        "status": "passed" if passed else "failed",
+    }
+
+
+def _work_write_ready_fast_path_latest_completed_verifier_model_turn(context):
+    work_session = (context or {}).get("work_session") or {}
+    tool_calls = list(work_session.get("tool_calls") or [])
+    tool_calls_by_id = {
+        call.get("id"): call for call in tool_calls if isinstance(call, dict) and call.get("id") is not None
+    }
+    latest_turn = {}
+    for turn in reversed(list(work_session.get("model_turns") or [])):
+        if str(turn.get("status") or "").strip() == "completed":
+            latest_turn = turn
+            break
+    action = latest_turn.get("action") or {}
+    if action.get("type") != "run_tests":
+        return {}
+    command = str(action.get("command") or "").strip()
+    if not command:
+        linked_tool_call_id = latest_turn.get("tool_call_id")
+        linked_tool_call = tool_calls_by_id.get(linked_tool_call_id) if linked_tool_call_id is not None else {}
+        if linked_tool_call and str(linked_tool_call.get("status") or "").strip() == "completed":
+            if linked_tool_call.get("tool") == "run_tests":
+                result = linked_tool_call.get("result") or {}
+                verification = result.get("verification")
+                if isinstance(verification, dict):
+                    command = str(verification.get("command") or "").strip()
+                else:
+                    command = str(
+                        result.get("command")
+                        or (linked_tool_call.get("parameters") or {}).get("command")
+                        or ""
+                    ).strip()
+    if not command:
+        return {}
+    return {
+        "id": latest_turn.get("id"),
+        "tool_call_id": latest_turn.get("tool_call_id"),
+        "command": command,
+        "target_paths": [
+            str(path)
+            for path in (latest_turn.get("target_paths") or [])
+            if isinstance(path, str) and path
+        ],
+        "write_ready_fast_path": latest_turn.get("write_ready_fast_path"),
+        "write_ready_fast_path_reason": str(latest_turn.get("write_ready_fast_path_reason") or "").strip(),
+    }
+
+
+def _write_ready_fast_path_verifier_closeout_passed(context):
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") or {}
+    active_work_todo = resume.get("active_work_todo") or {}
+    status = str(active_work_todo.get("status") or "").strip()
+    if status != "drafting":
+        return False
+    verify_command = _work_write_ready_fast_path_verify_command(context)
+    if not verify_command:
+        return False
+    verifier_tool_call = _work_write_ready_fast_path_latest_completed_verifier_tool_call(context)
+    if str(verifier_tool_call.get("status") or "") != "passed":
+        return False
+    verifier_model_turn = _work_write_ready_fast_path_latest_completed_verifier_model_turn(context)
+    if str(verifier_tool_call.get("command") or "") != verify_command:
+        return False
+    if str(verifier_model_turn.get("command") or "") != verify_command:
+        return False
+    expected_target_paths = [
+        str(path)
+        for path in ((active_work_todo.get("source") or {}).get("target_paths") or [])
+        if isinstance(path, str) and path
+    ]
+    observed_target_paths = [
+        str(path)
+        for path in (verifier_model_turn.get("target_paths") or [])
+        if isinstance(path, str) and path
+    ]
+    if len(expected_target_paths) != len(observed_target_paths):
+        return False
+    if any(
+        not any(_work_paths_match(expected, observed) for observed in observed_target_paths)
+        for expected in expected_target_paths
+    ):
+        return False
+    if verifier_model_turn.get("write_ready_fast_path") is not False:
+        return False
+    if str(verifier_model_turn.get("write_ready_fast_path_reason") or "") != "insufficient_cached_window_context":
+        return False
+    turn_tool_call_id = verifier_model_turn.get("tool_call_id")
+    tool_call_id = verifier_tool_call.get("id")
+    if turn_tool_call_id is None or tool_call_id is None:
+        return False
+    return turn_tool_call_id == tool_call_id
+
+
 def _work_write_ready_fast_path_details(context):
     fast_path = _work_write_ready_fast_path_state(context)
     if not fast_path.get("active"):
@@ -1392,6 +1544,12 @@ def _work_write_ready_fast_path_details(context):
                 "reason": "missing_exact_cached_window_texts",
             }
     if not _write_ready_recent_windows_are_structurally_complete(recent_windows):
+        if _write_ready_fast_path_verifier_closeout_passed(context):
+            return {
+                **fast_path,
+                "recent_windows": recent_windows,
+                "cached_paths": cached_paths,
+            }
         return {
             **fast_path,
             "active": False,

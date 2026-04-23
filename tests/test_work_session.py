@@ -7210,6 +7210,257 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(details["reason"], "insufficient_cached_window_context")
         self.assertEqual(build_write_ready_work_model_context(context), {})
 
+    def test_write_ready_fast_path_does_not_bypass_verifier_closeout_without_model_turn_evidence(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return 41\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {"verify_command": verify_command},
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 0},
+            }
+        ]
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_does_not_bypass_verifier_closeout_without_closeout_metrics(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return 41\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {
+                "verify_command": verify_command,
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 0},
+            }
+        ]
+        context["work_session"]["model_turns"] = [
+            {
+                "id": 2,
+                "status": "completed",
+                "tool_call_id": 3,
+                "action": {"type": "run_tests", "command": verify_command},
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "",
+            }
+        ]
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_does_not_bypass_verifier_closeout_when_verify_command_mismatched(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        expected_command = "uv run python -m unittest tests.test_patch_draft"
+        run_tests_command = "python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return 41\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {
+                "verify_command": expected_command,
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": run_tests_command},
+                "result": {"command": run_tests_command, "exit_code": 0},
+            }
+        ]
+        context["work_session"]["model_turns"] = [
+            {
+                "id": 2,
+                "status": "completed",
+                "tool_call_id": 3,
+                "action": {"type": "run_tests", "command": run_tests_command},
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "insufficient_cached_window_context",
+            }
+        ]
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_does_not_bypass_verifier_closeout_when_verifier_failed(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return 41\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {
+                "verify_command": verify_command,
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 1},
+            }
+        ]
+        context["work_session"]["model_turns"] = [
+            {
+                "id": 2,
+                "status": "completed",
+                "tool_call_id": 3,
+                "action": {"type": "run_tests", "command": verify_command},
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "insufficient_cached_window_context",
+            }
+        ]
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_does_not_bypass_verifier_closeout_when_not_drafting(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return 41\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "blocked_on_patch",
+            "source": {
+                "verify_command": verify_command,
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 0},
+            }
+        ]
+        context["work_session"]["model_turns"] = [
+            {
+                "id": 2,
+                "status": "completed",
+                "tool_call_id": 3,
+                "action": {"type": "run_tests", "command": verify_command},
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "insufficient_cached_window_context",
+            }
+        ]
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_does_not_bypass_verifier_closeout_when_target_surface_mismatched(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return 41\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 41)\n",
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {
+                "verify_command": verify_command,
+                "target_paths": ["src/mew/new_surface.py", "tests/test_new_surface.py"],
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 0},
+            }
+        ]
+        context["work_session"]["model_turns"] = [
+            {
+                "id": 2,
+                "status": "completed",
+                "tool_call_id": 3,
+                "action": {"type": "run_tests", "command": verify_command},
+                "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "insufficient_cached_window_context",
+            }
+        ]
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
     def test_plan_item_exact_read_window_blocks_edit_ready_until_cached(self):
         from mew.work_loop import build_work_model_context, build_write_ready_work_model_context
         from mew.work_session import finish_work_model_turn, start_work_model_turn
@@ -8335,6 +8586,143 @@ class WorkSessionTests(unittest.TestCase):
                     metrics["think"]["elapsed_seconds"],
                     _round_seconds(metrics["tiny_write_ready_draft_elapsed_seconds"]),
                 )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_uses_tiny_draft_path_for_verifier_closeout_mid_fragment(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                session["tool_calls"][0]["result"]["text"] = "    return 41\n"
+                session.setdefault("active_work_todo", {})
+                session["active_work_todo"]["status"] = "drafting"
+                session["active_work_todo"].setdefault("source", {})["verify_command"] = verify_command
+                session["active_work_todo"]["source"]["target_paths"] = [
+                    "src/mew/patch_draft.py",
+                    "tests/test_patch_draft.py",
+                ]
+                session["active_work_todo"].setdefault("attempts", {})
+                session["active_work_todo"]["attempts"]["draft"] = 1
+                session["tool_calls"].append(
+                    {
+                        "id": 3,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": verify_command},
+                        "result": {"command": verify_command, "exit_code": 0},
+                    }
+                )
+                session.setdefault("model_turns", []).append(
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "tool_call_id": 3,
+                        "decision_plan": {
+                            "summary": "Source and focused test appear aligned; validate that with the focused verifier before deciding no-change vs repair.",
+                            "working_memory": {
+                                "hypothesis": (
+                                    "src/mew/patch_draft.py already returns patch_blocker code "
+                                    "missing_exact_cached_window_texts when cached_windows has no exact window."
+                                ),
+                                "next_step": (
+                                    "If the focused verifier passes, finish with a no-change conclusion; "
+                                    "if it fails, use the failure output for one narrow paired repair."
+                                ),
+                                "plan_items": [
+                                    "Run the corrected focused verifier",
+                                    "Decide no-change conclusion or one scoped paired repair from failure output",
+                                ],
+                                "target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                                "open_questions": [
+                                    "Does the focused verifier pass on current head without code changes?"
+                                ],
+                                "last_verified_state": (
+                                    "Read cached windows for the paired src/tests surfaces; "
+                                    "source branch and test expectation currently match."
+                                ),
+                            },
+                            "action": {
+                                "type": "run_tests",
+                                "command": verify_command,
+                                "reason": (
+                                    "Investigation suggests the task premise may already be satisfied on the scoped "
+                                    "surfaces, so the next bounded step is to validate that conclusion."
+                                ),
+                                "summary": "Run the corrected focused verifier for the scoped patch_draft behavior.",
+                                "task_done": False,
+                            },
+                        },
+                        "action": {"type": "run_tests", "command": verify_command},
+                        "action_plan": {
+                            "summary": "Run the corrected focused verifier for the scoped patch_draft behavior.",
+                            "action": {
+                                "type": "run_tests",
+                                "command": verify_command,
+                                "reason": (
+                                    "Investigation suggests the task premise may already be satisfied on the scoped "
+                                    "surfaces, so the next bounded step is to validate that conclusion."
+                                ),
+                                "summary": "Run the corrected focused verifier for the scoped patch_draft behavior.",
+                                "task_done": False,
+                            },
+                            "act_mode": "deterministic",
+                        },
+                        "model_metrics": {
+                            "write_ready_fast_path": False,
+                            "write_ready_fast_path_reason": "insufficient_cached_window_context",
+                        },
+                    }
+                )
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {
+                        "kind": "patch_blocker",
+                        "summary": "no concrete draftable change",
+                        "code": "no_concrete_draftable_change",
+                        "detail": "source edit does not produce concrete behavior change",
+                    }
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command=verify_command,
+                        act_mode="model",
+                    )
+
+                metrics = planned["model_metrics"]
+                self.assertTrue(metrics["write_ready_fast_path"])
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_fallback_reason"], "")
+                self.assertEqual(metrics["tiny_write_ready_draft_compiler_artifact_kind"], "patch_blocker")
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_blocker")
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    "write-ready tiny draft blocker: no_concrete_draftable_change",
+                )
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertEqual(metrics["act"]["mode"], "tiny_write_ready_draft")
+                self.assertTrue(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(Path(metrics["patch_draft_compiler_replay_path"]).is_file())
             finally:
                 os.chdir(old_cwd)
 
