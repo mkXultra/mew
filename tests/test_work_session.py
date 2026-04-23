@@ -9968,6 +9968,7 @@ class WorkSessionTests(unittest.TestCase):
                     "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
                 )
                 target_paths = ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]
+                absolute_target_paths = [str(Path(path).resolve()) for path in target_paths]
                 task["scope"] = {"target_paths": target_paths}
                 session["tool_calls"] = [
                     {
@@ -9976,7 +9977,7 @@ class WorkSessionTests(unittest.TestCase):
                         "status": "completed",
                         "parameters": {"path": target_paths[0], "line_start": 1, "line_count": 2},
                         "result": {
-                            "path": target_paths[0],
+                            "path": absolute_target_paths[0],
                             "line_start": 1,
                             "line_end": 2,
                             "text": "def compile_patch_draft_previews():\n    return []\n",
@@ -9991,7 +9992,7 @@ class WorkSessionTests(unittest.TestCase):
                         "status": "completed",
                         "parameters": {"path": target_paths[1], "line_start": 1, "line_count": 2},
                         "result": {
-                            "path": target_paths[1],
+                            "path": absolute_target_paths[1],
                             "line_start": 1,
                             "line_end": 2,
                             "text": "class PatchDraftTests:\n    pass\n",
@@ -10044,7 +10045,70 @@ class WorkSessionTests(unittest.TestCase):
                     )
 
                 self.assertEqual(planned["action"]["type"], "wait")
-                self.assertIn("verifier-only closeout is not enough", planned["action"]["reason"])
+                context_session = planned["context"]["work_session"]
+                self.assertEqual(
+                    set(item["path"] for item in context_session["recent_read_file_windows"][:2]),
+                    set(absolute_target_paths),
+                )
+                active_todo = context_session["resume"]["active_work_todo"]
+                self.assertEqual(active_todo["source"]["target_paths"], target_paths)
+                self.assertEqual(
+                    set(item["path"] for item in active_todo["cached_window_refs"]),
+                    set(target_paths),
+                )
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    "write-ready tiny draft blocker: no_material_change",
+                )
+                blocker = planned["action"].get("blocker") or {}
+                self.assertEqual(blocker["code"], "no_material_change")
+                self.assertEqual(blocker["todo_id"], f"todo-{session['id']}-1")
+                metrics = planned["model_metrics"]
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_compiler_artifact_kind"], "patch_blocker")
+                replay_path = Path(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(replay_path.is_file())
+                replay_metadata = json.loads(replay_path.read_text(encoding="utf-8"))
+                self.assertEqual(replay_metadata["bundle"], "patch_draft_compiler")
+                self.assertTrue(replay_metadata["calibration_counted"])
+                self.assertEqual(replay_metadata["session_id"], str(session["id"]))
+                self.assertEqual(replay_metadata["todo_id"], f"todo-{session['id']}-1")
+                self.assertEqual(replay_metadata["blocker_code"], "no_material_change")
+                validator_result = json.loads(
+                    (replay_path.parent / replay_metadata["files"]["validator_result"]).read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(validator_result["kind"], "patch_blocker")
+                self.assertEqual(validator_result["code"], "no_material_change")
+                cached_windows = json.loads(
+                    (replay_path.parent / replay_metadata["files"]["cached_windows"]).read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(set(cached_windows), set(target_paths))
+
+                session["model_turns"].append(
+                    {
+                        "id": 4,
+                        "status": "completed",
+                        "decision_plan": planned["decision_plan"],
+                        "action_plan": planned["action_plan"],
+                        "action": planned["action"],
+                        "model_metrics": metrics,
+                    }
+                )
+                resume = build_work_session_resume(session, task=task)
+                active_todo = resume["active_work_todo"]
+                self.assertEqual(active_todo["status"], "blocked_on_patch")
+                self.assertEqual(active_todo["blocker"]["code"], "no_material_change")
+                self.assertTrue((resume.get("recovery_plan") or {}).get("items"))
+                self.assertEqual(
+                    resume["latest_patch_draft_compiler_replay"]["path"],
+                    str(replay_path),
+                )
             finally:
                 os.chdir(old_cwd)
 

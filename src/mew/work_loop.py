@@ -1701,6 +1701,180 @@ def _calibration_measured_patch_draft_has_paired_patch_evidence(context):
     return False
 
 
+def _calibration_measured_patch_draft_scoped_target_paths(context):
+    resume = ((context or {}).get("work_session") or {}).get("resume") or {}
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    target_paths = [
+        normalize_work_path(path)
+        for path in (source.get("target_paths") or [])
+        if normalize_work_path(path)
+    ]
+    expected_paths = {"src/mew/patch_draft.py", "tests/test_patch_draft.py"}
+    if set(target_paths) != expected_paths or len(target_paths) != len(expected_paths):
+        return []
+    if not any(_work_batch_path_is_mew_source(path) for path in target_paths):
+        return []
+    if not any(_work_batch_path_is_tests(path) for path in target_paths):
+        return []
+    return target_paths
+
+
+def _calibration_measured_patch_draft_matching_target_path(path, target_paths):
+    normalized_path = normalize_work_path(path)
+    if not normalized_path:
+        return ""
+    for target_path in target_paths or []:
+        if _work_paths_match(normalized_path, target_path):
+            return target_path
+    return ""
+
+
+def _calibration_measured_patch_draft_exact_recent_windows(context):
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    target_paths = _calibration_measured_patch_draft_scoped_target_paths(context)
+    if not target_paths:
+        return []
+    refs_by_path = {}
+    for ref in active_work_todo.get("cached_window_refs") or []:
+        if not isinstance(ref, dict):
+            continue
+        path = _calibration_measured_patch_draft_matching_target_path(
+            ref.get("path"),
+            target_paths,
+        )
+        if not path:
+            continue
+        if bool(ref.get("context_truncated")):
+            return []
+        try:
+            line_start = int(ref.get("line_start") or 0)
+            line_end = int(ref.get("line_end") or 0)
+        except (TypeError, ValueError):
+            return []
+        if line_start <= 0 or line_end < line_start:
+            return []
+        refs_by_path[path] = {**ref, "path": path, "line_start": line_start, "line_end": line_end}
+    if set(refs_by_path) != set(target_paths):
+        return []
+
+    windows_by_path = {}
+    for window in work_session.get("recent_read_file_windows") or []:
+        if not isinstance(window, dict):
+            continue
+        path = _calibration_measured_patch_draft_matching_target_path(
+            window.get("path"),
+            refs_by_path.keys(),
+        )
+        ref = refs_by_path.get(path)
+        if not ref:
+            continue
+        try:
+            line_start = int(window.get("line_start") or 0)
+            line_end = int(window.get("line_end") or 0)
+        except (TypeError, ValueError):
+            continue
+        if line_start != ref["line_start"] or line_end != ref["line_end"]:
+            continue
+        if any(bool(window.get(key)) for key in ("context_truncated", "source_truncated", "truncated")):
+            return []
+        if not isinstance(window.get("text"), str) or not window.get("text"):
+            return []
+        windows_by_path[path] = {
+            **window,
+            "path": path,
+            "line_start": line_start,
+            "line_end": line_end,
+            "context_truncated": False,
+        }
+    if set(windows_by_path) != set(target_paths):
+        return []
+    return [windows_by_path[path] for path in target_paths]
+
+
+def _calibration_measured_patch_draft_no_change_replay_action(
+    *,
+    session,
+    context,
+    model_metrics,
+    allowed_write_roots=None,
+):
+    if not session:
+        return {}
+    if not _write_ready_fast_path_verifier_closeout_passed(context):
+        return {}
+    recent_windows = _calibration_measured_patch_draft_exact_recent_windows(context)
+    if not recent_windows:
+        return {}
+    resume = ((context or {}).get("work_session") or {}).get("resume") or {}
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    todo_id = str(active_work_todo.get("id") or "").strip()
+    proposal = {
+        "kind": "patch_blocker",
+        "summary": "no concrete draftable change after matching verifier closeout",
+        "code": "no_material_change",
+        "detail": (
+            "calibration-measured patch_draft finish attempted after exact scoped windows "
+            "and matching green verifier evidence, but no concrete draftable change was emitted"
+        ),
+    }
+    compiled = _compile_write_ready_patch_draft_proposal(
+        session=session,
+        context=context,
+        proposal=proposal,
+        write_ready_fast_path={"recent_windows": recent_windows},
+        allowed_write_roots=allowed_write_roots,
+    )
+    observation = compiled.get("observation") or _empty_patch_draft_compiler_observation()
+    if any(observation.get(key) for key in observation):
+        model_metrics.update(observation)
+    validator_result = compiled.get("validator_result") if isinstance(compiled.get("validator_result"), dict) else {}
+    if validator_result.get("kind") != "patch_blocker":
+        return {}
+    blocker_payload = _work_loop_tiny_write_ready_draft_blocker_payload(validator_result)
+    if todo_id:
+        blocker_payload["todo_id"] = todo_id
+    model_metrics.update(
+        {
+            "tiny_write_ready_draft_outcome": "blocker",
+            "tiny_write_ready_draft_fallback_reason": "",
+            "tiny_write_ready_draft_compiler_artifact_kind": "patch_blocker",
+        }
+    )
+    return {
+        "type": "wait",
+        "reason": _stable_write_ready_tiny_draft_blocker_reason(validator_result),
+        "todo_id": todo_id,
+        "blocker": blocker_payload,
+    }
+
+
+def _calibration_measured_finish_is_no_change_closeout(action, action_plan=None):
+    action = action if isinstance(action, dict) else {}
+    action_plan = action_plan if isinstance(action_plan, dict) else {}
+    text = " ".join(
+        str(value or "")
+        for value in (
+            action.get("reason"),
+            action.get("summary"),
+            action_plan.get("summary"),
+        )
+    ).casefold()
+    return any(
+        marker in text
+        for marker in (
+            "no-change",
+            "no change",
+            "no concrete",
+            "no material",
+            "nothing to change",
+            "already satisfied",
+        )
+    )
+
+
 def _calibration_measured_patch_draft_finish_allowed(task, context, model_metrics):
     def valid_replay_path(candidate):
         replay_path = str(candidate or "").strip()
@@ -1768,13 +1942,42 @@ def _calibration_measured_patch_draft_finish_allowed(task, context, model_metric
     return False
 
 
-def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action, model_metrics):
+def _enforce_calibration_measured_patch_draft_finish_gate(
+    task,
+    context,
+    action,
+    model_metrics,
+    *,
+    session=None,
+    allowed_write_roots=None,
+    action_plan=None,
+):
     if str((action or {}).get("type") or "") != "finish":
         return action
     if not _is_calibration_measured_finish_gated_task(task, context):
         return action
     if _calibration_measured_patch_draft_finish_allowed(task, context, model_metrics):
         return action
+    if (
+        _is_calibration_measured_patch_draft_task(task, context)
+        and _calibration_measured_finish_is_no_change_closeout(action, action_plan)
+    ):
+        replay_action = _calibration_measured_patch_draft_no_change_replay_action(
+            session=session,
+            context=context,
+            model_metrics=model_metrics,
+            allowed_write_roots=allowed_write_roots,
+        )
+        if replay_action:
+            if isinstance(action_plan, dict):
+                action_plan["summary"] = replay_action.get("reason") or action_plan.get("summary") or ""
+                action_plan["action"] = replay_action
+                action_plan["act_mode"] = "tiny_write_ready_draft"
+                if replay_action.get("todo_id"):
+                    action_plan["todo_id"] = replay_action.get("todo_id")
+                if isinstance(replay_action.get("blocker"), dict):
+                    action_plan["blocker"] = replay_action.get("blocker")
+            return replay_action
     return {
         "type": "wait",
         "reason": (
@@ -3499,6 +3702,9 @@ def plan_work_model_turn(
                 context=context,
                 action=action,
                 model_metrics=model_metrics,
+                session=session,
+                allowed_write_roots=allowed_write_roots,
+                action_plan=tiny_result.get("action_plan"),
             )
             if progress:
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
@@ -3592,6 +3798,9 @@ def plan_work_model_turn(
         context=context,
         action=action,
         model_metrics=model_metrics,
+        session=session,
+        allowed_write_roots=allowed_write_roots,
+        action_plan=action_plan,
     )
     model_metrics["total_model_seconds"] = _round_seconds(
         (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
