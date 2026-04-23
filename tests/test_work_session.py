@@ -149,6 +149,69 @@ class WorkSessionTests(unittest.TestCase):
         finish_work_model_turn(state, session["id"], turn["id"])
         return task, session
 
+    def _build_write_ready_fast_path_context(self, *, source_text, test_text):
+        source_lines = max(1, len(str(source_text or "").splitlines()))
+        test_lines = max(1, len(str(test_text or "").splitlines()))
+        return {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Explain why write-ready fast path is unavailable.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "working_memory": {
+                        "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "line_start": 120,
+                                    "line_end": 120 + source_lines - 1,
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line_start": 240,
+                                    "line_end": 240 + test_lines - 1,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 120,
+                        "line_end": 120 + source_lines - 1,
+                        "text": source_text,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 240,
+                        "line_end": 240 + test_lines - 1,
+                        "text": test_text,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
     def test_compact_running_search_summary_uses_parameters_before_result(self):
         summary = compact_work_tool_summary(
             {
@@ -6716,6 +6779,76 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertFalse(details["active"])
         self.assertEqual(details["reason"], "missing_exact_cached_window_texts")
+
+    def test_write_ready_fast_path_blocks_unfinished_source_block_window(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def update_state():\n    if ready:\n",
+            test_text="def test_update_state():\n    assert update_state() == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_test_window_with_unmatched_open_paren(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def update_state():\n    return 1\n",
+            test_text="def test_update_state():\n    helper(\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_orphaned_leading_indented_body_fragment(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return foo\n",
+            test_text="def test_update_state():\n    assert value == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_clause_tail_fragment(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="else:\n    x = 1\n",
+            test_text="def test_update_state():\n    assert value == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_source_window_starting_mid_fragment(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="    )\nvalue = compute_value()\n",
+            test_text="def test_update_state():\n    assert value == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
 
     def test_plan_item_exact_read_window_blocks_edit_ready_until_cached(self):
         from mew.work_loop import build_work_model_context, build_write_ready_work_model_context

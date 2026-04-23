@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import shlex
 import time
+from io import StringIO
+import tokenize
 
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
@@ -1271,6 +1273,57 @@ def _write_ready_recent_windows_from_target_paths(work_session, resume):
     return matched
 
 
+def _write_ready_window_has_unmatched_delimiters(text):
+    delimiter_pairs = {")": "(", "]": "[", "}": "{"}
+    delimiter_stack = []
+    try:
+        for token in tokenize.generate_tokens(StringIO(text).readline):
+            if token.type != tokenize.OP:
+                continue
+            token_text = token.string
+            if token_text in "([{":
+                delimiter_stack.append(token_text)
+                continue
+            expected_open = delimiter_pairs.get(token_text)
+            if not expected_open:
+                continue
+            if not delimiter_stack or delimiter_stack[-1] != expected_open:
+                return True
+            delimiter_stack.pop()
+    except tokenize.TokenError as exc:
+        error_text = str(exc)
+        if "EOF in multi-line statement" in error_text or "EOF in multi-line string" in error_text:
+            return True
+    return bool(delimiter_stack)
+
+
+def _write_ready_window_text_is_structurally_complete(text):
+    text = str(text or "")
+    significant_lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    if not significant_lines:
+        return False
+    first_line = significant_lines[0]
+    first_line_stripped = first_line.lstrip()
+    first_keyword = first_line_stripped.split()[0].rstrip(":") if first_line_stripped else ""
+    if first_line and first_line[0].isspace():
+        return False
+    if first_line_stripped.endswith(":") and first_keyword in {"else", "elif", "except", "finally"}:
+        return False
+    last_line = significant_lines[-1].lstrip()
+    if last_line.endswith(":") or last_line.startswith(("def ", "class ", "async def ", "@")):
+        return False
+    if _write_ready_window_has_unmatched_delimiters(text):
+        return False
+    return True
+
+
+def _write_ready_recent_windows_are_structurally_complete(recent_windows):
+    for item in recent_windows or []:
+        if not _write_ready_window_text_is_structurally_complete((item or {}).get("text") or ""):
+            return False
+    return True
+
+
 def _work_write_ready_fast_path_details(context):
     fast_path = _work_write_ready_fast_path_state(context)
     if not fast_path.get("active"):
@@ -1304,6 +1357,12 @@ def _work_write_ready_fast_path_details(context):
                 "active": False,
                 "reason": "missing_exact_cached_window_texts",
             }
+    if not _write_ready_recent_windows_are_structurally_complete(recent_windows):
+        return {
+            **fast_path,
+            "active": False,
+            "reason": "insufficient_cached_window_context",
+        }
     return {
         **fast_path,
         "recent_windows": recent_windows,
