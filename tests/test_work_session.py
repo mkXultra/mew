@@ -7384,6 +7384,149 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(details["active"])
         self.assertIn("write_ready_fast_path", build_write_ready_work_model_context(context))
 
+    def test_write_ready_fast_path_stays_off_for_verifier_closeout_plan_item(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="def meaning():\n    return 42\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 42)\n",
+        )
+        target_paths = ["src/mew/commands.py", "tests/test_work_session.py"]
+        context["work_session"]["resume"]["plan_item_observations"][0]["plan_item"] = (
+            "Record non-counted no-change closeout in the calibration ledger"
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {
+                "plan_item": "Record non-counted no-change closeout in the calibration ledger",
+                "verify_command": verify_command,
+                "target_paths": target_paths,
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["resume"]["latest_verifier_closeout"] = {
+            "tool_call_id": 3,
+            "model_turn_id": 2,
+            "command": verify_command,
+            "exit_code": 0,
+            "target_paths": target_paths,
+            "write_ready_fast_path": False,
+            "write_ready_fast_path_reason": "missing_plan_item_observations",
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 0},
+            }
+        ]
+        context["work_session"]["model_turns"] = []
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "verifier_closeout_plan_item")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_stays_off_for_ledger_edit_closeout_plan_item(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="def meaning():\n    return 42\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 42)\n",
+        )
+        target_paths = ["src/mew/commands.py", "tests/test_work_session.py"]
+        context["work_session"]["resume"]["plan_item_observations"][0]["plan_item"] = (
+            "Edit calibration ledger with the non-counted closeout row"
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {
+                "plan_item": "Edit calibration ledger with the non-counted closeout row",
+                "verify_command": verify_command,
+                "target_paths": target_paths,
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["resume"]["latest_verifier_closeout"] = {
+            "tool_call_id": 3,
+            "model_turn_id": 2,
+            "command": verify_command,
+            "exit_code": 0,
+            "target_paths": target_paths,
+            "write_ready_fast_path": False,
+            "write_ready_fast_path_reason": "missing_plan_item_observations",
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 0},
+            }
+        ]
+        context["work_session"]["model_turns"] = []
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "verifier_closeout_plan_item")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_allows_repair_plan_item_with_closeout_wording(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        verify_command = "uv run python -m unittest tests.test_patch_draft"
+        context = self._build_write_ready_fast_path_context(
+            source_text="def meaning():\n    return 41\n",
+            test_text="def test_meaning(self):\n    self.assertEqual(meaning(), 42)\n",
+        )
+        target_paths = ["src/mew/commands.py", "tests/test_work_session.py"]
+        context["work_session"]["resume"]["plan_item_observations"][0]["plan_item"] = (
+            "Repair closeout misroute on the paired source/test path"
+        )
+        context["work_session"]["resume"]["active_work_todo"] = {
+            "id": "todo-17",
+            "status": "drafting",
+            "source": {
+                "plan_item": "Repair closeout misroute on the paired source/test path",
+                "verify_command": verify_command,
+                "target_paths": target_paths,
+            },
+            "attempts": {"draft": 1, "review": 0},
+        }
+        context["work_session"]["resume"]["latest_verifier_closeout"] = {
+            "tool_call_id": 3,
+            "model_turn_id": 2,
+            "command": verify_command,
+            "exit_code": 0,
+            "target_paths": target_paths,
+            "write_ready_fast_path": False,
+            "write_ready_fast_path_reason": "missing_plan_item_observations",
+        }
+        context["work_session"]["tool_calls"] = [
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": verify_command},
+                "result": {"command": verify_command, "exit_code": 0},
+            }
+        ]
+        context["work_session"]["model_turns"] = []
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertTrue(details["active"])
+        self.assertIn("write_ready_fast_path", build_write_ready_work_model_context(context))
+
     def test_write_ready_fast_path_does_not_trust_recent_decisions_without_closeout_summary(self):
         from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
 

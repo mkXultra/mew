@@ -1227,6 +1227,14 @@ def _work_write_ready_fast_path_state(context):
     if not observations:
         return {"active": False, "reason": "missing_plan_item_observations"}
     first = observations[0] or {}
+    if _write_ready_fast_path_verifier_closeout_passed(context):
+        source = {}
+        active_work_todo = resume.get("active_work_todo")
+        if isinstance(active_work_todo, dict) and isinstance(active_work_todo.get("source"), dict):
+            source = active_work_todo.get("source") or {}
+        plan_item_text = str(first.get("plan_item") or source.get("plan_item") or "").strip()
+        if _work_plan_item_is_verifier_closeout(plan_item_text):
+            return {"active": False, "reason": "verifier_closeout_plan_item"}
     if not first.get("edit_ready"):
         return {"active": False, "reason": "first_plan_item_not_edit_ready"}
     cached_windows = [
@@ -1264,6 +1272,46 @@ def _work_write_ready_fast_path_state(context):
         "activation_source": activation_source,
         "steer_text": steer_text,
     }
+
+
+def _work_plan_item_is_verifier_closeout(plan_item):
+    text = str(plan_item or "").strip().casefold()
+    if not text:
+        return False
+    repair_or_edit = any(marker in text for marker in ("repair", "edit"))
+    source_test_intent = any(
+        marker in text
+        for marker in (
+            "paired source/test",
+            "source/test",
+            "src/test",
+            "source test",
+            "source and test",
+            "source/tests",
+        )
+    )
+    if repair_or_edit and source_test_intent:
+        return False
+    if "ledger" in text:
+        return True
+    if repair_or_edit:
+        return False
+    closeout_markers = (
+        "calibration ledger",
+        "closeout",
+        "non-counted",
+        "non counted",
+        "preserved verifier",
+        "verifier evidence",
+    )
+    if any(marker in text for marker in closeout_markers):
+        return True
+    if ("no-change" in text or "no change" in text) and any(
+        marker in text for marker in ("record", "finish", "close")
+    ):
+        if not any(marker in text for marker in ("repair", "edit", "patch")):
+            return True
+    return "finish" in text and "verifier" in text
 
 
 def _write_ready_recent_windows_from_target_paths(work_session, resume):

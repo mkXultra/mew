@@ -515,6 +515,29 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertEqual(calibration["non_counted_bundle_count"], 1)
         self.assertEqual(calibration["non_counted_bundle_reasons"], {"reviewer rejected": 1})
 
+    def test_summarize_m6_11_calibration_non_counted_model_failure_bundle_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(replay_root / "counted", 1, "patch_valid")
+            attempt_dir = replay_root / "non_counted_failure" / "attempt-1"
+            ProofSummaryTests._write_json(
+                attempt_dir / "report.json",
+                {
+                    "bundle": "work-loop-model-failure",
+                    "failure": {"code": "request_timed_out"},
+                    "calibration_counted": False,
+                    "calibration_exclusion_reason": "reviewer superseded",
+                },
+            )
+
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 1)
+        self.assertEqual(calibration["bundle_type_counts"], {"patch_draft_compiler.other": 1})
+        self.assertEqual(calibration["non_counted_bundle_count"], 1)
+        self.assertEqual(calibration["non_counted_bundle_reasons"], {"reviewer superseded": 1})
+
     def test_summarize_m6_11_calibration_current_head_excludes_auto_non_native_patch_blocker(self):
         with tempfile.TemporaryDirectory() as tmp:
             replay_root = Path(tmp)

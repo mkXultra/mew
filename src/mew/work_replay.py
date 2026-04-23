@@ -303,6 +303,8 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
     report = {
         "schema_version": 1,
         "bundle": "work-loop-model-failure",
+        "calibration_counted": True,
+        "calibration_exclusion_reason": "",
         "session_id": session_id,
         "task_id": _task_id_for_report(session, task),
         "model_turn_id": turn_id,

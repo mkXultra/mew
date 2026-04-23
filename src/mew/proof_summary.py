@@ -327,6 +327,8 @@ def _summarize_model_failure_bundle(report_path):
     summary = {
         "bundle_type": "work-loop-model-failure",
         "calibration_bundle_type": "work-loop-model-failure.other",
+        "calibration_counted": True,
+        "calibration_exclusion_reason": "",
         "off_schema": False,
         "refusal": False,
         "git_head": "",
@@ -347,6 +349,12 @@ def _summarize_model_failure_bundle(report_path):
     bundle_name = report.get("bundle")
     if isinstance(bundle_name, str) and bundle_name.strip():
         summary["bundle_type"] = bundle_name.strip()
+    summary["calibration_counted"] = _coerce_calibration_counted(
+        report.get("calibration_counted"), default=True
+    )
+    summary["calibration_exclusion_reason"] = str(
+        report.get("calibration_exclusion_reason") or ""
+    )
     summary["git_head"] = str(report.get("git_head") or "")
     summary["bucket_tag"] = str(report.get("bucket_tag") or "")
     summary["blocker_code"] = str(report.get("blocker_code") or "")
@@ -458,6 +466,19 @@ def summarize_m6_11_replay_calibration(replay_root):
             malformed_bundle_count += 1
             cohort_summary["malformed_bundle_count"] += 1
             cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
+            continue
+        calibration_counted = _coerce_calibration_counted(
+            bundle_summary.get("calibration_counted"),
+            default=True,
+        )
+        if not calibration_counted:
+            reason = str(bundle_summary.get("calibration_exclusion_reason") or "").strip()
+            if not reason:
+                reason = "unspecified"
+            non_counted_bundle_count += 1
+            non_counted_bundle_reasons[reason] += 1
+            cohort_summary["non_counted_bundle_count"] += 1
+            cohort_summary["non_counted_bundle_reasons"][reason] += 1
             continue
         relevant_bundles += 1
         cohort_summary["relevant_bundles"] += 1
