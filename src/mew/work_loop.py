@@ -18,6 +18,7 @@ from .test_discovery import normalize_work_path
 from .timeutil import now_iso
 from .work_replay import write_patch_draft_compiler_replay
 from .work_session import (
+    APPROVAL_STATUS_INDETERMINATE,
     GIT_WORK_TOOLS,
     READ_ONLY_WORK_TOOLS,
     WORK_TOOLS,
@@ -401,6 +402,7 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
         ),
         "summary": clip_output(call.get("summary") or "", result_text_limit),
         "error": clip_output(call.get("error") or "", result_text_limit),
+        "approval_status": call.get("approval_status") or "",
         "result": _compact_tool_result(
             tool,
             call.get("result") or {},
@@ -1629,7 +1631,50 @@ def _is_calibration_measured_patch_draft_task(task):
     )
 
 
-def _calibration_measured_patch_draft_finish_allowed(context, model_metrics):
+def _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task):
+    task = task or {}
+    text = " ".join(
+        str(task.get(field) or "").strip().lower()
+        for field in ("title", "description", "notes")
+        if task.get(field) is not None
+    )
+    return "do not finish from a passing verifier alone" in text
+
+
+def _calibration_measured_patch_draft_has_paired_patch_evidence(context):
+    work_session = (context or {}).get("work_session") or {}
+    source_seen = False
+    test_seen = False
+    for call in work_session.get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        if str(call.get("status") or "") != "completed":
+            continue
+        if str(call.get("tool") or "") not in {"write_file", "edit_file", "edit_file_hunks"}:
+            continue
+        if call.get("approval_status") in ("rejected", "failed", APPROVAL_STATUS_INDETERMINATE):
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        changed = result.get("changed")
+        if changed is False:
+            continue
+        path = str(
+            result.get("path")
+            or (call.get("parameters") or {}).get("path")
+            or ""
+        ).strip()
+        if not path:
+            continue
+        if _work_batch_path_is_mew_source(path):
+            source_seen = True
+        if _work_batch_path_is_tests(path):
+            test_seen = True
+        if source_seen and test_seen:
+            return True
+    return False
+
+
+def _calibration_measured_patch_draft_finish_allowed(task, context, model_metrics):
     def valid_replay_path(candidate):
         replay_path = str(candidate or "").strip()
         if not replay_path:
@@ -1673,8 +1718,6 @@ def _calibration_measured_patch_draft_finish_allowed(context, model_metrics):
             return False
         return True
 
-    if _write_ready_fast_path_verifier_closeout_passed(context):
-        return True
     replay_path = str((model_metrics or {}).get("patch_draft_compiler_replay_path") or "").strip()
     if valid_replay_path(replay_path):
         return True
@@ -1686,7 +1729,16 @@ def _calibration_measured_patch_draft_finish_allowed(context, model_metrics):
         else {}
     )
     replay_path = str(latest_replay.get("path") or "").strip()
-    return valid_replay_path(replay_path)
+    if valid_replay_path(replay_path):
+        return True
+    if _calibration_measured_patch_draft_has_paired_patch_evidence(context):
+        return True
+    if (
+        _write_ready_fast_path_verifier_closeout_passed(context)
+        and not _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task)
+    ):
+        return True
+    return False
 
 
 def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action, model_metrics):
@@ -1694,13 +1746,14 @@ def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action,
         return action
     if not _is_calibration_measured_patch_draft_task(task):
         return action
-    if _calibration_measured_patch_draft_finish_allowed(context, model_metrics):
+    if _calibration_measured_patch_draft_finish_allowed(task, context, model_metrics):
         return action
     return {
         "type": "wait",
         "reason": (
             "finish is blocked: calibration-measured patch_draft tasks require "
-            "a passed focused verifier closeout or same-session replay artifact before no-change"
+            "a same-session replay artifact or reviewer-visible paired patch evidence; "
+            "verifier-only closeout is not enough for this task"
         ),
     }
 

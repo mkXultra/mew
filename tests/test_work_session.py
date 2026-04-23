@@ -9729,7 +9729,7 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(resume["latest_patch_draft_compiler_replay"], {})
 
-    def test_plan_work_model_turn_allows_calibration_measured_patch_draft_finish_after_verifier_closeout(self):
+    def test_plan_work_model_turn_blocks_calibration_measured_patch_draft_finish_after_verifier_only_closeout(self):
         from mew.work_loop import plan_work_model_turn
 
         old_cwd = os.getcwd()
@@ -9827,8 +9827,132 @@ class WorkSessionTests(unittest.TestCase):
                         act_mode="deterministic",
                     )
 
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("verifier-only closeout is not enough", planned["action"]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_allows_calibration_measured_patch_draft_finish_with_paired_patch_evidence(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        target_paths = ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Goal: get one live replay result on this pair. Stop only after one replay bundle, "
+                    "one reviewer-visible paired dry-run patch, or one live exact blocker from the draft lane. "
+                    "Do not finish from a passing verifier alone."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0]},
+                        "result": {"path": target_paths[0], "changed": True, "dry_run": True, "written": False},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[1]},
+                        "result": {"path": target_paths[1], "changed": True, "dry_run": True, "written": False},
+                    },
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "paired patch captured"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=target_paths,
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        act_mode="deterministic",
+                    )
+
                 self.assertEqual(planned["action"]["type"], "finish")
-                self.assertEqual(planned["action"]["reason"], "verified no change")
+                self.assertEqual(planned["action"]["reason"], "paired patch captured")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_blocks_calibration_finish_with_rejected_paired_patch_evidence(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        target_paths = ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Goal: get one live replay result on this pair. Stop only after one replay bundle, "
+                    "one reviewer-visible paired dry-run patch, or one live exact blocker from the draft lane. "
+                    "Do not finish from a passing verifier alone."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "rejected",
+                        "parameters": {"path": target_paths[0]},
+                        "result": {"path": target_paths[0], "changed": True, "dry_run": True, "written": False},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "approval_status": "rejected",
+                        "parameters": {"path": target_paths[1]},
+                        "result": {"path": target_paths[1], "changed": True, "dry_run": True, "written": False},
+                    },
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={"summary": "done", "action": {"type": "finish", "reason": "paired patch rejected"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=target_paths,
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft.PatchDraftTests",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("reviewer-visible paired patch evidence", planned["action"]["reason"])
             finally:
                 os.chdir(old_cwd)
 
