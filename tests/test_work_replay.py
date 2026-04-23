@@ -409,6 +409,80 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_write_work_model_failure_replay_writes_for_queued_pre_draft_handoff_shape(self):
+        session = {
+            "id": 15,
+            "active_work_todo": {
+                "id": "todo-15",
+                "status": "queued",
+                "source": {"target_paths": ["src/mew/work_replay.py"]},
+            },
+        }
+        model_turn = {
+            "id": 90,
+            "summary": "model produced response without assistant text",
+            "model_metrics": {
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "first_plan_item_not_edit_ready",
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-23"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-23T10:00:00Z"):
+                        report_path = write_work_model_failure_replay(
+                            session=session,
+                            model_turn=model_turn,
+                            exc=RuntimeError("model had no assistant text"),
+                        )
+
+                self.assertTrue(report_path)
+                report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                self.assertEqual(report["bundle"], "work-loop-model-failure")
+                self.assertEqual(report["session_id"], 15)
+                self.assertEqual(report["model_turn_id"], 90)
+                self.assertEqual(
+                    report["active_work_todo"]["source"]["target_paths"],
+                    ["src/mew/work_replay.py"],
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_work_model_failure_replay_skips_unrelated_queued_failure(self):
+        session = {
+            "id": 16,
+            "active_work_todo": {
+                "id": "todo-16",
+                "status": "queued",
+                "source": {"target_paths": ["src/mew/work_replay.py"]},
+            },
+        }
+        model_turn = {
+            "id": 91,
+            "summary": "model failed before draft handoff",
+            "model_metrics": {
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "paired_cached_windows_edit_ready",
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                report_path = write_work_model_failure_replay(
+                    session=session,
+                    model_turn=model_turn,
+                    exc=RuntimeError("model failure"),
+                )
+                self.assertIsNone(report_path)
+                self.assertFalse((Path(tmp) / REPLAYS_ROOT).exists())
+            finally:
+                os.chdir(old_cwd)
+
     def test_write_patch_draft_compiler_replay_persists_cohort_fields(self):
         session_id = "s-11"
         todo_id = "todo-11-1"

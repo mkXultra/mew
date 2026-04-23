@@ -24,7 +24,20 @@ def _is_draft_related_failure(session, model_turn):
         return True
     active_work_todo = session.get("active_work_todo") or {}
     todo_status = str(active_work_todo.get("status") or "").strip()
-    return todo_status in WORK_TODO_PHASE_STATUSES
+    if todo_status in WORK_TODO_PHASE_STATUSES:
+        return True
+    if todo_status != "queued":
+        return False
+    source = active_work_todo.get("source") or {}
+    target_paths = source.get("target_paths") or []
+    has_target_paths = isinstance(target_paths, (list, tuple)) and any(
+        isinstance(path, str) and path.strip() for path in target_paths
+    )
+    return (
+        has_target_paths
+        and str(model_metrics.get("write_ready_fast_path_reason") or "").strip()
+        == "first_plan_item_not_edit_ready"
+    )
 
 
 def _task_id_for_report(session, task):
