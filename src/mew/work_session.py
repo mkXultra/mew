@@ -17,7 +17,7 @@ from .read_tools import (
     summarize_read_result,
 )
 from .state import next_id
-from .tasks import clip_output, find_task
+from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
 from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_command_record_streaming, run_git_tool
@@ -39,6 +39,7 @@ WORK_SESSION_STATUSES = {"active", "closed"}
 WORK_TOOL_STATUSES = {"running", "completed", "failed", "interrupted"}
 WORK_MODEL_TURN_STATUSES = {"running", "completed", "failed", "interrupted"}
 WORK_TODO_STATUSES = {
+    "queued",
     "drafting",
     "blocked_on_patch",
     "awaiting_review",
@@ -1195,6 +1196,7 @@ def create_work_session(state, task, current_time=None, inherit_defaults=True):
         task_goal = task.get("description") or task.get("title") or ""
         if task_goal:
             existing["goal"] = task_goal
+        existing["task_scope"] = task_scope(task)
         existing["updated_at"] = current_time
         return existing, False
 
@@ -1212,6 +1214,7 @@ def create_work_session(state, task, current_time=None, inherit_defaults=True):
         "tool_calls": [],
         "model_turns": [],
         "active_work_todo": {},
+        "task_scope": task_scope(task),
         "startup_memory": startup_working_memory(task),
     }
     if inherit_defaults and latest and latest.get("default_options"):
@@ -1226,7 +1229,7 @@ def startup_working_memory(task):
     title = str(task.get("title") or "work session").strip()
     goal = str(task.get("description") or title).strip()
     task_ref = f"task #{task_id}" if task_id is not None else "the selected task"
-    return {
+    memory = {
         "hypothesis": f"Start {task_ref}: {title}",
         "next_step": "continue the work session with one bounded model/tool step, then verify or record the next blocker",
         "plan_items": [],
@@ -1234,6 +1237,10 @@ def startup_working_memory(task):
         "source": "session_startup",
         "goal": goal,
     }
+    target_paths = task_scope_target_paths(task)
+    if target_paths:
+        memory["target_paths"] = target_paths
+    return memory
 
 
 def safe_work_write_roots(roots):
@@ -5025,6 +5032,54 @@ def _observe_active_work_todo(
     return existing
 
 
+def _task_scope_target_paths_for_session(session, *, task=None):
+    target_paths = task_scope_target_paths(task)
+    if target_paths:
+        return target_paths
+    return list(
+        (
+            normalize_task_scope((session or {}).get("task_scope") or {}).get("target_paths")
+            or []
+        )
+    )
+
+
+def _seed_active_work_todo_from_task_scope(
+    session,
+    *,
+    task=None,
+    plan_item_observations=None,
+    verify_command="",
+    current_time=None,
+):
+    if _normalize_active_work_todo((session or {}).get("active_work_todo") or {}):
+        return {}
+    first_observation = (plan_item_observations or [{}])[0] if plan_item_observations else {}
+    if first_observation.get("edit_ready"):
+        return {}
+    target_paths = _relevant_resume_target_paths(_task_scope_target_paths_for_session(session, task=task))
+    if len(target_paths) != 2:
+        return {}
+    current_time = current_time or (session or {}).get("updated_at") or now_iso()
+    seed = {
+        "id": _next_active_work_todo_id(session),
+        "status": "queued",
+        "source": {
+            "plan_item": str(first_observation.get("plan_item") or "").strip(),
+            "target_paths": target_paths,
+            "verify_command": str(verify_command or "").strip(),
+        },
+        "cached_window_refs": [],
+        "attempts": {"draft": 0, "review": 0},
+        "patch_draft_id": "",
+        "blocker": {},
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+    session["active_work_todo"] = _normalize_active_work_todo(seed)
+    return session["active_work_todo"]
+
+
 def _build_draft_state_from_turns(model_turns, plan_item_observations, active_work_todo=None):
     draft_state = {
         "draft_phase": "",
@@ -5503,6 +5558,14 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         model_turns=turns,
         current_time=current_time,
     )
+    if not active_work_todo:
+        active_work_todo = _seed_active_work_todo_from_task_scope(
+            session,
+            task=task,
+            plan_item_observations=plan_item_observations,
+            verify_command=verify_command,
+            current_time=current_time,
+        )
     latest_tiny_turn = _latest_tiny_write_ready_draft_turn(
         turns,
         todo_id=(active_work_todo or {}).get("id"),

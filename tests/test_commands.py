@@ -81,6 +81,41 @@ class CommandTests(unittest.TestCase):
         self.assertIn("usage: mew task add", output)
         self.assertIn("create the task in ready status", output)
 
+    def test_task_add_json_stores_scope_target_paths(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "task",
+                            "add",
+                            "Scoped pair",
+                            "--kind",
+                            "coding",
+                            "--scope-target-path",
+                            "tests/test_commands.py",
+                            "--scope-target-path",
+                            "./src/mew/commands.py",
+                            "--json",
+                        ]
+                    )
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        data = json.loads(stdout.getvalue())
+        self.assertEqual(
+            data["task"]["scope"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_commands.py"],
+        )
+        self.assertEqual(
+            state["tasks"][0]["scope"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_commands.py"],
+        )
+
     def test_do_uses_supervised_work_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

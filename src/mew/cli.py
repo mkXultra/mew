@@ -1736,6 +1736,11 @@ def build_parser():
     add_parser.add_argument("--agent-model", help="agent model for task run, e.g. codex-ultra")
     add_parser.add_argument("--agent-prompt", help="prompt override for task run")
     add_parser.add_argument(
+        "--scope-target-path",
+        action="append",
+        help="repeat twice to store one explicit src/test task scope pair",
+    )
+    add_parser.add_argument(
         "--auto-execute",
         action="store_true",
         help="allow passive runtime to execute this task command",
@@ -1817,6 +1822,12 @@ def build_parser():
     update_parser.add_argument("--agent-backend")
     update_parser.add_argument("--agent-model")
     update_parser.add_argument("--agent-prompt")
+    update_parser.add_argument(
+        "--scope-target-path",
+        action="append",
+        help="repeat twice to replace the explicit src/test task scope pair",
+    )
+    update_parser.add_argument("--clear-scope", action="store_true", help="clear any explicit task scope pair")
     update_parser.add_argument("--auto-execute", dest="auto_execute", action="store_true")
     update_parser.add_argument("--no-auto-execute", dest="auto_execute", action="store_false")
     update_parser.set_defaults(auto_execute=None)

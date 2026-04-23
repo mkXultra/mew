@@ -6884,6 +6884,80 @@ class WorkSessionTests(unittest.TestCase):
         self.assertFalse(details["active"])
         self.assertEqual(details["reason"], "missing_plan_item_observations")
 
+    def test_write_ready_fast_path_can_use_seeded_active_work_todo_pair_once_one_observation_arrives(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Seeded scope fallback",
+                "description": "Recover the paired target paths from the seeded task scope.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "queued",
+                        "source": {
+                            "target_paths": ["src/mew/commands.py", "tests/test_commands.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "line_start": 6960,
+                                    "line_end": 7010,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_commands.py"},
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_commands.py",
+                        "line_start": 1,
+                        "line_end": 60,
+                        "text": "tests window\n" * 20,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_fallback")
+        self.assertEqual(
+            [item["path"] for item in details["recent_windows"]],
+            ["src/mew/commands.py", "tests/test_commands.py"],
+        )
+
     def test_write_ready_fast_path_does_not_replace_nonpaired_frontier_with_active_todo_pair(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 
@@ -9583,6 +9657,69 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(session, before)
         self.assertNotIn("active_work_todo:", format_work_session_resume(resume))
 
+    def test_build_work_session_resume_seeds_active_work_todo_from_fresh_task_scope(self):
+        state = {"tasks": [], "work_sessions": [], "next_ids": {"task": 1, "work_session": 1}}
+        task = add_coding_task(state)
+        task["scope"] = {"target_paths": ["tests/test_work_session.py", "src/mew/work_session.py"]}
+
+        session, _created = create_work_session(state, task, current_time="2026-04-23T00:00:00Z")
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["phase"], "idle")
+        self.assertEqual(resume["active_work_todo"]["status"], "queued")
+        self.assertEqual(
+            resume["active_work_todo"]["source"]["target_paths"],
+            ["src/mew/work_session.py", "tests/test_work_session.py"],
+        )
+        self.assertEqual(
+            session["active_work_todo"]["source"]["target_paths"],
+            ["src/mew/work_session.py", "tests/test_work_session.py"],
+        )
+
+    def test_build_work_session_resume_seeded_scope_still_fails_closed_without_observations(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        state = {"tasks": [], "work_sessions": [], "next_ids": {"task": 1, "work_session": 1}}
+        task = add_coding_task(state)
+        task["scope"] = {"target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"]}
+        session, _created = create_work_session(state, task, current_time="2026-04-23T00:00:00Z")
+        resume = build_work_session_resume(session)
+        context = {
+            "task": task,
+            "work_session": {
+                "id": session["id"],
+                "status": session["status"],
+                "resume": resume,
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/work_session.py",
+                        "line_start": 1,
+                        "line_end": 40,
+                        "text": "source window\n" * 20,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 1,
+                        "line_end": 40,
+                        "text": "test window\n" * 20,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertEqual(resume["active_work_todo"]["status"], "queued")
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_plan_item_observations")
+
     def test_build_work_session_resume_replaces_stale_active_work_todo_on_frontier_change(self):
         session = {
             "id": 1,
@@ -9678,6 +9815,100 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(todo["blocker"], {})
         self.assertEqual(session["active_work_todo"]["id"], "todo-1-2")
         self.assertEqual(session["last_work_todo_ordinal"], 2)
+
+    def test_build_work_session_resume_seed_does_not_override_existing_live_active_work_todo(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Keep live frontier",
+            "goal": "Do not replace a live active todo with a scoped seed.",
+            "updated_at": "2026-04-23T00:00:00Z",
+            "task_scope": {
+                "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+            },
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/commands.py",
+                        "line_start": 5203,
+                        "line_end": 5348,
+                        "text": "command window\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_commands.py",
+                        "line_start": 1,
+                        "line_end": 40,
+                        "text": "test window\n",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Draft one paired dry-run edit batch for src/mew/commands.py and tests/test_commands.py",
+                            ],
+                            "target_paths": ["src/mew/commands.py", "tests/test_commands.py"],
+                        }
+                    },
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-1-1",
+                "status": "drafting",
+                "source": {
+                    "plan_item": "Draft one paired dry-run edit batch for src/mew/commands.py and tests/test_commands.py",
+                    "target_paths": ["src/mew/commands.py", "tests/test_commands.py"],
+                    "verify_command": "",
+                },
+                "cached_window_refs": [
+                    {
+                        "path": "src/mew/commands.py",
+                        "tool_call_id": 2,
+                        "line_start": 5203,
+                        "line_end": 5348,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:commands",
+                    },
+                    {
+                        "path": "tests/test_commands.py",
+                        "tool_call_id": 3,
+                        "line_start": 1,
+                        "line_end": 40,
+                        "context_truncated": False,
+                        "window_sha1": "sha1:tests",
+                    },
+                ],
+                "attempts": {"draft": 1, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {},
+                "created_at": "2026-04-23T00:00:00Z",
+                "updated_at": "2026-04-23T00:01:00Z",
+            },
+            "last_work_todo_ordinal": 1,
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["active_work_todo"]["id"], "todo-1-1")
+        self.assertEqual(
+            resume["active_work_todo"]["source"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_commands.py"],
+        )
 
     def test_build_work_session_resume_creates_active_work_todo_for_edit_ready_frontier(self):
         session = {

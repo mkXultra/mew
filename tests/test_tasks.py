@@ -3,10 +3,12 @@ import unittest
 from mew.tasks import (
     infer_task_kind,
     normalize_task_id,
+    normalize_task_scope,
     task_kind,
     task_kind_report,
     task_needs_programmer_plan,
     task_question,
+    task_scope_target_paths,
     task_sort_key,
 )
 
@@ -61,6 +63,22 @@ class TaskKindTests(unittest.TestCase):
 
         self.assertEqual(report["inferred_kind"], "unknown")
         self.assertFalse(report["mismatch"])
+
+    def test_normalize_task_scope_requires_matching_source_test_pair(self):
+        self.assertEqual(
+            normalize_task_scope({"target_paths": ["tests/test_commands.py", "./src/mew/commands.py"]}),
+            {"target_paths": ["src/mew/commands.py", "tests/test_commands.py"]},
+        )
+        self.assertEqual(
+            normalize_task_scope({"target_paths": ["src/mew/commands.py", "tests/test_work_session.py"]}),
+            {},
+        )
+
+    def test_task_scope_target_paths_returns_normalized_pair(self):
+        self.assertEqual(
+            task_scope_target_paths({"scope": {"target_paths": ["./tests/test_tasks.py", "src/mew/tasks.py"]}}),
+            ["src/mew/tasks.py", "tests/test_tasks.py"],
+        )
 
     def test_running_tasks_sort_before_ready_tasks(self):
         tasks = [

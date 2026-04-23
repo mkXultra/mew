@@ -197,10 +197,12 @@ from .tasks import (
     format_task,
     is_programmer_task,
     normalize_task_kind,
+    normalize_task_scope,
     open_tasks,
     task_kind,
     task_kind_report,
     task_question,
+    task_scope_target_paths,
     task_sort_key,
 )
 from .thoughts import format_thought_entry
@@ -294,6 +296,7 @@ APPROVAL_MODES = ("default", APPROVAL_MODE_ACCEPT_EDITS)
 
 def task_json_data(task):
     data = dict(task)
+    data["scope"] = normalize_task_scope(task.get("scope") or {})
     data["effective_kind"] = task_kind(task)
     data["plan_count"] = len(task.get("plans") or [])
     data["run_count"] = len(task.get("runs") or [])
@@ -315,6 +318,14 @@ def task_json_response(task, **extra):
 
 
 def cmd_task_add(args):
+    scope_target_paths = list(getattr(args, "scope_target_path", None) or [])
+    scope = normalize_task_scope({"target_paths": scope_target_paths})
+    if scope_target_paths and not scope:
+        print(
+            "mew: --scope-target-path requires one src/mew/*.py path and its matching tests/test_*.py path",
+            file=sys.stderr,
+        )
+        return 1
     with state_lock():
         state = load_state()
         current_time = now_iso()
@@ -333,6 +344,7 @@ def cmd_task_add(args):
             "agent_model": args.agent_model or "",
             "agent_prompt": args.agent_prompt or "",
             "agent_run_id": None,
+            "scope": scope,
             "plans": [],
             "latest_plan_id": None,
             "runs": [],
@@ -473,6 +485,8 @@ def cmd_task_show(args):
     print(f"notes: {format_task_notes_display(task.get('notes') or '')}")
     print(f"command: {task.get('command') or ''}")
     print(f"cwd: {task.get('cwd') or ''}")
+    scope_target_paths = task_scope_target_paths(task)
+    print(f"scope_target_paths: {', '.join(scope_target_paths)}")
     print(f"auto_execute: {task.get('auto_execute')}")
     print(f"agent_backend: {task.get('agent_backend') or ''}")
     print(f"agent_model: {task.get('agent_model') or ''}")
@@ -8532,6 +8546,19 @@ def sync_task_done_state(state, task, summary, current_time):
         close_work_session(session, current_time=current_time)
 
 def cmd_task_update(args):
+    if getattr(args, "clear_scope", False) and getattr(args, "scope_target_path", None):
+        print("mew: choose either --scope-target-path or --clear-scope", file=sys.stderr)
+        return 1
+    scope_target_paths = getattr(args, "scope_target_path", None)
+    if scope_target_paths is not None:
+        scope_target_paths = list(scope_target_paths)
+        scope = normalize_task_scope({"target_paths": scope_target_paths})
+        if scope_target_paths and not scope:
+            print(
+                "mew: --scope-target-path requires one src/mew/*.py path and its matching tests/test_*.py path",
+                file=sys.stderr,
+            )
+            return 1
     with state_lock():
         state = load_state()
         task = find_task(state, args.task_id)
@@ -8560,6 +8587,12 @@ def cmd_task_update(args):
                 changed = True
         if args.auto_execute is not None:
             task["auto_execute"] = args.auto_execute
+            changed = True
+        if getattr(args, "clear_scope", False):
+            task["scope"] = {}
+            changed = True
+        elif scope_target_paths is not None:
+            task["scope"] = scope
             changed = True
 
         if changed:

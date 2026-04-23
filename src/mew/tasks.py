@@ -6,6 +6,7 @@ import subprocess
 from .config import MAX_COMMAND_OUTPUT_CHARS
 from .errors import MewError
 from .state import add_outbox_message, has_unread_outbox_message
+from .test_discovery import convention_test_path_for_mew_source, normalize_work_path
 from .timeutil import now_iso
 
 TASK_KINDS = ("coding", "research", "personal", "admin", "unknown")
@@ -229,6 +230,36 @@ def task_kind_report(task):
         "effective_kind": effective,
         "mismatch": bool(explicit and inferred not in ("", "unknown") and explicit != inferred),
     }
+
+def normalize_task_scope(scope):
+    if not isinstance(scope, dict):
+        return {}
+    raw_target_paths = scope.get("target_paths") or []
+    if isinstance(raw_target_paths, str):
+        raw_target_paths = [raw_target_paths]
+    target_paths = []
+    for item in raw_target_paths:
+        path = normalize_work_path(item)
+        if path and path not in target_paths:
+            target_paths.append(path)
+    if len(target_paths) != 2:
+        return {}
+    source_paths = [path for path in target_paths if convention_test_path_for_mew_source(path)]
+    test_paths = [path for path in target_paths if path.startswith("tests/") and path.endswith(".py")]
+    if len(source_paths) != 1 or len(test_paths) != 1:
+        return {}
+    source_path = source_paths[0]
+    test_path = test_paths[0]
+    if convention_test_path_for_mew_source(source_path) != test_path:
+        return {}
+    return {"target_paths": [source_path, test_path]}
+
+def task_scope(task):
+    task = task if isinstance(task, dict) else {}
+    return normalize_task_scope(task.get("scope") or {})
+
+def task_scope_target_paths(task):
+    return list((task_scope(task).get("target_paths") or []))
 
 def latest_task_plan_record(task):
     plans = task.get("plans") or []
