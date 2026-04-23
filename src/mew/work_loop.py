@@ -1412,7 +1412,8 @@ def _write_ready_window_text_is_structurally_complete(text):
     first_line_stripped = first_line.lstrip()
     first_keyword = first_line_stripped.split()[0].rstrip(":") if first_line_stripped else ""
     if first_line and first_line[0].isspace():
-        return False
+        if not first_line_stripped.startswith(("def ", "async def ", "@")):
+            return False
     if first_line_stripped.endswith(":") and first_keyword in {"else", "elif", "except", "finally"}:
         return False
     last_line = significant_lines[-1].lstrip()

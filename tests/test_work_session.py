@@ -7301,6 +7301,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(details["reason"], "insufficient_cached_window_context")
         self.assertEqual(build_write_ready_work_model_context(context), {})
 
+    def test_write_ready_fast_path_allows_complete_indented_test_method_window(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def update_state():\n    return 1\n",
+            test_text="    def test_update_state(self):\n        assert update_state() == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(build_write_ready_work_model_context(context)["write_ready_fast_path"]["active"], True)
+
     def test_write_ready_fast_path_blocks_clause_tail_fragment(self):
         from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
 
