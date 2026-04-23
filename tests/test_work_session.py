@@ -39,6 +39,7 @@ from mew.work_session import (
     build_work_continuity_score,
     build_work_session_effort,
     build_work_session_resume,
+    first_actionable_plan_item,
     create_work_session,
     finish_work_tool_call,
     first_unquoted_shell_operator,
@@ -10663,6 +10664,203 @@ class WorkSessionTests(unittest.TestCase):
             resume["skipped_exact_read_plan_items"][0]["plan_item"],
             "Run the scoped PatchDraftTests command",
         )
+
+    def test_build_work_session_resume_skips_verified_failure_branch_and_surfaces_conclusion_plan_item(self):
+        verify_command = (
+            "uv run python -m unittest tests.test_patch_draft.PatchDraftTests"
+            ".test_compile_patch_draft_blocks_missing_exact_cached_window_texts"
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Skip verified failure branch",
+            "goal": "Keep branch resolution faithful after a passing verifier closeout.",
+            "created_at": "2026-04-22T00:00:00Z",
+            "updated_at": "2026-04-22T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": verify_command,
+                        "exit_code": 0,
+                        "stdout": ".\n----------------------------------------------------------------------\nRan 1 test in 0.003s\n\nOK\n",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:45Z",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/patch_draft.py",
+                        "line_start": 408,
+                        "line_end": 423,
+                        "text": "".join(f"source_line_{index}\n" for index in range(16)),
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_patch_draft.py",
+                        "line_start": 542,
+                        "line_end": 561,
+                        "text": "".join(f"test_line_{index}\n" for index in range(20)),
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                    "working_memory": {
+                            "plan_items": [
+                                "Run the named PatchDraftTests blocker test",
+                                "If the focused verifier fails, repair on the same src/test pair",
+                                "If it succeeds without a replay artifact, finish with a no-change conclusion",
+                            ],
+                            "target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "If it succeeds without a replay artifact, finish with a no-change conclusion",
+        )
+        self.assertFalse(resume["plan_item_observations"][0]["edit_ready"])
+        self.assertEqual(
+            [item["plan_item"] for item in resume["skipped_exact_read_plan_items"]],
+            [
+                "Run the named PatchDraftTests blocker test",
+                "If the focused verifier fails, repair on the same src/test pair",
+            ],
+        )
+        self.assertEqual(resume["active_work_todo"], {})
+
+    def test_build_work_session_resume_skips_verified_verification_branch_and_keeps_success_branch_non_edit_ready(self):
+        verify_command = "uv run pytest tests/test_patch_draft.py -q"
+        session = {
+            "id": 2,
+            "task_id": 2,
+            "status": "active",
+            "title": "Skip verified verification branch",
+            "goal": "Verification-worded follow-up branches should resolve after a passing verifier.",
+            "created_at": "2026-04-22T00:00:00Z",
+            "updated_at": "2026-04-22T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": verify_command,
+                        "exit_code": 0,
+                        "stdout": ".\n1 passed\n",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:45Z",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/patch_draft.py",
+                        "line_start": 408,
+                        "line_end": 423,
+                        "text": "".join(f"source_line_{index}\n" for index in range(16)),
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_patch_draft.py",
+                        "line_start": 542,
+                        "line_end": 561,
+                        "text": "".join(f"test_line_{index}\n" for index in range(20)),
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Run the scoped PatchDraftTests command",
+                                "If verification fails, repair on the same src/test pair",
+                                "If verification succeeds without a replay artifact, finish with a no-change conclusion",
+                            ],
+                            "target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "If verification succeeds without a replay artifact, finish with a no-change conclusion",
+        )
+        self.assertFalse(resume["plan_item_observations"][0]["edit_ready"])
+        self.assertEqual(
+            [item["plan_item"] for item in resume["skipped_exact_read_plan_items"]],
+            [
+                "Run the scoped PatchDraftTests command",
+                "If verification fails, repair on the same src/test pair",
+            ],
+        )
+        self.assertEqual(resume["active_work_todo"], {})
+
+    def test_first_actionable_plan_item_retains_failure_branch_when_verifier_not_passed(self):
+        calls = [
+            {
+                "id": 1,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "command": (
+                        "uv run python -m unittest tests.test_patch_draft.PatchDraftTests"
+                        ".test_compile_patch_draft_blocks_missing_exact_cached_window_texts"
+                    ),
+                    "exit_code": 1,
+                    "stdout": "F\n======================================================================\nFAIL: 1 test failed\n",
+                    "cwd": ".",
+                },
+            },
+        ]
+        plan_items = [
+            "Run the named PatchDraftTests blocker test",
+            "If it fails, repair on the same src/test pair",
+            "If it passes, conclude whether this counts as the exact live blocker result required",
+        ]
+        actionable, skipped = first_actionable_plan_item(plan_items, [], calls=calls)
+        self.assertEqual(actionable, "Run the named PatchDraftTests blocker test")
+        self.assertEqual(skipped, [])
+
+        actionable, skipped = first_actionable_plan_item(plan_items[1:], [], calls=calls)
+        self.assertEqual(actionable, "If it fails, repair on the same src/test pair")
+        self.assertEqual(skipped, [])
 
     def test_build_work_session_resume_does_not_skip_leading_verifier_plan_item_after_later_edit(self):
         session = {

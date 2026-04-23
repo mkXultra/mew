@@ -665,10 +665,26 @@ PLAN_ITEM_VERIFIER_PLAN_RE = re.compile(
     r"^(?:run|rerun|execute)\b.*(?:test|tests|verification|verifier|verify|unittest|pytest|poe|tox|nox)\b",
     re.IGNORECASE,
 )
+PLAN_ITEM_VERIFIER_FAILURE_BRANCH_RE = re.compile(
+    r"^\s*if\s+(?:it|(?:the\s+)?(?:focused\s+)?(?:verification|verify|verifier|test|tests|unittest|pytest|poe|tox|nox))\b.*\bfails\b",
+    re.IGNORECASE,
+)
+PLAN_ITEM_VERIFIER_SUCCESS_BRANCH_RE = re.compile(
+    r"^\s*if\s+(?:it|(?:the\s+)?(?:focused\s+)?(?:verification|verify|verifier|test|tests|unittest|pytest|poe|tox|nox))\b.*\b(?:passes|succeeds)\b",
+    re.IGNORECASE,
+)
 
 
 def _looks_like_verifier_plan_item(plan_item):
     return bool(PLAN_ITEM_VERIFIER_PLAN_RE.match(str(plan_item or "").strip()))
+
+
+def _looks_like_verifier_failure_branch_plan_item(plan_item):
+    return bool(PLAN_ITEM_VERIFIER_FAILURE_BRANCH_RE.match(str(plan_item or "").strip()))
+
+
+def _looks_like_verifier_success_branch_plan_item(plan_item):
+    return bool(PLAN_ITEM_VERIFIER_SUCCESS_BRANCH_RE.match(str(plan_item or "").strip()))
 
 
 def _looks_like_verifier_command(command):
@@ -728,6 +744,7 @@ def first_actionable_plan_item(plan_items, cached_windows, calls=None, task=None
     items = [str(item or "").strip() for item in (plan_items or []) if str(item or "").strip()]
     cached_windows = list(cached_windows or [])
     skipped = []
+    suppress_leading_failure_branches = False
 
     while items and _leading_verifier_plan_item_satisfied_by_last_verification(
         items[0],
@@ -741,6 +758,19 @@ def first_actionable_plan_item(plan_items, cached_windows, calls=None, task=None
                 "reason": (
                     "leading verifier step already satisfied by the latest successful verification "
                     "and is skipped before read-cache frontier evaluation"
+                ),
+            }
+        )
+        suppress_leading_failure_branches = True
+
+    while suppress_leading_failure_branches and items and _looks_like_verifier_failure_branch_plan_item(items[0]):
+        skipped_item = items.pop(0)
+        skipped.append(
+            {
+                "plan_item": skipped_item,
+                "reason": (
+                    "failure branch is suppressed because the preceding verifier step was satisfied by the "
+                    "latest successful verification"
                 ),
             }
         )
@@ -5511,8 +5541,12 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 )
             if cached_windows:
                 plan_item_observation["cached_windows"] = cached_windows
-            edit_ready = bool(relevant_target_paths) and len(cached_windows) == len(relevant_target_paths) and all(
-                not item.get("context_truncated") for item in cached_windows
+            is_verifier_success_branch = _looks_like_verifier_success_branch_plan_item(actionable_plan_item)
+            edit_ready = (
+                not is_verifier_success_branch
+                and bool(relevant_target_paths)
+                and len(cached_windows) == len(relevant_target_paths)
+                and all(not item.get("context_truncated") for item in cached_windows)
             )
             if edit_ready and requested_window:
                 requested_window_covered = any(
