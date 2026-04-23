@@ -10112,6 +10112,316 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_plan_work_model_turn_writes_no_change_replay_without_active_work_todo_from_task_scope(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        verify_command = "uv run python -m unittest tests.test_patch_draft.PatchDraftTests"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target_paths = ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]
+                source_text = "def compile_patch_draft_previews():\n    return []\n"
+                test_text = "class PatchDraftTests:\n    pass\n"
+                for path, text in zip(target_paths, [source_text, test_text]):
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(text, encoding="utf-8")
+                absolute_target_paths = [str(Path(path).resolve()) for path in target_paths]
+
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "Current-head sample: patch_draft native blocker closeout"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Use the current-head sample to decide whether the scoped patch_draft surfaces "
+                    "need a native blocker."
+                )
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0]},
+                        "result": {
+                            "path": absolute_target_paths[0],
+                            "offset": 0,
+                            "text": source_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[1]},
+                        "result": {
+                            "path": absolute_target_paths[1],
+                            "offset": 0,
+                            "text": test_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 3,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": verify_command},
+                        "result": {"command": verify_command, "exit_code": 0},
+                    },
+                ]
+                session["model_turns"] = [
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "tool_call_id": 3,
+                        "decision_plan": {
+                            "working_memory": {
+                                "plan_items": ["Finish native no_material_change blocker closeout"],
+                                "target_paths": target_paths,
+                            },
+                        },
+                        "action": {"type": "run_tests", "command": verify_command},
+                        "model_metrics": {
+                            "write_ready_fast_path": False,
+                            "write_ready_fast_path_reason": "missing_plan_item_observations",
+                        },
+                    }
+                ]
+
+                def fake_resume(resume_session, *args, **kwargs):
+                    resume = build_work_session_resume(resume_session, *args, **kwargs)
+                    resume["active_work_todo"] = {}
+                    resume["plan_item_observations"] = []
+                    resume["target_path_cached_window_observations"] = []
+                    resume["latest_patch_draft_compiler_replay"] = {}
+                    resume_session.pop("active_work_todo", None)
+                    return resume
+
+                blocker_summary = json.dumps(
+                    {
+                        "kind": "patch_blocker",
+                        "code": "no_material_change",
+                        "summary": "no material change remains on the scoped current-head pair",
+                    },
+                    sort_keys=True,
+                )
+                with patch("mew.work_loop.build_work_session_resume", side_effect=fake_resume):
+                    with patch(
+                        "mew.work_loop.call_model_json_with_retries",
+                        return_value={
+                            "summary": blocker_summary,
+                            "action": {
+                                "type": "finish",
+                                "reason": "patch_blocker/no_material_change",
+                            },
+                        },
+                    ):
+                        planned = plan_work_model_turn(
+                            state,
+                            session,
+                            task,
+                            {"path": "auth.json"},
+                            allowed_read_roots=["."],
+                            allowed_write_roots=target_paths,
+                            allow_verify=True,
+                            verify_command=verify_command,
+                            act_mode="deterministic",
+                        )
+
+                self.assertEqual(planned["context"]["work_session"]["resume"]["active_work_todo"], {})
+                self.assertEqual(
+                    planned["context"]["work_session"]["resume"]["latest_patch_draft_compiler_replay"],
+                    {},
+                )
+                self.assertFalse(planned["model_metrics"]["write_ready_fast_path"])
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    "write-ready tiny draft blocker: no_material_change",
+                )
+                expected_todo_id = f"session-{session['id']}-patch-draft-no-change"
+                blocker = planned["action"].get("blocker") or {}
+                self.assertEqual(blocker["code"], "no_material_change")
+                self.assertEqual(blocker["todo_id"], expected_todo_id)
+                metrics = planned["model_metrics"]
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                replay_path = Path(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(replay_path.is_file())
+                self.assertEqual(blocker["replay_path"], str(replay_path))
+
+                replay_metadata = json.loads(replay_path.read_text(encoding="utf-8"))
+                self.assertEqual(replay_metadata["bundle"], "patch_draft_compiler")
+                self.assertTrue(replay_metadata["calibration_counted"])
+                self.assertEqual(replay_metadata["session_id"], str(session["id"]))
+                self.assertEqual(replay_metadata["todo_id"], expected_todo_id)
+                self.assertEqual(replay_metadata["blocker_code"], "no_material_change")
+                validator_result = json.loads(
+                    (replay_path.parent / replay_metadata["files"]["validator_result"]).read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(validator_result["kind"], "patch_blocker")
+                self.assertEqual(validator_result["code"], "no_material_change")
+                cached_windows = json.loads(
+                    (replay_path.parent / replay_metadata["files"]["cached_windows"]).read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(set(cached_windows), set(target_paths))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_blocks_no_change_replay_without_active_work_todo_for_suffix_line_windows(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        verify_command = "uv run python -m unittest tests.test_patch_draft.PatchDraftTests"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target_paths = ["src/mew/patch_draft.py", "tests/test_patch_draft.py"]
+                source_text = "HEADER\nTARGET_SOURCE\nTAIL_SOURCE\n"
+                test_text = "HEADER\nTARGET_TEST\nTAIL_TEST\n"
+                for path, text in zip(target_paths, [source_text, test_text]):
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(text, encoding="utf-8")
+                absolute_target_paths = [str(Path(path).resolve()) for path in target_paths]
+
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "Current-head sample: patch_draft native blocker closeout"
+                task["description"] = (
+                    "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                    "Use the current-head sample to decide whether the scoped patch_draft surfaces "
+                    "need a native blocker."
+                )
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": target_paths[0],
+                            "line_start": 2,
+                            "line_count": 2,
+                        },
+                        "result": {
+                            "path": absolute_target_paths[0],
+                            "line_start": 2,
+                            "line_count": 2,
+                            "line_end": 3,
+                            "has_more_lines": False,
+                            "text": "TARGET_SOURCE\nTAIL_SOURCE\n",
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": target_paths[1],
+                            "line_start": 2,
+                            "line_count": 2,
+                        },
+                        "result": {
+                            "path": absolute_target_paths[1],
+                            "line_start": 2,
+                            "line_count": 2,
+                            "line_end": 3,
+                            "has_more_lines": False,
+                            "text": "TARGET_TEST\nTAIL_TEST\n",
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 3,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": verify_command},
+                        "result": {"command": verify_command, "exit_code": 0},
+                    },
+                ]
+                session["model_turns"] = [
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "tool_call_id": 3,
+                        "decision_plan": {
+                            "working_memory": {
+                                "plan_items": ["Finish native no_material_change blocker closeout"],
+                                "target_paths": target_paths,
+                            },
+                        },
+                        "action": {"type": "run_tests", "command": verify_command},
+                        "model_metrics": {
+                            "write_ready_fast_path": False,
+                            "write_ready_fast_path_reason": "missing_plan_item_observations",
+                        },
+                    }
+                ]
+
+                def fake_resume(resume_session, *args, **kwargs):
+                    resume = build_work_session_resume(resume_session, *args, **kwargs)
+                    resume["active_work_todo"] = {}
+                    resume["plan_item_observations"] = []
+                    resume["target_path_cached_window_observations"] = []
+                    resume["latest_patch_draft_compiler_replay"] = {}
+                    resume_session.pop("active_work_todo", None)
+                    return resume
+
+                blocker_summary = json.dumps(
+                    {
+                        "kind": "patch_blocker",
+                        "code": "no_material_change",
+                        "summary": "no material change remains on the scoped current-head pair",
+                    },
+                    sort_keys=True,
+                )
+                with patch("mew.work_loop.build_work_session_resume", side_effect=fake_resume):
+                    with patch(
+                        "mew.work_loop.call_model_json_with_retries",
+                        return_value={
+                            "summary": blocker_summary,
+                            "action": {
+                                "type": "finish",
+                                "reason": "patch_blocker/no_material_change",
+                            },
+                        },
+                    ):
+                        planned = plan_work_model_turn(
+                            state,
+                            session,
+                            task,
+                            {"path": "auth.json"},
+                            allowed_read_roots=["."],
+                            allowed_write_roots=target_paths,
+                            allow_verify=True,
+                            verify_command=verify_command,
+                            act_mode="deterministic",
+                        )
+
+                self.assertEqual(planned["context"]["work_session"]["resume"]["active_work_todo"], {})
+                self.assertFalse(planned["model_metrics"]["write_ready_fast_path"])
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("same-session replay artifact", planned["action"]["reason"])
+                metrics = planned["model_metrics"]
+                self.assertFalse(metrics.get("patch_draft_compiler_ran", False))
+                self.assertEqual(metrics.get("patch_draft_compiler_replay_path") or "", "")
+                self.assertFalse((Path(".mew") / "replays" / "work-loop").exists())
+            finally:
+                os.chdir(old_cwd)
+
     def test_plan_work_model_turn_blocks_patch_draft_finish_when_guidance_supplies_measurement_contract(self):
         from mew.work_loop import plan_work_model_turn
 

@@ -11,7 +11,7 @@ from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MOD
 from .errors import MewError, ModelBackendError
 from .patch_draft import compile_patch_draft, compile_patch_draft_previews
 from .reasoning_policy import codex_reasoning_effort_scope, select_work_reasoning_policy
-from .tasks import clip_output
+from .tasks import clip_output, task_scope_target_paths
 from .test_discovery import normalize_work_path
 from .timeutil import now_iso
 from .toolbox import is_resident_mew_loop_command
@@ -1637,11 +1637,16 @@ def _is_calibration_measured_patch_draft_task(task, context=None):
             "do not finish from a passing verifier alone",
         )
     )
-    return (
+    has_current_head_sample_patch_draft_markers = (
         has_sample_marker
         and has_current_head_marker
         and has_patch_draft_marker
-        and has_measurement_contract_marker
+    )
+    if has_current_head_sample_patch_draft_markers and has_measurement_contract_marker:
+        return True
+    return bool(
+        has_current_head_sample_patch_draft_markers
+        and _calibration_measured_patch_draft_task_scope_target_paths(task)
     )
 
 
@@ -1701,23 +1706,40 @@ def _calibration_measured_patch_draft_has_paired_patch_evidence(context):
     return False
 
 
-def _calibration_measured_patch_draft_scoped_target_paths(context):
+def _calibration_measured_patch_draft_expected_target_paths(target_paths):
+    normalized_paths = []
+    for path in target_paths or []:
+        normalized_path = normalize_work_path(path)
+        if normalized_path:
+            normalized_paths.append(normalized_path)
+    expected_paths = {"src/mew/patch_draft.py", "tests/test_patch_draft.py"}
+    if set(normalized_paths) != expected_paths or len(normalized_paths) != len(expected_paths):
+        return []
+    if not any(_work_batch_path_is_mew_source(path) for path in normalized_paths):
+        return []
+    if not any(_work_batch_path_is_tests(path) for path in normalized_paths):
+        return []
+    return normalized_paths
+
+
+def _calibration_measured_patch_draft_task_scope_target_paths(task):
+    return _calibration_measured_patch_draft_expected_target_paths(
+        task_scope_target_paths(task)
+    )
+
+
+def _calibration_measured_patch_draft_scoped_target_paths(context, task=None):
     resume = ((context or {}).get("work_session") or {}).get("resume") or {}
     active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
     source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
-    target_paths = [
-        normalize_work_path(path)
-        for path in (source.get("target_paths") or [])
-        if normalize_work_path(path)
-    ]
-    expected_paths = {"src/mew/patch_draft.py", "tests/test_patch_draft.py"}
-    if set(target_paths) != expected_paths or len(target_paths) != len(expected_paths):
+    target_paths = _calibration_measured_patch_draft_expected_target_paths(
+        source.get("target_paths") or []
+    )
+    if target_paths:
+        return target_paths
+    if active_work_todo:
         return []
-    if not any(_work_batch_path_is_mew_source(path) for path in target_paths):
-        return []
-    if not any(_work_batch_path_is_tests(path) for path in target_paths):
-        return []
-    return target_paths
+    return _calibration_measured_patch_draft_task_scope_target_paths(task)
 
 
 def _calibration_measured_patch_draft_matching_target_path(path, target_paths):
@@ -1730,13 +1752,99 @@ def _calibration_measured_patch_draft_matching_target_path(path, target_paths):
     return ""
 
 
-def _calibration_measured_patch_draft_exact_recent_windows(context):
+def _calibration_measured_patch_draft_recent_window_is_exact(window, raw_call=None):
+    window = window if isinstance(window, dict) else {}
+    raw_call = raw_call if isinstance(raw_call, dict) else {}
+    raw_result = raw_call.get("result") if isinstance(raw_call.get("result"), dict) else {}
+    if any(bool(window.get(key)) for key in ("context_truncated", "source_truncated", "truncated")):
+        return False
+    if any(bool(raw_result.get(key)) for key in ("context_truncated", "source_truncated", "truncated")):
+        return False
+    if not isinstance(window.get("text"), str) or not window.get("text"):
+        return False
+
+    line_start = window.get("line_start")
+    line_end = window.get("line_end")
+    if line_start is None and line_end is None:
+        offset = window.get("offset")
+        if offset is None:
+            offset = raw_result.get("offset")
+        try:
+            offset = int(offset or 0)
+        except (TypeError, ValueError):
+            return False
+        if offset != 0:
+            return False
+        if raw_result.get("next_offset") not in (None, ""):
+            return False
+        return True
+
+    try:
+        line_start = int(line_start or 0)
+        line_end = int(line_end or 0)
+    except (TypeError, ValueError):
+        return False
+    if line_start != 1 or line_end < line_start:
+        return False
+    return raw_result.get("has_more_lines") is False
+
+
+def _calibration_measured_patch_draft_exact_recent_windows_from_task_scope(
+    work_session,
+    target_paths,
+    *,
+    session=None,
+):
+    raw_calls = list((session or {}).get("tool_calls") or [])
+    if not raw_calls:
+        raw_calls = list((work_session or {}).get("tool_calls") or [])
+    raw_calls_by_id = {
+        call.get("id"): call
+        for call in raw_calls
+        if isinstance(call, dict) and call.get("id") is not None
+    }
+    windows_by_path = {}
+    for window in (work_session or {}).get("recent_read_file_windows") or []:
+        if not isinstance(window, dict):
+            continue
+        path = _calibration_measured_patch_draft_matching_target_path(
+            window.get("path"),
+            target_paths,
+        )
+        if not path or path in windows_by_path:
+            continue
+        raw_call = raw_calls_by_id.get(window.get("tool_call_id"))
+        if not _calibration_measured_patch_draft_recent_window_is_exact(window, raw_call):
+            return []
+        normalized_window = {
+            **window,
+            "path": path,
+            "context_truncated": False,
+        }
+        line_start = normalized_window.get("line_start")
+        line_end = normalized_window.get("line_end")
+        if line_start is not None or line_end is not None:
+            normalized_window["line_start"] = int(line_start)
+            normalized_window["line_end"] = int(line_end)
+        windows_by_path[path] = normalized_window
+    if set(windows_by_path) != set(target_paths):
+        return []
+    return [windows_by_path[path] for path in target_paths]
+
+
+def _calibration_measured_patch_draft_exact_recent_windows(context, task=None, session=None):
     work_session = (context or {}).get("work_session") or {}
     resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
     active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
-    target_paths = _calibration_measured_patch_draft_scoped_target_paths(context)
+    target_paths = _calibration_measured_patch_draft_scoped_target_paths(context, task=task)
     if not target_paths:
         return []
+    if not active_work_todo:
+        return _calibration_measured_patch_draft_exact_recent_windows_from_task_scope(
+            work_session,
+            target_paths,
+            session=session,
+        )
     refs_by_path = {}
     for ref in active_work_todo.get("cached_window_refs") or []:
         if not isinstance(ref, dict):
@@ -1794,8 +1902,55 @@ def _calibration_measured_patch_draft_exact_recent_windows(context):
     return [windows_by_path[path] for path in target_paths]
 
 
+def _calibration_measured_patch_draft_verifier_closeout_passed(task, context):
+    if _write_ready_fast_path_verifier_closeout_passed(context):
+        return True
+
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    if active_work_todo:
+        return False
+
+    expected_target_paths = _calibration_measured_patch_draft_scoped_target_paths(
+        context,
+        task=task,
+    )
+    if not expected_target_paths:
+        return False
+    verifier_tool_call = _work_write_ready_fast_path_latest_completed_verifier_tool_call(context)
+    if str(verifier_tool_call.get("status") or "") != "passed":
+        return False
+    verifier_model_turn = _work_write_ready_fast_path_latest_completed_verifier_model_turn(context)
+    if not verifier_model_turn:
+        return False
+    verify_command = str(verifier_tool_call.get("command") or "").strip()
+    if not verify_command or str(verifier_model_turn.get("command") or "").strip() != verify_command:
+        return False
+    observed_target_paths = [
+        str(path)
+        for path in (verifier_model_turn.get("target_paths") or [])
+        if isinstance(path, str) and path
+    ]
+    if len(expected_target_paths) != len(observed_target_paths):
+        return False
+    if any(
+        not any(_work_paths_match(expected, observed) for observed in observed_target_paths)
+        for expected in expected_target_paths
+    ):
+        return False
+    if verifier_model_turn.get("write_ready_fast_path") is not False:
+        return False
+    turn_tool_call_id = verifier_model_turn.get("tool_call_id")
+    tool_call_id = verifier_tool_call.get("id")
+    if turn_tool_call_id is None or tool_call_id is None:
+        return False
+    return turn_tool_call_id == tool_call_id
+
+
 def _calibration_measured_patch_draft_no_change_replay_action(
     *,
+    task,
     session,
     context,
     model_metrics,
@@ -1803,14 +1958,25 @@ def _calibration_measured_patch_draft_no_change_replay_action(
 ):
     if not session:
         return {}
-    if not _write_ready_fast_path_verifier_closeout_passed(context):
+    if not _calibration_measured_patch_draft_verifier_closeout_passed(task, context):
         return {}
-    recent_windows = _calibration_measured_patch_draft_exact_recent_windows(context)
+    recent_windows = _calibration_measured_patch_draft_exact_recent_windows(
+        context,
+        task=task,
+        session=session,
+    )
     if not recent_windows:
         return {}
     resume = ((context or {}).get("work_session") or {}).get("resume") or {}
     active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
     todo_id = str(active_work_todo.get("id") or "").strip()
+    if not todo_id:
+        session_id = str(
+            (session or {}).get("id")
+            or ((context or {}).get("work_session") or {}).get("id")
+            or ""
+        ).strip()
+        todo_id = f"session-{session_id}-patch-draft-no-change" if session_id else "patch-draft-no-change"
     proposal = {
         "kind": "patch_blocker",
         "summary": "no concrete draftable change after matching verifier closeout",
@@ -1826,6 +1992,7 @@ def _calibration_measured_patch_draft_no_change_replay_action(
         proposal=proposal,
         write_ready_fast_path={"recent_windows": recent_windows},
         allowed_write_roots=allowed_write_roots,
+        todo_id_override=todo_id,
     )
     observation = compiled.get("observation") or _empty_patch_draft_compiler_observation()
     if any(observation.get(key) for key in observation):
@@ -1836,6 +2003,14 @@ def _calibration_measured_patch_draft_no_change_replay_action(
     blocker_payload = _work_loop_tiny_write_ready_draft_blocker_payload(validator_result)
     if todo_id:
         blocker_payload["todo_id"] = todo_id
+    replay_path = str((observation or {}).get("patch_draft_compiler_replay_path") or "").strip()
+    if replay_path:
+        blocker_payload["replay_path"] = replay_path
+    else:
+        blocker_payload["calibration_counted"] = False
+        blocker_payload["calibration_exclusion_reason"] = (
+            "same-session patch_draft compiler replay artifact was not written"
+        )
     model_metrics.update(
         {
             "tiny_write_ready_draft_outcome": "blocker",
@@ -1854,12 +2029,17 @@ def _calibration_measured_patch_draft_no_change_replay_action(
 def _calibration_measured_finish_is_no_change_closeout(action, action_plan=None):
     action = action if isinstance(action, dict) else {}
     action_plan = action_plan if isinstance(action_plan, dict) else {}
+    planned_action = (
+        action_plan.get("action") if isinstance(action_plan.get("action"), dict) else {}
+    )
     text = " ".join(
         str(value or "")
         for value in (
             action.get("reason"),
             action.get("summary"),
             action_plan.get("summary"),
+            planned_action.get("reason"),
+            planned_action.get("summary"),
         )
     ).casefold()
     return any(
@@ -1868,6 +2048,8 @@ def _calibration_measured_finish_is_no_change_closeout(action, action_plan=None)
             "no-change",
             "no change",
             "no concrete",
+            "no_material",
+            "no_material_change",
             "no material",
             "nothing to change",
             "already satisfied",
@@ -1963,6 +2145,7 @@ def _enforce_calibration_measured_patch_draft_finish_gate(
         and _calibration_measured_finish_is_no_change_closeout(action, action_plan)
     ):
         replay_action = _calibration_measured_patch_draft_no_change_replay_action(
+            task=task,
             session=session,
             context=context,
             model_metrics=model_metrics,
@@ -2139,6 +2322,7 @@ def _write_ready_patch_draft_environment(
     session,
     context,
     write_ready_fast_path,
+    todo_id_override="",
 ):
     def canonical_path(path):
         normalized = normalize_work_path(path)
@@ -2184,7 +2368,7 @@ def _write_ready_patch_draft_environment(
             if normalized_path:
                 target_paths.append(normalized_path)
     todo = {
-        "id": str(active_work_todo.get("id") or "").strip(),
+        "id": str(active_work_todo.get("id") or todo_id_override or "").strip(),
         "source": {"target_paths": target_paths},
     }
     cached_windows = {}
@@ -2299,6 +2483,7 @@ def _compile_write_ready_patch_draft_proposal(
     proposal,
     write_ready_fast_path,
     allowed_write_roots=None,
+    todo_id_override="",
 ):
     observation = _empty_patch_draft_compiler_observation()
     proposal = proposal if isinstance(proposal, dict) else {}
@@ -2306,6 +2491,7 @@ def _compile_write_ready_patch_draft_proposal(
         session=session,
         context=context,
         write_ready_fast_path=write_ready_fast_path,
+        todo_id_override=todo_id_override,
     )
     todo = environment.get("todo") or {}
     cached_windows = environment.get("cached_windows") or {}
