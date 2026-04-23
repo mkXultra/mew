@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mew.cli import build_parser
+from mew.work_replay import PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON
 from mew.proof_summary import (
     format_proof_summary,
     summarize_m6_11_replay_calibration,
@@ -513,6 +514,53 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertEqual(calibration["thresholds"]["malformed_relevant_bundles_ok"], True)
         self.assertEqual(calibration["non_counted_bundle_count"], 1)
         self.assertEqual(calibration["non_counted_bundle_reasons"], {"reviewer rejected": 1})
+
+    def test_summarize_m6_11_calibration_current_head_excludes_auto_non_native_patch_blocker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            with patch("mew.proof_summary._current_git_head", return_value="HEAD-ONLY"):
+                self._write_relevant_compiler_bundle(
+                    replay_root / "counted",
+                    1,
+                    "patch_valid",
+                    git_head="HEAD-ONLY",
+                )
+                non_counted_root = replay_root / "non_counted" / "attempt-1"
+                non_counted_root.parent.mkdir(parents=True, exist_ok=True)
+                ProofSummaryTests._write_json(
+                    non_counted_root / "validator_result.json",
+                    {"kind": "patch_blocker", "code": "insufficient_cached_window_text"},
+                )
+                ProofSummaryTests._write_json(
+                    non_counted_root / "replay_metadata.json",
+                    {
+                        "bundle": "patch_draft_compiler",
+                        "files": {"validator_result": "validator_result.json"},
+                        "git_head": "HEAD-ONLY",
+                        "calibration_counted": False,
+                        "calibration_exclusion_reason": PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON,
+                    },
+                )
+                summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        current_head = calibration["cohorts"]["current_head"]
+        self.assertEqual(calibration["total_bundles"], 1)
+        self.assertEqual(calibration["compiler_bundles"], 1)
+        self.assertEqual(calibration["relevant_bundles"], 1)
+        self.assertEqual(current_head["total_bundles"], 1)
+        self.assertEqual(current_head["compiler_bundles"], 1)
+        self.assertEqual(current_head["non_counted_bundle_count"], 1)
+        self.assertEqual(
+            current_head["non_counted_bundle_reasons"],
+            {PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON: 1},
+        )
+        self.assertEqual(calibration["non_counted_bundle_count"], 1)
+        self.assertEqual(
+            calibration["non_counted_bundle_reasons"],
+            {PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON: 1},
+        )
+
     def test_summarize_m6_11_calibration_legacy_bundles_are_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:
             replay_root = Path(tmp)

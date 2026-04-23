@@ -15,6 +15,7 @@ from mew.work_loop import (
 )
 from mew.work_replay import (
     REPLAYS_ROOT,
+    PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON,
     mark_patch_draft_compiler_replay_non_counted,
     write_work_model_failure_replay,
     write_patch_draft_compiler_replay,
@@ -243,6 +244,86 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(metadata["files"]["live_files"], "live_files.json")
                 self.assertEqual(metadata["files"]["allowed_write_roots"], "allowed_write_roots.json")
                 self.assertEqual(metadata["files"]["validator_result"], "validator_result.json")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_patch_draft_compiler_replay_auto_non_native_blocker_is_not_counted(self):
+        session_id = "s-10a"
+        todo_id = "todo-10-1"
+        todo = {"id": todo_id}
+        proposal = {
+            "kind": "patch_blocker",
+            "code": "insufficient_cached_window_text",
+            "detail": "model-authored pass-through blocker",
+        }
+        validator_result = proposal.copy()
+        cached_windows = {}
+        live_files = {}
+        allowed_write_roots = ["."]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        metadata_path = write_patch_draft_compiler_replay(
+                            session_id=session_id,
+                            todo_id=todo_id,
+                            todo=todo,
+                            proposal=proposal,
+                            cached_windows=cached_windows,
+                            live_files=live_files,
+                            allowed_write_roots=allowed_write_roots,
+                            validator_result=validator_result,
+                        )
+
+                self.assertTrue(metadata_path)
+                metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+                self.assertFalse(metadata["calibration_counted"])
+                self.assertEqual(
+                    metadata["calibration_exclusion_reason"],
+                    PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON,
+                )
+                self.assertEqual(metadata["blocker_code"], "insufficient_cached_window_text")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_write_patch_draft_compiler_replay_retains_counted_native_blocker(self):
+        session_id = "s-10b"
+        todo_id = "todo-10-2"
+        todo = {"id": todo_id}
+        proposal = {"kind": "patch_blocker", "code": "missing_exact_cached_window_texts"}
+        validator_result = proposal.copy()
+        cached_windows = {}
+        live_files = {}
+        allowed_write_roots = ["."]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        metadata_path = write_patch_draft_compiler_replay(
+                            session_id=session_id,
+                            todo_id=todo_id,
+                            todo=todo,
+                            proposal=proposal,
+                            cached_windows=cached_windows,
+                            live_files=live_files,
+                            allowed_write_roots=allowed_write_roots,
+                            validator_result=validator_result,
+                        )
+
+                self.assertTrue(metadata_path)
+                metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+                self.assertTrue(metadata["calibration_counted"])
+                self.assertEqual(metadata["calibration_exclusion_reason"], "")
+                self.assertEqual(
+                    metadata["blocker_code"],
+                    "missing_exact_cached_window_texts",
+                )
             finally:
                 os.chdir(old_cwd)
 

@@ -4,11 +4,16 @@ from pathlib import Path
 import subprocess
 
 from .errors import CodexRefusalError, ModelBackendError, ModelRefusalError
+from .patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
 from .timeutil import now_date_iso, now_iso, parse_time
 from .work_session import WORK_TODO_PHASE_STATUSES, build_work_session_resume
 
 
 REPLAYS_ROOT = Path(".mew/replays/work-loop")
+NATIVE_PATCH_DRAFT_BLOCKER_CODES = frozenset(PATCH_BLOCKER_RECOVERY_ACTIONS.keys())
+PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON = (
+    "model-authored patch_blocker code outside native patch_draft vocabulary"
+)
 
 
 def _is_draft_related_failure(session, model_turn):
@@ -115,6 +120,20 @@ def _derive_compiler_blocker_code(validator_code):
     if code in {"", "patch_valid", "patch_adapted"}:
         return ""
     return code
+
+
+def _is_model_authored_non_native_patch_blocker_pass_through(proposal, validator_result):
+    proposal_kind = str((proposal or {}).get("kind") or "").strip()
+    validator_kind = str((validator_result or {}).get("kind") or "").strip()
+    proposal_code = str((proposal or {}).get("code") or "").strip()
+    validator_code = str((validator_result or {}).get("code") or "").strip()
+    if proposal_kind != "patch_blocker":
+        return False
+    if validator_kind != "patch_blocker":
+        return False
+    if proposal_code != validator_code:
+        return False
+    return validator_code not in NATIVE_PATCH_DRAFT_BLOCKER_CODES
 
 
 def _sanitize_replay_path_component(value):
@@ -328,11 +347,24 @@ def write_patch_draft_compiler_replay(
             encoding="utf-8",
         )
 
+    is_non_native_patch_blocker_pass_through = (
+        _is_model_authored_non_native_patch_blocker_pass_through(
+            proposal=payloads["proposal"],
+            validator_result=payloads["validator_result"],
+        )
+    )
+    calibration_counted = not is_non_native_patch_blocker_pass_through
+    calibration_exclusion_reason = (
+        PATCH_DRAFT_COMPILER_PASSTHROUGH_NON_NATIVE_EXCLUSION_REASON
+        if not calibration_counted
+        else ""
+    )
+
     metadata = {
         "schema_version": 1,
         "bundle": "patch_draft_compiler",
-        "calibration_counted": True,
-        "calibration_exclusion_reason": "",
+        "calibration_counted": calibration_counted,
+        "calibration_exclusion_reason": calibration_exclusion_reason,
         "git_head": _current_git_head(),
         "bucket_tag": _derive_compiler_bucket_tag(validator_result, todo),
         "session_id": normalized_session_id,
