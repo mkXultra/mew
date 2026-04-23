@@ -9749,6 +9749,209 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resumed_again["active_work_todo"]["id"], todo["id"])
         self.assertEqual(session["last_work_todo_ordinal"], 1)
 
+    def test_build_work_session_resume_skips_satisfied_leading_verifier_plan_item(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Skip satisfied verifier frontier",
+            "goal": "Do not block on a completed leading verifier plan item.",
+            "created_at": "2026-04-22T00:00:00Z",
+            "updated_at": "2026-04-22T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": "uv run pytest tests/test_work_session.py -q",
+                        "exit_code": 0,
+                        "stdout": "1 passed in 0.10s",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:30Z",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "text": "def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):\n    pass\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 6830,
+                        "line_end": 6888,
+                        "text": "def test_build_work_session_resume_surfaces_draft_placeholders(self):\n    pass\n",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Run the scoped PatchDraftTests command",
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        todo = resume["active_work_todo"]
+        self.assertEqual(resume["phase"], "drafting")
+        self.assertEqual(resume["draft_phase"], "drafting")
+        self.assertEqual(todo["status"], "drafting")
+        self.assertEqual(
+            todo["source"]["target_paths"],
+            ["src/mew/work_session.py", "tests/test_work_session.py"],
+        )
+        self.assertEqual(todo["attempts"], {"draft": 0, "review": 0})
+        self.assertEqual(len(todo["cached_window_refs"]), 2)
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+        )
+        self.assertEqual(
+            resume["skipped_exact_read_plan_items"][0]["plan_item"],
+            "Run the scoped PatchDraftTests command",
+        )
+
+    def test_build_work_session_resume_does_not_skip_leading_verifier_plan_item_after_later_edit(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Verifier stale after edit",
+            "goal": "Keep leading verifier frontier when a source edit happened later.",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": "uv run pytest tests/test_work_session.py -q",
+                        "exit_code": 0,
+                        "stdout": "1 passed in 0.10s",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:30Z",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py"},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "changed": True,
+                        "written": True,
+                        "path_exists": True,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Run the scoped PatchDraftTests command",
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the scoped PatchDraftTests command again",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "Run the scoped PatchDraftTests command",
+        )
+        self.assertEqual(resume["skipped_exact_read_plan_items"], [])
+        self.assertEqual(resume["active_work_todo"], {})
+
+    def test_build_work_session_resume_does_not_skip_leading_verifier_plan_item_with_coverage_mismatch(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Verifier coverage mismatch",
+            "goal": "Keep leading verifier frontier when latest pass misses inferred test coverage.",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py"},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "changed": True,
+                        "written": True,
+                        "path_exists": True,
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": "uv run pytest tests/test_work_loop.py -q",
+                        "exit_code": 0,
+                        "stdout": "1 passed in 0.10s",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:50Z",
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Run the scoped PatchDraftTests command",
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the scoped PatchDraftTests command again",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "Run the scoped PatchDraftTests command",
+        )
+        self.assertTrue(resume["verification_coverage_warning"])
+        self.assertEqual(resume["skipped_exact_read_plan_items"], [])
+
     def test_work_session_resume_failure_beats_active_work_todo_phase(self):
         session = {
             "id": 1,
