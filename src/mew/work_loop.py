@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import shlex
 import time
+from io import StringIO
+import tokenize
 
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
@@ -1209,12 +1211,17 @@ def _work_write_ready_fast_path_state(context):
         for item in (first.get("cached_windows") or [])
         if isinstance(item, dict) and item.get("path")
     ]
+    activation_source = "plan_item_observations"
     if len(cached_windows) < 2:
-        return {"active": False, "reason": "insufficient_cached_windows"}
+        cached_windows = _write_ready_recent_windows_from_active_work_todo(work_session, resume)
+        if not cached_windows:
+            return {"active": False, "reason": "insufficient_cached_windows"}
+        activation_source = "active_work_todo_fallback"
     has_tests = any(_work_batch_path_is_tests(item.get("path")) for item in cached_windows)
     has_source = any(_work_batch_path_is_mew_source(item.get("path")) for item in cached_windows)
     if not (has_tests and has_source):
         return {"active": False, "reason": "missing_source_test_pair"}
+
     steer_text = str(((resume.get("pending_steer") or {}).get("text")) or "")
     if not steer_text:
         steer_text = str((context or {}).get("guidance") or "")
@@ -1229,8 +1236,9 @@ def _work_write_ready_fast_path_state(context):
     return {
         "active": True,
         "reason": "paired_cached_windows_edit_ready",
-        "plan_item": first,
+        "plan_item": observations[0] if observations else {},
         "cached_windows": cached_windows,
+        "activation_source": activation_source,
         "steer_text": steer_text,
     }
 
@@ -1271,6 +1279,85 @@ def _write_ready_recent_windows_from_target_paths(work_session, resume):
     return matched
 
 
+def _write_ready_recent_windows_from_active_work_todo(work_session, resume):
+    resume = resume if isinstance(resume, dict) else {}
+    active_work_todo = resume.get("active_work_todo") or {}
+    if not isinstance(active_work_todo, dict):
+        return []
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    if not isinstance(source, dict):
+        return []
+    target_paths = []
+    for path in source.get("target_paths") or []:
+        if not isinstance(path, str) or not path:
+            continue
+        if any(_work_paths_match(path, existing) for existing in target_paths):
+            continue
+        target_paths.append(path)
+    if not target_paths:
+        return []
+    return _write_ready_recent_windows_from_target_paths(
+        work_session,
+        {
+            "working_memory": {"target_paths": target_paths},
+            "target_path_cached_window_observations": [
+                {"path": path} for path in target_paths
+            ],
+        },
+    )
+
+
+def _write_ready_window_has_unmatched_delimiters(text):
+    delimiter_pairs = {")": "(", "]": "[", "}": "{"}
+    delimiter_stack = []
+    try:
+        for token in tokenize.generate_tokens(StringIO(text).readline):
+            if token.type != tokenize.OP:
+                continue
+            token_text = token.string
+            if token_text in "([{":
+                delimiter_stack.append(token_text)
+                continue
+            expected_open = delimiter_pairs.get(token_text)
+            if not expected_open:
+                continue
+            if not delimiter_stack or delimiter_stack[-1] != expected_open:
+                return True
+            delimiter_stack.pop()
+    except tokenize.TokenError as exc:
+        error_text = str(exc)
+        if "EOF in multi-line statement" in error_text or "EOF in multi-line string" in error_text:
+            return True
+    return bool(delimiter_stack)
+
+
+def _write_ready_window_text_is_structurally_complete(text):
+    text = str(text or "")
+    significant_lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    if not significant_lines:
+        return False
+    first_line = significant_lines[0]
+    first_line_stripped = first_line.lstrip()
+    first_keyword = first_line_stripped.split()[0].rstrip(":") if first_line_stripped else ""
+    if first_line and first_line[0].isspace():
+        return False
+    if first_line_stripped.endswith(":") and first_keyword in {"else", "elif", "except", "finally"}:
+        return False
+    last_line = significant_lines[-1].lstrip()
+    if last_line.endswith(":") or last_line.startswith(("def ", "class ", "async def ", "@")):
+        return False
+    if _write_ready_window_has_unmatched_delimiters(text):
+        return False
+    return True
+
+
+def _write_ready_recent_windows_are_structurally_complete(recent_windows):
+    for item in recent_windows or []:
+        if not _write_ready_window_text_is_structurally_complete((item or {}).get("text") or ""):
+            return False
+    return True
+
+
 def _work_write_ready_fast_path_details(context):
     fast_path = _work_write_ready_fast_path_state(context)
     if not fast_path.get("active"):
@@ -1304,6 +1391,12 @@ def _work_write_ready_fast_path_details(context):
                 "active": False,
                 "reason": "missing_exact_cached_window_texts",
             }
+    if not _write_ready_recent_windows_are_structurally_complete(recent_windows):
+        return {
+            **fast_path,
+            "active": False,
+            "reason": "insufficient_cached_window_context",
+        }
     return {
         **fast_path,
         "recent_windows": recent_windows,
@@ -1925,25 +2018,38 @@ def _write_ready_prompt_active_work_todo(resume, recent_windows):
 
 
 def _write_ready_tiny_draft_observation_target_paths(resume):
+    resume = resume if isinstance(resume, dict) else {}
     plan_item_observations = (resume or {}).get("plan_item_observations") or []
-    if not isinstance(plan_item_observations, list) or not plan_item_observations:
-        return []
-    first_observation = plan_item_observations[0]
-    if not isinstance(first_observation, dict):
-        return []
     target_paths = []
-    for item in first_observation.get("cached_windows") or []:
-        path = item.get("path")
+    if isinstance(plan_item_observations, list) and plan_item_observations:
+        first_observation = plan_item_observations[0]
+        if isinstance(first_observation, dict):
+            for item in first_observation.get("cached_windows") or []:
+                path = item.get("path")
+                if not isinstance(path, str) or not path:
+                    continue
+                if any(_work_paths_match(path, existing) for existing in target_paths):
+                    continue
+                target_paths.append(path)
+            if not target_paths:
+                target_path = first_observation.get("target_path")
+                if isinstance(target_path, str) and target_path:
+                    target_paths.append(target_path)
+    if len(target_paths) >= 2:
+        return target_paths
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    for path in source.get("target_paths") or []:
         if not isinstance(path, str) or not path:
             continue
         if any(_work_paths_match(path, existing) for existing in target_paths):
             continue
         target_paths.append(path)
-    if target_paths:
-        return target_paths
-    target_path = first_observation.get("target_path")
-    if isinstance(target_path, str) and target_path:
-        target_paths.append(target_path)
+    if len(target_paths) >= 2:
+        has_tests = any(_work_batch_path_is_tests(path) for path in target_paths)
+        has_source = any(_work_batch_path_is_mew_source(path) for path in target_paths)
+        if has_tests and has_source:
+            return target_paths
     return target_paths
 
 
@@ -1961,6 +2067,7 @@ def build_write_ready_work_model_context(context):
         "write_ready_fast_path": {
             "active": True,
             "reason": "paired cached windows are edit-ready; draft one dry-run batch or report one exact blocker",
+            "activation_source": fast_path.get("activation_source") or "plan_item_observations",
             "cached_window_texts": [
                 {
                     "path": item.get("path"),

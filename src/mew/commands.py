@@ -2931,6 +2931,8 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                         f"stopped before next batch tool: {stop_request.get('reason') or ''}".strip(),
                         4000,
                     )
+                    if write_batch and not tool_call_ids:
+                        _mark_batch_turn_replay_non_counted_on_stop(turn, stop_request)
                 save_state(state)
             else:
                 turn = None
@@ -5699,6 +5701,19 @@ def reject_work_tool_call(session, source_call, reason=""):
     source_call["rejection_reason"] = reason or ""
     session["updated_at"] = current_time
     return source_call
+
+
+def _mark_batch_turn_replay_non_counted_on_stop(turn, stop_request):
+    replay_path = ((turn or {}).get("model_metrics") or {}).get(
+        "patch_draft_compiler_replay_path"
+    )
+    if not replay_path:
+        return False
+    action = str((stop_request or {}).get("action") or "stop").strip() or "stop"
+    return mark_patch_draft_compiler_replay_non_counted(
+        replay_path,
+        reason=f"superseded by {action} before approval",
+    )
 
 
 def cmd_work_reject_tool(args):

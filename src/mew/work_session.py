@@ -660,10 +660,90 @@ def cached_window_covers_exact_read(cached_window, requested_window):
     return cached_start <= requested_start and cached_end >= requested_end
 
 
-def first_actionable_plan_item(plan_items, cached_windows):
+PLAN_ITEM_VERIFIER_PLAN_RE = re.compile(
+    r"^(?:run|rerun|execute)\b.*(?:test|tests|verification|verifier|verify|unittest|pytest|poe|tox|nox)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_verifier_plan_item(plan_item):
+    return bool(PLAN_ITEM_VERIFIER_PLAN_RE.match(str(plan_item or "").strip()))
+
+
+def _looks_like_verifier_command(command):
+    command = str(command or "").strip().lower()
+    if not command:
+        return False
+    try:
+        tokens = [token.replace("\\", "/") for token in shlex.split(command)]
+    except ValueError:
+        tokens = [token.replace("\\", "/") for token in command.split()]
+    if not tokens:
+        return False
+    if any(token == "pytest" or token.endswith("/pytest") for token in tokens):
+        return True
+    if "unittest" in tokens:
+        return True
+    if "tox" in tokens or "./tox" in tokens:
+        return True
+    if "nox" in tokens or "./nox" in tokens:
+        return True
+    for index, token in enumerate(tokens):
+        if token == "poe" and index + 1 < len(tokens) and tokens[index + 1] in {"test", "tests"}:
+            return True
+    return False
+
+
+def _leading_verifier_plan_item_satisfied_by_last_verification(plan_item, calls, task=None):
+    if not _looks_like_verifier_plan_item(plan_item):
+        return False
+    calls = list(calls or [])
+    verification_state = latest_work_verification_state(calls, task=task)
+    if verification_state.get("status") != "passed":
+        return False
+    if not _looks_like_verifier_command(verification_state.get("command")):
+        return False
+    verification_tool_call_id = verification_state.get("tool_call_id")
+    if isinstance(verification_tool_call_id, int):
+        for call in calls:
+            if call.get("tool") not in WRITE_WORK_TOOLS or call.get("status") != "completed":
+                continue
+            call_id = call.get("id")
+            if not isinstance(call_id, int) or call_id <= verification_tool_call_id:
+                continue
+            result = call.get("result") or {}
+            if result.get("changed") or result.get("written") or result.get("applied"):
+                return False
+    verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
+    verification_confidence_status = str((verification_confidence or {}).get("status") or "").strip()
+    if verification_confidence and verification_confidence_status != "verified":
+        return False
+    if verification_coverage_warning_for_calls(calls, task=task):
+        return False
+    return True
+
+
+def first_actionable_plan_item(plan_items, cached_windows, calls=None, task=None):
     items = [str(item or "").strip() for item in (plan_items or []) if str(item or "").strip()]
     cached_windows = list(cached_windows or [])
     skipped = []
+
+    while items and _leading_verifier_plan_item_satisfied_by_last_verification(
+        items[0],
+        calls or [],
+        task=task,
+    ):
+        skipped_item = items.pop(0)
+        skipped.append(
+            {
+                "plan_item": skipped_item,
+                "reason": (
+                    "leading verifier step already satisfied by the latest successful verification "
+                    "and is skipped before read-cache frontier evaluation"
+                ),
+            }
+        )
+
     for item in items:
         requested_window = plan_item_exact_read_window(item)
         if not requested_window:
@@ -5330,6 +5410,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         actionable_plan_item, skipped_exact_read_plan_items = first_actionable_plan_item(
             plan_items,
             target_path_cached_window_observations,
+            calls,
+            task=task,
         )
     if actionable_plan_item:
         plan_item_observation = {

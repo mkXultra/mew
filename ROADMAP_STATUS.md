@@ -2097,6 +2097,14 @@ Next action:
   `blocker_code_breakdown` output to collect the remaining current-head slices
   and measure whether current-head timeout incidence stays at zero while the
   combined `#399/#401` blocker mix actually drops versus the pre-M6.11 sample
+- while M6.11 remains open, append a canonical calibration ledger at
+  `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
+  reviewer-rejected current-head sample. Each line should capture the
+  `head`, `task_id`, `session_id`, `attempt`, scoped files, verifier,
+  counted/non-counted status, blocker code, reviewer decision, replay bundle
+  path, and review doc. Treat that ledger plus the replay root under
+  `.mew/replays/work-loop/` as the canonical M6.12 input, rather than relying
+  on scattered review notes after M6.11 closes.
 - if live evidence still shows the stale-timeout `latest_model_failure` field
   obscuring blocker-backed recovery despite `resume_source=session_overlay`,
   cut one more bounded operator-surface slice before starting Phase 5/6 work

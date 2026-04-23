@@ -149,6 +149,69 @@ class WorkSessionTests(unittest.TestCase):
         finish_work_model_turn(state, session["id"], turn["id"])
         return task, session
 
+    def _build_write_ready_fast_path_context(self, *, source_text, test_text):
+        source_lines = max(1, len(str(source_text or "").splitlines()))
+        test_lines = max(1, len(str(test_text or "").splitlines()))
+        return {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Explain why write-ready fast path is unavailable.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "working_memory": {
+                        "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "line_start": 120,
+                                    "line_end": 120 + source_lines - 1,
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line_start": 240,
+                                    "line_end": 240 + test_lines - 1,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 120,
+                        "line_end": 120 + source_lines - 1,
+                        "text": source_text,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 240,
+                        "line_end": 240 + test_lines - 1,
+                        "text": test_text,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
     def test_compact_running_search_summary_uses_parameters_before_result(self):
         summary = compact_work_tool_summary(
             {
@@ -6666,6 +6729,292 @@ class WorkSessionTests(unittest.TestCase):
             [6890, 19433],
         )
 
+    def test_write_ready_fast_path_recovers_active_work_todo_pair_when_plan_item_only_has_one_window(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            build_write_ready_tiny_draft_model_context,
+            build_write_ready_work_model_context,
+        )
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Draft one paired dry-run edit from the recovered frontier.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "repair active frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "line_start": 6960,
+                                    "line_end": 7010,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+        fast_context = build_write_ready_work_model_context(context)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_fallback")
+        self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+        self.assertEqual(
+            fast_context["write_ready_fast_path"]["activation_source"],
+            "active_work_todo_fallback",
+        )
+        self.assertEqual(
+            [item["tool_call_id"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            [11, 12],
+        )
+        self.assertEqual(
+            [item["line_start"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            [6890, 19433],
+        )
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["target_paths"],
+            ["src/mew/commands.py", "tests/test_work_session.py"],
+        )
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            ["src/mew/commands.py", "tests/test_work_session.py"],
+        )
+
+    def test_write_ready_fast_path_does_not_activate_without_plan_item_observations(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Require current frontier evidence before drafting.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "repair active frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_plan_item_observations")
+
+    def test_write_ready_fast_path_does_not_replace_nonpaired_frontier_with_active_todo_pair(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Keep the current frontier authoritative.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "older paired frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "different frontier",
+                            "cached_windows": [
+                                {"path": "src/mew/commands.py", "line_start": 1, "line_end": 10},
+                                {"path": "src/mew/other.py", "line_start": 20, "line_end": 40},
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "src/mew/other.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_source_test_pair")
+
+    def test_write_ready_fast_path_does_not_bypass_not_edit_ready_plan_item(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 1,
+                "title": "Reply-file audit trail",
+                "description": "Planner not-ready must still win.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 1,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "repair active frontier",
+                            "target_paths": ["src/mew/commands.py", "tests/test_work_session.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": False,
+                            "plan_item": "frontier still needs inspection",
+                            "cached_windows": [
+                                {"path": "src/mew/commands.py", "line_start": 6960, "line_end": 7010},
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/commands.py"},
+                        {"path": "tests/test_work_session.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": "src/mew/commands.py",
+                        "line_start": 6890,
+                        "line_end": 7105,
+                        "text": "commands window\n" * 30,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 19433,
+                        "line_end": 19860,
+                        "text": "tests window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "first_plan_item_not_edit_ready")
+
     def test_write_ready_fast_path_reports_missing_exact_cached_window_texts_reason(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 
@@ -6716,6 +7065,76 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertFalse(details["active"])
         self.assertEqual(details["reason"], "missing_exact_cached_window_texts")
+
+    def test_write_ready_fast_path_blocks_unfinished_source_block_window(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def update_state():\n    if ready:\n",
+            test_text="def test_update_state():\n    assert update_state() == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_test_window_with_unmatched_open_paren(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def update_state():\n    return 1\n",
+            test_text="def test_update_state():\n    helper(\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_orphaned_leading_indented_body_fragment(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="    return foo\n",
+            test_text="def test_update_state():\n    assert value == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_clause_tail_fragment(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="else:\n    x = 1\n",
+            test_text="def test_update_state():\n    assert value == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_blocks_source_window_starting_mid_fragment(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="    )\nvalue = compute_value()\n",
+            test_text="def test_update_state():\n    assert value == 1\n",
+        )
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "insufficient_cached_window_context")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
 
     def test_plan_item_exact_read_window_blocks_edit_ready_until_cached(self):
         from mew.work_loop import build_work_model_context, build_write_ready_work_model_context
@@ -9329,6 +9748,209 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resume["next_action"], "draft one bounded patch from the cached paired windows or record one exact blocker")
         self.assertEqual(resumed_again["active_work_todo"]["id"], todo["id"])
         self.assertEqual(session["last_work_todo_ordinal"], 1)
+
+    def test_build_work_session_resume_skips_satisfied_leading_verifier_plan_item(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Skip satisfied verifier frontier",
+            "goal": "Do not block on a completed leading verifier plan item.",
+            "created_at": "2026-04-22T00:00:00Z",
+            "updated_at": "2026-04-22T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": "uv run pytest tests/test_work_session.py -q",
+                        "exit_code": 0,
+                        "stdout": "1 passed in 0.10s",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:30Z",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 4363,
+                        "line_end": 4388,
+                        "text": "def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):\n    pass\n",
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 6830,
+                        "line_end": 6888,
+                        "text": "def test_build_work_session_resume_surfaces_draft_placeholders(self):\n    pass\n",
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Run the scoped PatchDraftTests command",
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        todo = resume["active_work_todo"]
+        self.assertEqual(resume["phase"], "drafting")
+        self.assertEqual(resume["draft_phase"], "drafting")
+        self.assertEqual(todo["status"], "drafting")
+        self.assertEqual(
+            todo["source"]["target_paths"],
+            ["src/mew/work_session.py", "tests/test_work_session.py"],
+        )
+        self.assertEqual(todo["attempts"], {"draft": 0, "review": 0})
+        self.assertEqual(len(todo["cached_window_refs"]), 2)
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+        )
+        self.assertEqual(
+            resume["skipped_exact_read_plan_items"][0]["plan_item"],
+            "Run the scoped PatchDraftTests command",
+        )
+
+    def test_build_work_session_resume_does_not_skip_leading_verifier_plan_item_after_later_edit(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Verifier stale after edit",
+            "goal": "Keep leading verifier frontier when a source edit happened later.",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": "uv run pytest tests/test_work_session.py -q",
+                        "exit_code": 0,
+                        "stdout": "1 passed in 0.10s",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:30Z",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py"},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "changed": True,
+                        "written": True,
+                        "path_exists": True,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Run the scoped PatchDraftTests command",
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the scoped PatchDraftTests command again",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "Run the scoped PatchDraftTests command",
+        )
+        self.assertEqual(resume["skipped_exact_read_plan_items"], [])
+        self.assertEqual(resume["active_work_todo"], {})
+
+    def test_build_work_session_resume_does_not_skip_leading_verifier_plan_item_with_coverage_mismatch(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Verifier coverage mismatch",
+            "goal": "Keep leading verifier frontier when latest pass misses inferred test coverage.",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py"},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "changed": True,
+                        "written": True,
+                        "path_exists": True,
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "command": "uv run pytest tests/test_work_loop.py -q",
+                        "exit_code": 0,
+                        "stdout": "1 passed in 0.10s",
+                        "cwd": ".",
+                        "finished_at": "2026-04-22T00:00:50Z",
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Run the scoped PatchDraftTests command",
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the scoped PatchDraftTests command again",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(
+            resume["plan_item_observations"][0]["plan_item"],
+            "Run the scoped PatchDraftTests command",
+        )
+        self.assertTrue(resume["verification_coverage_warning"])
+        self.assertEqual(resume["skipped_exact_read_plan_items"], [])
 
     def test_work_session_resume_failure_beats_active_work_todo_phase(self):
         session = {

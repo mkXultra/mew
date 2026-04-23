@@ -636,6 +636,11 @@ Done when:
   explicit Phase 2.5 calibration slice lands first; the checkpoint uses replay
   bundles to measure off-schema/refusal rates and prevent an unstable Phase 3
   rollout
+- while M6.11 is open, measured and reviewer-rejected calibration samples are
+  appended to `proof-artifacts/m6_11_calibration_ledger.jsonl` with head,
+  scope, verifier, counted/non-counted status, blocker code, replay bundle
+  path, and reviewer decision, so M6.12 can consume one canonical ledger
+  instead of reconstructing method and evidence from scattered review notes
 
 Why it matters:
 

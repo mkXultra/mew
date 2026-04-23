@@ -22,6 +22,38 @@ from mew.errors import MewError
 
 
 class CommandTests(unittest.TestCase):
+    def test_mark_batch_turn_replay_non_counted_on_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            metadata_path = Path(tmp) / "replay_metadata.json"
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "bundle": "patch_draft_compiler",
+                        "calibration_counted": True,
+                        "calibration_exclusion_reason": "",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            changed = commands_module._mark_batch_turn_replay_non_counted_on_stop(
+                {
+                    "model_metrics": {
+                        "patch_draft_compiler_replay_path": str(metadata_path),
+                    }
+                },
+                {"action": "interrupt_submit"},
+            )
+
+            self.assertTrue(changed)
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertFalse(metadata["calibration_counted"])
+            self.assertEqual(
+                metadata["calibration_exclusion_reason"],
+                "superseded by interrupt_submit before approval",
+            )
+
     def test_help_subcommand_prints_top_level_help(self):
         with redirect_stdout(StringIO()) as stdout:
             code = main(["help"])
