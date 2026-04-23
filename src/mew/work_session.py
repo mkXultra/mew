@@ -5165,6 +5165,56 @@ def _build_draft_state_from_turns(model_turns, plan_item_observations, active_wo
     return draft_state
 
 
+def _latest_verifier_closeout_summary(calls, turns):
+    latest_call = {}
+    for call in reversed(list(calls or [])):
+        if str(call.get("status") or "").strip() == "completed":
+            latest_call = call
+            break
+    if latest_call.get("tool") != "run_tests":
+        return {}
+    result = latest_call.get("result") or {}
+    command = str(result.get("command") or (latest_call.get("parameters") or {}).get("command") or "").strip()
+    if not command:
+        return {}
+    try:
+        exit_code = int(result.get("exit_code"))
+    except (TypeError, ValueError):
+        return {}
+    linked_turn = {}
+    for turn in reversed(list(turns or [])):
+        if str(turn.get("status") or "").strip() != "completed":
+            continue
+        if turn.get("tool_call_id") != latest_call.get("id"):
+            continue
+        action = turn.get("action") or {}
+        if action.get("type") != "run_tests":
+            continue
+        linked_turn = turn
+        break
+    if not linked_turn:
+        return {}
+    decision_plan = linked_turn.get("decision_plan") if isinstance(linked_turn.get("decision_plan"), dict) else {}
+    working_memory = (
+        decision_plan.get("working_memory") if isinstance(decision_plan.get("working_memory"), dict) else {}
+    )
+    target_paths = linked_turn.get("target_paths")
+    if not target_paths:
+        target_paths = decision_plan.get("target_paths")
+    if not target_paths:
+        target_paths = working_memory.get("target_paths")
+    metrics = linked_turn.get("model_metrics") if isinstance(linked_turn.get("model_metrics"), dict) else {}
+    return {
+        "tool_call_id": latest_call.get("id"),
+        "model_turn_id": linked_turn.get("id"),
+        "command": command,
+        "exit_code": exit_code,
+        "target_paths": _coerce_working_memory_target_paths(target_paths or []),
+        "write_ready_fast_path": metrics.get("write_ready_fast_path"),
+        "write_ready_fast_path_reason": str(metrics.get("write_ready_fast_path_reason") or "").strip(),
+    }
+
+
 def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):
     if not session:
         return None
@@ -5411,6 +5461,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             }
         )
     compressed_prior_think = build_compressed_prior_think(turns_for_prompt, recent_limit=limit, limit=4)
+    latest_verifier_closeout = _latest_verifier_closeout_summary(calls, turns)
 
     latest_call = calls[-1] if calls else None
     latest_failed = bool(
@@ -5735,6 +5786,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "cli_override_approve_all_hint": cli_override_approve_all_hint,
         "notes": list(session.get("notes") or [])[-limit:],
         "recent_decisions": recent_decisions,
+        "latest_verifier_closeout": latest_verifier_closeout,
         "compressed_prior_think": compressed_prior_think,
         "working_memory": working_memory,
         "user_preferences": user_preferences,

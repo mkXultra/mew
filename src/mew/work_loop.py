@@ -1424,19 +1424,16 @@ def _work_write_ready_fast_path_latest_completed_verifier_model_turn(context):
     tool_calls_by_id = {
         call.get("id"): call for call in tool_calls if isinstance(call, dict) and call.get("id") is not None
     }
-    latest_turn = {}
     for turn in reversed(list(work_session.get("model_turns") or [])):
-        if str(turn.get("status") or "").strip() == "completed":
-            latest_turn = turn
-            break
-    action = latest_turn.get("action") or {}
-    if action.get("type") != "run_tests":
-        return {}
-    command = str(action.get("command") or "").strip()
-    if not command:
-        linked_tool_call_id = latest_turn.get("tool_call_id")
+        if str(turn.get("status") or "").strip() != "completed":
+            continue
+        action = turn.get("action") or {}
+        if action.get("type") != "run_tests":
+            continue
+        command = str(action.get("command") or "").strip()
+        linked_tool_call_id = turn.get("tool_call_id")
         linked_tool_call = tool_calls_by_id.get(linked_tool_call_id) if linked_tool_call_id is not None else {}
-        if linked_tool_call and str(linked_tool_call.get("status") or "").strip() == "completed":
+        if not command and linked_tool_call and str(linked_tool_call.get("status") or "").strip() == "completed":
             if linked_tool_call.get("tool") == "run_tests":
                 result = linked_tool_call.get("result") or {}
                 verification = result.get("verification")
@@ -1448,20 +1445,52 @@ def _work_write_ready_fast_path_latest_completed_verifier_model_turn(context):
                         or (linked_tool_call.get("parameters") or {}).get("command")
                         or ""
                     ).strip()
-    if not command:
-        return {}
-    return {
-        "id": latest_turn.get("id"),
-        "tool_call_id": latest_turn.get("tool_call_id"),
-        "command": command,
-        "target_paths": [
-            str(path)
-            for path in (latest_turn.get("target_paths") or [])
-            if isinstance(path, str) and path
-        ],
-        "write_ready_fast_path": latest_turn.get("write_ready_fast_path"),
-        "write_ready_fast_path_reason": str(latest_turn.get("write_ready_fast_path_reason") or "").strip(),
-    }
+        if not command:
+            continue
+        decision_plan = turn.get("decision_plan") if isinstance(turn.get("decision_plan"), dict) else {}
+        working_memory = (
+            decision_plan.get("working_memory") if isinstance(decision_plan.get("working_memory"), dict) else {}
+        )
+        target_paths = turn.get("target_paths")
+        if not target_paths:
+            target_paths = decision_plan.get("target_paths")
+        if not target_paths:
+            target_paths = working_memory.get("target_paths")
+        metrics = turn.get("model_metrics") if isinstance(turn.get("model_metrics"), dict) else {}
+        write_ready_fast_path = turn.get("write_ready_fast_path")
+        if write_ready_fast_path is None and "write_ready_fast_path" in metrics:
+            write_ready_fast_path = metrics.get("write_ready_fast_path")
+        write_ready_fast_path_reason = str(turn.get("write_ready_fast_path_reason") or "").strip()
+        if not write_ready_fast_path_reason:
+            write_ready_fast_path_reason = str(metrics.get("write_ready_fast_path_reason") or "").strip()
+        return {
+            "id": turn.get("id"),
+            "tool_call_id": turn.get("tool_call_id"),
+            "command": command,
+            "target_paths": [
+                str(path)
+                for path in (target_paths or [])
+                if isinstance(path, str) and path
+            ],
+            "write_ready_fast_path": write_ready_fast_path,
+            "write_ready_fast_path_reason": write_ready_fast_path_reason,
+        }
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    closeout = resume.get("latest_verifier_closeout") if isinstance(resume.get("latest_verifier_closeout"), dict) else {}
+    if closeout:
+        return {
+            "id": closeout.get("model_turn_id"),
+            "tool_call_id": closeout.get("tool_call_id"),
+            "command": str(closeout.get("command") or "").strip(),
+            "target_paths": [
+                str(path)
+                for path in (closeout.get("target_paths") or [])
+                if isinstance(path, str) and path
+            ],
+            "write_ready_fast_path": closeout.get("write_ready_fast_path"),
+            "write_ready_fast_path_reason": str(closeout.get("write_ready_fast_path_reason") or "").strip(),
+        }
+    return {}
 
 
 def _write_ready_fast_path_verifier_closeout_passed(context):
@@ -1469,7 +1498,7 @@ def _write_ready_fast_path_verifier_closeout_passed(context):
     resume = work_session.get("resume") or {}
     active_work_todo = resume.get("active_work_todo") or {}
     status = str(active_work_todo.get("status") or "").strip()
-    if status != "drafting":
+    if status not in ("drafting", "queued"):
         return False
     verify_command = _work_write_ready_fast_path_verify_command(context)
     if not verify_command:
@@ -1501,7 +1530,7 @@ def _write_ready_fast_path_verifier_closeout_passed(context):
         return False
     if verifier_model_turn.get("write_ready_fast_path") is not False:
         return False
-    if str(verifier_model_turn.get("write_ready_fast_path_reason") or "") != "insufficient_cached_window_context":
+    if not str(verifier_model_turn.get("write_ready_fast_path_reason") or ""):
         return False
     turn_tool_call_id = verifier_model_turn.get("tool_call_id")
     tool_call_id = verifier_tool_call.get("id")
