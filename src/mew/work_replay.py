@@ -80,6 +80,11 @@ def _is_draft_related_failure(session, model_turn, task=None):
         return has_target_paths
     if failure_reason == "missing_plan_item_observations":
         return has_target_paths and _is_calibration_measured_patch_draft_task(task)
+    if failure_reason in {
+        "insufficient_cached_window_context",
+        "missing_exact_cached_window_texts",
+    }:
+        return has_target_paths and _is_calibration_measured_patch_draft_task(task)
     return False
 
 
