@@ -2029,7 +2029,15 @@ Missing proof:
   `insufficient_cached_test_context=1`, while current-head timeout incidence is
   zero.
 - draft-time recovery still collapses to generic `replan`
-- no bounded implementation slice has yet passed through the new drafting path
+- A first counted mew-first reviewer-visible implementation slice has now
+  landed: task `#454` / session `#438` produced a paired
+  `src/mew/patch_draft.py` + `tests/test_patch_draft.py` dry-run preview,
+  approval/apply/verify completed without supervisor code rescue, codex-ultra
+  reviewed it as `STATUS: PASS` / `COUNTEDNESS: counted`, and commit
+  `857c6a1` recorded the change plus calibration ledger row. This satisfies
+  the reviewer-visible implementation-slice progress signal, while the
+  stricter replay-bundle / tiny-compiler calibration gate remains open because
+  the slice did not emit a current-head replay bundle.
 - `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
   M6.11 close additionally requires dogfood scenario registration, a 20-slice
   `#399/#401` incidence gate, and a Phase 2/3 replay-bundle calibration
