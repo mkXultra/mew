@@ -2106,6 +2106,37 @@ Missing proof:
   `bundles=work-loop-model-failure.request_timed_out=1`. This is honest
   current-head evidence after the guidance-aware finish-gate fix, but it also
   means timeout incidence on the active head is no longer zero.
+- Fresh post-`e9a13f9` measurement has now started, and the first replay on
+  that head is reviewer-rejected rather than counted. Task `#468` / session
+  `#458` reached exact paired cached windows on the `patch_draft` pair and
+  emitted a `patch_draft_compiler` replay bundle, but the proposed dry-run
+  patch invented absolute-path cached-window fallback behavior and even
+  asserted the wrong artifact kind in the paired test. The replay metadata is
+  therefore backfilled to `calibration_counted=false`, and
+  `mew proof-summary --m6_11-phase2-calibration` now reports
+  `cohort[current_head]: total=0` plus
+  `cohort[current_head]_non_counted: total=1` on `e9a13f9`.
+- Task `#469` / session `#459` then validated the generalized finish gate on
+  the `work_loop` guidance surface (`src/mew/work_loop.py:1750-1809` +
+  `tests/test_work_session.py:9913-10252`). The focused verifier passed, the
+  model attempted `finish`, and the gate correctly converted that into `wait`
+  because there was still no same-session replay artifact or paired dry-run
+  patch evidence. This is useful non-counted no-artifact validation, not
+  replay incidence, so it is tracked in the calibration ledger rather than in
+  `proof-summary`.
+- A first valid counted bundle on `e9a13f9` now exists again through task
+  `#470` / session `#460`. Attempt 1 on the exact `patch_draft` pair emitted a
+  replay bundle but auto-marked itself non-counted because proposal and
+  validator shared the same model-authored non-native `patch_blocker` code
+  `insufficient_cached_window_context`. Attempt 2 broadened the same paired
+  windows to `src/mew/patch_draft.py:416-519` and
+  `tests/test_patch_draft.py:576-639`, then model turn `#2193` emitted a
+  counted `work-loop-model-failure.request_timed_out` report at
+  `.mew/replays/work-loop/2026-04-23/session-460/todo-no-todo-460/turn-2193/attempt-1/report.json`.
+  `mew proof-summary --m6_11-phase2-calibration` now reports
+  `cohort[current_head]: total=1`,
+  `bundles=work-loop-model-failure.request_timed_out=1`, and
+  `cohort[current_head]_non_counted: total=2` on `e9a13f9`.
 
 Next action:
 
@@ -2115,9 +2146,11 @@ Next action:
   current-head source landed, continue the bounded live incidence gate against
   `#399/#401`; use the cohort-aware replay summaries plus the additive
   `blocker_code_breakdown` output to collect the remaining current-head slices
-  and measure whether the new current-head timeout incidence drops below the
-  initial `1/1` sample while the combined `#399/#401` blocker mix actually
-  drops versus the pre-M6.11 sample
+  on `e9a13f9`. The head is no longer empty, but it is still timeout-only
+  (`current_head.total_bundles=1`, dominant
+  `work-loop-model-failure.request_timed_out=1.0000`) and it still has two
+  non-counted `patch_draft` replays, so do not advance on timeout-only or
+  reviewer/non-native non-counted evidence alone
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
