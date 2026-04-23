@@ -680,6 +680,72 @@ class ProofSummaryTests(unittest.TestCase):
             {"patch_draft_compiler.other": 1},
         )
 
+    def test_summarize_m6_11_calibration_blocker_code_counts_split_by_current_head(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            with patch("mew.proof_summary._current_git_head", return_value="HEAD-CURRENT"):
+                self._write_relevant_compiler_bundle(
+                    replay_root / "current_head_compiler",
+                    1,
+                    "patch_valid",
+                    git_head="HEAD-CURRENT",
+                    blocker_code="CH-COMP",
+                )
+                self._write_model_failure_bundle(
+                    replay_root / "current_head_timeout",
+                    1,
+                    "model_failed_timeout",
+                    git_head="HEAD-CURRENT",
+                    blocker_code="CH-TIMEOUT",
+                )
+                self._write_relevant_compiler_bundle(
+                    replay_root / "legacy_compiler",
+                    1,
+                    "patch_valid",
+                    git_head="HEAD-LEGACY",
+                    blocker_code="LG-COMP",
+                )
+                self._write_model_failure_bundle(
+                    replay_root / "legacy_timeout",
+                    1,
+                    "model_failed_timeout",
+                    git_head="HEAD-LEGACY",
+                    blocker_code="LG-TIMEOUT",
+                )
+                self._write_relevant_compiler_bundle(
+                    replay_root / "unknown_compiler",
+                    1,
+                    "patch_valid",
+                    git_head="",
+                    blocker_code="UNK-COMP",
+                )
+                summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        cohorts = calibration["cohorts"]
+        self.assertEqual(
+            calibration["blocker_code_counts"],
+            {
+                "CH-COMP": 1,
+                "CH-TIMEOUT": 1,
+                "LG-COMP": 1,
+                "LG-TIMEOUT": 1,
+                "UNK-COMP": 1,
+            },
+        )
+        self.assertEqual(
+            cohorts["current_head"]["blocker_code_counts"],
+            {"CH-COMP": 1, "CH-TIMEOUT": 1},
+        )
+        self.assertEqual(
+            cohorts["legacy"]["blocker_code_counts"],
+            {"LG-COMP": 1, "LG-TIMEOUT": 1},
+        )
+        self.assertEqual(
+            cohorts["unknown"]["blocker_code_counts"],
+            {"UNK-COMP": 1},
+        )
+
     def test_summarize_m6_11_calibration_unknown_when_summary_head_lookup_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             replay_root = Path(tmp)
