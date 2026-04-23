@@ -1632,6 +1632,10 @@ def _is_calibration_measured_patch_draft_task(task):
 
 
 def _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task):
+    return _calibration_measured_task_forbids_verifier_only_finish(task)
+
+
+def _calibration_measured_task_forbids_verifier_only_finish(task):
     task = task or {}
     text = " ".join(
         str(task.get(field) or "").strip().lower()
@@ -1639,6 +1643,12 @@ def _calibration_measured_patch_draft_task_forbids_verifier_only_finish(task):
         if task.get(field) is not None
     )
     return "do not finish from a passing verifier alone" in text
+
+
+def _is_calibration_measured_finish_gated_task(task):
+    return _is_calibration_measured_patch_draft_task(
+        task
+    ) or _calibration_measured_task_forbids_verifier_only_finish(task)
 
 
 def _calibration_measured_patch_draft_has_paired_patch_evidence(context):
@@ -1744,14 +1754,14 @@ def _calibration_measured_patch_draft_finish_allowed(task, context, model_metric
 def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action, model_metrics):
     if str((action or {}).get("type") or "") != "finish":
         return action
-    if not _is_calibration_measured_patch_draft_task(task):
+    if not _is_calibration_measured_finish_gated_task(task):
         return action
     if _calibration_measured_patch_draft_finish_allowed(task, context, model_metrics):
         return action
     return {
         "type": "wait",
         "reason": (
-            "finish is blocked: calibration-measured patch_draft tasks require "
+            "finish is blocked: calibration-measured tasks require "
             "a same-session replay artifact or reviewer-visible paired patch evidence; "
             "verifier-only closeout is not enough for this task"
         ),

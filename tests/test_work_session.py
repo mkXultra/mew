@@ -9404,7 +9404,7 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(planned["action"]["type"], "wait")
         self.assertIn(
-            "finish is blocked: calibration-measured patch_draft tasks require",
+            "finish is blocked: calibration-measured tasks require",
             planned["action"]["reason"],
         )
 
@@ -9814,6 +9814,110 @@ class WorkSessionTests(unittest.TestCase):
                 with patch(
                     "mew.work_loop.call_model_json_with_retries",
                     return_value={"summary": "done", "action": {"type": "finish", "reason": "verified no change"}},
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=target_paths,
+                        allow_verify=True,
+                        verify_command=verify_command,
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertIn("verifier-only closeout is not enough", planned["action"]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_blocks_calibration_measured_dogfood_finish_after_fixture_only_verifier(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        verify_command = "uv run pytest -q tests/test_dogfood.py -k 'm6_11_compiler_replay' --no-testmon"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "Current-head replay sample: dogfood compiler-replay after 1b2f7e0"
+                task["description"] = (
+                    "Scope fence: src/mew/dogfood.py + tests/test_dogfood.py only. "
+                    "Goal: collect one fresh current-head live work-loop replay result on the dogfood pair. "
+                    "Stop only after one replay bundle, one reviewer-visible paired dry-run patch, "
+                    "or one live exact blocker from the draft lane. "
+                    "Do not finish from a passing verifier alone."
+                )
+                target_paths = ["src/mew/dogfood.py", "tests/test_dogfood.py"]
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": verify_command},
+                        "result": {"command": verify_command, "exit_code": 0},
+                    },
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[1], "line_start": 478, "line_count": 60},
+                        "result": {
+                            "path": target_paths[1],
+                            "line_start": 478,
+                            "line_end": 537,
+                            "text": "def test_run_dogfood_m6_11_compiler_replay_scenario(self):\n    pass\n",
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 3,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0], "line_start": 680, "line_count": 80},
+                        "result": {
+                            "path": target_paths[0],
+                            "line_start": 680,
+                            "line_end": 759,
+                            "text": "commands = []\nreport = _scenario_report('m6_11-compiler-replay', workspace, commands, checks)\n",
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                ]
+                session["model_turns"] = [
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "tool_call_id": 1,
+                        "decision_plan": {
+                            "working_memory": {
+                                "plan_items": ["Finish fixture-only replay"],
+                                "target_paths": target_paths,
+                            },
+                        },
+                        "action": {"type": "run_tests", "command": verify_command},
+                        "model_metrics": {
+                            "write_ready_fast_path": False,
+                            "write_ready_fast_path_reason": "missing_plan_item_observations",
+                        },
+                    }
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={
+                        "summary": "done",
+                        "action": {"type": "finish", "reason": "fixture replay already passes"},
+                    },
                 ):
                     planned = plan_work_model_turn(
                         state,
