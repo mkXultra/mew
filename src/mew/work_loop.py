@@ -1510,6 +1510,71 @@ def _write_ready_fast_path_verifier_closeout_passed(context):
     return turn_tool_call_id == tool_call_id
 
 
+def _is_calibration_measured_patch_draft_task(task):
+    task = task or {}
+    text = " ".join(
+        str(task.get(field) or "").strip().lower()
+        for field in ("title", "description", "notes")
+        if task.get(field) is not None
+    ).strip()
+    if not text:
+        return False
+    has_sample_marker = "sample" in text
+    has_current_head_marker = any(
+        marker in text
+        for marker in (
+            "current-head",
+            "current head",
+            "current_head",
+        )
+    )
+    has_patch_draft_marker = any(
+        marker in text
+        for marker in ("patchdraft", "patch draft", "patch_draft")
+    )
+    has_measurement_contract_marker = any(
+        marker in text
+        for marker in (
+            "replay bundle",
+            "get one live replay result",
+            "count the sample only if",
+            "calibration ledger row",
+            "counted replay bundle",
+            "exact non-counted conclusion",
+            "do not finish from a passing verifier alone",
+        )
+    )
+    return (
+        has_sample_marker
+        and has_current_head_marker
+        and has_patch_draft_marker
+        and has_measurement_contract_marker
+    )
+
+
+def _calibration_measured_patch_draft_finish_allowed(context, model_metrics):
+    if _write_ready_fast_path_verifier_closeout_passed(context):
+        return True
+    replay_path = str((model_metrics or {}).get("patch_draft_compiler_replay_path") or "").strip()
+    return bool(replay_path)
+
+
+def _enforce_calibration_measured_patch_draft_finish_gate(task, context, action, model_metrics):
+    if str((action or {}).get("type") or "") != "finish":
+        return action
+    if not _is_calibration_measured_patch_draft_task(task):
+        return action
+    if _calibration_measured_patch_draft_finish_allowed(context, model_metrics):
+        return action
+    return {
+        "type": "wait",
+        "reason": (
+            "finish is blocked: calibration-measured patch_draft tasks require "
+            "a passed focused verifier closeout or current-turn replay artifact before no-change"
+        ),
+    }
+
+
 def _work_write_ready_fast_path_details(context):
     fast_path = _work_write_ready_fast_path_state(context)
     if not fast_path.get("active"):
@@ -3147,6 +3212,12 @@ def plan_work_model_turn(
                 + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)
             )
             action = tiny_result.get("action") or {"type": "wait", "reason": "missing action"}
+            action = _enforce_calibration_measured_patch_draft_finish_gate(
+                task=task,
+                context=context,
+                action=action,
+                model_metrics=model_metrics,
+            )
             if progress:
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
             return {
@@ -3234,6 +3305,12 @@ def plan_work_model_turn(
                 allowed_write_roots=allowed_write_roots,
             )
         )
+    action = _enforce_calibration_measured_patch_draft_finish_gate(
+        task=task,
+        context=context,
+        action=action,
+        model_metrics=model_metrics,
+    )
     model_metrics["total_model_seconds"] = _round_seconds(
         (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
         + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)

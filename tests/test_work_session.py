@@ -9015,6 +9015,217 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_plan_work_model_turn_blocks_calibration_measured_patch_draft_finish_without_verifier_or_replay(self):
+        from mew.work_loop import plan_work_model_turn
+
+        state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+        task = add_coding_task(state)
+        task["title"] = "Current-head replay sample: patch_draft compiler on 15310b8"
+        task["description"] = (
+            "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+            "Goal: get one live replay result on this pair on 15310b8. Stop only after one replay bundle, "
+            "one reviewer-visible paired dry-run patch, or one live exact blocker from the draft lane. "
+            "Do not finish from a passing verifier alone. Keep reads minimal and stay on this pair. "
+            "Use PatchDraftTests."
+        )
+        task["notes"] = "Non-counted timeout-family evidence on the same current-head sample surface."
+        session, _created = create_work_session(state, task)
+
+        with patch("mew.work_loop.call_model_json_with_retries", return_value={"summary": "done", "action": {"type": "finish", "reason": "no change"}}):
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                allowed_read_roots=["."],
+                allowed_write_roots=["."],
+                act_mode="deterministic",
+            )
+
+        self.assertEqual(planned["action"]["type"], "wait")
+        self.assertIn(
+            "finish is blocked: calibration-measured patch_draft tasks require",
+            planned["action"]["reason"],
+        )
+
+    def test_plan_work_model_turn_allows_calibration_measured_patch_draft_finish_with_replay_artifact(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                replay_path = Path(".mew/replays/work-loop/measurement-replay.json")
+                replay_path.parent.mkdir(parents=True, exist_ok=True)
+                replay_path.write_text("{}", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Collect one fresh current-head live work-loop replay bundle on the fenced patch_draft surface."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    if log_prefix and "work_write_ready_tiny_draft" in str(log_prefix):
+                        return {"summary": "skip", "action": {"type": "wait", "reason": "tiny fallback"}}
+                    return {"summary": "done", "action": {"type": "finish", "reason": "no change"}}
+
+                def fake_shadow(*args, **kwargs):
+                    return {"patch_draft_compiler_replay_path": str(replay_path)}
+
+                with patch("mew.work_loop._shadow_compile_patch_draft_for_write_ready_turn", side_effect=fake_shadow):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        planned = plan_work_model_turn(
+                            state,
+                            session,
+                            task,
+                            {"path": "auth.json"},
+                            allowed_read_roots=["."],
+                            allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                            allow_verify=True,
+                            verify_command="uv run python -m unittest tests.test_patch_draft",
+                            act_mode="deterministic",
+                        )
+
+                self.assertEqual(planned["action"]["type"], "finish")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_allows_calibration_measured_patch_draft_finish_after_verifier_closeout(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+                task["title"] = "M6.11 current-head sample: patch_draft replay rerun"
+                task["description"] = (
+                    "Collect one fresh current-head live work-loop replay bundle on the fenced patch_draft surface."
+                )
+                task["notes"] = (
+                    "Success bar: counted replay bundle or exact non-counted conclusion plus calibration ledger row."
+                )
+
+                with patch(
+                    "mew.work_loop._write_ready_fast_path_verifier_closeout_passed",
+                    return_value=True,
+                ):
+                    with patch(
+                        "mew.work_loop.call_model_json_with_retries",
+                        return_value={"summary": "done", "action": {"type": "finish", "reason": "verified no change"}},
+                    ):
+                        planned = plan_work_model_turn(
+                            state,
+                            session,
+                            task,
+                            {"path": "auth.json"},
+                            allowed_read_roots=["."],
+                            allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                            allow_verify=True,
+                            verify_command="uv run python -m unittest tests.test_patch_draft",
+                            act_mode="deterministic",
+                        )
+
+                self.assertEqual(planned["action"]["type"], "finish")
+                self.assertEqual(planned["action"]["reason"], "verified no change")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_does_not_gate_fix_first_task_that_mentions_current_head_calibration(self):
+        from mew.work_loop import plan_work_model_turn
+
+        state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+        task = add_coding_task(state)
+        task["title"] = "M6.11 measurement-path: block no-change finish before verifier or replay"
+        task["description"] = (
+            "Goal: for M6.11-style current-head calibration tasks, do not allow a live work session to finish "
+            "from cached-read no-change alone before either the focused verifier has run or a replay bundle exists."
+        )
+        task["notes"] = "Implementation task on work_loop.py and tests/test_work_session.py."
+        session, _created = create_work_session(state, task)
+
+        with patch(
+            "mew.work_loop.call_model_json_with_retries",
+            return_value={"summary": "done", "action": {"type": "finish", "reason": "task complete"}},
+        ):
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                allowed_read_roots=["."],
+                allowed_write_roots=["."],
+                act_mode="deterministic",
+            )
+
+        self.assertEqual(planned["action"]["type"], "finish")
+        self.assertEqual(planned["action"]["reason"], "task complete")
+
+    def test_plan_work_model_turn_does_not_gate_non_patch_draft_current_head_sample(self):
+        from mew.work_loop import plan_work_model_turn
+
+        state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+        task = add_coding_task(state)
+        task["title"] = "M6.11 counted current-head sample: write-ready fast-path probe"
+        task["description"] = (
+            "Collect the first honest counted current-head M6.11 sample on the write-ready fast-path loop surface."
+        )
+        task["notes"] = (
+            "Count the sample only if it stays on this paired src/tests surface. "
+            "Focused verifier passed and the sample can be counted."
+        )
+        session, _created = create_work_session(state, task)
+
+        with patch(
+            "mew.work_loop.call_model_json_with_retries",
+            return_value={"summary": "done", "action": {"type": "finish", "reason": "counted sample complete"}},
+        ):
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                allowed_read_roots=["."],
+                allowed_write_roots=["."],
+                act_mode="deterministic",
+            )
+
+        self.assertEqual(planned["action"]["type"], "finish")
+        self.assertEqual(planned["action"]["reason"], "counted sample complete")
+
+    def test_plan_work_model_turn_keeps_finish_for_non_measured_tasks(self):
+        from mew.work_loop import plan_work_model_turn
+
+        state = {"next_ids": {"work_session": 1, "work_model_turn": 1}, "tasks": [], "work_sessions": []}
+        task = add_coding_task(state)
+        task["title"] = "Refresh documentation notes"
+        task["description"] = "Update user-facing docs with latest behavior."
+        task["notes"] = "No calibration tracking is involved."
+        session, _created = create_work_session(state, task)
+
+        with patch("mew.work_loop.call_model_json_with_retries", return_value={"summary": "done", "action": {"type": "finish", "reason": "task complete"}}):
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                allowed_read_roots=["."],
+                allowed_write_roots=["."],
+                act_mode="deterministic",
+            )
+
+        self.assertEqual(planned["action"]["type"], "finish")
+        self.assertEqual(planned["action"]["reason"], "task complete")
+
     def test_write_ready_draft_runtime_mode_contract(self):
         from mew.work_loop import _write_ready_draft_runtime_mode
 
