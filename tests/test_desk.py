@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from mew.cli_command import mew_command
 from mew.cli import main
+from mew.brief import coding_self_improve_focus_from_friction
 from mew.desk import build_desk_view_model, format_desk_view
 from mew.state import add_outbox_message, load_state, save_state, state_lock
 
@@ -440,6 +441,7 @@ class DeskTests(unittest.TestCase):
 
     def test_build_desk_view_model_suggests_ready_self_improve_for_empty_coding_queue(self):
         view = build_desk_view_model({"tasks": [], "questions": [], "work_sessions": []}, kind="coding")
+        focus = coding_self_improve_focus_from_friction({}, kind="coding")
 
         self.assertEqual(view["primary_action"]["kind"], "start_self_improve")
         self.assertEqual(
@@ -448,7 +450,7 @@ class DeskTests(unittest.TestCase):
                 "self-improve",
                 "--start-session",
                 "--focus",
-                "Advance M5 audited self-improvement loop",
+                focus,
             ),
         )
 

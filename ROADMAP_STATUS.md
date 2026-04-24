@@ -2659,8 +2659,18 @@ Next action:
   as `positive_verifier_backed_no_change`; the stale `blocked_on_patch`
   `active_work_todo` after recovery is logged as follow-up defect
   `stale_blocked_active_work_todo_after_verifier_backed_no_change_recovery`,
-  not a counting blocker unless it recurs or blocks the next slice. Next step:
-  continue with the bounded `desk` source/test surface.
+  not a counting blocker unless it recurs or blocks the next slice. `#563` /
+  session `#544` then exercised the bounded `desk` source/test surface and
+  produced a valid test-only expectation update in `tests/test_desk.py` so the
+  ready self-improve focus expectation uses
+  `coding_self_improve_focus_from_friction`, matching current
+  `src/mew/desk.py` behavior. `uv run pytest -q tests/test_desk.py
+  --no-testmon` passed with 21 tests, ruff passed, and diff-check passed, but
+  codex-ultra classified it `non_counted_external_patch_due_session_accounting_gap`
+  because session `#544` stayed idle/queued and did not record reads,
+  files_touched, command history, approvals, or verifier history. Next step:
+  rerun the bounded `desk` surface as a fresh mew-recorded slice before moving
+  to another surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
