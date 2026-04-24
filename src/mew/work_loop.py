@@ -2255,6 +2255,9 @@ def _write_ready_window_has_unmatched_delimiters(text):
         error_text = str(exc)
         if "EOF in multi-line statement" in error_text or "EOF in multi-line string" in error_text:
             return True
+        return bool(delimiter_stack)
+    except (IndentationError, SyntaxError):
+        return True
     return bool(delimiter_stack)
 
 

@@ -2688,7 +2688,17 @@ Next action:
   recovered read guard and split offset read coverage not reflected in
   `target_path_cached_window_observations` are follow-up defects, not counting
   blockers. Next step: continue with the bounded `programmer` source/test
-  surface.
+  surface. `#565` / session `#546` then exposed a non-counted fix-first
+  infrastructure crash before verifier: the write-ready fast-path structural
+  window check let `tokenize.generate_tokens` propagate `IndentationError` on
+  an indented partial `tests/test_programmer.py` window. The remediation treats
+  tokenizer `IndentationError` / `SyntaxError` as structurally incomplete
+  windows instead of crashing, preserves the existing `TokenError` stack
+  semantics, and adds a regression test. Codex-ultra approved the fix-first
+  patch after `uv run pytest -q tests/test_work_session.py -k 'write_ready'
+  --no-testmon` passed 78 tests plus 5 subtests, ruff passed, and
+  `git diff --check` passed. Next step after commit: rerun the bounded
+  `programmer` source/test surface on the repaired head.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,

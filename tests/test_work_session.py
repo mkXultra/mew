@@ -14556,6 +14556,18 @@ class WorkSessionTests(unittest.TestCase):
             _cached_window_signature(window_without_text),
         )
 
+    def test_write_ready_structural_incomplete_from_indented_partial_window(self):
+        from mew.work_loop import _write_ready_window_text_is_structurally_complete
+
+        partial_window = (
+            "    def method_body(self):\n"
+            "        result = 1\n"
+            "  def next_item():\n"
+            "    return result\n"
+        )
+
+        self.assertFalse(_write_ready_window_text_is_structurally_complete(partial_window))
+
     def test_build_work_session_resume_surfaces_draft_placeholders(self):
         session = {
             "id": 1,
