@@ -313,10 +313,10 @@ class CodexApiTests(unittest.TestCase):
         response = FakeUrlopenResponse(
             [],
             headers={"content-type": "text/event-stream"},
-            readline_side_effects=[socket.timeout("idle"), socket.timeout("idle")],
+            readline_side_effects=[socket.timeout("idle")],
         )
         with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
-            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0, 1.1, 1.1]):
+            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0]):
                 with self.assertRaisesRegex(CodexApiError, "request timed out"):
                     call_codex_web_api(
                         {"access_token": "token"},
@@ -349,12 +349,11 @@ class CodexApiTests(unittest.TestCase):
 
         self.assertEqual(deltas, [])
 
-    def test_call_codex_web_api_uses_full_request_timeout_but_shorter_stream_read_timeout(self):
+    def test_call_codex_web_api_uses_remaining_request_timeout_for_stream_reads(self):
         deltas = []
         response = FakeUrlopenResponse(
             [sse_line({"type": "response.output_text.delta", "delta": "ok"}), b"data: [DONE]\n"],
             headers={"content-type": "text/event-stream"},
-            readline_side_effects=[socket.timeout("idle")],
         )
         captured = {}
 
@@ -379,4 +378,21 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(text, "ok")
         self.assertEqual(deltas, ["ok"])
         self.assertEqual(captured["timeout"], 45)
-        self.assertEqual(response.socket_timeouts, [5.0])
+        self.assertEqual(response.socket_timeouts, [45.0, 44.0, 43.5])
+
+    def test_call_codex_web_api_wraps_timed_out_response_reader_oserror(self):
+        response = FakeUrlopenResponse(
+            [],
+            headers={"content-type": "text/event-stream"},
+            readline_side_effects=[OSError("cannot read from timed out object")],
+        )
+
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(CodexApiError, "request timed out"):
+                call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    45,
+                )

@@ -197,28 +197,29 @@ def _raise_if_request_timed_out(deadline):
         raise CodexApiError("request timed out")
 
 
-def _socket_read_timeout(timeout):
-    try:
-        timeout_value = float(timeout)
-    except (TypeError, ValueError):
-        return 5.0
-    if timeout_value <= 0:
-        return 5.0
-    return max(0.01, min(timeout_value, 5.0))
+def _deadline_read_timeout(deadline):
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise CodexApiError("request timed out")
+    return max(0.01, remaining)
 
 
 def _read_stream_body(response, deadline, on_text_delta=None):
     chunks = []
     while True:
-        _raise_if_request_timed_out(deadline)
+        socket_timeout = _deadline_read_timeout(deadline)
+        if socket_timeout is not None:
+            _set_response_read_timeout(response, socket_timeout)
         try:
             raw_line = response.readline()
-        except socket.timeout:
-            _raise_if_request_timed_out(deadline)
-            continue
-        except TimeoutError:
-            _raise_if_request_timed_out(deadline)
-            continue
+        except (socket.timeout, TimeoutError) as exc:
+            raise CodexApiError("request timed out") from exc
+        except OSError as exc:
+            if "cannot read from timed out object" in str(exc).casefold():
+                raise CodexApiError("request timed out") from exc
+            raise
         if not raw_line:
             break
         _raise_if_request_timed_out(deadline)
@@ -277,13 +278,11 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=Non
         method="POST",
     )
     deadline = _request_deadline(timeout)
-    socket_timeout = _socket_read_timeout(timeout)
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             content_type = response.headers.get("content-type", "")
             if on_text_delta or "text/event-stream" in content_type:
-                _set_response_read_timeout(response, socket_timeout)
                 raw = _read_stream_body(response, deadline, on_text_delta=on_text_delta)
             else:
                 _raise_if_request_timed_out(deadline)
