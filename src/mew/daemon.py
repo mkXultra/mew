@@ -69,6 +69,8 @@ def build_daemon_status(state, lock, pid_alive_func, *, current_time=None):
         state_name = "running"
     elif lock_state["state"] == "stale":
         state_name = "stale"
+    elif state_name == "running" and pid is not None:
+        state_name = "stale"
 
     return {
         "state": state_name,

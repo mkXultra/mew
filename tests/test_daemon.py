@@ -83,6 +83,18 @@ class DaemonTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_build_daemon_status_marks_unlocked_running_pid_as_stale(self):
+        status = build_daemon_status(
+            {"runtime_status": {"state": "running", "pid": 999, "started_at": "2026-04-20T00:00:00Z"}},
+            None,
+            lambda pid: False,
+            current_time="2026-04-20T00:02:00Z",
+        )
+
+        self.assertEqual(status["state"], "stale")
+        self.assertEqual(status["lock"]["state"], "none")
+        self.assertEqual(status["pid"], 999)
+
     def test_daemon_pause_resume_and_inspect_are_cli_controls(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
