@@ -81,6 +81,7 @@ DOGFOOD_SCENARIOS = (
     "m6_11-phase4-regression",
     "m6_9-memory-taxonomy",
     "m6_9-active-memory-recall",
+    "m6_9-symbol-index-hit",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -2130,6 +2131,177 @@ def run_m6_9_memory_taxonomy_scenario(workspace, env=None):
         "resolved_test_pair": resolved_test,
     }
     return report
+
+
+def run_m6_9_symbol_index_hit_scenario(workspace, env=None):
+    from .symbol_index import INDEX_PATH as SYMBOL_INDEX_PATH
+    from .symbol_index import rebuild_symbol_index, resolve_source_path
+
+    commands = []
+    checks = []
+    state_dir = workspace / STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    source_rel = "src/mew/dogfood.py"
+    test_rel = "tests/test_dogfood.py"
+    symbol_name = "M6_9_SYMBOL_INDEX_HIT_ANCHOR"
+    source_path = workspace / source_rel
+    test_path = workspace / test_rel
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    test_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(
+        "def M6_9_SYMBOL_INDEX_HIT_ANCHOR():\n"
+        "    return 'm6.9 symbol index hit dogfood source'\n",
+        encoding="utf-8",
+    )
+    test_path.write_text(
+        "def test_M6_9_SYMBOL_INDEX_HIT_ANCHOR():\n"
+        "    assert 'symbol-index-hit'\n",
+        encoding="utf-8",
+    )
+    state = default_state()
+    state["tasks"].append(
+        {
+            "id": 6909,
+            "title": "M6.9 Symbol Index Hit",
+            "description": "Prove first-read source lookup for M6_9_SYMBOL_INDEX_HIT_ANCHOR uses the durable symbol/file-pair index.",
+            "status": "todo",
+            "priority": "normal",
+            "kind": "coding",
+            "notes": "Dogfood scenario should resolve the source/test pair from durable symbol index state, not fresh search.",
+            "created_at": "now",
+            "updated_at": "now",
+        }
+    )
+    write_json_file(workspace / STATE_FILE, state)
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    pair_result = run(
+        [
+            "memory",
+            "--add",
+            "M6.9 symbol index hit dogfood change pairs src/mew/dogfood.py with tests/test_dogfood.py.",
+            "--type",
+            "project",
+            "--kind",
+            "file-pair",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 symbol index hit dogfood pair",
+            "--description",
+            "Symbol index hit dogfood should resolve this source/test pair without fresh search.",
+            "--source-path",
+            source_rel,
+            "--test-path",
+            test_rel,
+            "--structural-evidence",
+            "temp workspace contains the source/test files for M6_9_SYMBOL_INDEX_HIT_ANCHOR",
+            "--focused-test-green",
+            "--json",
+        ]
+    )
+    pair_entry = _json_stdout(pair_result).get("entry") or {}
+    index = rebuild_symbol_index(workspace)
+    resolved_record = resolve_source_path(source_rel, workspace) or {}
+    resolved_memory_ids = resolved_record.get("memory_ids") if isinstance(resolved_record, dict) else []
+    if not isinstance(resolved_memory_ids, list):
+        resolved_memory_ids = []
+    entry_id = str(pair_entry.get("id") or "")
+    trace_rel = str(Path(STATE_DIR) / "durable" / "m6_9-symbol-index-hit-trace.json")
+    trace_path = workspace / trace_rel
+    trace = {
+        "schema_version": 1,
+        "scenario": "m6_9-symbol-index-hit",
+        "lookup": "first-read/source",
+        "symbol": symbol_name,
+        "requested_source_path": source_rel,
+        "index_hit": bool(resolved_record),
+        "fresh_search_performed": False,
+        "resolved_source_path": str(resolved_record.get("source_path") or ""),
+        "resolved_test_path": str(resolved_record.get("test_path") or ""),
+        "memory_id_count": len(resolved_memory_ids),
+    }
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_file(trace_path, trace)
+    trace_file_data = json.loads(trace_path.read_text(encoding="utf-8"))
+
+    _scenario_check(
+        checks,
+        "m6_9_symbol_index_hit_writes_file_pair_memory",
+        pair_result.get("exit_code") == 0
+        and pair_entry.get("memory_kind") == "file-pair"
+        and pair_entry.get("source_path") == source_rel
+        and pair_entry.get("test_path") == test_rel,
+        observed={"exit_code": pair_result.get("exit_code"), "entry": pair_entry},
+        expected="file-pair memory for the symbol index hit source/test pair is accepted",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_symbol_index_hit_builds_durable_index",
+        source_rel in (index.get("sources") or {})
+        and entry_id
+        and entry_id in resolved_memory_ids,
+        observed={
+            "index_sources": sorted((index.get("sources") or {}).keys()),
+            "resolved_memory_id_count": len(resolved_memory_ids),
+            "entry_id_indexed": entry_id in resolved_memory_ids if entry_id else False,
+        },
+        expected="durable symbol index contains the seeded file-pair record",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_symbol_index_hit_first_read_source_lookup_uses_index",
+        trace["index_hit"] is True and trace["fresh_search_performed"] is False,
+        observed=trace,
+        expected="first-read source lookup is served by the durable index with index_hit=true and no fresh search",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_symbol_index_hit_resolves_expected_source_test_pair",
+        trace["resolved_source_path"] == source_rel and trace["resolved_test_path"] == test_rel,
+        observed={
+            "resolved_source_path": trace["resolved_source_path"],
+            "resolved_test_path": trace["resolved_test_path"],
+        },
+        expected="resolved source/test pair matches the seeded M6.9 dogfood pair",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_symbol_index_hit_writes_deterministic_trace",
+        trace_file_data == trace
+        and trace_file_data.get("symbol") == symbol_name
+        and trace_file_data.get("index_hit") is True,
+        observed={"trace_path": trace_rel, "trace": trace_file_data},
+        expected="deterministic trace artifact records the index hit and resolved pair",
+    )
+
+    artifacts = {
+        "symbol": symbol_name,
+        "source_path": source_rel,
+        "test_path": test_rel,
+        "index_path": str(SYMBOL_INDEX_PATH),
+        "trace_path": trace_rel,
+        "index_hit": trace["index_hit"],
+        "fresh_search_performed": trace["fresh_search_performed"],
+        "resolved_source_path": trace["resolved_source_path"],
+        "resolved_test_path": trace["resolved_test_path"],
+        "trace": trace,
+    }
+    passed = all(check.get("passed") for check in checks)
+    return {
+        "generated_at": now_iso(),
+        "name": "m6_9-symbol-index-hit",
+        "status": "pass" if passed else "fail",
+        "workspace": str(workspace),
+        "command_count": len(commands),
+        "commands": commands,
+        "checks": checks,
+        "artifacts": artifacts,
+    }
 
 
 def run_m6_9_active_memory_recall_scenario(workspace, env=None):
@@ -11936,6 +12108,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-symbol-index-hit":
+            reports.append(run_m6_9_symbol_index_hit_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":

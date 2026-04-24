@@ -530,6 +530,38 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_active_memory_recall_keeps_relevant_file_pair", check_names)
             self.assertIn("m6_9_active_memory_recall_drops_stale_file_pair_with_precondition_miss", check_names)
 
+    def test_run_dogfood_m6_9_symbol_index_hit_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-symbol-index-hit",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-symbol-index-hit")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-symbol-index-hit: pass", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["symbol"], "M6_9_SYMBOL_INDEX_HIT_ANCHOR")
+            self.assertTrue(scenario["artifacts"]["index_hit"])
+            self.assertFalse(scenario["artifacts"]["fresh_search_performed"])
+            self.assertEqual(scenario["artifacts"]["resolved_source_path"], "src/mew/dogfood.py")
+            self.assertEqual(scenario["artifacts"]["resolved_test_path"], "tests/test_dogfood.py")
+            self.assertEqual(scenario["artifacts"]["trace"]["index_hit"], True)
+            self.assertEqual(scenario["artifacts"]["trace"]["fresh_search_performed"], False)
+            self.assertEqual(scenario["artifacts"]["trace"]["resolved_source_path"], "src/mew/dogfood.py")
+            self.assertEqual(scenario["artifacts"]["trace"]["resolved_test_path"], "tests/test_dogfood.py")
+            self.assertIn("m6_9_symbol_index_hit_builds_durable_index", check_names)
+            self.assertIn("m6_9_symbol_index_hit_first_read_source_lookup_uses_index", check_names)
+            self.assertIn("m6_9_symbol_index_hit_resolves_expected_source_test_pair", check_names)
+            self.assertIn("m6_9_symbol_index_hit_writes_deterministic_trace", check_names)
+
     def test_run_dogfood_m6_11_compiler_replay_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
