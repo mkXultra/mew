@@ -2624,8 +2624,16 @@ Next action:
   line 1102 after the initial read truncated, found no immediately justified
   paired change, ran `uv run pytest -q tests/test_memory.py --no-testmon` with
   26 passed, and closed as counted `positive_verifier_backed_no_change`.
-  Codex-ultra classified it PASS/COUNTED. Next step: continue the fresh
-  literal-current-head calibration batch on the step_loop source/test pair.
+  Codex-ultra classified it PASS/COUNTED. `#559` / session `#540` on HEAD
+  `1eeed71` then exercised the step_loop source/test pair and produced counted
+  fix-first blocker evidence: attempts 1-2 reported `cached_window_incomplete`,
+  attempt 3 had full non-truncated cached windows for `src/mew/step_loop.py`
+  and `tests/test_step_loop.py`, but stale refresh-state/todo wording still
+  caused `missing_exact_cached_window_texts`. The focused verifier was green
+  with 25 tests, but the session remained `blocked_on_patch`. Codex-ultra
+  classified this as `counted_fix_first_blocker` and directed pausing the
+  calibration batch for fix-first remediation in `src/mew/work_loop.py` plus
+  `tests/test_work_session.py`, then rerunning the same step_loop slice.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
