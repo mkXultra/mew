@@ -7022,11 +7022,413 @@ class WorkSessionTests(unittest.TestCase):
         self.assertFalse(fast_path["active"])
         self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
         self.assertEqual(fast_path["activation_source"], "active_work_todo_fallback")
-        self.assertEqual(preflight_block["action"]["type"], "wait")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertEqual(
+            [tool["type"] for tool in preflight_block["action"]["tools"]],
+            ["read_file", "read_file"],
+        )
+        self.assertEqual(
+            [tool["reason"] for tool in preflight_block["action"]["tools"]],
+            [
+                "refresh structurally incomplete write-ready cached window",
+                "refresh structurally incomplete write-ready cached window",
+            ],
+        )
         self.assertEqual(
             preflight_block["decision_plan"]["working_memory"]["target_paths"],
             target_paths,
         )
+
+    def test_write_ready_preflight_block_reads_widened_windows_for_incomplete_paired_refs(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/proof_summary.py", "tests/test_proof_summary.py"]
+        context = {
+            "task": {
+                "id": 504,
+                "title": "Proof-summary artifact-required slice",
+                "description": "Produce an incidence artifact or a concrete fix-first blocker.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 487,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-487-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Refresh paired cached windows",
+                            "target_paths": target_paths,
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh paired cached windows",
+                            "cached_windows": [
+                                {
+                                    "path": "tests/test_proof_summary.py",
+                                    "line_start": 800,
+                                    "line_end": 884,
+                                },
+                                {
+                                    "path": "src/mew/proof_summary.py",
+                                    "line_start": 383,
+                                    "line_end": 522,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "tests/test_proof_summary.py"},
+                        {"path": "src/mew/proof_summary.py"},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 3918,
+                        "path": "src/mew/proof_summary.py",
+                        "line_start": 383,
+                        "line_end": 522,
+                        "text": "def summarize_m6_11_replay_calibration():\n    if current_head:\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3921,
+                        "path": "tests/test_proof_summary.py",
+                        "line_start": 800,
+                        "line_end": 884,
+                        "text": "    def test_current_head_cohort(self):\n        self.assertIn(\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Use cached windows for the paired dry-run draft.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertEqual(
+            [
+                (tool["path"], tool["line_start"], tool["line_count"], tool["reason"])
+                for tool in preflight_block["action"]["tools"]
+            ],
+            [
+                (
+                    "tests/test_proof_summary.py",
+                    680,
+                    520,
+                    "refresh structurally incomplete write-ready cached window",
+                ),
+                (
+                    "src/mew/proof_summary.py",
+                    263,
+                    520,
+                    "refresh structurally incomplete write-ready cached window",
+                ),
+            ],
+        )
+
+    def test_write_ready_fast_path_prefers_complete_covering_window_over_exact_fragment(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        target_paths = ["src/mew/proof_summary.py", "tests/test_proof_summary.py"]
+        context = {
+            "task": {
+                "id": 504,
+                "title": "Proof-summary artifact-required slice",
+                "description": "Produce an incidence artifact or a concrete fix-first blocker.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 487,
+                "status": "active",
+                "resume": {
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/proof_summary.py",
+                                    "tool_call_id": 3922,
+                                    "line_start": 383,
+                                    "line_end": 522,
+                                },
+                                {
+                                    "path": "tests/test_proof_summary.py",
+                                    "tool_call_id": 3923,
+                                    "line_start": 800,
+                                    "line_end": 884,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": path} for path in target_paths
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 3918,
+                        "path": "src/mew/proof_summary.py",
+                        "line_start": 383,
+                        "line_end": 522,
+                        "text": "def summarize_m6_11_replay_calibration():\n    if current_head:\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3921,
+                        "path": "tests/test_proof_summary.py",
+                        "line_start": 800,
+                        "line_end": 884,
+                        "text": "    def test_current_head_cohort(self):\n        self.assertIn(\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3924,
+                        "path": "src/mew/proof_summary.py",
+                        "line_start": 1,
+                        "line_end": 1200,
+                        "text": "def summarize_m6_11_replay_calibration():\n    return {'broad': True}\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3925,
+                        "path": "tests/test_proof_summary.py",
+                        "line_start": 1,
+                        "line_end": 1300,
+                        "text": "class ProofSummaryTests:\n    def test_current_head_cohort(self):\n        self.assertTrue(True)\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3922,
+                        "path": "src/mew/proof_summary.py",
+                        "line_start": 263,
+                        "line_end": 782,
+                        "text": "def summarize_m6_11_replay_calibration():\n    return {'ok': True}\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3923,
+                        "path": "tests/test_proof_summary.py",
+                        "line_start": 680,
+                        "line_end": 1199,
+                        "text": "class ProofSummaryTests:\n    def test_current_head_cohort(self):\n        self.assertTrue(True)\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(
+            [item["tool_call_id"] for item in details["recent_windows"]],
+            [3922, 3923],
+        )
+
+    def test_write_ready_preflight_block_skips_oversized_cached_ref_refresh(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        context = {
+            "task": {
+                "id": 504,
+                "title": "Oversized cached ref",
+                "description": "Do not issue impossible oversized read recovery.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 487,
+                "status": "active",
+                "resume": {
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/proof_summary.py",
+                                    "line_start": 1,
+                                    "line_end": 1201,
+                                },
+                                {
+                                    "path": "tests/test_proof_summary.py",
+                                    "line_start": 1,
+                                    "line_end": 1201,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 1,
+                        "path": "src/mew/proof_summary.py",
+                        "line_start": 1,
+                        "line_end": 1201,
+                        "text": "def proof_summary():\n    if open_block:\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 2,
+                        "path": "tests/test_proof_summary.py",
+                        "line_start": 1,
+                        "line_end": 1201,
+                        "text": "def test_proof_summary():\n    self.assertIn(\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the cached windows.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "wait")
+
+    def test_write_ready_preflight_block_caps_large_cached_ref_without_losing_coverage(self):
+        from mew.work_loop import _work_write_ready_cached_window_refresh_read_actions
+
+        actions = _work_write_ready_cached_window_refresh_read_actions(
+            {"recent_read_file_windows": []},
+            [
+                {
+                    "path": "src/mew/proof_summary.py",
+                    "line_start": 1000,
+                    "line_end": 1999,
+                },
+                {
+                    "path": "tests/test_proof_summary.py",
+                    "line_start": 1000,
+                    "line_end": 1999,
+                },
+            ],
+        )
+
+        self.assertEqual(
+            [(tool["line_start"], tool["line_count"]) for tool in actions],
+            [(1000, 1000), (1000, 1000)],
+        )
+
+    def test_write_ready_preflight_block_does_not_repeat_existing_widened_incomplete_read(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/proof_summary.py", "tests/test_proof_summary.py"]
+        context = {
+            "task": {
+                "id": 504,
+                "title": "Proof-summary artifact-required slice",
+                "description": "Do not repeat an already widened read.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 487,
+                "status": "active",
+                "resume": {
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/proof_summary.py",
+                                    "tool_call_id": 3922,
+                                    "line_start": 263,
+                                    "line_end": 782,
+                                },
+                                {
+                                    "path": "tests/test_proof_summary.py",
+                                    "tool_call_id": 3923,
+                                    "line_start": 680,
+                                    "line_end": 1199,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": path} for path in target_paths
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 3922,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/proof_summary.py",
+                            "line_start": 263,
+                            "line_count": 520,
+                            "reason": "refresh structurally incomplete write-ready cached window",
+                        },
+                    },
+                    {
+                        "id": 3923,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_proof_summary.py",
+                            "line_start": 680,
+                            "line_count": 520,
+                            "reason": "refresh structurally incomplete write-ready cached window",
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 3922,
+                        "path": "src/mew/proof_summary.py",
+                        "line_start": 263,
+                        "line_end": 782,
+                        "text": "def summarize_m6_11_replay_calibration():\n    if current_head:\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3923,
+                        "path": "tests/test_proof_summary.py",
+                        "line_start": 680,
+                        "line_end": 1199,
+                        "text": "class ProofSummaryTests:\n    def test_current_head_cohort(self):\n        self.assertIn(\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the cached windows.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "wait")
 
     def test_write_ready_preflight_block_searches_explicit_unnumbered_refresh_cues(self):
         from mew.work_loop import (

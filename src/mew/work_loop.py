@@ -1392,6 +1392,49 @@ def _write_ready_recent_windows_from_active_work_todo(work_session, resume):
     )
 
 
+def _write_ready_recent_window_covers_cached_ref(window, cached):
+    if not _work_paths_match((window or {}).get("path"), (cached or {}).get("path")):
+        return False
+    if not (window or {}).get("text") or (window or {}).get("context_truncated"):
+        return False
+    try:
+        window_start = int((window or {}).get("line_start") or 0)
+        window_end = int((window or {}).get("line_end") or 0)
+        cached_start = int((cached or {}).get("line_start") or 0)
+        cached_end = int((cached or {}).get("line_end") or 0)
+    except (TypeError, ValueError):
+        return False
+    if window_start <= 0 or window_end < window_start:
+        return False
+    if cached_start <= 0 or cached_end < cached_start:
+        return False
+    return window_start <= cached_start and window_end >= cached_end
+
+
+def _write_ready_recent_window_for_cached_ref(cached, recent_windows):
+    candidates = [
+        item
+        for item in recent_windows or []
+        if _write_ready_recent_window_covers_cached_ref(item, cached)
+    ]
+    if not candidates:
+        return {}
+
+    def score(item):
+        try:
+            span = int(item.get("line_end") or 0) - int(item.get("line_start") or 0)
+        except (TypeError, ValueError):
+            span = 0
+        complete = _write_ready_window_text_is_structurally_complete(item.get("text") or "")
+        try:
+            tool_call_id = int(item.get("tool_call_id") or 0)
+        except (TypeError, ValueError):
+            tool_call_id = 0
+        return (1 if complete else 0, -span, tool_call_id)
+
+    return max(candidates, key=score)
+
+
 def _write_ready_window_has_unmatched_delimiters(text):
     delimiter_pairs = {")": "(", "]": "[", "}": "{"}
     delimiter_stack = []
@@ -2195,19 +2238,12 @@ def _work_write_ready_fast_path_details(context):
     cached_paths = [item.get("path") for item in fast_path.get("cached_windows") or []]
     recent_windows = []
     for cached in fast_path.get("cached_windows") or []:
-        for item in (work_session.get("recent_read_file_windows") or []):
-            if not _work_paths_match(item.get("path"), cached.get("path")):
-                continue
-            if item.get("line_start") != cached.get("line_start") or item.get("line_end") != cached.get("line_end"):
-                continue
-            if not item.get("text") or item.get("context_truncated"):
-                return {
-                    **fast_path,
-                    "active": False,
-                    "reason": "cached_window_text_missing_or_truncated",
-                }
+        item = _write_ready_recent_window_for_cached_ref(
+            cached,
+            work_session.get("recent_read_file_windows") or [],
+        )
+        if item:
             recent_windows.append(item)
-            break
         else:
             recent_windows = []
             break
@@ -2450,6 +2486,84 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
     return actions
 
 
+def _work_write_ready_cached_window_refresh_read_actions(work_session, cached_windows):
+    recent_windows = [
+        item
+        for item in (work_session or {}).get("recent_read_file_windows") or []
+        if isinstance(item, dict) and item.get("path")
+    ]
+    tool_calls_by_id = {
+        call.get("id"): call
+        for call in (work_session or {}).get("tool_calls") or []
+        if isinstance(call, dict) and call.get("id") is not None
+    }
+
+    def came_from_structural_refresh(cached):
+        call = tool_calls_by_id.get((cached or {}).get("tool_call_id"))
+        parameters = call.get("parameters") if isinstance(call, dict) else {}
+        if not isinstance(parameters, dict):
+            return False
+        return str(parameters.get("reason") or "") == "refresh structurally incomplete write-ready cached window"
+
+    def already_read(path, line_start, line_end):
+        for window in recent_windows:
+            if not _work_paths_match(window.get("path"), path):
+                continue
+            try:
+                window_start = int(window.get("line_start") or 0)
+                window_end = int(window.get("line_end") or 0)
+            except (TypeError, ValueError):
+                continue
+            if window_start <= line_start and window_end >= line_end:
+                if window.get("text") and not window.get("context_truncated"):
+                    return True
+        return False
+
+    actions = []
+    seen = set()
+    for cached in cached_windows or []:
+        if not isinstance(cached, dict):
+            continue
+        if came_from_structural_refresh(cached):
+            continue
+        path = str(cached.get("path") or "").strip()
+        if not path:
+            continue
+        try:
+            cached_start = int(cached.get("line_start") or 0)
+            cached_end = int(cached.get("line_end") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cached_start <= 0 or cached_end < cached_start:
+            continue
+        cached_span = cached_end - cached_start + 1
+        if cached_span > 1000:
+            continue
+        line_start = max(1, cached_start - 120)
+        line_count = max(520, cached_end - line_start + 121)
+        if line_count > 1000:
+            line_count = 1000
+            min_start_to_cover_ref = max(1, cached_end - line_count + 1)
+            line_start = min(max(line_start, min_start_to_cover_ref), cached_start)
+        line_end = line_start + line_count - 1
+        key = (path, line_start, line_count)
+        if key in seen or already_read(path, line_start, line_end):
+            continue
+        seen.add(key)
+        actions.append(
+            {
+                "type": "read_file",
+                "path": path,
+                "line_start": line_start,
+                "line_count": line_count,
+                "reason": "refresh structurally incomplete write-ready cached window",
+            }
+        )
+        if len(actions) >= 5:
+            break
+    return actions
+
+
 def _work_write_ready_refresh_text_segment(text, path):
     text = text or ""
     path = str(path or "").strip()
@@ -2519,6 +2633,29 @@ def _work_write_ready_refresh_query(text):
     return candidates[0][2]
 
 
+def _work_write_ready_guidance_forbids_widening(context, resume):
+    text_parts = []
+    guidance = str((context or {}).get("guidance") or "").strip()
+    if guidance:
+        text_parts.append(guidance)
+    pending_steer = (resume or {}).get("pending_steer")
+    if isinstance(pending_steer, dict):
+        steer_text = str(pending_steer.get("text") or "").strip()
+        if steer_text:
+            text_parts.append(steer_text)
+    text = "\n".join(text_parts).casefold()
+    if not text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "do not widen",
+            "don't widen",
+            "no widening",
+        )
+    )
+
+
 def _work_write_ready_preflight_block(context, write_ready_fast_path):
     fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
     if fast_path.get("active"):
@@ -2574,6 +2711,12 @@ def _work_write_ready_preflight_block(context, write_ready_fast_path):
     refresh_actions = _work_write_ready_explicit_refresh_read_actions(context, target_paths)
     if not refresh_actions:
         refresh_actions = _work_write_ready_refresh_search_result_read_actions(work_session, target_paths)
+    if not refresh_actions:
+        if not _work_write_ready_guidance_forbids_widening(context, resume):
+            refresh_actions = _work_write_ready_cached_window_refresh_read_actions(
+                work_session,
+                cached_windows,
+            )
     if refresh_actions:
         action = {
             "type": "batch",
