@@ -2444,7 +2444,11 @@ Next action:
   preflight ended on `cached_window_incomplete` before emitting a patch,
   verifier-backed no-change artifact, or native replay path. Pause the batch
   and fix that cached-window preflight/recovery path before taking more
-  calibration slices.
+  calibration slices. The blocker fix landed on HEAD `63dfe6f`; `#533` then
+  reran the same project_snapshot source/test pair and closed as counted
+  verifier-backed no-change after the scoped verifier passed with 8 tests,
+  validating that the cached-window preflight/recovery path is no longer
+  blocking that surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
