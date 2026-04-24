@@ -10490,6 +10490,62 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_tiny_write_ready_draft_lane_counts_cached_window_incomplete_blocker(self):
+        from mew.work_loop import plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {
+                        "kind": "patch_blocker",
+                        "summary": "cached windows end mid-block",
+                        "code": "cached_window_incomplete",
+                        "detail": "refresh the paired cached windows before drafting",
+                    }
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="model",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    "write-ready tiny draft blocker: cached_window_incomplete",
+                )
+                metrics = planned["model_metrics"]
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_blocker")
+                replay_path = Path(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(replay_path.is_file())
+
+                replay_metadata = json.loads(replay_path.read_text(encoding="utf-8"))
+                self.assertTrue(replay_metadata["calibration_counted"])
+                self.assertEqual(replay_metadata["calibration_exclusion_reason"], "")
+                self.assertEqual(replay_metadata["blocker_code"], "cached_window_incomplete")
+            finally:
+                os.chdir(old_cwd)
+
     def test_tiny_write_ready_draft_lane_normalizes_non_native_no_change_blocker_for_replay(self):
         from mew.work_loop import plan_work_model_turn
 

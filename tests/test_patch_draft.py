@@ -862,6 +862,7 @@ class PatchDraftTests(unittest.TestCase):
             PATCH_BLOCKER_RECOVERY_ACTIONS,
             {
                 "missing_exact_cached_window_texts": "refresh_cached_window",
+                "cached_window_incomplete": "refresh_cached_window",
                 "cached_window_text_truncated": "refresh_cached_window",
                 "stale_cached_window_text": "refresh_cached_window",
                 "old_text_not_found": "refresh_cached_window",

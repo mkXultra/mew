@@ -1182,6 +1182,18 @@ class ProofSummaryTests(unittest.TestCase):
                 "cached_window_text_truncated",
                 blocker_code="BK-CACHED-TRUNC-2",
             )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                7,
+                "cached_window_incomplete",
+                blocker_code="BK-CACHED-INCOMPLETE",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                8,
+                "cached_window_incomplete",
+                blocker_code="BK-CACHED-INCOMPLETE-2",
+            )
             summary = summarize_m6_11_replay_calibration(replay_root)
 
         calibration = summary["calibration"]
@@ -1192,9 +1204,10 @@ class ProofSummaryTests(unittest.TestCase):
                 "patch_draft_compiler.old_text_not_found": 2,
                 "patch_draft_compiler.missing_exact_cached_window_texts": 2,
                 "patch_draft_compiler.cached_window_text_truncated": 2,
+                "patch_draft_compiler.cached_window_incomplete": 2,
             },
         )
-        self.assertAlmostEqual(calibration["dominant_bundle_share"], 1 / 3)
+        self.assertAlmostEqual(calibration["dominant_bundle_share"], 1 / 4)
         self.assertTrue(calibration["thresholds"]["failure_mode_concentration_ok"])
 
     def test_summarize_m6_11_calibration_non_native_compiler_codes_stay_coarse(self):

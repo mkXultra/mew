@@ -10,6 +10,7 @@ from .test_discovery import convention_test_path_for_mew_source, normalize_work_
 PATCH_DRAFT_VALIDATOR_VERSION = 1
 PATCH_BLOCKER_RECOVERY_ACTIONS = {
     "missing_exact_cached_window_texts": "refresh_cached_window",
+    "cached_window_incomplete": "refresh_cached_window",
     "cached_window_text_truncated": "refresh_cached_window",
     "stale_cached_window_text": "refresh_cached_window",
     "old_text_not_found": "refresh_cached_window",

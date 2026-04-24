@@ -2215,6 +2215,17 @@ Missing proof:
   preflight can fall back to widened cached-window reads. Codex-ultra approved
   the plan, and the focused write-ready suite plus full
   `tests/test_work_session.py` validation passed locally.
+- Task `#506` on `2cff876` then reached a same-session patch-draft compiler
+  replay on the `proof_summary` pair, but the bundle was non-counted because
+  the model-authored blocker code `cached_window_incomplete` was still outside
+  the native patch-draft vocabulary. This is a narrower fix-first vocabulary
+  gap rather than a replay-emission failure: the bundle exists, but
+  `proof-summary` properly excluded it as non-native. The current patch
+  promotes `cached_window_incomplete` to native `refresh_cached_window`
+  recovery vocabulary, documents that code in tiny write-ready guidance, and
+  proves proof-summary taxonomy plus work-loop replay counting behavior with
+  focused tests. Codex-ultra approved this plan; the pre-fix `#506` replay
+  remains non-counted and must not be retroactively counted.
 
 Next action:
 
@@ -2234,9 +2245,9 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After committing the #505 path-stem/zero-match refresh fix, repeat a fresh
-  literal-head slice again; do not resume `#505` as counted evidence because it
-  is the blocked pre-fix session.
+  After committing the #506 `cached_window_incomplete` vocabulary fix, repeat a
+  fresh literal-head slice again; do not resume `#505` or `#506` as counted
+  evidence because both are blocked pre-fix sessions.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the

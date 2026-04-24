@@ -3741,6 +3741,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
         "If one file needs multiple hunks, express them in one files[i].edits array.\n"
         "If drafting cannot proceed from the cached windows, return patch_blocker with one stable code and detail.\n"
+        "Use cached_window_incomplete when the cached text exists but ends mid-block; use missing_exact_cached_window_texts when exact cached text is absent.\n"
         "Schema:\n"
         "{\n"
         '  "kind": "patch_proposal|patch_blocker",\n'
