@@ -34,6 +34,15 @@ HIGH_RISK_NEGATION_MARKERS = (
     "outside scope",
     "not in scope",
     "reviewer-owned",
+    "do not edit",
+    "do not touch",
+)
+HIGH_RISK_KEEP_DIRTY_MARKERS = (
+    "proof-artifacts",
+    "proof artifacts",
+    "proof artifact",
+    "roadmap_status.md",
+    "proofs",
 )
 
 
@@ -43,13 +52,17 @@ def normalize_reasoning_effort(value):
 
 
 def _joined_text(*values):
-    return " ".join(str(value or "") for value in values if value)
+    return "\n".join(str(value or "") for value in values if value)
 
 
 def _line_suppresses_high_risk(line):
     lowered = str(line or "").casefold()
     if not lowered:
         return False
+    if "dirty" in lowered and any(
+        marker in lowered for marker in HIGH_RISK_KEEP_DIRTY_MARKERS
+    ):
+        return True
     return any(marker in lowered for marker in HIGH_RISK_NEGATION_MARKERS)
 
 

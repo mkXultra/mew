@@ -2286,6 +2286,27 @@ Missing proof:
   preserving ordinary non-calibration failures as non-replay. Codex-ultra
   approved the code and accounting fix; the pre-fix `#512` session remains
   non-counted.
+- Task `#513` on literal head `06167a9` reran the small `report_io` surface
+  after the pre-active-todo replay-accounting fix. Session `#496` read the
+  complete source/test pair, then timed out on the next planning turn before an
+  edit-ready draft, and the new accounting path wrote a counted
+  `work-loop-model-failure.request_timed_out` replay at
+  `.mew/replays/work-loop/2026-04-24/session-496/todo-no-todo-496/turn-2394/attempt-1/report.json`.
+  Codex-ultra approved this as valid current-head incidence evidence. The
+  `proof-summary` current-head cohort now has one counted bundle on `06167a9`
+  with no off-schema/refusal/malformed evidence, but
+  `failure_mode_concentration=1.0`; M6.11 is still not close-ready.
+- Task `#514` on the same literal head `06167a9` sampled the small
+  `timeutil` surface. Session `#497` read the complete source/test pair, began
+  drafting a paired dry-run fix, then timed out before an edit-ready draft; the
+  replay-accounting path wrote a second counted
+  `work-loop-model-failure.request_timed_out` bundle at
+  `.mew/replays/work-loop/2026-04-24/session-497/todo-no-todo-497/turn-2396/attempt-1/report.json`.
+  Codex-ultra approved `#514` as valid current-head incidence evidence and
+  classified the repeated tiny-pair pre-draft timeout pattern as the next
+  fix-first target. The current-head cohort now has two counted bundles, both
+  `request_timed_out`, so schema health is clean but concentration remains
+  `1.0`.
 
 Next action:
 
@@ -2305,13 +2326,14 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After the #512 pre-active-todo replay-accounting fix is reviewed and
-  committed, rerun the `report_io` small complete source/test slice on the new
-  literal HEAD before broadening to other small pairs. Do not count or resume
-  `#505`, `#506`, `#507`, `#508`, or `#512` as current-head incidence because
-  they are blocked pre-fix sessions; #509/#510/#511 remain valid counted
-  evidence for HEAD `3b38ec7` but should be treated as prior-head evidence
-  after the fix commit.
+  After `#513` and `#514`, stop collecting more current-head slices for this
+  cohort and implement the fix-first target: compact-memory/high-effort
+  tiny-pair pre-draft planning turns are timing out with roughly 46k think
+  prompts after complete source/test reads. Do not count or resume `#505`,
+  `#506`, `#507`, `#508`, or `#512` as current-head incidence because they are
+  blocked pre-fix sessions; #509/#510/#511 remain valid counted evidence for
+  HEAD `3b38ec7` but should be treated as prior-head evidence after the fix
+  commit.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the

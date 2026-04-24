@@ -41,6 +41,19 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertIn("roadmap", policy["matched_terms"])
         self.assertIn("recovery", policy["matched_terms"])
 
+    def test_high_risk_title_is_not_suppressed_by_out_of_scope_guidance(self):
+        policy = select_work_reasoning_policy(
+            {"title": "Update roadmap recovery gate", "kind": "coding"},
+            capabilities={"allowed_write_roots": ["src/mew/timeutil.py", "tests/test_timeutil.py"], "allow_verify": True},
+            env={},
+            guidance="Do not edit ROADMAP_STATUS.md.",
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "high_risk")
+        self.assertIn("roadmap", policy["matched_terms"])
+        self.assertIn("recovery", policy["matched_terms"])
+
     def test_ignores_historical_commit_context_for_small_implementation(self):
         policy = select_work_reasoning_policy(
             {
@@ -73,6 +86,24 @@ class ReasoningPolicyTests(unittest.TestCase):
                 ),
             },
             capabilities={"allowed_write_roots": ["src/mew", "tests"], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "medium")
+        self.assertEqual(policy["work_type"], "small_implementation")
+
+    def test_bookkeeping_notes_do_not_trigger_high_risk_when_bounded(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Reverse symbol-index query",
+                "kind": "coding",
+                "notes": "Keep ROADMAP_STATUS.md and proof-artifacts dirty while implementing.",
+            },
+            capabilities={
+                "allowed_write_roots": ["src/mew/timeutil.py", "tests/test_timeutil.py"],
+                "allow_verify": True,
+            },
+            guidance="Do not edit ROADMAP_STATUS.md.",
             env={},
         )
 
