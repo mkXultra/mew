@@ -2650,8 +2650,17 @@ Next action:
   `src/mew/work_replay.py` and `tests/test_work_replay.py`, made no edits, ran
   `uv run pytest -q tests/test_work_replay.py --no-testmon` with 24 tests and
   4 subtests passed, and ruff passed. Codex-ultra classified it PASS/COUNTED
-  as `positive_verifier_backed_no_change`. Next step: continue with the
-  bounded `proof_summary` source/test surface.
+  as `positive_verifier_backed_no_change`. `#562` / session `#543` then
+  exercised the bounded `proof_summary` source/test surface: the first stop hit
+  recoverable `cached_window_incomplete`, same-session recovery refreshed
+  non-truncated source/test windows, made no edits, ran
+  `uv run pytest -q tests/test_proof_summary.py --no-testmon` with 32 passed,
+  and stopped verifier-backed no-change. Codex-ultra classified it PASS/COUNTED
+  as `positive_verifier_backed_no_change`; the stale `blocked_on_patch`
+  `active_work_todo` after recovery is logged as follow-up defect
+  `stale_blocked_active_work_todo_after_verifier_backed_no_change_recovery`,
+  not a counting blocker unless it recurs or blocks the next slice. Next step:
+  continue with the bounded `desk` source/test surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
