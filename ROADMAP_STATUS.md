@@ -2352,6 +2352,23 @@ Missing proof:
   `medium_small_impl_predraft_timeout_after_full_pair_read_no_artifact`, and
   selected a fix-first structural target around write-ready fast path /
   draft-step compaction after complete paired reads.
+- Commit `f4413b0` implemented that structural patch by promoting queued
+  complete paired source/test reads into the active draft frontier only when
+  the read/inspect/review plan item is tied to the paired target paths, while
+  rejecting stale complete reads after later applied or non-dry-run writes.
+  Task `#519` on literal head `f4413b0` then reran the same small
+  `plan_schema` surface. It partially validated the fix: the session reached
+  `active_work_todo.status=drafting` with exact paired cached refs for
+  `src/mew/plan_schema.py` and `tests/test_plan_schema.py`, moving past the
+  `#517` `first_plan_item_not_edit_ready` blocker. However, the initial run
+  failed with `response did not contain assistant text`, and a one-step
+  continuation timed out; neither attempt emitted a replay bundle,
+  reviewer-visible paired patch/diff, verifier artifact, or native blocker.
+  The latest failure still reported `write_ready_fast_path=false` with
+  `write_ready_fast_path_reason=missing_exact_cached_window_texts` despite the
+  paired `active_work_todo.cached_window_refs`. Codex-ultra classified this as
+  current-head non-counted evidence with blocker code
+  `cached_window_refs_not_hydrated_to_exact_window_texts`.
 
 Next action:
 
@@ -2371,22 +2388,29 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After `#517`, do not continue collecting evidence first and do not rerun
-  `#517` as the primary action. Implement the fix-first structural patch for
-  the new medium-reasoning pre-draft timeout after full paired reads:
-  `write_ready_fast_path=false`,
-  `write_ready_fast_path_reason=first_plan_item_not_edit_ready`,
-  `cached_window_refs=[]`, and prompt size around `51k`. The patch should make
-  a fresh literal-current-head `plan_schema` slice reach either a
-  reviewer-visible paired dry-run diff or a verifier-backed no-change artifact
-  at `medium/small_implementation`; if it still times out before artifact,
-  record the fresh counted incidence and continue fix-first. Do not count or
+  After `#519`, do not continue collecting evidence first and do not rerun
+  `#519` as the primary action. Implement the fix-first cached-window text
+  hydration patch for the new drafting-frontier no-artifact failure:
+  `active_work_todo.status=drafting`, paired `cached_window_refs` exist, but
+  `write_ready_fast_path=false` with
+  `write_ready_fast_path_reason=missing_exact_cached_window_texts` because the
+  fast path cannot recover exact cached text from the referenced completed
+  `read_file` calls. The patch should hydrate exact text from
+  `active_work_todo.cached_window_refs` / matching non-truncated read-file
+  tool calls into the write-ready context, preserve stale-write and arbitrary
+  non-edit-ready guardrails, and make a fresh literal-current-head
+  `plan_schema` slice reach either a reviewer-visible paired dry-run diff, a
+  verifier-backed no-change artifact, a native replay bundle, or a concrete
+  blocker. If it still times out before artifact, record the fresh evidence
+  and continue fix-first. Do not count or
   resume `#505`, `#506`, `#507`, `#508`, or `#512` as current-head incidence
   because they are blocked pre-fix sessions; #509/#510/#511 remain valid
   counted evidence for HEAD `3b38ec7`, #513/#514 remain valid counted evidence
   for HEAD `06167a9`, #515 remains valid counted evidence for HEAD `54b657a`,
-  and #517 remains valid counted evidence for HEAD `517a3b7`, but all should be
-  treated as prior-head evidence after their respective fix commits.
+  #517 remains valid counted evidence for HEAD `517a3b7`, and #519 remains
+  valid non-counted positive/frontier blocker evidence for HEAD `f4413b0`, but
+  all should be treated as prior-head evidence after their respective fix
+  commits.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
