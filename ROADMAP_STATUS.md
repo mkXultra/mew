@@ -2391,25 +2391,39 @@ Missing proof:
   `policy` / `roadmap`, but codex-ultra classified this as no separate
   fix-first task because the actual tiny draft used the low-effort write-ready
   override and produced the intended artifact.
+- Commit `5694e46` recorded that cached-ref hydration proof. Task `#522` on
+  literal head `5694e46` then exercised a different small paired surface,
+  `src/mew/cli_command.py` plus `tests/test_cli_command.py`. Session `#503`
+  read both files completely, found no justified small paired improvement, ran
+  `uv run pytest -q tests/test_cli_command.py --no-testmon`, and finished with
+  verifier-backed no-change evidence after `4 passed`. Codex-ultra classified
+  this as `current_head_positive_verifier_backed_no_change`. The stale
+  `latest_verifier_closeout.write_ready_fast_path=false /
+  missing_exact_cached_window_texts` metadata is not a blocker for this slice
+  because #522 intentionally took the verifier-backed no-change route rather
+  than the patch-draft route.
 
 Next action:
 
 - keep the Phase 2/3 calibration checkpoint active and move from the
-  cached-ref hydration positive proof into the next bounded literal-current-head
-  source/test slice. The next slice should use a different small paired surface
-  than `plan_schema` and should still force the outcome to one of: a native
-  replay bundle, a reviewer-visible paired dry-run patch/diff, a
-  verifier-backed no-change artifact, or a new concrete fix-first blocker. Do
-  not spend another cycle on the already-cleared
-  `missing_exact_cached_window_texts` blocker unless a fresh head reproduces it.
+  `cli_command` no-change proof into the next bounded literal-current-head
+  source/test slice. Codex-ultra selected `src/mew/model_trace.py` plus
+  `tests/test_model_trace.py` with verifier
+  `uv run pytest -q tests/test_model_trace.py --no-testmon`. The slice should
+  still force the outcome to one of: a native replay bundle, a
+  reviewer-visible paired dry-run patch/diff, a verifier-backed no-change
+  artifact, or a new concrete fix-first blocker. Do not spend another cycle on
+  the already-cleared `missing_exact_cached_window_texts` blocker unless a
+  fresh head reproduces it in a patch-draft route.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
   #513/#514 remain valid counted evidence for HEAD `06167a9`, #515 remains
   valid counted evidence for HEAD `54b657a`, #517 remains valid counted
   evidence for HEAD `517a3b7`, #519 remains valid non-counted
-  positive/frontier blocker evidence for HEAD `f4413b0`, and #521 is positive
-  current-head proof for HEAD `f37eb12`. After the #521 commit, treat all prior
+  positive/frontier blocker evidence for HEAD `f4413b0`, #521 is positive
+  proof for HEAD `f37eb12`, and #522 is positive verifier-backed no-change
+  proof for HEAD `5694e46`. After the #522 recording commit, treat all prior
   literal-head evidence as prior-head and run another fresh slice on the new
   HEAD.
 - while M6.11 remains open, append a canonical calibration ledger at
