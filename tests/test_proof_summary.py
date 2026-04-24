@@ -1142,3 +1142,82 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertEqual(calibration["dominant_bundle_type"], "patch_draft_compiler.other")
         self.assertEqual(calibration["dominant_bundle_share"], 1.0)
         self.assertFalse(calibration["thresholds"]["failure_mode_concentration_ok"])
+
+    def test_summarize_m6_11_calibration_diverse_native_blocker_codes_reduce_concentration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                1,
+                "old_text_not_found",
+                blocker_code="BK-OLD-TEXT",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                2,
+                "old_text_not_found",
+                blocker_code="BK-OLD-TEXT-2",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                3,
+                "missing_exact_cached_window_texts",
+                blocker_code="BK-MISSING-CACHED",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                4,
+                "missing_exact_cached_window_texts",
+                blocker_code="BK-MISSING-CACHED-2",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                5,
+                "cached_window_text_truncated",
+                blocker_code="BK-CACHED-TRUNC",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                6,
+                "cached_window_text_truncated",
+                blocker_code="BK-CACHED-TRUNC-2",
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertTrue(summary["ok"])
+        self.assertEqual(
+            calibration["bundle_type_counts"],
+            {
+                "patch_draft_compiler.old_text_not_found": 2,
+                "patch_draft_compiler.missing_exact_cached_window_texts": 2,
+                "patch_draft_compiler.cached_window_text_truncated": 2,
+            },
+        )
+        self.assertAlmostEqual(calibration["dominant_bundle_share"], 1 / 3)
+        self.assertTrue(calibration["thresholds"]["failure_mode_concentration_ok"])
+
+    def test_summarize_m6_11_calibration_non_native_compiler_codes_stay_coarse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                1,
+                "insufficient_cached_context",
+                blocker_code="BK-NON-NATIVE-A",
+            )
+            self._write_relevant_compiler_bundle(
+                replay_root / "compiler",
+                2,
+                "CACHED_WINDOW_INCOMPLETE",
+                blocker_code="BK-NON-NATIVE-B",
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        calibration = summary["calibration"]
+        self.assertEqual(
+            calibration["bundle_type_counts"],
+            {"patch_draft_compiler.other": 2},
+        )
+        self.assertEqual(calibration["dominant_bundle_share"], 1.0)
+        self.assertFalse(calibration["thresholds"]["failure_mode_concentration_ok"])

@@ -3,6 +3,8 @@ from collections import defaultdict
 from pathlib import Path
 import subprocess
 
+from mew.patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
+
 
 def _read_container_from_inspect(path):
     data = _load_json_file(path)
@@ -249,10 +251,15 @@ def _read_validator_result(metadata_path, metadata):
 
 
 def _calibration_compiler_type(code):
+    code = str(code or "").strip()
+    if not code:
+        return "patch_draft_compiler.other"
     if code == "model_returned_non_schema":
         return "patch_draft_compiler.off_schema"
     if code == "model_returned_refusal":
         return "patch_draft_compiler.refusal"
+    if code in PATCH_BLOCKER_RECOVERY_ACTIONS:
+        return f"patch_draft_compiler.{code}"
     return "patch_draft_compiler.other"
 
 
