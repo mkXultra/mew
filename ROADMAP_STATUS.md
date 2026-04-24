@@ -2510,8 +2510,17 @@ Next action:
   watchers now prune unrequested file watcher items while preserving requested
   file watchers and non-file items, the paired regression covers rebinding from
   one watched file to another, focused watcher pytest passed with 2 tests, ruff
-  passed, and codex-ultra approved the diff. Next step: continue the fresh
-  calibration batch.
+  passed, and codex-ultra approved the diff. `#547` / session `#528` then
+  produced a non-counted incomplete/guardrail-blocked `codex_api` attempt on
+  HEAD `57f7f66`: after source/test reads it first stopped on
+  `cached_window_incomplete`, then a continuation stopped on
+  `unpaired_source_edit_blocked` before any edit or verifier. Codex-ultra
+  classified this as non-counted and not yet fix-first; next action is to
+  continue or rerun `#547` with explicit steer to either produce a paired
+  source+test dry-run for the deadline-timeout issue or close verifier-backed
+  no-change. If `cached_window_incomplete` repeats as terminal, pause the batch
+  for a structural window-refresh fix. Next step: continue the fresh
+  calibration batch through that reviewer-steered `codex_api` retry.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
