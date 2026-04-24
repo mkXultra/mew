@@ -2539,7 +2539,12 @@ Next action:
   closed as counted `positive_verifier_backed_no_change`. Codex-ultra
   classified it PASS/COUNTED, accepted the non-blocking objc warning because
   the verifier exit was clean and the session closed, and approved marking task
-  `#548` done. Next step: continue the fresh literal-current-head calibration
+  `#548` done. `#549` / session `#530` then landed as counted
+  `positive_paired_patch_verifier` on HEAD `08f4f0f`: anthropic_json now emits
+  the returned assistant text through `on_text_delta` before JSON parsing, the
+  paired test asserts that callback behavior, focused anthropic pytest passed
+  with 5 tests, ruff passed, and codex-ultra approved the diff and marking task
+  `#549` done. Next step: continue the fresh literal-current-head calibration
   batch on a new bounded surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;

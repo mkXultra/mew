@@ -110,6 +110,8 @@ def call_anthropic_messages_api(auth, prompt, model, base_url, timeout):
 
 def call_anthropic_json(auth, prompt, model, base_url, timeout, on_text_delta=None):
     text = call_anthropic_messages_api(auth, prompt, model, base_url, timeout)
+    if on_text_delta:
+        on_text_delta(text)
     try:
         return extract_json_object(text)
     except (json.JSONDecodeError, ModelBackendError) as exc:

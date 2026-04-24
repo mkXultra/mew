@@ -61,6 +61,7 @@ class AnthropicApiTests(unittest.TestCase):
 
     def test_call_anthropic_json_posts_messages_request(self):
         body = {"content": [{"type": "text", "text": '{"summary": "ok"}'}]}
+        deltas = []
         with patch(
             "mew.anthropic_api.urllib.request.urlopen",
             return_value=FakeHTTPResponse(json.dumps(body)),
@@ -71,9 +72,11 @@ class AnthropicApiTests(unittest.TestCase):
                 "claude-sonnet-4-5",
                 "https://api.anthropic.com/v1",
                 5,
+                on_text_delta=deltas.append,
             )
 
         self.assertEqual(result, {"summary": "ok"})
+        self.assertEqual(deltas, ['{"summary": "ok"}'])
         request = urlopen.call_args.args[0]
         self.assertEqual(request.full_url, "https://api.anthropic.com/v1/messages")
         payload = json.loads(request.data.decode("utf-8"))
