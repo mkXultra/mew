@@ -1959,11 +1959,20 @@ Progress / remaining proof:
   stopped again with `cached_window_incomplete`. The substrate now prefers
   newer complete read windows when an active `blocked_on_patch` WorkTodo is
   explicitly recovering a `refresh_cached_window` blocker, while leaving normal
-  smaller-window ranking unchanged. Focused validation covered the new
-  stale-broad/manual-refresh regression plus the neighboring refresh-blocker
-  tests, full `uv run pytest -q tests/test_work_session.py --no-testmon`, and
-  ruff for `src/mew/work_loop.py` plus `tests/test_work_session.py`. This is
-  loop substrate hardening for the next #574 retry, not autonomy credit
+  smaller-window ranking unchanged. The follow-up `#574` retry then proved the
+  next failure mode: after the refresh blocker was cleared, the recovered
+  WorkTodo still carried the local "refresh cached windows" plan instead of the
+  task goal and only prompted the latest source/test pair, so the model drafted
+  an unrelated dogfood cleanup fallback. The substrate now treats refresh-plan
+  drafting state as recovered task-goal drafting, re-injects the task goal, and
+  keeps all structurally complete non-overlapping source/test refresh windows
+  in the tiny-draft prompt. Focused validation covered both regressions plus
+  the neighboring refresh-blocker tests; the full
+  `uv run pytest -q tests/test_work_session.py --no-testmon` run had one
+  unrelated hard-timeout threshold miss that passed on immediate focused rerun,
+  and ruff stayed green for `src/mew/work_loop.py` plus
+  `tests/test_work_session.py`. This is loop substrate hardening for the next
+  #574 retry, not autonomy credit
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices

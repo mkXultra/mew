@@ -7484,9 +7484,10 @@ class WorkSessionTests(unittest.TestCase):
             "    return _scenario_report('m6_9-memory-taxonomy', workspace, commands, checks)\n"
         )
         source_dispatch = (
-            "        elif name == 'm6_9-memory-taxonomy':\n"
-            "            reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))\n"
-            "        elif name == 'native-advance':\n"
+            "def run_dogfood_scenario(args):\n"
+            "    if name == 'm6_9-memory-taxonomy':\n"
+            "        reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))\n"
+            "    return {'status': 'pass', 'scenarios': reports}\n"
         )
         refreshed_test = (
             "    def test_run_dogfood_m6_9_memory_taxonomy_scenario(self):\n"
@@ -7607,7 +7608,7 @@ class WorkSessionTests(unittest.TestCase):
                         "tool_call_id": 4520,
                         "path": source_path,
                         "line_start": 11718,
-                        "line_end": 11720,
+                        "line_end": 11721,
                         "text": source_dispatch,
                         "context_truncated": False,
                     },
@@ -7626,6 +7627,135 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn(stale_source, [item["text"] for item in cached_texts])
         self.assertNotIn(stale_test, [item["text"] for item in cached_texts])
         self.assertTrue(any("run_m6_9_memory_taxonomy_scenario" in item["text"] for item in cached_texts))
+        self.assertTrue(
+            any("test_run_dogfood_m6_9_memory_taxonomy_scenario" in item["text"] for item in cached_texts)
+        )
+
+    def test_write_ready_refresh_recovery_drafting_restores_task_goal_and_all_windows(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        source_path = "src/mew/dogfood.py"
+        test_path = "tests/test_dogfood.py"
+        source_function = (
+            "def run_m6_9_memory_taxonomy_scenario(workspace, env=None):\n"
+            "    commands = []\n"
+            "    return _scenario_report('m6_9-memory-taxonomy', workspace, commands, checks)\n"
+        )
+        source_dispatch = (
+            "def run_dogfood_scenario(args):\n"
+            "    if name == 'm6_9-memory-taxonomy':\n"
+            "        reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))\n"
+            "    return {'status': 'pass', 'scenarios': reports}\n"
+        )
+        refreshed_test = (
+            "    def test_run_dogfood_m6_9_memory_taxonomy_scenario(self):\n"
+            "        with tempfile.TemporaryDirectory() as tmp:\n"
+            "            self.assertEqual('pass', 'pass')\n\n"
+        )
+        context = {
+            "task": {
+                "id": 574,
+                "title": "M6.9 dogfood: active memory recall scenario",
+                "description": "Register m6_9-active-memory-recall only.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 561,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-561-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "target_paths": [source_path, test_path],
+                            "verify_command": (
+                                "uv run pytest -q tests/test_dogfood.py "
+                                "-k 'm6_9_active_memory_recall or scenario_choices' --no-testmon"
+                            ),
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": source_path,
+                                "tool_call_id": 4520,
+                                "line_start": 11718,
+                                "line_end": 11737,
+                                "context_truncated": False,
+                            },
+                            {
+                                "path": test_path,
+                                "tool_call_id": 4517,
+                                "line_start": 350,
+                                "line_end": 869,
+                                "context_truncated": False,
+                            },
+                        ],
+                        "blocker": {},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {
+                                    "path": source_path,
+                                    "tool_call_id": 4520,
+                                    "line_start": 11718,
+                                    "line_end": 11737,
+                                    "context_truncated": False,
+                                },
+                                {
+                                    "path": test_path,
+                                    "tool_call_id": 4517,
+                                    "line_start": 350,
+                                    "line_end": 869,
+                                    "context_truncated": False,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [{"path": source_path}, {"path": test_path}],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 4519,
+                        "path": source_path,
+                        "line_start": 1885,
+                        "line_end": 1887,
+                        "text": source_function,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 4520,
+                        "path": source_path,
+                        "line_start": 11718,
+                        "line_end": 11721,
+                        "text": source_dispatch,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 4517,
+                        "path": test_path,
+                        "line_start": 470,
+                        "line_end": 473,
+                        "text": refreshed_test,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+        }
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        cached_texts = tiny_context["write_ready_fast_path"]["cached_window_texts"]
+        plan_item = tiny_context["active_work_todo"]["source"]["plan_item"]
+
+        self.assertIn("Task goal: M6.9 dogfood: active memory recall scenario", plan_item)
+        self.assertIn("m6_9-active-memory-recall", plan_item)
+        self.assertNotIn("Refresh the paired exact cached windows", plan_item)
+        self.assertTrue(any("run_m6_9_memory_taxonomy_scenario" in item["text"] for item in cached_texts))
+        self.assertTrue(any("if name == 'm6_9-memory-taxonomy'" in item["text"] for item in cached_texts))
         self.assertTrue(
             any("test_run_dogfood_m6_9_memory_taxonomy_scenario" in item["text"] for item in cached_texts)
         )
