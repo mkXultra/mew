@@ -72,6 +72,7 @@ WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
+WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE = "drafting_timeout_after_complete_cached_refs_no_artifact"
 WORK_WRITE_READY_STRUCTURAL_NARROW_MIN_LINES = 80
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
@@ -799,6 +800,70 @@ def _work_loop_tiny_write_ready_draft_blocker_payload(blocker):
     except (TypeError, ValueError):
         pass
     return payload
+
+
+def _work_loop_write_ready_timeout_blocker_plan(*, todo_id, exc):
+    error_detail = clip_output(str(exc), 500)
+    detail = (
+        "write-ready draft model timed out after complete cached source/test windows were "
+        "available and before a patch proposal, blocker, tool action, or compiler replay "
+        "artifact was produced"
+    )
+    if error_detail:
+        detail = f"{detail}: {error_detail}"
+    blocker_payload = _work_loop_tiny_write_ready_draft_blocker_payload(
+        {
+            "code": WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE,
+            "detail": detail,
+            "todo_id": todo_id,
+        }
+    )
+    blocker_payload["calibration_counted"] = False
+    blocker_payload["calibration_exclusion_reason"] = (
+        "same-session patch_draft compiler replay artifact was not written"
+    )
+    action = {
+        "type": "wait",
+        "reason": _stable_write_ready_tiny_draft_blocker_reason(blocker_payload),
+    }
+    action_plan = {
+        "summary": detail,
+        "action": action,
+        "act_mode": "tiny_write_ready_draft",
+        "blocker": blocker_payload,
+    }
+    if todo_id:
+        action_plan["todo_id"] = todo_id
+    decision_plan = {
+        "summary": detail,
+        "kind": "patch_blocker",
+        "code": blocker_payload["code"],
+        "detail": detail,
+        "blocker": blocker_payload,
+    }
+    if todo_id:
+        decision_plan["todo_id"] = todo_id
+    return decision_plan, action_plan, action
+
+
+def _work_loop_active_todo_id_from_context(context):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = work_session.get("resume") if isinstance(work_session, dict) else {}
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume, dict) else {}
+    if not isinstance(active_work_todo, dict):
+        return ""
+    return str(active_work_todo.get("id") or "").strip()
+
+
+def _work_loop_model_metrics_have_patch_replay_or_artifact(model_metrics):
+    metrics = model_metrics if isinstance(model_metrics, dict) else {}
+    if str(metrics.get("patch_draft_compiler_replay_path") or "").strip():
+        return True
+    artifact_kinds = {
+        str(metrics.get("patch_draft_compiler_artifact_kind") or "").strip(),
+        str(metrics.get("tiny_write_ready_draft_compiler_artifact_kind") or "").strip(),
+    }
+    return bool(artifact_kinds & {"patch_draft", "patch_blocker"})
 
 
 def _empty_patch_draft_compiler_observation():
@@ -3895,9 +3960,7 @@ def _attempt_write_ready_tiny_draft_turn(
         "tiny_write_ready_draft_exit_stage": "",
     }
     started = time.monotonic()
-    tiny_write_ready_todo_id = str(
-        (context.get("active_work_todo") or {}).get("id") or ""
-    ).strip()
+    tiny_write_ready_todo_id = _work_loop_active_todo_id_from_context(context)
 
     def _finalize_tiny_draft_metrics(exit_stage):
         elapsed_seconds = time.monotonic() - started
@@ -3957,12 +4020,29 @@ def _attempt_write_ready_tiny_draft_turn(
                 "compiler_observed": False,
             }
 
+        if _work_model_error_looks_like_timeout(exc):
+            decision_plan, action_plan, action = _work_loop_write_ready_timeout_blocker_plan(
+                todo_id=tiny_write_ready_todo_id,
+                exc=exc,
+            )
+            metrics["tiny_write_ready_draft_outcome"] = "blocker"
+            metrics["tiny_write_ready_draft_fallback_reason"] = ""
+            metrics["tiny_write_ready_draft_error"] = clip_output(str(exc), 500)
+            return {
+                "status": "blocker",
+                "decision_plan": decision_plan,
+                "action_plan": action_plan,
+                "action": action,
+                "metrics": metrics,
+                "elapsed_seconds": _finalize_tiny_draft_metrics(
+                    "model_exception_timeout_blocker"
+                ),
+                "compiler_observed": False,
+            }
+
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_exit_stage"] = "model_exception"
-        if _work_model_error_looks_like_timeout(exc):
-            metrics["tiny_write_ready_draft_fallback_reason"] = "timeout"
-        else:
-            metrics["tiny_write_ready_draft_fallback_reason"] = "error"
+        metrics["tiny_write_ready_draft_fallback_reason"] = "error"
         metrics["tiny_write_ready_draft_error"] = clip_output(str(exc), 500)
         return {
             "status": "fallback",
@@ -5253,17 +5333,60 @@ def plan_work_model_turn(
         if pre_model_metrics_sink:
             pre_model_metrics_sink(dict(model_metrics))
     think_started = time.monotonic()
-    with codex_reasoning_effort_scope(reasoning_policy.get("effort")):
-        decision_plan = call_model_json_with_retries(
-            model_backend,
-            model_auth,
-            think_prompt,
-            model,
-            base_url,
-            think_timeout,
-            log_prefix=f"{current_time}: work_think {model_backend} session={session.get('id')}",
-            **think_kwargs,
-        )
+    try:
+        with codex_reasoning_effort_scope(reasoning_policy.get("effort")):
+            decision_plan = call_model_json_with_retries(
+                model_backend,
+                model_auth,
+                think_prompt,
+                model,
+                base_url,
+                think_timeout,
+                log_prefix=f"{current_time}: work_think {model_backend} session={session.get('id')}",
+                **think_kwargs,
+            )
+    except Exception as exc:
+        if (
+            write_ready_fast_path.get("active")
+            and _work_model_error_looks_like_timeout(exc)
+            and not _work_loop_model_metrics_have_patch_replay_or_artifact(model_metrics)
+        ):
+            think_elapsed = time.monotonic() - think_started
+            todo_id = _work_loop_active_todo_id_from_context(context)
+            decision_plan, action_plan, action = _work_loop_write_ready_timeout_blocker_plan(
+                todo_id=todo_id,
+                exc=exc,
+            )
+            model_metrics["tiny_write_ready_draft_outcome"] = "blocker"
+            model_metrics["tiny_write_ready_draft_fallback_reason"] = ""
+            model_metrics["tiny_write_ready_draft_error"] = clip_output(str(exc), 500)
+            model_metrics["tiny_write_ready_draft_exit_stage"] = "broad_model_timeout_blocker"
+            model_metrics["think"]["elapsed_seconds"] = _round_seconds(
+                tiny_write_ready_elapsed + think_elapsed
+            )
+            model_metrics["act"] = {
+                "prompt_chars": 0,
+                "elapsed_seconds": 0.0,
+                "mode": "tiny_write_ready_draft",
+            }
+            model_metrics["total_model_seconds"] = _round_seconds(
+                (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
+                + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)
+            )
+            if progress:
+                progress(
+                    f"session #{session.get('id')}: THINK timeout converted to write-ready blocker"
+                )
+                progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
+            return {
+                "decision_plan": decision_plan,
+                "action_plan": action_plan,
+                "action": action,
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": compact_model_stream(stream_deltas),
+            }
+        raise
     think_elapsed = time.monotonic() - think_started
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")

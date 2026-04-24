@@ -2544,8 +2544,20 @@ Next action:
   the returned assistant text through `on_text_delta` before JSON parsing, the
   paired test asserts that callback behavior, focused anthropic pytest passed
   with 5 tests, ruff passed, and codex-ultra approved the diff and marking task
-  `#549` done. Next step: continue the fresh literal-current-head calibration
-  batch on a new bounded surface.
+  `#549` done. `#550` / session `#531` then exposed a non-counted fix-first
+  blocker on HEAD `843da37`: mew read `src/mew/perception.py` and
+  `tests/test_perception.py` completely, reached complete paired cached refs
+  with `edit_ready=true`, then repeated `request_timed_out` before patch,
+  blocker, verifier, or replay artifact. Codex-ultra classified this as
+  `non_counted_no_replay_repeated_drafting_timeout` with blocker code
+  `drafting_timeout_after_complete_cached_refs_no_artifact` and directed a
+  fix-first remediation before rerunning perception. The remediation converts
+  tiny write-ready and broad write-ready no-artifact timeouts into an explicit
+  non-counted patch blocker tied to the active todo, and regression coverage
+  now verifies the zero-attempt cached-ref timeout and broad-timeout fallback
+  cases. Next step after committing the remediation: rerun a fresh perception
+  slice on the new HEAD and classify it with codex-ultra before resuming broader
+  calibration.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,

@@ -11613,8 +11613,8 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
-    def test_tiny_write_ready_draft_lane_model_exception_records_elapsed_exit_stage_and_utilization(self):
-        from mew.work_loop import plan_work_model_turn
+    def test_tiny_write_ready_draft_lane_timeout_records_blocker_without_broad_retry(self):
+        from mew.work_loop import WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE, plan_work_model_turn
 
         scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
         old_cwd = os.getcwd()
@@ -11630,10 +11630,13 @@ class WorkSessionTests(unittest.TestCase):
                     state = load_state()
                     task, session = self._seed_write_ready_shadow_session(state, scenario)
 
+                observed = []
+
                 def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    observed.append({"prompt": prompt, "log_prefix": str(log_prefix or "")})
                     if log_prefix and "work_write_ready_tiny_draft" in str(log_prefix):
                         raise TimeoutError("timed out while generating tiny draft")
-                    return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
+                    self.fail("broad write-ready THINK should not run after tiny draft timeout")
 
                 with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
                     planned = plan_work_model_turn(
@@ -11648,12 +11651,264 @@ class WorkSessionTests(unittest.TestCase):
                         act_mode="deterministic",
                     )
 
+                self.assertEqual(len(observed), 1)
+                self.assertIn("Write-ready tiny draft lane is active.", observed[0]["prompt"])
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    f"write-ready tiny draft blocker: {WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE}",
+                )
+                blocker = planned["action_plan"].get("blocker") or {}
+                self.assertEqual(blocker.get("code"), WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE)
+                self.assertFalse(blocker.get("calibration_counted"))
+                self.assertIn("before a patch proposal", blocker.get("detail") or "")
                 metrics = planned["model_metrics"]
-                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "fallback")
-                self.assertEqual(metrics["tiny_write_ready_draft_fallback_reason"], "timeout")
-                self.assertEqual(metrics["tiny_write_ready_draft_exit_stage"], "model_exception")
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_fallback_reason"], "")
+                self.assertEqual(metrics["tiny_write_ready_draft_exit_stage"], "model_exception_timeout_blocker")
+                self.assertEqual(metrics["act"]["mode"], "tiny_write_ready_draft")
                 self.assertGreaterEqual(metrics["tiny_write_ready_draft_elapsed_seconds"], 0.0)
                 self.assertGreaterEqual(metrics["tiny_write_ready_draft_timeout_budget_utilization"], 0.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_blocks_zero_attempt_drafting_timeout_from_cached_refs(self):
+        from mew.errors import ModelBackendError
+        from mew.work_loop import WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE, plan_work_model_turn
+
+        source_path = "src/mew/perception.py"
+        test_path = "tests/test_perception.py"
+        source_text = "def perceive(value):\n    return value\n"
+        test_text = "def test_perceive():\n    assert perceive(1) == 1\n"
+        plan_item = f"Draft one paired dry-run edit batch for {source_path} and {test_path}"
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                state = {
+                    "tasks": [],
+                    "work_sessions": [],
+                    "next_ids": {"work_session": 1, "work_model_turn": 1},
+                }
+                task = add_coding_task(state)
+                task["title"] = "M6.11 cached frontier timeout blocker"
+                task["description"] = "Draft from complete paired cached refs."
+                session, _created = create_work_session(
+                    state,
+                    task,
+                    current_time="2026-04-24T00:00:00Z",
+                )
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": source_path, "line_start": 1, "line_count": 2},
+                        "result": {
+                            "path": source_path,
+                            "line_start": 1,
+                            "line_end": 2,
+                            "text": source_text,
+                            "has_more_lines": False,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": test_path, "line_start": 1, "line_count": 2},
+                        "result": {
+                            "path": test_path,
+                            "line_start": 1,
+                            "line_end": 2,
+                            "text": test_text,
+                            "has_more_lines": False,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                ]
+                session["model_turns"] = [
+                    {
+                        "id": 1,
+                        "status": "completed",
+                        "decision_plan": {
+                            "summary": "cached frontier is ready",
+                            "working_memory": {
+                                "hypothesis": "Complete source/test files are cached.",
+                                "next_step": plan_item,
+                                "plan_items": [plan_item, "Run focused verifier after apply"],
+                                "target_paths": [source_path, test_path],
+                                "last_verified_state": "Both target files were read completely.",
+                            },
+                        },
+                        "action": {"type": "wait", "reason": "ready to draft"},
+                    }
+                ]
+                session["active_work_todo"] = {
+                    "id": f"todo-{session['id']}-1",
+                    "status": "drafting",
+                    "source": {
+                        "plan_item": plan_item,
+                        "target_paths": [source_path, test_path],
+                        "verify_command": "uv run pytest tests/test_perception.py -q",
+                    },
+                    "cached_window_refs": [
+                        {
+                            "path": source_path,
+                            "tool_call_id": 1,
+                            "line_start": 1,
+                            "line_end": 2,
+                            "context_truncated": False,
+                            "window_sha1": "sha1:source-window",
+                        },
+                        {
+                            "path": test_path,
+                            "tool_call_id": 2,
+                            "line_start": 1,
+                            "line_end": 2,
+                            "context_truncated": False,
+                            "window_sha1": "sha1:test-window",
+                        },
+                    ],
+                    "attempts": {"draft": 0, "review": 0},
+                    "patch_draft_id": "",
+                    "blocker": {},
+                    "created_at": "2026-04-24T00:00:00Z",
+                    "updated_at": "2026-04-24T00:00:00Z",
+                }
+
+                resume_before = build_work_session_resume(
+                    session,
+                    task=task,
+                    current_time="2026-04-24T00:00:01Z",
+                )
+                self.assertEqual(resume_before["phase"], "drafting")
+                self.assertEqual(resume_before["draft_attempts"], 0)
+                self.assertEqual(resume_before["active_work_todo"]["status"], "drafting")
+                self.assertTrue(resume_before["plan_item_observations"][0]["edit_ready"])
+                self.assertEqual(len(resume_before["active_work_todo"]["cached_window_refs"]), 2)
+
+                observed = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    observed.append({"prompt": prompt, "log_prefix": str(log_prefix or "")})
+                    if log_prefix and "work_write_ready_tiny_draft" in str(log_prefix):
+                        raise ModelBackendError("request timed out")
+                    self.fail("broad drafting model call should not run after cached-ref timeout")
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=[source_path, test_path],
+                        allow_verify=True,
+                        verify_command="uv run pytest tests/test_perception.py -q",
+                        guidance="Draft one paired dry-run edit using the exact cached windows.",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(len(observed), 1)
+                self.assertIn("Write-ready tiny draft lane is active.", observed[0]["prompt"])
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    f"write-ready tiny draft blocker: {WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE}",
+                )
+                blocker = planned["action_plan"].get("blocker") or {}
+                self.assertEqual(blocker.get("todo_id"), session["active_work_todo"]["id"])
+                self.assertEqual(blocker.get("code"), WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE)
+                self.assertFalse(blocker.get("calibration_counted"))
+                metrics = planned["model_metrics"]
+                self.assertTrue(metrics["write_ready_fast_path"])
+                self.assertEqual(metrics["draft_attempts"], 1)
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["patch_draft_compiler_replay_path"], "")
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "")
+
+                session["model_turns"].append(
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "decision_plan": planned["decision_plan"],
+                        "action_plan": planned["action_plan"],
+                        "action": planned["action"],
+                        "model_metrics": metrics,
+                    }
+                )
+                resume_after = build_work_session_resume(
+                    session,
+                    task=task,
+                    current_time="2026-04-24T00:00:02Z",
+                )
+                todo_after = resume_after["active_work_todo"]
+                self.assertEqual(resume_after["phase"], "blocked_on_patch")
+                self.assertEqual(todo_after["status"], "blocked_on_patch")
+                self.assertEqual(todo_after["attempts"]["draft"], 1)
+                self.assertEqual(todo_after["blocker"]["code"], WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_plan_work_model_turn_converts_broad_write_ready_timeout_without_artifact_to_blocker(self):
+        from mew.errors import ModelBackendError
+        from mew.work_loop import WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE, plan_work_model_turn
+
+        scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                for path, payload in (scenario.get("live_files") or {}).items():
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(payload["text"], encoding="utf-8")
+
+                with state_lock():
+                    state = load_state()
+                    task, session = self._seed_write_ready_shadow_session(state, scenario)
+
+                observed = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    observed.append(str(log_prefix or ""))
+                    if "work_write_ready_tiny_draft" in str(log_prefix or ""):
+                        return {"summary": "not a patch artifact"}
+                    raise ModelBackendError("request timed out")
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                        allow_verify=True,
+                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(len(observed), 2)
+                self.assertIn("work_write_ready_tiny_draft", observed[0])
+                self.assertIn("work_think", observed[1])
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    f"write-ready tiny draft blocker: {WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE}",
+                )
+                blocker = planned["action_plan"].get("blocker") or {}
+                self.assertEqual(blocker.get("code"), WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE)
+                self.assertFalse(blocker.get("calibration_counted"))
+                metrics = planned["model_metrics"]
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertEqual(metrics["tiny_write_ready_draft_exit_stage"], "broad_model_timeout_blocker")
+                self.assertEqual(metrics["patch_draft_compiler_replay_path"], "")
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "")
             finally:
                 os.chdir(old_cwd)
 
