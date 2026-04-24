@@ -12,5 +12,7 @@ def write_generated_report(path: Path, text: str) -> None:
     if path.exists() and path.is_file():
         previous = path.read_text(encoding="utf-8")
         if previous != text:
-            backup_path(path).write_text(previous, encoding="utf-8")
+            backup = backup_path(path)
+            if not backup.exists():
+                backup.write_text(previous, encoding="utf-8")
     path.write_text(text, encoding="utf-8")
