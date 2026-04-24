@@ -2579,8 +2579,15 @@ Next action:
   manufacture a later patch blocker. The focused regression group passed 12
   tests, the broader write-ready/no-change subset passed 32 tests with 5
   subtests, ruff passed, `git diff --check` passed, and codex-ultra returned
-  PASS/no findings. Next step: rerun a fresh literal-current-head sweep slice
-  before continuing unrelated calibration surfaces.
+  PASS/no findings. The fresh post-fix sweep rerun `#553` / session `#534` on
+  HEAD `743035c` then cleared the blocker: mew read `src/mew/sweep.py` and
+  `tests/test_sweep.py` completely, found no justified paired change, ran
+  `uv run pytest -q tests/test_sweep.py --no-testmon` with 6 passed, and
+  closed as counted `positive_verifier_backed_no_change`. Codex-ultra
+  classified it PASS/COUNTED, accepted the non-blocking objc warning because
+  the verifier exit was clean and the session closed, and approved marking task
+  `#553` done. Next step: continue the fresh literal-current-head calibration
+  batch on a new bounded surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
