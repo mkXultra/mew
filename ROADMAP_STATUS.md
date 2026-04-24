@@ -2677,8 +2677,18 @@ Next action:
   cleanly as verifier-backed no-change, and made no edits after the committed
   test alignment. Codex-ultra classified the rerun PASS/COUNTED as
   `positive_verifier_backed_no_change`; the non-blocking objc warning is
-  ignored because `run_tests` exit code was 0. Next step: continue with the
-  bounded `metrics` source/test surface.
+  ignored because `run_tests` exit code was 0. `#564` / session `#545` then
+  exercised the bounded `metrics` source/test surface on HEAD `d0e4c08`: it
+  recovered from repeat-action guard `#4249` by recording split source
+  coverage through tail read `#4250`, used complete `tests/test_metrics.py`
+  read `#4246`, ran `uv run pytest -q tests/test_metrics.py --no-testmon`
+  with 10 passed, closed verifier-backed no-change, and made no edits.
+  Codex-ultra classified it PASS/COUNTED as
+  `positive_verifier_backed_no_change`; stale `unresolved_failure` after the
+  recovered read guard and split offset read coverage not reflected in
+  `target_path_cached_window_observations` are follow-up defects, not counting
+  blockers. Next step: continue with the bounded `programmer` source/test
+  surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
