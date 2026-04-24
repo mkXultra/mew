@@ -7028,6 +7028,110 @@ class WorkSessionTests(unittest.TestCase):
             target_paths,
         )
 
+    def test_write_ready_preflight_block_searches_explicit_unnumbered_refresh_cues(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/work_session.py", "tests/test_work_session.py"]
+        context = {
+            "task": {
+                "id": 499,
+                "title": "M6.11 current-head validation on work_session surface",
+                "description": "Validate the paired work_session/test_work_session surface.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 482,
+                "status": "active",
+                "resume": {
+                    "pending_steer": {
+                        "text": (
+                            "The initial line 1-260 reads were broad top-of-file context. "
+                            "Refresh structurally complete targeted windows before any draft: "
+                            "source around finish_work_model_turn/run command helpers in "
+                            "src/mew/work_session.py, and tests around the calibration/no_change "
+                            "replay finish-gate cases in tests/test_work_session.py."
+                        )
+                    },
+                    "active_work_todo": {
+                        "id": "todo-482-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "target_paths": target_paths,
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/work_session.py",
+                                    "line_start": 1,
+                                    "line_end": 260,
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line_start": 1,
+                                    "line_end": 260,
+                                },
+                            ],
+                        }
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 1,
+                        "path": "src/mew/work_session.py",
+                        "line_start": 1,
+                        "line_end": 260,
+                        "text": "import json\n\ndef unfinished():\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 2,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 1,
+                        "line_end": 260,
+                        "text": "class WorkSessionTests(unittest.TestCase):\n    def helper(self):\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertEqual(
+            preflight_block["action"]["tools"],
+            [
+                {
+                    "type": "search_text",
+                    "path": "src/mew/work_session.py",
+                    "query": "finish_work_model_turn",
+                    "reason": "locate explicitly requested write-ready cached window",
+                },
+                {
+                    "type": "search_text",
+                    "path": "tests/test_work_session.py",
+                    "query": "no_change",
+                    "reason": "locate explicitly requested write-ready cached window",
+                },
+            ],
+        )
+
     def test_write_ready_fast_path_does_not_activate_without_plan_item_observations(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 

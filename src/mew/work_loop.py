@@ -2287,7 +2287,106 @@ def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
         )
         if len(actions) >= 5:
             break
+    if actions:
+        return actions
+    return _work_write_ready_explicit_refresh_search_actions(text, allowed_paths)
+
+
+def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths):
+    lowered = (text or "").casefold()
+    if not re.search(r"\b(refresh|read|around)\b", lowered):
+        return []
+    actions = []
+    seen = set()
+    for path in allowed_paths:
+        segment = _work_write_ready_refresh_text_segment(text, path)
+        query = _work_write_ready_refresh_query(segment)
+        if not query:
+            continue
+        key = (path, query)
+        if key in seen:
+            continue
+        seen.add(key)
+        actions.append(
+            {
+                "type": "search_text",
+                "path": path,
+                "query": query,
+                "reason": "locate explicitly requested write-ready cached window",
+            }
+        )
+        if len(actions) >= 5:
+            break
     return actions
+
+
+def _work_write_ready_refresh_text_segment(text, path):
+    text = text or ""
+    path = str(path or "").strip()
+    if _work_batch_path_is_mew_source(path):
+        match = re.search(r"\bsource\s+around\s+(?P<cues>[^.;\n]+)", text, re.IGNORECASE)
+        if match:
+            return match.group("cues")
+    if _work_batch_path_is_tests(path):
+        match = re.search(r"\btests?\s+around\s+(?P<cues>[^.;\n]+)", text, re.IGNORECASE)
+        if match:
+            return match.group("cues")
+
+    lowered = text.casefold()
+    path_index = lowered.find(path.casefold()) if path else -1
+    if path_index >= 0:
+        start = max(0, path_index - 240)
+        end = min(len(text), path_index + len(path) + 240)
+        return text[start:end]
+    return text
+
+
+def _work_write_ready_refresh_query(text):
+    stopwords = {
+        "and",
+        "around",
+        "before",
+        "cached",
+        "cases",
+        "complete",
+        "decision",
+        "draft",
+        "drafting",
+        "exact",
+        "finish",
+        "helpers",
+        "line",
+        "lines",
+        "read",
+        "refresh",
+        "source",
+        "structurally",
+        "targeted",
+        "tests",
+        "the",
+        "window",
+        "windows",
+    }
+    candidates = []
+    for match in re.finditer(r"[A-Za-z_][A-Za-z0-9_]{2,}", text or ""):
+        token = match.group(0).strip("_")
+        lowered = token.casefold()
+        if lowered in stopwords:
+            continue
+        if lowered in {"src", "mew", "py", "test", "work", "session"}:
+            continue
+        score = 0
+        if "_" in token:
+            score += 4
+        if len(token) >= 8:
+            score += 1
+        if lowered.startswith(("test_", "finish_", "no_", "calibration")):
+            score += 1
+        candidates.append((score, match.start(), token))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][2]
 
 
 def _work_write_ready_preflight_block(context, write_ready_fast_path):
