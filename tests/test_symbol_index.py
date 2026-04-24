@@ -18,8 +18,8 @@ class SymbolIndexTests(unittest.TestCase):
                 memory_type="project",
                 memory_kind="file-pair",
                 name="symbol index pair",
-                source_path="src/mew/symbol_index.py",
-                test_path="tests/test_symbol_index.py",
+                source_path=" src/mew/symbol_index.py ",
+                test_path=" tests/test_symbol_index.py ",
                 structural_evidence="same-session read of source and test plus co-edit plan",
                 focused_test_green=True,
                 created_at="2026-04-21T19:00:00Z",
@@ -36,6 +36,7 @@ class SymbolIndexTests(unittest.TestCase):
 
             self.assertEqual(index["schema_version"], 1)
             record = index["sources"]["src/mew/symbol_index.py"]
+            self.assertEqual(record["source_path"], "src/mew/symbol_index.py")
             self.assertEqual(record["test_path"], "tests/test_symbol_index.py")
             self.assertEqual(record["memory_ids"], [entry.id])
 

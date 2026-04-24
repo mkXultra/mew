@@ -29,19 +29,21 @@ def build_symbol_index(base_dir: str | Path = ".") -> dict[str, Any]:
             continue
         if entry.memory_type != "project" or entry.memory_kind != "file-pair":
             continue
-        if not entry.source_path or not entry.test_path:
+        source_path = str(entry.source_path or "").strip()
+        test_path = str(entry.test_path or "").strip()
+        if not source_path or not test_path:
             continue
 
         record = sources.setdefault(
-            entry.source_path,
+            source_path,
             {
-                "source_path": entry.source_path,
-                "test_path": entry.test_path,
+                "source_path": source_path,
+                "test_path": test_path,
                 "memory_ids": [],
             },
         )
         if not record.get("test_path"):
-            record["test_path"] = entry.test_path
+            record["test_path"] = test_path
         if entry.id and entry.id not in record["memory_ids"]:
             record["memory_ids"].append(entry.id)
 
