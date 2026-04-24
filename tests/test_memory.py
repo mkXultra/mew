@@ -771,6 +771,10 @@ class MemoryTests(unittest.TestCase):
                     self.assertEqual(main(["memory", "--reviewer-diffs", "--json"]), 0)
                 self.assertEqual(json.loads(stdout.getvalue()), {"records": []})
 
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--reviewer-diffs"]), 0)
+                self.assertEqual(stdout.getvalue(), "No reviewer diff records.\n")
+
                 durable = Path(".mew") / "durable"
                 durable.mkdir(parents=True, exist_ok=True)
                 payload = {

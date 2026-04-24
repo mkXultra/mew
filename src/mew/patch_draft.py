@@ -365,8 +365,13 @@ def _normalize_blocker_proposal(proposal, *, todo_id):
 
 
 def _validate_pairing(todo, edited_paths, *, allowed_write_roots=None):
-    target_paths = set(todo.get("source", {}).get("target_paths") or [])
+    ordered_target_paths = list(todo.get("source", {}).get("target_paths") or [])
+    target_paths = set(ordered_target_paths)
     edited_path_set = set(edited_paths)
+    target_test_paths = [path for path in ordered_target_paths if _patch_draft_path_is_test(path)]
+    edited_target_test_paths = [
+        path for path in edited_paths if path in target_paths and _patch_draft_path_is_test(path)
+    ]
 
     if not allowed_write_roots:
         return build_patch_blocker(
@@ -397,21 +402,38 @@ def _validate_pairing(todo, edited_paths, *, allowed_write_roots=None):
         if not path.startswith("src/mew/"):
             continue
         paired_test_path = convention_test_path_for_mew_source(path)
-        if paired_test_path and paired_test_path not in target_paths:
-            return build_patch_blocker(
-                todo.get("id") or "",
-                "write_policy_violation",
-                path=paired_test_path,
-                detail="paired test path is outside the active WorkTodo target_paths",
-            )
-        if paired_test_path and paired_test_path not in edited_path_set:
+        if not paired_test_path:
+            continue
+        if paired_test_path in target_paths:
+            if paired_test_path not in edited_path_set:
+                return build_patch_blocker(
+                    todo.get("id") or "",
+                    "unpaired_source_edit_blocked",
+                    path=path,
+                    detail=f"missing paired test edit for {paired_test_path}",
+                )
+            continue
+        if target_test_paths:
+            if edited_target_test_paths:
+                continue
             return build_patch_blocker(
                 todo.get("id") or "",
                 "unpaired_source_edit_blocked",
                 path=path,
-                detail=f"missing paired test edit for {paired_test_path}",
+                detail=f"missing paired test edit for {target_test_paths[0]}",
             )
+        return build_patch_blocker(
+            todo.get("id") or "",
+            "write_policy_violation",
+            path=paired_test_path,
+            detail="paired test path is outside the active WorkTodo target_paths",
+        )
     return {}
+
+
+def _patch_draft_path_is_test(path):
+    normalized = normalize_work_path(path)
+    return normalized.startswith("tests/") or "/tests/" in normalized
 
 
 def _compile_file(*, todo, proposal_file, cached_windows, live_files):

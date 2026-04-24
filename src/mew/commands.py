@@ -11980,6 +11980,8 @@ def cmd_memory(args):
                     print(json.dumps({"records": records}, ensure_ascii=False, indent=2))
                 elif records:
                     print(_format_reviewer_diff_records(records))
+                else:
+                    print("No reviewer diff records.")
                 return 0
             if args.resolve_source_path:
                 from .symbol_index import resolve_source_path, resolve_test_path

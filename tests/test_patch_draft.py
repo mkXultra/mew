@@ -408,6 +408,74 @@ class PatchDraftTests(unittest.TestCase):
             "paired test path is outside the active WorkTodo target_paths",
         )
 
+    def test_compile_patch_draft_accepts_explicit_non_convention_test_pair(self):
+        source_path = "src/mew/commands.py"
+        test_path = "tests/test_memory.py"
+        source_before = "def empty_message():\n    return ''\n"
+        test_before = "def test_empty_message():\n    assert empty_message() == ''\n"
+        proposal = {
+            "kind": "patch_proposal",
+            "files": [
+                {
+                    "path": source_path,
+                    "edits": [{"old": "return ''", "new": "return 'No records.'"}],
+                },
+                {
+                    "path": test_path,
+                    "edits": [{"old": "== ''", "new": "== 'No records.'"}],
+                },
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo=_todo(source_path, test_path),
+            proposal=proposal,
+            cached_windows={
+                source_path: _window(source_path, source_before),
+                test_path: _window(test_path, test_before),
+            },
+            live_files={
+                source_path: _live_file(source_before),
+                test_path: _live_file(test_before),
+            },
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_draft")
+        self.assertEqual([item["path"] for item in artifact["files"]], [source_path, test_path])
+        self.assertIn("No records.", artifact["unified_diff"])
+
+    def test_compile_patch_draft_requires_explicit_non_convention_test_edit(self):
+        source_path = "src/mew/commands.py"
+        test_path = "tests/test_memory.py"
+        source_before = "def empty_message():\n    return ''\n"
+        proposal = {
+            "kind": "patch_proposal",
+            "files": [
+                {
+                    "path": source_path,
+                    "edits": [{"old": "return ''", "new": "return 'No records.'"}],
+                }
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo=_todo(source_path, test_path),
+            proposal=proposal,
+            cached_windows={
+                source_path: _window(source_path, source_before),
+            },
+            live_files={
+                source_path: _live_file(source_before),
+            },
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_blocker")
+        self.assertEqual(artifact["code"], "unpaired_source_edit_blocked")
+        self.assertEqual(artifact["path"], source_path)
+        self.assertEqual(artifact["detail"], "missing paired test edit for tests/test_memory.py")
+
     def test_compile_patch_draft_blocks_overlapping_same_path_hunks(self):
         path = "tests/test_patch_draft.py"
         before_text = "abcdef\n"

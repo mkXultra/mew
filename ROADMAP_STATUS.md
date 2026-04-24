@@ -1905,6 +1905,15 @@ Progress / remaining proof:
   Task `#398` stalled twice in mew session `#390` despite exact cached windows,
   so `claude-ultra` chose a direct patch as product progress rather than
   autonomy credit
+- The follow-up `#399` blocker is closed: patch-draft validation no longer
+  hard-requires the conventional `tests/test_commands.py` pair when the active
+  WorkTodo explicitly targets another test surface such as
+  `src/mew/commands.py` + `tests/test_memory.py`. The first validator fix was
+  supervisor rescue/product progress, then gpt-5.5/high mew-first session
+  `#558` retried from cached windows, produced reviewer-visible dry-run edits,
+  applied the paired `mew memory --reviewer-diffs` human empty-state patch, ran
+  the configured verifier plus `tests.test_commands`, and closed with finish.
+  Count the post-repair draft/apply/verify/finish as mew-first evidence
 - D7 read-only reviewer-diff observability is landed as product progress:
   `mew memory --reviewer-diffs` now dumps `.mew/durable/reviewer_diffs.jsonl`
   in both human and JSON form, with empty-log no-op behavior and collision
