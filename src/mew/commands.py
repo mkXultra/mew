@@ -11882,6 +11882,19 @@ def _format_memory_entry_show(item):
     return "\n".join(lines)
 
 
+def _format_veto_log_entries(entries):
+    if not entries:
+        return "No veto log entries."
+    lines = []
+    for entry in entries:
+        parts = [f"entry_id={entry.get('entry_id') or ''}"]
+        if entry.get("created_at"):
+            parts.append(f"created_at={entry.get('created_at')}")
+        parts.append(f"reason={entry.get('reason') or ''}")
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
+
+
 def cmd_memory(args):
     if args.active:
         if (
@@ -11894,9 +11907,10 @@ def cmd_memory(args):
             or args.resolve_test_path
             or args.reviewer_diffs
             or args.veto
+            or args.veto_log
         ):
             print(
-                "mew: --active cannot be combined with --add, --search, --compact, --list, --show, --resolve-source-path, --resolve-test-path, --reviewer-diffs, or --veto",
+                "mew: --active cannot be combined with --add, --search, --compact, --list, --show, --resolve-source-path, --resolve-test-path, --reviewer-diffs, --veto, or --veto-log",
                 file=sys.stderr,
             )
             return 1
@@ -11923,10 +11937,18 @@ def cmd_memory(args):
         print(format_active_memory(active_memory, task=task, session=session))
         return 0
 
-    if args.list or args.show or args.resolve_source_path or args.resolve_test_path or args.reviewer_diffs or args.veto:
+    if (
+        args.list
+        or args.show
+        or args.resolve_source_path
+        or args.resolve_test_path
+        or args.reviewer_diffs
+        or args.veto
+        or args.veto_log
+    ):
         if args.add or args.search or args.compact:
             print(
-                "mew: --list/--show/--resolve-source-path/--resolve-test-path/--reviewer-diffs/--veto cannot be combined with --add, --search, or --compact",
+                "mew: --list/--show/--resolve-source-path/--resolve-test-path/--reviewer-diffs/--veto/--veto-log cannot be combined with --add, --search, or --compact",
                 file=sys.stderr,
             )
             return 1
@@ -11939,12 +11961,13 @@ def cmd_memory(args):
                 bool(args.resolve_test_path),
                 bool(args.reviewer_diffs),
                 bool(args.veto),
+                bool(args.veto_log),
             )
             if flag
         ]
         if len(chosen) > 1:
             print(
-                "mew: choose only one of --list, --show, --resolve-source-path, --resolve-test-path, --reviewer-diffs, or --veto",
+                "mew: choose only one of --list, --show, --resolve-source-path, --resolve-test-path, --reviewer-diffs, --veto, or --veto-log",
                 file=sys.stderr,
             )
             return 1
@@ -11998,6 +12021,13 @@ def cmd_memory(args):
                     print(json.dumps({"veto": payload}, ensure_ascii=False, indent=2))
                 else:
                     print(f"vetoed {payload['entry_id']}: {payload['reason']}")
+                return 0
+            if args.veto_log:
+                entries = backend.veto_log_entries()
+                if args.json:
+                    print(json.dumps({"veto_log": entries}, ensure_ascii=False, indent=2))
+                else:
+                    print(_format_veto_log_entries(entries))
                 return 0
             if args.show:
                 entry = backend.get(

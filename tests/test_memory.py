@@ -896,6 +896,83 @@ class MemoryTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_cli_memory_veto_log_reads_durable_log(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--veto-log", "--json"]), 0)
+                self.assertEqual(json.loads(stdout.getvalue())["veto_log"], [])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Remember this note so the veto log has an entry.",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "failure-shield",
+                                "--scope",
+                                "private",
+                                "--name",
+                                "Veto log note",
+                                "--approved",
+                                "--symptom",
+                                "stale durable note was reused",
+                                "--root-cause",
+                                "veto history was hidden",
+                                "--fix",
+                                "surface the durable veto log",
+                                "--stop-rule",
+                                "stop if veto log cannot be inspected",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                entry_id = json.loads(stdout.getvalue())["entry"]["id"]
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--veto",
+                                entry_id,
+                                "--reason",
+                                "reviewer rejected this durable note",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--veto-log", "--json"]), 0)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["veto_log"][-1]["entry_id"], entry_id)
+                self.assertEqual(payload["veto_log"][-1]["reason"], "reviewer rejected this durable note")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["memory", "--veto-log"]), 0)
+                text = stdout.getvalue()
+                self.assertIn(f"entry_id={entry_id}", text)
+                self.assertIn("reason=reviewer rejected this durable note", text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_veto_log_collides_with_other_memory_modes(self):
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            self.assertEqual(main(["memory", "--veto-log", "--list"]), 1)
+        self.assertIn("choose only one", stderr.getvalue())
+
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+            self.assertEqual(main(["memory", "--veto-log", "--search", "trace"]), 1)
+        self.assertIn("cannot be combined", stderr.getvalue())
+
     def test_cli_memory_add_rejects_reasoning_trace_direct_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

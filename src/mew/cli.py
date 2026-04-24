@@ -1503,6 +1503,7 @@ def build_parser():
         help="dump durable reviewer diff records",
     )
     memory_parser.add_argument("--veto", help="logically suppress one typed memory entry by id")
+    memory_parser.add_argument("--veto-log", dest="veto_log", action="store_true", help="dump durable typed-memory veto log entries")
     memory_parser.add_argument("--reason", help="required veto reason for --veto")
     memory_parser.add_argument("--active", action="store_true", help="show typed memory that would be injected now")
     memory_parser.add_argument("--task-id", help="task id used to select active typed memory")
