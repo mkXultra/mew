@@ -10,7 +10,11 @@ import tokenize
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .errors import MewError, ModelBackendError
-from .patch_draft import compile_patch_draft, compile_patch_draft_previews
+from .patch_draft import (
+    PATCH_BLOCKER_RECOVERY_ACTIONS,
+    compile_patch_draft,
+    compile_patch_draft_previews,
+)
 from .reasoning_policy import codex_reasoning_effort_scope, select_work_reasoning_policy
 from .tasks import clip_output, task_scope_target_paths
 from .test_discovery import normalize_work_path
@@ -2550,6 +2554,59 @@ def _write_ready_patch_draft_proposal_from_action(
     }
 
 
+def _work_loop_patch_blocker_describes_no_material_change(proposal):
+    proposal = proposal if isinstance(proposal, dict) else {}
+    code = str(proposal.get("code") or "").strip()
+    if not code or code in PATCH_BLOCKER_RECOVERY_ACTIONS:
+        return False
+    text = re.sub(
+        r"\s+",
+        " ",
+        " ".join(
+            str(proposal.get(field) or "")
+            for field in ("summary", "detail", "reason")
+            if proposal.get(field) is not None
+        ),
+    ).casefold()
+    if not text:
+        return False
+    uncertainty_pattern = re.compile(
+        r"\b(?:whether|may|might|could|uncertain|unsure|not sure)\b"
+        r"|\b(?:before deciding|deciding whether|decide whether)\b"
+        r"|\bneed(?:s|ed)?\b.{0,80}\b(?:before|decid|whether|exact cached|"
+        r"cached windows|inspect|check|review|verify|read|fetch|refresh)\b"
+        r"|\bshould\s+(?:inspect|check|review|verify|read|fetch|refresh|decide)\b"
+    )
+    if uncertainty_pattern.search(text):
+        return False
+    conclusion_pattern = re.compile(
+        r"\bno concrete code change (?:was |is )?specified\b"
+        r"|\bno concrete code change to draft\b"
+        r"|\bno concrete change to draft\b"
+        r"|\bno concrete draftable change\b"
+        r"|\bno material change remains?\b"
+        r"|\bnothing to change\b"
+        r"|\bno draftable change remains?\b"
+    )
+    return bool(conclusion_pattern.search(text))
+
+
+def _normalize_work_loop_patch_blocker_proposal(proposal):
+    proposal = proposal if isinstance(proposal, dict) else {}
+    if str(proposal.get("kind") or "").strip() != "patch_blocker":
+        return proposal
+    if not _work_loop_patch_blocker_describes_no_material_change(proposal):
+        return proposal
+    normalized = dict(proposal)
+    normalized["code"] = "no_material_change"
+    if not str(normalized.get("detail") or "").strip():
+        normalized["detail"] = (
+            str(proposal.get("summary") or proposal.get("reason") or "").strip()
+            or "model reported no concrete draftable change"
+        )
+    return normalized
+
+
 def _compile_write_ready_patch_draft_proposal(
     *,
     session,
@@ -2561,6 +2618,7 @@ def _compile_write_ready_patch_draft_proposal(
 ):
     observation = _empty_patch_draft_compiler_observation()
     proposal = proposal if isinstance(proposal, dict) else {}
+    proposal = _normalize_work_loop_patch_blocker_proposal(proposal)
     environment = _write_ready_patch_draft_environment(
         session=session,
         context=context,
