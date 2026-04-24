@@ -72,6 +72,7 @@ WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
+WORK_WRITE_READY_RECENT_WINDOWS_PER_TARGET_PATH = 3
 WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE = "drafting_timeout_after_complete_cached_refs_no_artifact"
 WORK_WRITE_READY_REFRESH_RECOVERABLE_BLOCKER_CODES = {
     "missing_exact_cached_window_texts",
@@ -1693,15 +1694,67 @@ def _write_ready_recent_windows_from_target_paths(work_session, resume):
         if any(_work_paths_match(path, existing) for existing in ordered_paths):
             continue
         ordered_paths.append(path)
+    def window_score(item):
+        prepared = _write_ready_window_with_draft_window(item)
+        draft_window = _write_ready_structural_window_for_draft(prepared)
+        complete = _write_ready_window_text_is_structurally_complete(
+            (draft_window or {}).get("text") or ""
+        )
+        try:
+            span = int((draft_window or {}).get("line_end") or 0) - int(
+                (draft_window or {}).get("line_start") or 0
+            )
+        except (TypeError, ValueError):
+            span = 0
+        try:
+            tool_call_id = int(item.get("tool_call_id") or 0)
+        except (TypeError, ValueError):
+            tool_call_id = 0
+        return (1 if complete else 0, -span, tool_call_id)
+
+    def window_complete(item):
+        draft_window = _write_ready_structural_window_for_draft(item)
+        return _write_ready_window_text_is_structurally_complete(
+            (draft_window or {}).get("text") or ""
+        )
+
+    def windows_overlap(left, right):
+        try:
+            left_start = int(left.get("line_start") or 0)
+            left_end = int(left.get("line_end") or 0)
+            right_start = int(right.get("line_start") or 0)
+            right_end = int(right.get("line_end") or 0)
+        except (TypeError, ValueError):
+            return False
+        if left_start <= 0 or right_start <= 0 or left_end < left_start or right_end < right_start:
+            return False
+        return left_start <= right_end and right_start <= left_end
+
     matched = []
     for path in ordered_paths:
+        candidates = []
         for item in recent_windows:
             if not _work_paths_match(item.get("path"), path):
                 continue
             if not item.get("text") or item.get("context_truncated"):
-                break
-            matched.append(item)
-            break
+                continue
+            candidates.append(_write_ready_window_with_draft_window(item))
+        if candidates:
+            selected = []
+            complete_candidates = [candidate for candidate in candidates if window_complete(candidate)]
+            ranked_candidates = complete_candidates or candidates
+            for candidate in sorted(ranked_candidates, key=window_score, reverse=True):
+                if any(windows_overlap(candidate, existing) for existing in selected):
+                    continue
+                selected.append(candidate)
+                if len(selected) >= WORK_WRITE_READY_RECENT_WINDOWS_PER_TARGET_PATH:
+                    break
+            matched.extend(
+                sorted(
+                    selected,
+                    key=lambda item: int(item.get("line_start") or 0),
+                )
+            )
     if len(matched) < 2:
         return []
     has_tests = any(_work_batch_path_is_tests(item.get("path")) for item in matched)
@@ -1813,16 +1866,16 @@ def _write_ready_complete_recent_windows_from_active_work_todo(work_session, res
         return complete_windows
     if _write_ready_refresh_blocker_cleared_by_complete_windows(active_work_todo, complete_windows):
         return complete_windows
-    cached_refs = _write_ready_cached_refs_from_active_work_todo(resume)
-    exact_windows = _write_ready_exact_windows_for_cached_refs(work_session, cached_refs)
-    if exact_windows and _write_ready_recent_windows_are_structurally_complete(exact_windows):
-        return exact_windows
     recent_windows = [
         _write_ready_window_with_draft_window(window)
         for window in _write_ready_recent_windows_from_active_work_todo(work_session, resume)
     ]
     if recent_windows and _write_ready_recent_windows_are_structurally_complete(recent_windows):
         return recent_windows
+    cached_refs = _write_ready_cached_refs_from_active_work_todo(resume)
+    exact_windows = _write_ready_exact_windows_for_cached_refs(work_session, cached_refs)
+    if exact_windows and _write_ready_recent_windows_are_structurally_complete(exact_windows):
+        return exact_windows
     return []
 
 
@@ -4685,12 +4738,33 @@ def build_write_ready_tiny_draft_model_context(context):
             recent_windows,
         )
     )
+    def task_goal_plan_item():
+        task = (context or {}).get("task") if isinstance((context or {}).get("task"), dict) else {}
+        title = str(task.get("title") or "").strip()
+        description = str(task.get("description") or "").strip()
+        if not title and not description:
+            return ""
+        pieces = []
+        if title:
+            pieces.append(title)
+        if description:
+            pieces.append(description)
+        return "Task goal: " + " - ".join(pieces)
+
     if stale_refresh_blocker_cleared:
         actionable_plan_item = _write_ready_refreshed_draft_plan_item(
             resume,
             resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {},
             first_observation,
         )
+        task_goal = task_goal_plan_item()
+        if task_goal and actionable_plan_item.startswith(
+            "Draft one paired dry-run edit from the refreshed exact cached windows"
+        ):
+            actionable_plan_item = (
+                f"{task_goal}\n"
+                "Recovered from a cached-window refresh blocker; draft only the patch that implements this task goal."
+            )
     elif first_observation:
         actionable_plan_item = str(first_observation.get("plan_item") or "").strip()
     if actionable_plan_item:

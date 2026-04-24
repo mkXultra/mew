@@ -7204,6 +7204,259 @@ class WorkSessionTests(unittest.TestCase):
             target_paths,
         )
 
+    def test_write_ready_refresh_blocker_uses_later_complete_reads_over_stale_cached_refs(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            build_write_ready_tiny_draft_model_context,
+            build_write_ready_work_model_context,
+        )
+
+        source_path = "src/mew/dogfood.py"
+        test_path = "tests/test_dogfood.py"
+        source_broad = (
+            "def old_scenario():\n"
+            "    return {'status': 'pass'}\n\n"
+            "def dangling_source():\n"
+            "    if True:\n"
+        )
+        test_broad = (
+            "def test_old_scenario():\n"
+            "    assert True\n\n"
+            "def dangling_test():\n"
+            "    if True:\n"
+        )
+        source_narrow = "def run_m6_9_memory_taxonomy_scenario():\n    return {'status': 'pass'}\n"
+        test_narrow = "def test_run_dogfood_m6_9_memory_taxonomy_scenario():\n    assert True\n"
+        context = {
+            "task": {
+                "id": 573,
+                "title": "M6.9 dogfood taxonomy",
+                "description": "Recover after cached-window blocker with explicit narrow reads.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 559,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-559-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "target_paths": [source_path, test_path],
+                            "verify_command": "uv run pytest -q tests/test_dogfood.py -k m6_9_memory_taxonomy --no-testmon",
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": source_path,
+                                "tool_call_id": 11,
+                                "line_start": 1,
+                                "line_end": 5,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:source-old",
+                            },
+                            {
+                                "path": test_path,
+                                "tool_call_id": 12,
+                                "line_start": 1,
+                                "line_end": 5,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:test-old",
+                            },
+                        ],
+                        "attempts": {"draft": 2, "review": 0},
+                        "blocker": {
+                            "code": "cached_window_incomplete",
+                            "detail": "old broad cached refs ended mid-block",
+                            "recovery_action": "refresh_cached_window",
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {
+                                    "path": source_path,
+                                    "tool_call_id": 11,
+                                    "line_start": 1,
+                                    "line_end": 5,
+                                    "context_truncated": False,
+                                },
+                                {
+                                    "path": test_path,
+                                    "tool_call_id": 12,
+                                    "line_start": 1,
+                                    "line_end": 5,
+                                    "context_truncated": False,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [{"path": source_path}, {"path": test_path}],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": source_path,
+                        "line_start": 1,
+                        "line_end": 5,
+                        "text": source_broad,
+                        "context_truncated": False,
+                        "complete_file": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": test_path,
+                        "line_start": 1,
+                        "line_end": 5,
+                        "text": test_broad,
+                        "context_truncated": False,
+                        "complete_file": False,
+                    },
+                    {
+                        "tool_call_id": 13,
+                        "path": source_path,
+                        "line_start": 45,
+                        "line_end": 46,
+                        "text": source_narrow,
+                        "context_truncated": False,
+                        "complete_file": False,
+                    },
+                    {
+                        "tool_call_id": 14,
+                        "path": test_path,
+                        "line_start": 478,
+                        "line_end": 479,
+                        "text": test_narrow,
+                        "context_truncated": False,
+                        "complete_file": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the refreshed exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+        fast_context = build_write_ready_work_model_context(context)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_complete_reads")
+        self.assertEqual(fast_context["active_work_todo"]["status"], "drafting")
+        self.assertEqual(fast_context["active_work_todo"]["blocker"], {"code": "", "recovery_action": ""})
+        self.assertEqual(
+            [item["tool_call_id"] for item in details["recent_windows"]],
+            [13, 14],
+        )
+        self.assertEqual(
+            [item["text"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            [source_narrow, test_narrow],
+        )
+        self.assertIn(
+            "Task goal: M6.9 dogfood taxonomy",
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+        )
+        self.assertNotIn(
+            "Refresh the paired exact cached windows",
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+        )
+
+    def test_write_ready_refresh_blocker_keeps_multiple_non_overlapping_windows_per_target_path(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        source_path = "src/mew/dogfood.py"
+        test_path = "tests/test_dogfood.py"
+        source_constants = "DOGFOOD_SCENARIOS = (\n    \"m6_9-memory-taxonomy\",\n)\n"
+        source_runner = "def run_m6_9_memory_taxonomy_scenario(workspace, env=None):\n    return {}\n"
+        source_dispatch = (
+            "def run_dogfood_scenario(args):\n"
+            "    if name == \"m6_9-memory-taxonomy\":\n"
+            "        reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))\n"
+        )
+        test_case = "def test_run_dogfood_m6_9_memory_taxonomy_scenario():\n    assert True\n"
+        context = {
+            "task": {
+                "id": 573,
+                "title": "M6.9 dogfood: memory taxonomy scenario",
+                "description": "Register and implement m6_9-memory-taxonomy.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 559,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-559-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "target_paths": [source_path, test_path],
+                        },
+                        "cached_window_refs": [
+                            {"path": source_path, "tool_call_id": 11, "line_start": 1, "line_end": 3},
+                            {"path": test_path, "tool_call_id": 14, "line_start": 478, "line_end": 479},
+                        ],
+                        "blocker": {
+                            "code": "cached_window_incomplete",
+                            "recovery_action": "refresh_cached_window",
+                        },
+                    },
+                    "target_path_cached_window_observations": [{"path": source_path}, {"path": test_path}],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 11,
+                        "path": source_path,
+                        "line_start": 50,
+                        "line_end": 52,
+                        "text": source_constants,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": source_path,
+                        "line_start": 690,
+                        "line_end": 691,
+                        "text": source_runner,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 13,
+                        "path": source_path,
+                        "line_start": 11415,
+                        "line_end": 11417,
+                        "text": source_dispatch,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 14,
+                        "path": test_path,
+                        "line_start": 478,
+                        "line_end": 479,
+                        "text": test_case,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+        }
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        cached_texts = tiny_context["write_ready_fast_path"]["cached_window_texts"]
+
+        self.assertEqual(
+            [item["path"] for item in cached_texts],
+            [source_path, source_path, source_path, test_path],
+        )
+        self.assertEqual(
+            [item["text"] for item in cached_texts],
+            [source_constants, source_runner, source_dispatch, test_case],
+        )
+
     def test_write_ready_preflight_block_reads_widened_windows_for_incomplete_paired_refs(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
