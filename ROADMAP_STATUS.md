@@ -1913,6 +1913,15 @@ Progress / remaining proof:
   rejection. Task `#400` timed out in mew session `#391` after exact cached
   windows but before drafting the paired edit, so the landed patch is product
   progress and the failure was preserved separately as blocker task `#401`
+- D7 read-only veto-log observability is landed as product progress:
+  `mew memory --veto-log` now dumps `.mew/durable/vetoes.jsonl` as human
+  `entry_id`/`reason`/`created_at` rows and JSON `{records: [...]}`, with
+  empty-log no-op behavior and flag-collision checks matching the memory
+  read-surface matrix. Task `#402` gathered useful mew-first inspection
+  evidence in sessions `#392` and `#556`, but write-ready preflight still
+  detoured before drafting, so the shipped patch is supervisor rescue/product
+  progress and the failure remains input for bounded M6.9 loop hardening rather
+  than autonomy credit
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices
