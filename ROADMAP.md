@@ -650,6 +650,55 @@ Why it matters:
   resident-operation work build on a replayable, contract-driven execution
   core rather than prompt luck.
 
+## Milestone 6.12: Failure-Science Instrumentation
+
+Turn the M6.11 calibration ledger and replay bundles into a small
+operator-facing failure-science surface before resuming broad M6.9 durable
+memory work.
+
+Target:
+
+- a read-only calibration ledger parser for
+  `proof-artifacts/m6_11_calibration_ledger.jsonl`
+- a derived classifier that maps each ledger row into reproducible v0
+  archetypes without mutating the canonical ledger
+- a single CLI surface:
+  `mew proof-summary <artifact_dir> --m6_12-report`
+- bundle-provenance accounting that separates ledger-only claims from
+  bundle-derived rates and fails closed under `--strict` when referenced
+  bundles are missing
+- drift axes rendered explicitly even when all are still reserved with
+  `count=0`
+- no downstream governance wiring in v0; the report is an operator/reviewer
+  reading surface only
+- design spec:
+  `docs/DESIGN_2026-04-24_M6_12_FAILURE_SCIENCE_INSTRUMENTATION.md`
+
+Done when:
+
+- every row in the closed 127-row M6.11 calibration ledger is classified into
+  exactly one v0 archetype or `unclassified_v0` with a row-ref warning, and the
+  emitted counts match the design's post-priority totals
+- every derived label traces back to a ledger row and, where applicable, a
+  replay bundle reference
+- text output fits the single-screen cockpit discipline while still showing
+  reserved drift axes
+- `--json` separates `canonical` from `derived`, includes
+  `bundle_provenance`, and exposes `derived.classifier_priority`
+- pre-closeout and post-closeout resolver modes are both tested, including
+  strict-mode failures for missing bundles and closeout-index errors
+- existing `proof-summary` default and `--m6_11-phase2-calibration` strict
+  behavior remains unchanged
+- no canonical ledger field is renamed, widened, or retroactively rewritten
+
+Why it matters:
+
+- M6.11 produced the evidence plane needed to debug mew's agent loop, but raw
+  ledger rows are too hard to use during future long sessions. M6.12 turns that
+  evidence into a compact instrument so M6.9 and later resident-coding work can
+  choose the next hardening slice from recurrence data instead of scattered
+  review notes.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only

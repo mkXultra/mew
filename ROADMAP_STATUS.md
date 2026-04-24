@@ -7,6 +7,10 @@ survive context compression and long-session reentry. Historical detail through
 M5 was archived losslessly in
 `docs/archive/ROADMAP_STATUS_through_M5_2026-04-20.md`.
 
+Status vocabulary: `pending` means meaningful implementation already exists,
+but the milestone is intentionally paused by the active milestone and should
+not be resumed until the recorded resume condition fires.
+
 ## Summary
 
 | Milestone | Status | Short Assessment |
@@ -22,9 +26,10 @@ M5 was archived losslessly in
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate exists; M6.11 is now closed, so durable coding intelligence can resume as the active milestone. |
+| 6.9. Durable Coding Intelligence | `pending` | Phase 1 substrate exists; paused while M6.12 turns the M6.11 ledger into a failure-science instrument for choosing the next hardening slice. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 6.11. Loop Stabilization | `done` | Close-gate audit passed with dogfood, strict replay calibration, 20-slice incidence reduction, canonical ledger evidence, and codex-ultra approval. |
+| 6.12. Failure-Science Instrumentation | `foundation` | Design and external-prior input are ready; active focus is the v0 read-only ledger/classifier/report MVP. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -33,12 +38,13 @@ M5 was archived losslessly in
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 02:00 JST.
+Last assessed: 2026-04-25 03:25 JST.
 
-Active work: **M6.9 Durable Coding Intelligence** while M5.1, M6, M6.6, M6.7,
-and M6.11 remain closed baselines. M6.10 stays registered but inactive until
-the M6.9 memory path has useful repeated-task evidence, and M7 remains
-deferred.
+Active work: **M6.12 Failure-Science Instrumentation** while M5.1, M6, M6.6,
+M6.7, and M6.11 remain closed baselines. M6.9 stays pending until M6.12 v0
+turns the M6.11 calibration ledger into a usable failure-science surface. M6.10
+stays registered but inactive until the M6.9 memory path has useful repeated-task
+evidence, and M7 remains deferred.
 
 Reasoning:
 
@@ -110,7 +116,15 @@ Reasoning:
   `uv run pytest -q tests/test_dogfood.py -k 'm6_11' --no-testmon` passed,
   strict `mew proof-summary --m6_11-phase2-calibration --strict` returned
   `ok=true`, and codex-ultra approved the corrected audit as close-ready. The
-  freeze is lifted and M6.9 resumes as the active milestone.
+  freeze is lifted, but M6.12 now takes a short active slot before broad M6.9
+  resumes so future M6.9 slices can read recurrence and failure-family evidence
+  from the closed M6.11 ledger instead of scattered review notes.
+- M6.12 is implementation-ready as a bounded read-only instrumentation
+  milestone. `docs/DESIGN_2026-04-24_M6_12_FAILURE_SCIENCE_INSTRUMENTATION.md`
+  defines the v0 MVP, and
+  `docs/REVIEW_2026-04-23_M6_12_CALIBRATION_INPUT_FROM_EXTERNALS.md` is the
+  external-prior input. M6.12 must not mutate the canonical M6.11 ledger or wire
+  its JSON into governance surfaces in v0.
 - The first pull-forward item from the M6.11 review is refusal separation in
   `src/mew/codex_api.py`, because without it the
   `model_returned_refusal` blocker code is unreachable.
@@ -118,9 +132,9 @@ Reasoning:
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  bounded M6.9 durable-coding progress, not speculative cockpit polish,
-  premature M6.10 implementation, or reopening M6.11 without new regression
-  evidence.
+  bounded M6.12 v0 implementation, not speculative cockpit polish, premature
+  M6.10 implementation, broad M6.9 memory expansion before failure-science
+  instrumentation exists, or reopening M6.11 without new regression evidence.
 
 Current next action:
 
@@ -147,9 +161,10 @@ Current next action:
    window reached `2026-04-22 05:29 JST`.
 8. `docs/M6_7_CLOSE_GATE_2026-04-22.md` now records that reviewer-owned close
    decision. The frozen close-watch copy remains historical evidence only.
-9. Treat M6.9 as active again now that M6.11 closed. Resume from the landed
-   Phase 1 substrate and use M6.11's loop calibration ledger as M6.12/M6.9
-   input instead of reconstructing method from scattered review notes.
+9. Treat M6.12 as active now that M6.11 closed and the failure-science design
+   is refreshed for the 127-row ledger. Implement the v0 reader/classifier/report
+   MVP first so later M6.9 work can use recurrence and archetype evidence
+   instead of reconstructing method from scattered review notes.
 10. Treat M6.11 as a closed baseline. Reopen only if a future fresh bounded
    coding loop regresses on exact-window drafting, refusal separation,
    replay-bundle capture, `WorkTodo.status`, or follow-status recovery parity.
@@ -157,12 +172,14 @@ Current next action:
    `mew proof-summary --m6_11-phase2-calibration`, scanning
    `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure
    bundles.
-12. Do not let mew self-author roadmap-status or milestone-close edits; those
+12. Keep M6.9 pending, not abandoned. Resume M6.9 after M6.12 v0 closes, unless
+    a fresh loop regression forces a narrow M6.11 follow-up first.
+13. Do not let mew self-author roadmap-status or milestone-close edits; those
     remain reviewer-controlled until a later milestone explicitly moves that
     boundary.
-13. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+14. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
    self-improvement loop violates the documented safety hooks.
-14. Do not adopt `docs/PROPOSE_M6_7_UNSTICK_2026-04-21.md` into active M6.7 as
+15. Do not adopt `docs/PROPOSE_M6_7_UNSTICK_2026-04-21.md` into active M6.7 as
    written. The reconsideration trigger fired on fresh bounded item `#389`,
    but the exposed blocker was narrower than Explorer/Todo: write-ready diff
    generation. `work_loop.py` now carries the blocker-specific fix set
@@ -1803,7 +1820,7 @@ Next action:
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `in_progress`.
+Status: `pending`.
 
 Goal:
 
@@ -1897,8 +1914,9 @@ Progress / remaining proof:
 
 Next action:
 
-- resume bounded M6.9 work from the landed Phase 1 substrate. Choose the next
-  task by mapping it to one M6.9 Done-when criterion, preferably recall-time
+- keep M6.9 pending while M6.12 is active. Resume bounded M6.9 work from the
+  landed Phase 1 substrate after M6.12 v0 closes, choosing the next task by
+  mapping it to one M6.9 Done-when criterion, preferably recall-time
   observability or a repeated-task proof shape that can show durable memory
   shortening a later iteration without reviewer rescue edits.
 
@@ -2780,6 +2798,56 @@ Next action:
   Future loop regressions should create a fresh reopen/follow-up task with a
   concrete blocker instead of silently extending the closed M6.11 batch.
 
+### M6.12: Failure-Science Instrumentation
+
+Status: `foundation`.
+
+Goal:
+
+- turn the closed M6.11 calibration ledger and replay bundles into a compact
+  operator-facing failure-science surface before broad M6.9 durable-memory work
+  resumes
+
+Entry gate:
+
+- M6.11 must be closed
+- the M6.12 design must be refreshed for the post-M6.11 127-row ledger
+- external failure-science input must be checked in as a design input, not as a
+  commitment to copy external architecture
+
+Evidence:
+
+- `docs/DESIGN_2026-04-24_M6_12_FAILURE_SCIENCE_INSTRUMENTATION.md` is
+  refreshed for the post-M6.11 closeout state and names the v0 MVP:
+  read-only ledger parser, derived classifier, `proof-summary --m6_12-report`,
+  bundle provenance, strict missing-bundle behavior, reserved drift axes, and
+  focused tests.
+- `docs/REVIEW_2026-04-23_M6_12_CALIBRATION_INPUT_FROM_EXTERNALS.md` is now
+  checked in and provides external-prior input from Hermes, OpenClaw, Codex,
+  and Vellum Assistant without making their architecture canonical for mew.
+- The canonical M6.11 ledger exists at
+  `proof-artifacts/m6_11_calibration_ledger.jsonl` and is treated as read-only
+  M6.12 input.
+
+Missing proof:
+
+- no `src/mew/calibration_ledger.py` or equivalent typed reader exists yet
+- no derived classifier reproduces the design's post-priority totals against
+  the 127-row ledger
+- `mew proof-summary --m6_12-report` does not exist yet
+- bundle-provenance and strict-mode behavior for M6.12 are not implemented or
+  tested
+- the closeout export tree and index are still deferred; v0 must run honestly
+  in pre-closeout mode first
+
+Next action:
+
+- implement the M6.12 v0 MVP in bounded slices, starting with a read-only
+  calibration ledger parser and classifier tests that reproduce the design's
+  post-priority totals. Do not wire M6.12 JSON into
+  `mew-product-evaluator`, roadmap governance, or adversarial verification in
+  v0.
+
 ### M7: Senses - Inbound Signals
 
 Status: `foundation`.
@@ -2882,30 +2950,33 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.9 Durable Coding Intelligence**.
+Active focus: **M6.12 Failure-Science Instrumentation**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- bounded M6.9 work from
-  `docs/REVIEW_2026-04-21_DURABLE_CODING_INTELLIGENCE.md`;
-- repeated-task evidence, reviewer-steering/failure-shield/file-pair memory,
-  task-template recall, reasoning-trace recall, and recall-time
-  observability;
+- bounded M6.12 v0 implementation from
+  `docs/DESIGN_2026-04-24_M6_12_FAILURE_SCIENCE_INSTRUMENTATION.md`;
+- read-only calibration ledger parsing, derived archetype classification,
+  `mew proof-summary --m6_12-report`, bundle provenance, strict missing-bundle
+  behavior, and fixture-backed classifier tests;
+- keeping M6.9 pending, not abandoned, until M6.12 v0 makes M6.11 recurrence
+  and failure-family evidence readable;
 - roadmap registration and status maintenance for later milestones only when it
-  clarifies post-M6.9 ordering without changing the active milestone;
+  clarifies post-M6.12 ordering without changing the active milestone;
 - keeping M6.11 as a closed agent-loop stability baseline, not as the current
   implementation target unless a fresh loop regression appears;
 - keeping M6.6 as a closed regression baseline for resident coding work;
 - keeping M6 and M6.7 close artifacts as closed baseline evidence;
-- reviewer-owned roadmap/status updates and checkpointing around M6.9 runs;
+- reviewer-owned roadmap/status updates and checkpointing around M6.12 runs;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1, M6, M6.6, M6.7, and M6.11 as closed baselines while M6.9 turns
-durable state into measurable coding advantage. M6.10 accelerator work, deeper
-M7 signal work, and unattended self-hosting remain deferred until they map to
-the active M6.9 gate or a later explicit milestone switch.
+Keep M5.1, M6, M6.6, M6.7, and M6.11 as closed baselines while M6.12 turns
+the M6.11 evidence plane into a usable failure-science instrument. M6.9 durable
+coding work resumes after M6.12 v0 closes; M6.10 accelerator work, deeper M7
+signal work, and unattended self-hosting remain deferred until they map to the
+active M6.12 gate or a later explicit milestone switch.
 
 ## Maintenance Rule
 
