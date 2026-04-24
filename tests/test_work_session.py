@@ -7132,6 +7132,213 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_block_reads_latest_explicit_refresh_search_results(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/work_session.py", "tests/test_work_session.py"]
+        context = {
+            "task": {
+                "id": 500,
+                "title": "M6.11 current-head validation on work_session cue-refresh recovery",
+                "description": "Validate the paired work_session/test_work_session surface.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 483,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-483-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "target_paths": target_paths,
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/work_session.py",
+                                    "line_start": 1687,
+                                    "line_end": 1906,
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line_start": 7028,
+                                    "line_end": 7117,
+                                },
+                            ],
+                        }
+                    ],
+                    "recent_decisions": [],
+                    "notes": [],
+                },
+                "tool_calls": [
+                    {
+                        "id": 3871,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/work_session.py",
+                            "query": "finish_work_model_turn",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "src/mew/work_session.py",
+                                    "line": 1690,
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "id": 3872,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_work_session.py",
+                            "query": "no_change_replay_for_current_head_validation_slice",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line": 10760,
+                                }
+                            ]
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 1,
+                        "path": "src/mew/work_session.py",
+                        "line_start": 1687,
+                        "line_end": 1906,
+                        "text": "    session = find_work_session(state, session_id)\n    turn = {}\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 2,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 7028,
+                        "line_end": 7117,
+                        "text": "        fast_path = _work_write_ready_fast_path_details(context)\n        self.assertFalse(fast_path)\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertEqual(
+            preflight_block["action"]["tools"],
+            [
+                {
+                    "type": "read_file",
+                    "path": "src/mew/work_session.py",
+                    "line_start": 1570,
+                    "line_count": 520,
+                    "reason": "read explicitly located write-ready cached window",
+                },
+                {
+                    "type": "read_file",
+                    "path": "tests/test_work_session.py",
+                    "line_start": 10640,
+                    "line_count": 520,
+                    "reason": "read explicitly located write-ready cached window",
+                },
+            ],
+        )
+
+    def test_write_ready_preflight_block_ignores_stale_refresh_search_anchors(self):
+        from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
+
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            {
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/work_session.py",
+                            "query": "old_symbol",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "src/mew/work_session.py",
+                                    "line": 1000,
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/work_session.py",
+                            "query": "new_symbol",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {"snippets": []},
+                    },
+                    {
+                        "id": 3,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_work_session.py",
+                            "query": "current_test",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line": 3000,
+                                }
+                            ]
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [],
+            },
+            ["src/mew/work_session.py", "tests/test_work_session.py"],
+        )
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "read_file",
+                    "path": "tests/test_work_session.py",
+                    "line_start": 2880,
+                    "line_count": 520,
+                    "reason": "read explicitly located write-ready cached window",
+                }
+            ],
+        )
+
     def test_write_ready_fast_path_does_not_activate_without_plan_item_observations(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 

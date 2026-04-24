@@ -2320,6 +2320,78 @@ def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths):
     return actions
 
 
+def _work_write_ready_refresh_search_result_read_actions(work_session, target_paths):
+    work_session = work_session if isinstance(work_session, dict) else {}
+    target_paths = [str(path or "").strip() for path in target_paths or [] if str(path or "").strip()]
+    if not target_paths:
+        return []
+
+    recent_windows = [
+        item
+        for item in (work_session.get("recent_read_file_windows") or [])
+        if isinstance(item, dict) and item.get("path")
+    ]
+
+    def already_read(path, line_start, line_end):
+        for window in recent_windows:
+            if not _work_paths_match(window.get("path"), path):
+                continue
+            try:
+                window_start = int(window.get("line_start") or 0)
+                window_end = int(window.get("line_end") or 0)
+            except (TypeError, ValueError):
+                continue
+            if window_start <= line_start and window_end >= line_end:
+                if window.get("text") and not window.get("context_truncated"):
+                    return True
+        return False
+
+    actions = []
+    for target_path in target_paths:
+        for call in reversed(work_session.get("tool_calls") or []):
+            if not isinstance(call, dict) or call.get("tool") != "search_text":
+                continue
+            if str(call.get("status") or "") != "completed":
+                continue
+            parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+            if not _work_paths_match(parameters.get("path"), target_path):
+                continue
+            if str(parameters.get("reason") or "") != "locate explicitly requested write-ready cached window":
+                continue
+            result = call.get("result") if isinstance(call.get("result"), dict) else {}
+            snippets = result.get("snippets") if isinstance(result.get("snippets"), list) else []
+            anchor_line = 0
+            for snippet in snippets:
+                if not isinstance(snippet, dict) or not _work_paths_match(snippet.get("path"), target_path):
+                    continue
+                try:
+                    anchor_line = int(snippet.get("line") or snippet.get("start_line") or 0)
+                except (TypeError, ValueError):
+                    anchor_line = 0
+                if anchor_line > 0:
+                    break
+            if anchor_line <= 0:
+                break
+            line_start = max(1, anchor_line - 120)
+            line_count = 520
+            line_end = line_start + line_count - 1
+            if already_read(target_path, line_start, line_end):
+                break
+            actions.append(
+                {
+                    "type": "read_file",
+                    "path": target_path,
+                    "line_start": line_start,
+                    "line_count": line_count,
+                    "reason": "read explicitly located write-ready cached window",
+                }
+            )
+            break
+        if len(actions) >= 5:
+            break
+    return actions
+
+
 def _work_write_ready_refresh_text_segment(text, path):
     text = text or ""
     path = str(path or "").strip()
@@ -2442,6 +2514,8 @@ def _work_write_ready_preflight_block(context, write_ready_fast_path):
         },
     }
     refresh_actions = _work_write_ready_explicit_refresh_read_actions(context, target_paths)
+    if not refresh_actions:
+        refresh_actions = _work_write_ready_refresh_search_result_read_actions(work_session, target_paths)
     if refresh_actions:
         action = {
             "type": "batch",

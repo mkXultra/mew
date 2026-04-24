@@ -2145,6 +2145,27 @@ Missing proof:
   measurement head, but do not claim current-head coverage on `ca9e52b`
   without a fresh replay/model-failure bundle or an explicit future
   measurement-head override.
+- Later M6.11 runtime-head evidence moved through the same pattern and is now
+  recorded in the canonical calibration ledger. Runtime head `b650319`
+  fixed Codex stream read timeouts and task `#498` / session `#481` emitted a
+  reviewer-approved counted native `no_material_change` replay on the
+  `codex_api` pair. Commit `3faed1c` only recorded that ledger evidence, so
+  literal `current_head` reset while
+  `mew proof-summary --m6_11-phase2-calibration --measurement-head b650319...`
+  preserves the runtime-head view (`measurement_head: total=1,
+  patch_draft_compiler.no_material_change=1`). This establishes the rule for
+  evidence-only commits: use `--measurement-head` for runtime-head accounting,
+  but do not use it for fresh live proof selection.
+- Two subsequent literal-head `work_session` slices produced non-counted
+  fix-first infrastructure evidence rather than replay incidence. Task `#499`
+  on `3faed1c` showed that an unnumbered cue-only refresh steer was consumed
+  as terminal wait; `1c018f7` fixed that by emitting bounded
+  explicit-refresh `search_text` actions. Task `#500` on `1c018f7` then
+  showed the next gap: after successful explicit-refresh search results,
+  preflight returned wait instead of reading widened windows around the found
+  anchors. The current patch fixes that search-result-to-read recovery and
+  refuses to fall back to stale older search anchors; codex-ultra approved the
+  patch after focused and full `tests/test_work_session.py` validation.
 
 Next action:
 
@@ -2154,12 +2175,16 @@ Next action:
   current-head source landed, continue the bounded live incidence gate against
   `#399/#401`; use the cohort-aware replay summaries plus the additive
   `blocker_code_breakdown` output to collect the remaining runtime slices.
-  Because docs-only commit `ca9e52b` reset literal `current_head` cohorting to
-  zero, the next concrete step is to re-establish a fresh bundle on `ca9e52b`
-  without another evidence-only commit in between, ideally on a non-timeout
-  surface. Keep the `e9a13f9` results as the last runtime-head evidence, but
-  do not advance on legacy timeout-only evidence or reviewer/non-native
-  non-counted replays alone
+  Because evidence-only commits keep resetting literal `current_head`
+  cohorting to zero, the next concrete step after the search-result-to-read
+  recovery commit is to run a fresh bounded live slice on the new literal HEAD
+  without `--measurement-head`, ideally on the same
+  `src/mew/work_session.py` + `tests/test_work_session.py` surface, and prove
+  whether the loop can now advance from cue-only refresh to widened reads and
+  then to either a native replay, a reviewer-visible patch, or a new concrete
+  fix-first blocker. Keep the `b650319` counted replay as the latest counted
+  runtime-head evidence via `--measurement-head`, but do not advance on legacy
+  timeout-only evidence or reviewer/non-native non-counted replays alone
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
