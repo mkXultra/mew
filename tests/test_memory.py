@@ -903,7 +903,7 @@ class MemoryTests(unittest.TestCase):
             try:
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["memory", "--veto-log", "--json"]), 0)
-                self.assertEqual(json.loads(stdout.getvalue())["veto_log"], [])
+                self.assertEqual(json.loads(stdout.getvalue())["records"], [])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
@@ -953,8 +953,8 @@ class MemoryTests(unittest.TestCase):
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["memory", "--veto-log", "--json"]), 0)
                 payload = json.loads(stdout.getvalue())
-                self.assertEqual(payload["veto_log"][-1]["entry_id"], entry_id)
-                self.assertEqual(payload["veto_log"][-1]["reason"], "reviewer rejected this durable note")
+                self.assertEqual(payload["records"][-1]["entry_id"], entry_id)
+                self.assertEqual(payload["records"][-1]["reason"], "reviewer rejected this durable note")
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["memory", "--veto-log"]), 0)

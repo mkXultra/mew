@@ -12025,7 +12025,7 @@ def cmd_memory(args):
             if args.veto_log:
                 entries = backend.veto_log_entries()
                 if args.json:
-                    print(json.dumps({"veto_log": entries}, ensure_ascii=False, indent=2))
+                    print(json.dumps({"records": entries}, ensure_ascii=False, indent=2))
                 else:
                     print(_format_veto_log_entries(entries))
                 return 0
