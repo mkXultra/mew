@@ -56,6 +56,8 @@ def report_path(root: Path, spec: ReportSpec, day: str) -> Path:
 
 def strip_h1(markdown: str) -> str:
     lines = markdown.splitlines()
+    while lines and not lines[0].strip():
+        lines = lines[1:]
     if lines and lines[0].startswith("# "):
         lines = lines[1:]
         if lines and not lines[0].strip():

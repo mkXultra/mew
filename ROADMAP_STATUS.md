@@ -2453,6 +2453,11 @@ Next action:
   drops only historical note lines while preserving later current note lines;
   the first source draft failed verifier and was corrected after reviewer
   feedback, then the scoped verifier passed with 15 tests and ruff passed.
+  `#535` then landed as a counted paired patch/verifier slice on HEAD
+  `270b9b6`: passive_bundle now ignores leading blank lines before stripping a
+  report H1; the first test edit failed due duplicate fixture text, mew
+  recovered with narrower context, and the scoped verifier passed with 11
+  tests and ruff passed.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,

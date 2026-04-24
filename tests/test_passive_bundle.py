@@ -22,7 +22,7 @@ class PassiveBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_report(root, ".mew/journal/2026-04-17.md", "# Mew Journal\n\nJournal hint.\n")
-            write_report(root, ".mew/mood/2026-04-17.md", "# Mew Mood\n\nCurrent mood: **steady**\n")
+            write_report(root, ".mew/mood/2026-04-17.md", "\n# Mew Mood\n\nCurrent mood: **steady**\n")
 
             result = generate_bundle(root, root, explicit_date="2026-04-17")
             text = result.path.read_text(encoding="utf-8")
