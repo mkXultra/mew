@@ -82,6 +82,13 @@ def task_note_learning(task: dict[str, Any]) -> str:
     return ""
 
 
+def task_items(state: dict[str, Any]) -> list[dict[str, Any]]:
+    tasks = state.get("tasks")
+    if not isinstance(tasks, list):
+        return []
+    return [task for task in tasks if isinstance(task, dict)]
+
+
 def raw_self_learning_candidates(state: dict[str, Any]) -> list[str]:
     learnings = []
     for key in ("learnings", "changes", "decisions"):
@@ -92,8 +99,8 @@ def raw_self_learning_candidates(state: dict[str, Any]) -> list[str]:
         if isinstance(deep, dict):
             learnings.extend(string_items(deep.get("decisions")))
             learnings.extend(string_items(deep.get("project")))
-    for task in reversed(state.get("tasks", [])):
-        if not isinstance(task, dict) or task.get("status") != "done":
+    for task in reversed(task_items(state)):
+        if task.get("status") != "done":
             continue
         learning = task_note_learning(task)
         if learning:
@@ -135,9 +142,7 @@ def collect_self_learnings(state: dict[str, Any]) -> list[str]:
 
 def task_title_by_id(state: dict[str, Any]) -> dict[str, str]:
     titles = {}
-    for task in state.get("tasks", []):
-        if not isinstance(task, dict):
-            continue
+    for task in task_items(state):
         task_id = task.get("id")
         title = normalize_text(task.get("title"))
         if task_id is not None and title:
@@ -146,14 +151,16 @@ def task_title_by_id(state: dict[str, Any]) -> dict[str, str]:
 
 
 def collect_continuity_cues(state: dict[str, Any]) -> list[str]:
-    tasks_by_id = {str(task.get("id")): task for task in state.get("tasks", []) if isinstance(task, dict)}
+    tasks = task_items(state)
+    state_for_desk = {**state, "tasks": tasks}
+    tasks_by_id = {str(task.get("id")): task for task in tasks}
     titles = {
         task_id: normalize_text(task.get("title"))
         for task_id, task in tasks_by_id.items()
         if normalize_text(task.get("title"))
     }
     cues = []
-    for session in active_work_sessions_for_desk(state):
+    for session in active_work_sessions_for_desk(state_for_desk):
         session_id = session.get("id", "?")
         task_id = session.get("task_id")
         task_record = tasks_by_id.get(str(task_id)) if task_id is not None else None

@@ -44,7 +44,7 @@ class SelfMemoryTests(unittest.TestCase):
         self.assertIn("journal helps reentry", view["learnings"])
         self.assertIn("report surfaces should be generated locally", view["learnings"])
         self.assertIn(
-            "Work session #3 task #2: Open work is think: Continue report work; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, or verified state; next: run tests",
+            "Work session #3 task #2: Open work is think: Continue report work; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, verified state, or durable planning fields like plan_items, target_paths, or open_questions; next: run tests",
             view["continuity_cues"],
         )
         self.assertIn("# Mew Self Memory 2026-04-17", text)
@@ -68,6 +68,19 @@ class SelfMemoryTests(unittest.TestCase):
 
             self.assertEqual(path, Path(".mew/self/learned-2026-04-17.md"))
             self.assertTrue((Path(tmp) / path).exists())
+
+    def test_build_self_memory_view_model_ignores_malformed_tasks_container(self):
+        state = {
+            "traits": ["prefers small verified slices"],
+            "learnings": ["journal helps reentry"],
+            "tasks": 42,
+        }
+
+        view = build_self_memory_view_model(state, explicit_date="2026-04-17")
+
+        self.assertEqual(view["traits"], ["prefers small verified slices"])
+        self.assertEqual(view["learnings"], ["journal helps reentry"])
+        self.assertEqual(view["continuity_cues"], [])
 
     def test_self_memory_command_rejects_invalid_date_json_show_and_write_error(self):
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
