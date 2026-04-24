@@ -11624,6 +11624,27 @@ class WorkSessionTests(unittest.TestCase):
                             },
                         ]
                     },
+                },
+                {
+                    "id": 2,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "src/mew/cli.py",
+                        "query": "read_file",
+                        "reason": "locate explicitly requested write-ready cached window",
+                    },
+                    "result": {
+                        "snippets": [
+                            {
+                                "path": "src/mew/cli.py",
+                                "line": 1194,
+                                "lines": [
+                                    {"line": 1194, "text": '            "read_file",', "match": True},
+                                ],
+                            }
+                        ]
+                    },
                 }
             ],
         }

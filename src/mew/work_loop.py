@@ -3441,6 +3441,8 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
 
     actions = []
     for target_path in target_paths:
+        best_anchor_line = 0
+        best_anchor_score = -10
         for call in reversed(tool_calls):
             if not isinstance(call, dict) or call.get("tool") != "search_text":
                 continue
@@ -3453,23 +3455,22 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
                 continue
             result = call.get("result") if isinstance(call.get("result"), dict) else {}
             snippets = result.get("snippets") if isinstance(result.get("snippets"), list) else []
-            anchor_line = 0
-            anchor_score = -10
+            if not snippets:
+                break
             for snippet in snippets:
                 if not isinstance(snippet, dict) or not _work_paths_match(snippet.get("path"), target_path):
                     continue
                 score, line = snippet_anchor(snippet)
                 score += anchor_proximity_score(target_path, line)
-                if line > 0 and score > anchor_score:
-                    anchor_score = score
-                    anchor_line = line
-            if anchor_line <= 0:
-                break
-            line_start = max(1, anchor_line - 120)
-            line_count = 520
-            line_end = line_start + line_count - 1
-            if already_read(target_path, line_start, line_end):
-                break
+                if line > 0 and score > best_anchor_score:
+                    best_anchor_score = score
+                    best_anchor_line = line
+        if best_anchor_line <= 0:
+            continue
+        line_start = max(1, best_anchor_line - 120)
+        line_count = 520
+        line_end = line_start + line_count - 1
+        if not already_read(target_path, line_start, line_end):
             actions.append(
                 {
                     "type": "read_file",
@@ -3479,7 +3480,6 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
                     "reason": "read explicitly located write-ready cached window",
                 }
             )
-            break
         if len(actions) >= 5:
             break
     return actions
