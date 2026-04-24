@@ -2448,7 +2448,11 @@ Next action:
   reran the same project_snapshot source/test pair and closed as counted
   verifier-backed no-change after the scoped verifier passed with 8 tests,
   validating that the cached-window preflight/recovery path is no longer
-  blocking that surface.
+  blocking that surface. `#534` then landed as a counted paired
+  patch/verifier slice on HEAD `77eaeaf`: reasoning_policy note filtering now
+  drops only historical note lines while preserving later current note lines;
+  the first source draft failed verifier and was corrected after reviewer
+  feedback, then the scoped verifier passed with 15 tests and ruff passed.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,

@@ -121,6 +121,24 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertEqual(policy["effort"], "medium")
         self.assertEqual(policy["work_type"], "small_implementation")
 
+    def test_current_notes_after_historical_note_still_drive_high_risk(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Improve mew itself",
+                "kind": "coding",
+                "notes": (
+                    "Dogfood note: previous M6 daemon proof and recovery work used high effort.\n"
+                    "Update approval flow before resuming the task."
+                ),
+            },
+            capabilities={"allowed_write_roots": ["src/mew", "tests"], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "high_risk")
+        self.assertIn("approval", policy["matched_terms"])
+
     def test_bookkeeping_notes_do_not_trigger_high_risk_when_bounded(self):
         policy = select_work_reasoning_policy(
             {

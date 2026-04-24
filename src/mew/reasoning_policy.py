@@ -93,10 +93,12 @@ def task_policy_description(task):
 
 def task_policy_notes(task):
     notes = str((task or {}).get("notes") or "")
-    for marker in NOTE_HISTORY_MARKERS:
-        if marker in notes:
-            return ""
-    return notes
+    kept_lines = []
+    for line in notes.splitlines():
+        if any(marker.casefold() in line.casefold() for marker in NOTE_HISTORY_MARKERS):
+            continue
+        kept_lines.append(line)
+    return "\n".join(kept_lines)
 
 
 def select_work_reasoning_policy(task=None, *, guidance="", capabilities=None, env=None):
