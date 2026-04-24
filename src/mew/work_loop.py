@@ -2333,19 +2333,26 @@ def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
             break
     if actions:
         return actions
-    return _work_write_ready_explicit_refresh_search_actions(text, allowed_paths)
+    return _work_write_ready_explicit_refresh_search_actions(text, allowed_paths, work_session)
 
 
-def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths):
+def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths, work_session=None):
     lowered = (text or "").casefold()
     if not re.search(r"\b(refresh|read|around)\b", lowered):
         return []
     actions = []
     seen = set()
+    blocked_tokens = _work_write_ready_refresh_path_query_tokens(allowed_paths)
     for path in allowed_paths:
         segment = _work_write_ready_refresh_text_segment(text, path)
-        query = _work_write_ready_refresh_query(segment)
+        query = _work_write_ready_refresh_query(segment, blocked_tokens=blocked_tokens)
         if not query:
+            continue
+        if _work_write_ready_explicit_refresh_search_already_zero_match(
+            work_session,
+            path,
+            query,
+        ):
             continue
         key = (path, query)
         if key in seen:
@@ -2362,6 +2369,52 @@ def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths):
         if len(actions) >= 5:
             break
     return actions
+
+
+def _work_write_ready_refresh_path_query_tokens(paths):
+    tokens = set()
+    for path in paths or []:
+        raw_path = str(path or "").strip()
+        if not raw_path:
+            continue
+        path_obj = Path(raw_path)
+        for raw_token in (
+            raw_path,
+            path_obj.name,
+            path_obj.stem,
+            *path_obj.parts,
+            *re.split(r"[^A-Za-z0-9_]+", raw_path),
+        ):
+            token = str(raw_token or "").strip().strip("_")
+            if token:
+                tokens.add(token.casefold())
+    return tokens
+
+
+def _work_write_ready_explicit_refresh_search_already_zero_match(work_session, path, query):
+    if not isinstance(work_session, dict):
+        return False
+    for collection_name in ("explicit_refresh_search_tool_calls", "tool_calls"):
+        for call in work_session.get(collection_name) or []:
+            if not isinstance(call, dict):
+                continue
+            if call.get("tool") != "search_text" or str(call.get("status") or "") != "completed":
+                continue
+            parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+            if str(parameters.get("reason") or "") != "locate explicitly requested write-ready cached window":
+                continue
+            if not _work_paths_match(parameters.get("path"), path):
+                continue
+            if str(parameters.get("query") or "") != str(query or ""):
+                continue
+            result = call.get("result") if isinstance(call.get("result"), dict) else {}
+            snippets = result.get("snippets")
+            matches = result.get("matches")
+            if isinstance(matches, list) and len(matches) == 0:
+                return True
+            if not isinstance(matches, list) and isinstance(snippets, list) and len(snippets) == 0:
+                return True
+    return False
 
 
 def _work_write_ready_refresh_search_result_read_actions(work_session, target_paths):
@@ -2585,7 +2638,7 @@ def _work_write_ready_refresh_text_segment(text, path):
     return text
 
 
-def _work_write_ready_refresh_query(text):
+def _work_write_ready_refresh_query(text, blocked_tokens=None):
     stopwords = {
         "and",
         "around",
@@ -2611,13 +2664,18 @@ def _work_write_ready_refresh_query(text):
         "window",
         "windows",
     }
+    stopwords |= {
+        str(token or "").strip().strip("_").casefold()
+        for token in (blocked_tokens or [])
+        if str(token or "").strip().strip("_")
+    }
     candidates = []
     for match in re.finditer(r"[A-Za-z_][A-Za-z0-9_]{2,}", text or ""):
         token = match.group(0).strip("_")
         lowered = token.casefold()
         if lowered in stopwords:
             continue
-        if lowered in {"src", "mew", "py", "test", "work", "session"}:
+        if lowered in {"src", "mew", "py", "test", "tests", "work", "session"}:
             continue
         score = 0
         if "_" in token:

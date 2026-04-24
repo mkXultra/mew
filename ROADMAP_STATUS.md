@@ -2204,6 +2204,17 @@ Missing proof:
   widening cached refs produced by the structural-refresh recovery itself.
   Codex-ultra approved the final patch after full `tests/test_work_session.py`
   validation.
+- Task `#505` on `e1c4e2f` verified that the structural-refresh recovery
+  patch removed the recursive widening path, but exposed a smaller non-counted
+  fix-first gap: explicit refresh search extraction could choose the scoped
+  test filename stem `test_proof_summary` as the query, produce zero matches on
+  both files, and then repeat the same zero-match search instead of falling
+  through to cached-window widening or an artifact. The current patch excludes
+  path/basename-derived tokens from explicit refresh query extraction and
+  suppresses repeated zero-match explicit refresh searches so deterministic
+  preflight can fall back to widened cached-window reads. Codex-ultra approved
+  the plan, and the focused write-ready suite plus full
+  `tests/test_work_session.py` validation passed locally.
 
 Next action:
 
@@ -2222,7 +2233,10 @@ Next action:
   dry-run patch/diff, or a new concrete fix-first blocker. Keep the `b650319`
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
-  reviewer/non-native non-counted replays, or no-artifact live validation alone
+  reviewer/non-native non-counted replays, or no-artifact live validation alone.
+  After committing the #505 path-stem/zero-match refresh fix, repeat a fresh
+  literal-head slice again; do not resume `#505` as counted evidence because it
+  is the blocked pre-fix session.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the

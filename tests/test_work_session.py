@@ -7534,6 +7534,195 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_block_does_not_search_path_stem_refresh_cues(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/proof_summary.py", "tests/test_proof_summary.py"]
+        context = {
+            "task": {
+                "id": 505,
+                "title": "M6.11 current-head incidence slice after cached-window recovery",
+                "description": "Produce an incidence artifact or a concrete fix-first blocker.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 488,
+                "status": "active",
+                "resume": {
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {
+                                    "path": target_paths[0],
+                                    "line_start": 383,
+                                    "line_end": 522,
+                                },
+                                {
+                                    "path": target_paths[1],
+                                    "line_start": 850,
+                                    "line_end": 919,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 3937,
+                        "path": target_paths[0],
+                        "line_start": 383,
+                        "line_end": 522,
+                        "text": "def summarize_m6_11_replay_calibration():\n    return {}\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3934,
+                        "path": target_paths[1],
+                        "line_start": 850,
+                        "line_end": 919,
+                        "text": "    def test_current_head_summary(self):\n        self.assertIn(\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": (
+                "Scope fence: src/mew/proof_summary.py and tests/test_proof_summary.py only. "
+                "First cache exact non-truncated source and test windows around "
+                "summarize_m6_11_replay_calibration and its focused tests before drafting "
+                "a reviewer-visible paired dry-run patch."
+            ),
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertEqual(
+            [
+                (tool["path"], tool["query"])
+                for tool in preflight_block["action"]["tools"]
+            ],
+            [
+                ("src/mew/proof_summary.py", "summarize_m6_11_replay_calibration"),
+                ("tests/test_proof_summary.py", "summarize_m6_11_replay_calibration"),
+            ],
+        )
+
+    def test_write_ready_preflight_block_does_not_repeat_zero_match_explicit_refresh(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/proof_summary.py", "tests/test_proof_summary.py"]
+        context = {
+            "task": {
+                "id": 505,
+                "title": "M6.11 current-head incidence slice after cached-window recovery",
+                "description": "Produce an incidence artifact or a concrete fix-first blocker.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 488,
+                "status": "active",
+                "resume": {
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {
+                                    "path": target_paths[0],
+                                    "line_start": 383,
+                                    "line_end": 522,
+                                },
+                                {
+                                    "path": target_paths[1],
+                                    "line_start": 850,
+                                    "line_end": 919,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 3938,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/proof_summary.py",
+                            "query": "missing_symbol",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {"matches": [], "snippets": []},
+                    },
+                    {
+                        "id": 3939,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_proof_summary.py",
+                            "query": "missing_symbol",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {"matches": [], "snippets": []},
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 3937,
+                        "path": target_paths[0],
+                        "line_start": 383,
+                        "line_end": 522,
+                        "text": "def summarize_m6_11_replay_calibration():\n    return {}\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3934,
+                        "path": target_paths[1],
+                        "line_start": 850,
+                        "line_end": 919,
+                        "text": "    def test_current_head_summary(self):\n        self.assertIn(\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": (
+                "Refresh structurally complete targeted windows before any draft: "
+                "source around missing_symbol in src/mew/proof_summary.py, and "
+                "tests around missing_symbol in tests/test_proof_summary.py."
+            ),
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertEqual(
+            [
+                (tool["type"], tool["path"], tool["line_start"], tool["line_count"])
+                for tool in preflight_block["action"]["tools"]
+            ],
+            [
+                ("read_file", "src/mew/proof_summary.py", 263, 520),
+                ("read_file", "tests/test_proof_summary.py", 730, 520),
+            ],
+        )
+
     def test_write_ready_preflight_block_reads_latest_explicit_refresh_search_results(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
