@@ -73,6 +73,13 @@ WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
 WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE = "drafting_timeout_after_complete_cached_refs_no_artifact"
+WORK_WRITE_READY_REFRESH_RECOVERABLE_BLOCKER_CODES = {
+    "missing_exact_cached_window_texts",
+    "cached_window_incomplete",
+    "cached_window_text_truncated",
+    "stale_cached_window_text",
+    "old_text_not_found",
+}
 WORK_WRITE_READY_STRUCTURAL_NARROW_MIN_LINES = 80
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
@@ -1368,6 +1375,84 @@ def _write_ready_fast_path_steer_requests_write(steer_text):
     )
 
 
+def _write_ready_cached_window_refresh_plan_item(plan_item):
+    lowered = str(plan_item or "").strip().casefold()
+    if not lowered:
+        return False
+    if not re.search(r"\brefresh(?:ing)?\b", lowered):
+        return False
+    return (
+        "cached window" in lowered
+        or "cached windows" in lowered
+        or "exact window" in lowered
+        or "exact windows" in lowered
+    )
+
+
+def _write_ready_active_todo_has_refresh_cached_window_blocker(active_work_todo):
+    if not isinstance(active_work_todo, dict):
+        return False
+    blocker = active_work_todo.get("blocker") if isinstance(active_work_todo.get("blocker"), dict) else {}
+    if not blocker:
+        return False
+    code = str(blocker.get("code") or "").strip()
+    recovery_action = str(blocker.get("recovery_action") or "").strip()
+    if code in WORK_WRITE_READY_REFRESH_RECOVERABLE_BLOCKER_CODES:
+        return True
+    return recovery_action == PATCH_BLOCKER_RECOVERY_ACTIONS.get("missing_exact_cached_window_texts")
+
+
+def _write_ready_complete_windows_cover_active_todo_source(active_work_todo, complete_windows):
+    source = active_work_todo.get("source") if isinstance((active_work_todo or {}).get("source"), dict) else {}
+    source_paths = _write_ready_paired_target_paths(source.get("target_paths") or [])
+    window_paths = _write_ready_paired_target_paths(
+        [
+            str(item.get("path") or "").strip()
+            for item in complete_windows or []
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        ]
+    )
+    if not source_paths or not window_paths:
+        return False
+    return all(
+        any(_work_paths_match(source_path, window_path) for window_path in window_paths)
+        for source_path in source_paths
+    )
+
+
+def _write_ready_refresh_blocker_cleared_by_complete_windows(active_work_todo, complete_windows):
+    return (
+        _write_ready_active_todo_has_refresh_cached_window_blocker(active_work_todo)
+        and _write_ready_complete_windows_cover_active_todo_source(active_work_todo, complete_windows)
+    )
+
+
+def _write_ready_refreshed_draft_plan_item(resume, active_work_todo, first_observation=None):
+    source = active_work_todo.get("source") if isinstance((active_work_todo or {}).get("source"), dict) else {}
+    working_memory = (resume or {}).get("working_memory") if isinstance((resume or {}).get("working_memory"), dict) else {}
+    candidates = [
+        str(source.get("plan_item") or "").strip(),
+        str((first_observation or {}).get("plan_item") or "").strip(),
+    ]
+    candidates.extend(str(item or "").strip() for item in working_memory.get("plan_items") or [])
+    for candidate in candidates:
+        if not candidate or _write_ready_cached_window_refresh_plan_item(candidate):
+            continue
+        lowered = candidate.casefold()
+        if _write_ready_fast_path_steer_requests_write(candidate) or any(
+            marker in lowered
+            for marker in ("no-change", "no change", "no_material_change", "no material")
+        ):
+            return candidate
+    for candidate in candidates:
+        if candidate and not _write_ready_cached_window_refresh_plan_item(candidate):
+            return candidate
+    return (
+        "Draft one paired dry-run edit from the refreshed exact cached windows, "
+        "or report no_material_change if no concrete change remains."
+    )
+
+
 def _write_ready_completed_read_frontier_plan_item(plan_item, target_paths):
     text = str(plan_item or "").strip()
     lowered = text.casefold()
@@ -1407,6 +1492,8 @@ def _write_ready_complete_read_frontier_allows_not_ready_override(first_observat
         return False
     first_plan_item = str((first_observation or {}).get("plan_item") or "").strip()
     active_work_todo = (resume or {}).get("active_work_todo") if isinstance(resume, dict) else {}
+    if _write_ready_refresh_blocker_cleared_by_complete_windows(active_work_todo, complete_windows):
+        return True
     source = active_work_todo.get("source") if isinstance((active_work_todo or {}).get("source"), dict) else {}
     source_plan_item = str((source or {}).get("plan_item") or "").strip()
     return any(
@@ -1448,6 +1535,20 @@ def _work_write_ready_fast_path_state(context):
         plan_item_text = str(first.get("plan_item") or source.get("plan_item") or "").strip()
         if _work_plan_item_is_verifier_closeout(plan_item_text):
             return {"active": False, "reason": "verifier_closeout_plan_item"}
+    if complete_active_windows and _write_ready_refresh_blocker_cleared_by_complete_windows(
+        resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {},
+        complete_active_windows,
+    ):
+        if not _write_ready_fast_path_steer_requests_write(steer_text):
+            return {"active": False, "reason": "guidance_not_requesting_write"}
+        return {
+            "active": True,
+            "reason": "paired_complete_reads_edit_ready",
+            "plan_item": first,
+            "cached_windows": complete_active_windows,
+            "activation_source": "active_work_todo_complete_reads",
+            "steer_text": steer_text,
+        }
     if not first.get("edit_ready"):
         plan_item_text = str(first.get("plan_item") or "").strip()
         if (
@@ -1697,13 +1798,48 @@ def _write_ready_complete_recent_windows_from_active_work_todo(work_session, res
     if not isinstance(active_work_todo, dict):
         return []
     status = str(active_work_todo.get("status") or "").strip()
+    refresh_blocker = _write_ready_active_todo_has_refresh_cached_window_blocker(active_work_todo)
     if status not in ("queued", "drafting"):
-        return []
+        if not (status == "blocked_on_patch" and refresh_blocker):
+            return []
     source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
-    return _write_ready_complete_recent_windows_from_target_paths(
+    complete_windows = _write_ready_complete_recent_windows_from_target_paths(
         work_session,
         source.get("target_paths") or [],
     )
+    if status != "blocked_on_patch":
+        return complete_windows
+    if _write_ready_refresh_blocker_cleared_by_complete_windows(active_work_todo, complete_windows):
+        return complete_windows
+    cached_refs = _write_ready_cached_refs_from_active_work_todo(resume)
+    exact_windows = _write_ready_exact_windows_for_cached_refs(work_session, cached_refs)
+    if exact_windows and _write_ready_recent_windows_are_structurally_complete(exact_windows):
+        return exact_windows
+    recent_windows = [
+        _write_ready_window_with_draft_window(window)
+        for window in _write_ready_recent_windows_from_active_work_todo(work_session, resume)
+    ]
+    if recent_windows and _write_ready_recent_windows_are_structurally_complete(recent_windows):
+        return recent_windows
+    return []
+
+
+def _write_ready_active_work_todo_status_allows_cached_refs(active_work_todo):
+    status = str((active_work_todo or {}).get("status") or "").strip()
+    if status in ("queued", "drafting"):
+        return True
+    if status != "blocked_on_patch":
+        return False
+    return _write_ready_active_todo_has_refresh_cached_window_blocker(active_work_todo)
+
+
+def _write_ready_active_work_todo_source(active_work_todo):
+    if not isinstance(active_work_todo, dict):
+        return {}
+    source = active_work_todo.get("source")
+    if not isinstance(source, dict):
+        return {}
+    return source
 
 
 def _write_ready_completed_write_touches_target_path(call, target_path):
@@ -1834,10 +1970,9 @@ def _write_ready_cached_refs_from_active_work_todo(resume):
     active_work_todo = (resume or {}).get("active_work_todo") if isinstance(resume, dict) else {}
     if not isinstance(active_work_todo, dict):
         return []
-    status = str(active_work_todo.get("status") or "").strip()
-    if status not in ("queued", "drafting"):
+    if not _write_ready_active_work_todo_status_allows_cached_refs(active_work_todo):
         return []
-    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    source = _write_ready_active_work_todo_source(active_work_todo)
     target_paths = _write_ready_paired_target_paths(source.get("target_paths") or [])
     if not target_paths:
         return []
@@ -4276,7 +4411,7 @@ def _write_ready_prompt_target_paths(active_work_todo, recent_windows):
     return target_paths
 
 
-def _write_ready_prompt_active_work_todo(resume, recent_windows):
+def _write_ready_prompt_active_work_todo(resume, recent_windows, *, clear_refresh_blocker=False):
     resume = resume if isinstance(resume, dict) else {}
     active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
     source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
@@ -4298,11 +4433,17 @@ def _write_ready_prompt_active_work_todo(resume, recent_windows):
     status = str(active_work_todo.get("status") or "").strip()
     if not status and (target_paths or first_observation.get("plan_item")):
         status = "drafting"
+    if clear_refresh_blocker and _write_ready_active_todo_has_refresh_cached_window_blocker(active_work_todo):
+        status = "drafting"
+        blocker = {}
+    plan_item = str(source.get("plan_item") or first_observation.get("plan_item") or "").strip()
+    if clear_refresh_blocker and _write_ready_cached_window_refresh_plan_item(plan_item):
+        plan_item = _write_ready_refreshed_draft_plan_item(resume, active_work_todo, first_observation)
     return {
         "id": str(active_work_todo.get("id") or "").strip(),
         "status": status,
         "source": {
-            "plan_item": str(source.get("plan_item") or first_observation.get("plan_item") or "").strip(),
+            "plan_item": plan_item,
             "target_paths": target_paths,
             "verify_command": verify_command,
         },
@@ -4389,7 +4530,18 @@ def build_write_ready_work_model_context(context):
     work_session = (context or {}).get("work_session") or {}
     resume = work_session.get("resume") or {}
     recent_windows = fast_path.get("recent_windows") or []
-    active_work_todo = _write_ready_prompt_active_work_todo(resume, recent_windows)
+    clear_refresh_blocker = bool(
+        fast_path.get("activation_source") == "active_work_todo_complete_reads"
+        and _write_ready_refresh_blocker_cleared_by_complete_windows(
+            resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {},
+            recent_windows,
+        )
+    )
+    active_work_todo = _write_ready_prompt_active_work_todo(
+        resume,
+        recent_windows,
+        clear_refresh_blocker=clear_refresh_blocker,
+    )
     capabilities = (context or {}).get("capabilities") or {}
     return {
         "active_work_todo": active_work_todo,
@@ -4424,9 +4576,23 @@ def build_write_ready_tiny_draft_model_context(context):
     recent_windows = fast_path.get("recent_windows") or []
     active_work_todo = write_ready_context.get("active_work_todo") or {}
     plan_item_observations = resume.get("plan_item_observations") or []
+    first_observation = plan_item_observations[0] if plan_item_observations and isinstance(plan_item_observations[0], dict) else {}
     actionable_plan_item = ""
-    if plan_item_observations and isinstance(plan_item_observations[0], dict):
-        actionable_plan_item = str(plan_item_observations[0].get("plan_item") or "").strip()
+    stale_refresh_blocker_cleared = bool(
+        fast_path.get("activation_source") == "active_work_todo_complete_reads"
+        and _write_ready_refresh_blocker_cleared_by_complete_windows(
+            resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {},
+            recent_windows,
+        )
+    )
+    if stale_refresh_blocker_cleared:
+        actionable_plan_item = _write_ready_refreshed_draft_plan_item(
+            resume,
+            resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {},
+            first_observation,
+        )
+    elif first_observation:
+        actionable_plan_item = str(first_observation.get("plan_item") or "").strip()
     if actionable_plan_item:
         active_todo_plan_item = actionable_plan_item
     else:

@@ -6946,6 +6946,171 @@ class WorkSessionTests(unittest.TestCase):
             ["src/mew/commands.py", "tests/test_work_session.py"],
         )
 
+    def test_write_ready_fast_path_leaves_stale_refresh_blocker_after_complete_paired_reads(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            build_write_ready_tiny_draft_model_context,
+            build_write_ready_work_model_context,
+        )
+
+        target_paths = ["src/mew/work_loop.py", "tests/test_work_session.py"]
+        refresh_plan_item = "Refresh the paired exact cached windows before drafting again."
+        retry_plan_item = "Retry the paired dry-run draft after refreshed windows are exact and complete."
+        source_text = "def refreshed_source_window():\n    return 1\n"
+        test_text = "def test_refreshed_source_window():\n    assert refreshed_source_window() == 1\n"
+        context = {
+            "task": {
+                "id": 559,
+                "title": "Stale refresh blocker retry",
+                "description": "Retry the write-ready draft after refresh windows are complete.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 540,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-540-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": refresh_plan_item,
+                            "target_paths": target_paths,
+                            "verify_command": "uv run pytest tests/test_work_session.py -q",
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": "src/mew/work_loop.py",
+                                "tool_call_id": 31,
+                                "line_start": 1,
+                                "line_end": 2,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:source",
+                            },
+                            {
+                                "path": "tests/test_work_session.py",
+                                "tool_call_id": 32,
+                                "line_start": 1,
+                                "line_end": 2,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:test",
+                            },
+                        ],
+                        "attempts": {"draft": 1, "review": 0},
+                        "blocker": {
+                            "code": "missing_exact_cached_window_texts",
+                            "detail": "refresh exact cached windows before drafting",
+                            "recovery_action": "refresh_cached_window",
+                        },
+                    },
+                    "working_memory": {
+                        "plan_items": [refresh_plan_item, retry_plan_item],
+                        "target_paths": target_paths,
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": False,
+                            "plan_item": refresh_plan_item,
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/work_loop.py",
+                                    "tool_call_id": 31,
+                                    "line_start": 1,
+                                    "line_end": 2,
+                                    "context_truncated": False,
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "tool_call_id": 32,
+                                    "line_start": 1,
+                                    "line_end": 2,
+                                    "context_truncated": False,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [{"path": path} for path in target_paths],
+                },
+                "tool_calls": [
+                    {
+                        "id": 31,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/work_loop.py", "line_start": 1, "line_count": 2},
+                        "result": {
+                            "path": "src/mew/work_loop.py",
+                            "line_start": 1,
+                            "line_end": 2,
+                            "has_more_lines": False,
+                            "text": source_text,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 32,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "tests/test_work_session.py", "line_start": 1, "line_count": 2},
+                        "result": {
+                            "path": "tests/test_work_session.py",
+                            "line_start": 1,
+                            "line_end": 2,
+                            "has_more_lines": False,
+                            "text": test_text,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 31,
+                        "path": "src/mew/work_loop.py",
+                        "line_start": 1,
+                        "line_end": 2,
+                        "text": source_text,
+                        "context_truncated": False,
+                        "complete_file": True,
+                    },
+                    {
+                        "tool_call_id": 32,
+                        "path": "tests/test_work_session.py",
+                        "line_start": 1,
+                        "line_end": 2,
+                        "text": test_text,
+                        "context_truncated": False,
+                        "complete_file": True,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the refreshed exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+        fast_context = build_write_ready_work_model_context(context)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_complete_reads")
+        self.assertEqual(fast_context["active_work_todo"]["status"], "drafting")
+        self.assertEqual(fast_context["active_work_todo"]["blocker"], {"code": "", "recovery_action": ""})
+        self.assertEqual(
+            fast_context["active_work_todo"]["source"]["plan_item"],
+            retry_plan_item,
+        )
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+            retry_plan_item,
+        )
+        self.assertEqual(
+            [item["text"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            [source_text, test_text],
+        )
+
     def test_write_ready_preflight_block_recovers_active_work_todo_pair_when_first_item_has_one_window(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
