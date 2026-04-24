@@ -11579,6 +11579,73 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(planned["model_metrics"]["think"]["prompt_chars"], 0)
         self.assertEqual(planned["model_metrics"]["total_model_seconds"], 0.0)
 
+    def test_write_ready_refresh_search_prefers_hit_near_existing_cached_window(self):
+        from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
+
+        work_session = {
+            "recent_read_file_windows": [
+                {
+                    "path": "src/mew/cli.py",
+                    "line_start": 1500,
+                    "line_end": 1579,
+                    "text": "    memory_parser.add_argument('--veto')\n",
+                    "context_truncated": False,
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "src/mew/cli.py",
+                        "query": "cmd_memory",
+                        "reason": "locate explicitly requested write-ready cached window",
+                    },
+                    "result": {
+                        "snippets": [
+                            {
+                                "path": "src/mew/cli.py",
+                                "line": 46,
+                                "lines": [
+                                    {"line": 46, "text": "    cmd_memory,", "match": True},
+                                ],
+                            },
+                            {
+                                "path": "src/mew/cli.py",
+                                "line": 1561,
+                                "lines": [
+                                    {
+                                        "line": 1561,
+                                        "text": "    memory_parser.set_defaults(func=cmd_memory)",
+                                        "match": True,
+                                    },
+                                ],
+                            },
+                        ]
+                    },
+                }
+            ],
+        }
+
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            work_session,
+            ["src/mew/cli.py"],
+        )
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "read_file",
+                    "path": "src/mew/cli.py",
+                    "line_start": 1441,
+                    "line_count": 520,
+                    "reason": "read explicitly located write-ready cached window",
+                }
+            ],
+        )
+
     def test_tiny_write_ready_draft_reasoning_effort_respects_auto_and_env_override_source(self):
         from mew.work_loop import _attempt_write_ready_tiny_draft_turn
 

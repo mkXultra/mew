@@ -3344,6 +3344,31 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
         if isinstance(item, dict) and item.get("path")
     ]
 
+    def anchor_proximity_score(path, anchor_line):
+        try:
+            anchor_line = int(anchor_line or 0)
+        except (TypeError, ValueError):
+            anchor_line = 0
+        if anchor_line <= 0:
+            return 0
+        best = 0
+        for window in recent_windows:
+            if not _work_paths_match(window.get("path"), path):
+                continue
+            try:
+                window_start = int(window.get("line_start") or 0)
+                window_end = int(window.get("line_end") or 0)
+            except (TypeError, ValueError):
+                continue
+            if window_start <= 0 or window_end < window_start:
+                continue
+            if window_start <= anchor_line <= window_end:
+                return 100
+            distance = min(abs(anchor_line - window_start), abs(anchor_line - window_end))
+            if distance <= 250:
+                best = max(best, 50 - min(distance // 10, 49))
+        return best
+
     def already_read(path, line_start, line_end):
         for window in recent_windows:
             if not _work_paths_match(window.get("path"), path):
@@ -3408,6 +3433,7 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
                 if not isinstance(snippet, dict) or not _work_paths_match(snippet.get("path"), target_path):
                     continue
                 score, line = snippet_anchor(snippet)
+                score += anchor_proximity_score(target_path, line)
                 if line > 0 and score > anchor_score:
                     anchor_score = score
                     anchor_line = line
