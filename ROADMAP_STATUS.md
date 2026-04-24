@@ -2335,6 +2335,23 @@ Missing proof:
   `tests/test_timeutil.py`. Codex-ultra approved applying it. Approvals
   `#3998/#3999` wrote the patch and `uv run pytest -q tests/test_timeutil.py
   --no-testmon` passed with `5 passed`.
+- Commit `517a3b7` recorded the `#516` paired `timeutil` patch. Task `#517`
+  then reran the previously failing small `plan_schema` surface on literal
+  head `517a3b7`, again with bookkeeping references to `ROADMAP_STATUS.md` /
+  proof artifacts and the local `reasoning-policy` phrase. This proved the
+  reasoning-policy fix generalized for classification: the failing turn
+  selected `medium/small_implementation`, not high-risk. It still timed out
+  after full paired reads and before any dry-run patch, no-change verifier
+  artifact, or patch blocker. The counted replay at
+  `.mew/replays/work-loop/2026-04-24/session-500/todo-no-todo-500/turn-2403/attempt-1/report.json`
+  records `think.prompt_chars=51712`, `recent_read_window_count=2`,
+  `write_ready_fast_path=false`, and
+  `write_ready_fast_path_reason=first_plan_item_not_edit_ready`.
+  Codex-ultra approved this as counted current-head incidence with blocker
+  code
+  `medium_small_impl_predraft_timeout_after_full_pair_read_no_artifact`, and
+  selected a fix-first structural target around write-ready fast path /
+  draft-step compaction after complete paired reads.
 
 Next action:
 
@@ -2354,16 +2371,22 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After `#516`, review and commit the applied `timeutil` paired source/test
-  patch together with its M6.11 ledger/status update, then run a fresh
-  literal-current-head slice on the next small pair to see whether the loop now
-  consistently reaches reviewer-visible patch/diff or no-change artifacts under
-  medium reasoning. Do not count or resume `#505`, `#506`, `#507`, `#508`, or
-  `#512` as current-head incidence because they are blocked pre-fix sessions;
-  #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`, #513/#514
-  remain valid counted evidence for HEAD `06167a9`, and #515 remains valid
-  counted evidence for HEAD `54b657a`, but all should be treated as prior-head
-  evidence after their respective fix commits.
+  After `#517`, do not continue collecting evidence first and do not rerun
+  `#517` as the primary action. Implement the fix-first structural patch for
+  the new medium-reasoning pre-draft timeout after full paired reads:
+  `write_ready_fast_path=false`,
+  `write_ready_fast_path_reason=first_plan_item_not_edit_ready`,
+  `cached_window_refs=[]`, and prompt size around `51k`. The patch should make
+  a fresh literal-current-head `plan_schema` slice reach either a
+  reviewer-visible paired dry-run diff or a verifier-backed no-change artifact
+  at `medium/small_implementation`; if it still times out before artifact,
+  record the fresh counted incidence and continue fix-first. Do not count or
+  resume `#505`, `#506`, `#507`, `#508`, or `#512` as current-head incidence
+  because they are blocked pre-fix sessions; #509/#510/#511 remain valid
+  counted evidence for HEAD `3b38ec7`, #513/#514 remain valid counted evidence
+  for HEAD `06167a9`, #515 remains valid counted evidence for HEAD `54b657a`,
+  and #517 remains valid counted evidence for HEAD `517a3b7`, but all should be
+  treated as prior-head evidence after their respective fix commits.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
