@@ -2697,8 +2697,15 @@ Next action:
   semantics, and adds a regression test. Codex-ultra approved the fix-first
   patch after `uv run pytest -q tests/test_work_session.py -k 'write_ready'
   --no-testmon` passed 78 tests plus 5 subtests, ruff passed, and
-  `git diff --check` passed. Next step after commit: rerun the bounded
-  `programmer` source/test surface on the repaired head.
+  `git diff --check` passed. The first `#566` rerun / session `#547` on HEAD
+  `089f84c` was non-counted because it read only `tests/test_programmer.py`
+  lines 1-1000 before verifier-backed no-change. The recovered `#566` session
+  `#548` then read `src/mew/programmer.py` through EOF and covered
+  `tests/test_programmer.py` lines 1-1350 through adjacent reads, reran
+  `uv run pytest -q tests/test_programmer.py --no-testmon` with 53 passed, and
+  closed verifier-backed no-change. Codex-ultra classified the recovery
+  PASS/COUNTED as `positive_verifier_backed_no_change`. Next step: run the
+  bounded `self_improve` source/test surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
