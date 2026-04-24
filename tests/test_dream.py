@@ -35,7 +35,7 @@ class DreamTests(unittest.TestCase):
 
         self.assertEqual(view["active_tasks"], ["#1 Open work [ready]"])
         self.assertIn(
-            "#3 task #1: Open work: Continue work [think]; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, or verified state; next: run tests",
+            "#3 task #1: Open work: Continue work [think]; continuity: 7/9 usable; repair: refresh working memory with a hypothesis, next step, verified state, or durable planning fields like plan_items, target_paths, or open_questions; next: run tests",
             view["active_work_sessions"],
         )
         self.assertEqual(view["learnings"], ["learned one thing"])

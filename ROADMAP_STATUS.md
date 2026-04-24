@@ -2586,8 +2586,17 @@ Next action:
   closed as counted `positive_verifier_backed_no_change`. Codex-ultra
   classified it PASS/COUNTED, accepted the non-blocking objc warning because
   the verifier exit was clean and the session closed, and approved marking task
-  `#553` done. Next step: continue the fresh literal-current-head calibration
-  batch on a new bounded surface.
+  `#553` done. The next bounded surface `#554` / session `#535` on HEAD
+  `fec2029` then exercised the dream source/test pair: mew read
+  `src/mew/dream.py` and `tests/test_dream.py`, initially surfaced a focused
+  verifier failure caused by a stale expected continuity repair string, judged
+  the current source behavior intended, updated only `tests/test_dream.py`, and
+  reran `uv run pytest -q tests/test_dream.py --no-testmon` with 3 passed.
+  `uv run ruff check src/mew/dream.py tests/test_dream.py` also passed.
+  Codex-ultra classified the slice PASS/COUNTED as
+  `positive_test_only_patch_verifier` and recommended `src/mew/journal.py` plus
+  `tests/test_journal.py` as the next bounded surface. Next step: continue the
+  fresh literal-current-head calibration batch on the journal source/test pair.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
