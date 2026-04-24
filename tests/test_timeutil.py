@@ -30,3 +30,9 @@ class TimeUtilTests(unittest.TestCase):
     def test_enable_dilation_rejects_non_positive_multiplier(self):
         with self.assertRaises(ValueError):
             timeutil.enable_dilation(0)
+
+    def test_elapsed_hours_accepts_timezone_less_iso_values(self):
+        self.assertEqual(
+            timeutil.elapsed_hours("1970-01-01T00:00:00", "1970-01-01T02:30:00Z"),
+            2.5,
+        )

@@ -2322,6 +2322,19 @@ Missing proof:
   second fix-first patch: ignore `reasoning-policy`, `reasoning_policy`, and
   `reasoning policy` as local component phrases while preserving genuine
   policy/governance/approval matches.
+- Commit `2a30480` implemented the second fix-first patch by normalizing local
+  `reasoning-policy`, `reasoning_policy`, and `reasoning policy` component
+  phrases before high-risk matching. Codex-ultra approved the patch after tests
+  proved those bounded phrases select medium while `Update approval policy
+  flow` remains high-risk.
+- Task `#516` on literal head `2a30480` validated the two reasoning-policy
+  fixes with the same bookkeeping and local component phrase references.
+  Session `#499` selected `medium/small_implementation` for both planning
+  turns, completed without the pre-draft timeout, and produced a
+  reviewer-visible paired dry-run patch on `src/mew/timeutil.py` plus
+  `tests/test_timeutil.py`. Codex-ultra approved applying it. Approvals
+  `#3998/#3999` wrote the patch and `uv run pytest -q tests/test_timeutil.py
+  --no-testmon` passed with `5 passed`.
 
 Next action:
 
@@ -2341,15 +2354,16 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After `#515`, implement and review the second reasoning-policy false-positive
-  patch for local `reasoning-policy` component phrases, then run one fresh
-  literal-current-head slice to verify the bounded bookkeeping task now selects
-  medium reasoning or exposes the next concrete timeout cause. Do not count or
-  resume `#505`, `#506`, `#507`, `#508`, or `#512` as current-head incidence
-  because they are blocked pre-fix sessions; #509/#510/#511 remain valid
-  counted evidence for HEAD `3b38ec7`, and #513/#514 remain valid counted
-  evidence for HEAD `06167a9`, but all should be treated as prior-head evidence
-  after their respective fix commits.
+  After `#516`, review and commit the applied `timeutil` paired source/test
+  patch together with its M6.11 ledger/status update, then run a fresh
+  literal-current-head slice on the next small pair to see whether the loop now
+  consistently reaches reviewer-visible patch/diff or no-change artifacts under
+  medium reasoning. Do not count or resume `#505`, `#506`, `#507`, `#508`, or
+  `#512` as current-head incidence because they are blocked pre-fix sessions;
+  #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`, #513/#514
+  remain valid counted evidence for HEAD `06167a9`, and #515 remains valid
+  counted evidence for HEAD `54b657a`, but all should be treated as prior-head
+  evidence after their respective fix commits.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
