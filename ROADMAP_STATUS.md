@@ -2492,8 +2492,12 @@ Next action:
   surface `#542` / session `#523` on HEAD `f636c09` then closed as counted
   `positive_verifier_backed_no_change`: signals source/test files were read
   completely, `uv run pytest -q tests/test_signals.py --no-testmon` passed 2
-  tests, and codex-ultra accepted the no-change closeout. Next step: continue
-  the fresh calibration batch.
+  tests, and codex-ultra accepted the no-change closeout. `#543` / session
+  `#524` then closed the next fresh surface as counted
+  `positive_verifier_backed_no_change`: action_application source/test files
+  were read completely, `uv run pytest -q tests/test_action_application.py
+  --no-testmon` passed 6 tests, and codex-ultra accepted the no-change
+  closeout. Next step: continue the fresh calibration batch.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
