@@ -20603,6 +20603,164 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_resume_preserves_failed_patch_repair_after_old_text_mismatch(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        task = {
+            "id": 574,
+            "title": "M6.9 dogfood: active memory recall scenario",
+            "description": "Register deterministic m6_9-active-memory-recall dogfood scenario.",
+            "scope": {"target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"]},
+        }
+        session = {
+            "id": 562,
+            "task_id": 574,
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "line_start": 1, "line_count": 3},
+                    "result": {
+                        "path": "src/mew/dogfood.py",
+                        "line_start": 1,
+                        "line_end": 3,
+                        "line_count": 3,
+                        "text": "DOGFOOD_SCENARIOS = (\n    \"m6_9-memory-taxonomy\",\n)\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_dogfood.py", "line_start": 1, "line_count": 3},
+                    "result": {
+                        "path": "tests/test_dogfood.py",
+                        "line_start": 1,
+                        "line_end": 3,
+                        "line_count": 3,
+                        "text": "def test_run_dogfood_m6_9_memory_taxonomy_scenario():\n    assert True\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {
+                        "path": "tests/test_dogfood.py",
+                        "old": "m6_9_memory_taxonomy_resolves_test_to_source_pair\n",
+                        "new": "m6_9-active-memory-recall\nm6_9_active_memory_recall_file_pair_kept\n",
+                    },
+                    "error": "old text was not found; confirm the exact existing text before retrying",
+                    "summary": "edit failed",
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "tests/test_dogfood.py",
+                        "old": "taxonomy",
+                        "new": "m6_9_memory_taxonomy_file_pair_persists_structural_evidence",
+                    },
+                    "result": {"path": "tests/test_dogfood.py", "dry_run": True, "changed": True, "written": False},
+                    "approval_status": "rejected",
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 10,
+                    "status": "failed",
+                    "summary": "model turn failed: old text was not found",
+                    "error": "old text was not found",
+                    "tool_call_id": 3,
+                    "tool_call_ids": [3],
+                    "decision_plan": {
+                        "summary": "Draft active recall scenario.",
+                        "working_memory": {
+                            "hypothesis": "Add the requested active recall scenario.",
+                            "next_step": "Retry the same source/test patch with exact anchors.",
+                            "plan_items": ["Apply paired source/test patch"],
+                            "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                        },
+                    },
+                    "action_plan": {"summary": "Draft m6_9-active-memory-recall source/test patch."},
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": "tests/test_dogfood.py",
+                                "old": "m6_9_memory_taxonomy_resolves_test_to_source_pair\n",
+                                "new": (
+                                    "def test_run_dogfood_m6_9_active_memory_recall_scenario():\n"
+                                    "    assert 'm6_9-active-memory-recall'\n"
+                                ),
+                            },
+                            {
+                                "type": "edit_file_hunks",
+                                "path": "src/mew/dogfood.py",
+                                "edits": [
+                                    {
+                                        "old": "def run_m6_9_memory_taxonomy_scenario(workspace, env=None):\n",
+                                        "new": (
+                                            "def run_m6_9_active_memory_recall_scenario(workspace, env=None):\n"
+                                            "    return 'm6_9-active-memory-recall'\n"
+                                        ),
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                },
+                {
+                    "id": 11,
+                    "status": "completed",
+                    "summary": "Unrelated taxonomy drift.",
+                    "tool_call_id": 4,
+                    "tool_call_ids": [4],
+                    "action": {"type": "edit_file", "path": "tests/test_dogfood.py"},
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session, task=task)
+
+        repair = resume["failed_patch_repair"]
+        self.assertEqual(repair["model_turn_id"], 10)
+        self.assertEqual(repair["failed_tool_call_id"], 3)
+        self.assertEqual(repair["failed_path"], "tests/test_dogfood.py")
+        self.assertEqual(repair["proposal_paths"], ["tests/test_dogfood.py", "src/mew/dogfood.py"])
+        self.assertIn("m6_9-active-memory-recall", repair["must_preserve_terms"])
+        self.assertNotIn("m6_9_memory_taxonomy_file_pair_persists_structural_evidence", repair["must_preserve_terms"])
+        self.assertIn("m6_9-active-memory-recall", json.dumps(repair["proposal_snippets"]))
+
+        text = format_work_session_resume(resume)
+        self.assertIn("failed_patch_repair:", text)
+        self.assertIn("m6_9-active-memory-recall", text)
+
+        tiny_context = build_write_ready_tiny_draft_model_context(
+            {
+                "task": task,
+                "capabilities": {"allowed_write_roots": ["."]},
+                "work_session": {
+                    "resume": resume,
+                    "tool_calls": session["tool_calls"],
+                    "model_turns": session["model_turns"],
+                },
+            }
+        )
+        self.assertIn("failed_patch_repair", tiny_context)
+        self.assertIn(
+            "Repair the same failed patch proposal",
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+        )
+
     def test_work_resume_drops_prior_read_window_after_intervening_write(self):
         from mew.work_session import build_work_session_resume
 

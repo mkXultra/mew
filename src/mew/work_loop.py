@@ -2425,6 +2425,36 @@ def _work_write_ready_fast_path_verify_command(context):
     return str(source.get("verify_command") or "").strip()
 
 
+def _write_ready_failed_patch_repair_for_targets(resume, target_paths):
+    repair = (resume or {}).get("failed_patch_repair")
+    if not isinstance(repair, dict):
+        return {}
+    repair_paths = _write_ready_paired_target_paths(repair.get("proposal_paths") or [])
+    target_paths = _write_ready_paired_target_paths(target_paths or [])
+    if target_paths and repair_paths and not set(repair_paths).issubset(set(target_paths)):
+        return {}
+    result = {
+        "kind": "failed_patch_repair",
+        "model_turn_id": repair.get("model_turn_id"),
+        "failed_tool_call_id": repair.get("failed_tool_call_id"),
+        "failed_path": str(repair.get("failed_path") or "").strip(),
+        "proposal_summary": str(repair.get("proposal_summary") or "").strip(),
+        "proposal_paths": repair_paths or target_paths,
+        "must_preserve_terms": [
+            str(term)
+            for term in (repair.get("must_preserve_terms") or [])
+            if str(term).strip()
+        ][:8],
+        "proposal_snippets": [
+            item
+            for item in (repair.get("proposal_snippets") or [])
+            if isinstance(item, dict)
+        ][:4],
+        "repair_instruction": str(repair.get("repair_instruction") or "").strip(),
+    }
+    return {key: value for key, value in result.items() if value not in (None, "", [])}
+
+
 def _work_write_ready_fast_path_latest_completed_verifier_tool_call(context):
     work_session = (context or {}).get("work_session") or {}
     latest_call = {}
@@ -4718,7 +4748,9 @@ def build_write_ready_work_model_context(context):
         clear_refresh_blocker=clear_refresh_blocker,
     )
     capabilities = (context or {}).get("capabilities") or {}
-    return {
+    target_paths = list(((active_work_todo.get("source") or {}).get("target_paths") or []))
+    failed_patch_repair = _write_ready_failed_patch_repair_for_targets(resume, target_paths)
+    result = {
         "active_work_todo": active_work_todo,
         "write_ready_fast_path": {
             "active": True,
@@ -4735,6 +4767,9 @@ def build_write_ready_work_model_context(context):
         },
         "focused_verify_command": str(((active_work_todo.get("source") or {}).get("verify_command") or "")).strip(),
     }
+    if failed_patch_repair:
+        result["failed_patch_repair"] = failed_patch_repair
+    return result
 
 
 def build_write_ready_tiny_draft_model_context(context):
@@ -4814,7 +4849,13 @@ def build_write_ready_tiny_draft_model_context(context):
             _write_ready_tiny_cached_window_prompt_item(item)
             for item in recent_windows
         ]
-    return {
+    failed_patch_repair = _write_ready_failed_patch_repair_for_targets(resume, active_todo_target_paths)
+    if failed_patch_repair:
+        active_todo_plan_item = (
+            f"{failed_patch_repair.get('repair_instruction') or 'Repair the same failed patch proposal.'}\n"
+            f"Original proposal summary: {failed_patch_repair.get('proposal_summary') or ''}"
+        ).strip()
+    result = {
         "active_work_todo": {
             "source": {
                 "plan_item": active_todo_plan_item,
@@ -4830,6 +4871,9 @@ def build_write_ready_tiny_draft_model_context(context):
             "write": list(((write_ready_context.get("allowed_roots") or {}).get("write") or [])),
         },
     }
+    if failed_patch_repair:
+        result["failed_patch_repair"] = failed_patch_repair
+    return result
 
 
 def _work_action_schema_text():
@@ -4907,6 +4951,7 @@ def build_work_think_prompt(context):
         "If work_session.resume.redundant_search_observations shows that the same successful search_text was already repeated on this surface, use its suggested_next read_file replacement instead of rerunning search_text again. "
         "If work_session.resume.adjacent_read_observations shows overlapping or near-adjacent read_file windows on the same path, use its suggested_next merged read instead of inching through more small reads. "
         "If work_session.resume.repair_anchor_observations lists source/test windows from a failed batch or repair loop, prefer those exact anchors before fresh same-surface search_text or broader rereads. "
+        "If work_session.resume.failed_patch_repair is present, the previous write proposal was on-task but failed on exact old text; repair that same proposal using current anchors, preserve its must_preserve_terms/proposal_snippets, and do not substitute a nearby patch. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
@@ -4948,6 +4993,7 @@ def build_work_write_ready_think_prompt(context):
         "Return the standard work JSON schema below and exactly one next action.\n"
         "Use write_ready_fast_path.cached_window_texts as the exact old text source for edit_file/edit_file_hunks.\n"
         "Keep the action inside active_work_todo.source.target_paths and allowed_roots.write.\n"
+        "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "Prefer one paired dry-run batch under tests/** and src/mew/** now.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
         "Do not add read, search, glob, git, shell, or verification actions on this fast path.\n"
@@ -4967,6 +5013,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "Return exactly one patch artifact for the active paired src/test slice.\n"
         "Allowed kinds are patch_proposal or patch_blocker.\n"
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts.\n"
+        "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "Stay inside allowed_roots.write and do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
         "If one file needs multiple hunks, express them in one files[i].edits array.\n"

@@ -2462,6 +2462,162 @@ def build_repair_anchor_observations(session, calls, failures, working_memory=No
     return observations[:limit]
 
 
+def _work_write_failure_is_old_text_mismatch(call):
+    if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+        return False
+    text = " ".join(
+        str(value or "")
+        for value in (
+            call.get("error"),
+            call.get("summary"),
+            ((call.get("result") or {}) if isinstance(call.get("result"), dict) else {}).get("error"),
+        )
+    ).casefold()
+    return "old text" in text and ("not found" in text or "mismatch" in text)
+
+
+def _work_turn_for_tool_call(turns, tool_call_id):
+    if tool_call_id is None:
+        return {}
+    target = str(tool_call_id)
+    for turn in reversed(list(turns or [])):
+        if any(str(value) == target for value in _turn_tool_call_ids(turn)):
+            return turn
+    return {}
+
+
+def _work_action_write_tools(action):
+    action = action if isinstance(action, dict) else {}
+    action_type = str(action.get("type") or action.get("tool") or "").strip()
+    if action_type in WRITE_WORK_TOOLS:
+        return [action]
+    if action_type != "batch":
+        return []
+    tools = []
+    for item in action.get("tools") or []:
+        if not isinstance(item, dict):
+            continue
+        tool_type = str(item.get("type") or item.get("tool") or "").strip()
+        if tool_type in WRITE_WORK_TOOLS:
+            tools.append(item)
+    return tools
+
+
+_FAILED_PATCH_REPAIR_TERM_RE = re.compile(r"\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+){2,}\b")
+
+
+def _failed_patch_repair_terms(*texts, limit=8):
+    terms = []
+    for text in texts:
+        for match in _FAILED_PATCH_REPAIR_TERM_RE.findall(str(text or "")):
+            if match not in terms:
+                terms.append(match)
+            if len(terms) >= limit:
+                return terms
+    return terms
+
+
+def _failed_patch_repair_snippet(text, terms, *, limit=500):
+    text = str(text or "")
+    if not text:
+        return ""
+    first_index = -1
+    for term in terms or []:
+        index = text.find(str(term))
+        if index >= 0 and (first_index < 0 or index < first_index):
+            first_index = index
+    if first_index < 0:
+        first_index = 0
+    half = max(80, limit // 2)
+    start = max(0, first_index - half)
+    end = min(len(text), start + limit)
+    start = max(0, end - limit)
+    snippet = text[start:end]
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(text):
+        snippet = snippet + "..."
+    return clip_output(snippet, limit + 6)
+
+
+def build_failed_patch_repair(session, calls, turns, failures, task=None):
+    """Summarize a failed write proposal so reentry repairs the same patch."""
+    calls_by_id = {call.get("id"): call for call in calls or [] if isinstance(call, dict)}
+    task = task if isinstance(task, dict) else {}
+    task_terms = _failed_patch_repair_terms(
+        task.get("title"),
+        task.get("description"),
+        limit=8,
+    )
+    for failure in reversed(list(failures or [])):
+        call = calls_by_id.get(failure.get("tool_call_id"))
+        if not _work_write_failure_is_old_text_mismatch(call):
+            continue
+        turn = _work_turn_for_tool_call(turns, call.get("id"))
+        write_tools = _work_action_write_tools((turn or {}).get("action"))
+        if not turn or not write_tools:
+            continue
+        proposal_paths = _coerce_working_memory_target_paths(
+            [tool.get("path") for tool in write_tools if isinstance(tool, dict)]
+        )
+        summary = clip_output(
+            str(
+                ((turn.get("action_plan") or {}).get("summary") if isinstance(turn.get("action_plan"), dict) else "")
+                or turn.get("summary")
+                or ""
+            ).strip(),
+            500,
+        )
+        proposed_texts = []
+        for tool in write_tools:
+            if not isinstance(tool, dict):
+                continue
+            proposed_texts.append(tool.get("new"))
+            for edit in tool.get("edits") or []:
+                if isinstance(edit, dict):
+                    proposed_texts.append(edit.get("new"))
+        proposal_terms = _failed_patch_repair_terms(summary, *proposed_texts, limit=12)
+        must_preserve_terms = task_terms or proposal_terms[:8]
+        snippets = []
+        for tool in write_tools[:4]:
+            path = _working_memory_target_path_text(tool.get("path"))
+            if not path:
+                continue
+            new_text = str(tool.get("new") or "")
+            if not new_text and isinstance(tool.get("edits"), list):
+                new_text = "\n\n".join(str((edit or {}).get("new") or "") for edit in tool.get("edits")[:3])
+            snippet = _failed_patch_repair_snippet(new_text, must_preserve_terms or proposal_terms, limit=500)
+            if not snippet:
+                continue
+            snippets.append(
+                {
+                    "path": path,
+                    "tool": str(tool.get("type") or tool.get("tool") or "").strip(),
+                    "new_snippet": snippet,
+                }
+            )
+        failed_path = _working_memory_target_path_text(work_call_path(call))
+        instruction_terms = ", ".join(must_preserve_terms[:4])
+        return {
+            "kind": "failed_patch_repair",
+            "model_turn_id": turn.get("id"),
+            "failed_tool_call_id": call.get("id"),
+            "failed_tool": call.get("tool") or "",
+            "failed_path": failed_path,
+            "failure": clip_output(call.get("error") or failure.get("error") or "", 300),
+            "proposal_summary": summary,
+            "proposal_paths": proposal_paths,
+            "must_preserve_terms": must_preserve_terms,
+            "proposal_snippets": snippets,
+            "repair_instruction": (
+                "Repair the same failed patch proposal using exact current anchors; "
+                "do not replace it with a nearby or easier patch"
+                + (f"; preserve task terms: {instruction_terms}" if instruction_terms else "")
+            ),
+        }
+    return {}
+
+
 def _work_call_repeat_target(call):
     result = call.get("result") or {}
     parameters = call.get("parameters") or {}
@@ -5912,6 +6068,13 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         working_memory=working_memory,
         limit=4,
     )
+    failed_patch_repair = build_failed_patch_repair(
+        session,
+        calls,
+        turns,
+        failures,
+        task=task,
+    )
     user_preferences = build_work_user_preferences(state, limit=limit)
     active_memory = build_work_active_memory(session=session, task=task, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
@@ -5953,6 +6116,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "plan_item_observations": plan_item_observations,
         "skipped_exact_read_plan_items": skipped_exact_read_plan_items,
         "repair_anchor_observations": repair_anchor_observations,
+        "failed_patch_repair": failed_patch_repair,
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
         "queued_followups": queued_followups[:limit],
@@ -6060,6 +6224,22 @@ def format_work_session_resume(resume):
         todo_source = active_work_todo.get("source") or {}
         if todo_source.get("plan_item"):
             lines.append(f"active_work_todo_plan_item: {todo_source.get('plan_item')}")
+    failed_patch_repair = resume.get("failed_patch_repair") or {}
+    if failed_patch_repair:
+        terms = ", ".join(failed_patch_repair.get("must_preserve_terms") or [])
+        paths = ", ".join(failed_patch_repair.get("proposal_paths") or [])
+        lines.append(
+            "failed_patch_repair: "
+            f"turn={failed_patch_repair.get('model_turn_id') or '-'} "
+            f"tool=#{failed_patch_repair.get('failed_tool_call_id') or '-'} "
+            f"path={failed_patch_repair.get('failed_path') or '-'}"
+        )
+        if paths:
+            lines.append(f"failed_patch_repair_paths: {paths}")
+        if terms:
+            lines.append(f"failed_patch_repair_terms: {terms}")
+        if failed_patch_repair.get("repair_instruction"):
+            lines.append(f"failed_patch_repair_instruction: {failed_patch_repair.get('repair_instruction')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)
