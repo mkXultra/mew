@@ -8542,6 +8542,195 @@ class WorkSessionTests(unittest.TestCase):
             ["src/mew/commands.py", "tests/test_commands.py"],
         )
 
+    def test_write_ready_fast_path_uses_queued_todo_after_complete_paired_reads(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            build_write_ready_tiny_draft_model_context,
+        )
+
+        source_text = "def normalize_plan(value):\n    return value\n"
+        test_text = "def test_normalize_plan():\n    assert normalize_plan(1) == 1\n"
+        context = {
+            "task": {
+                "id": 518,
+                "title": "Complete paired read frontier",
+                "description": "Draft from the complete source/test read frontier.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 500,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-500-1",
+                        "status": "queued",
+                        "source": {
+                            "plan_item": "Inspect src/mew/plan_schema.py",
+                            "target_paths": ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+                            "verify_command": "uv run pytest -q tests/test_plan_schema.py --no-testmon",
+                        },
+                        "cached_window_refs": [],
+                        "attempts": {"draft": 0, "review": 0},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": False,
+                            "plan_item": "Inspect src/mew/plan_schema.py",
+                            "reason": "first remaining plan item paired to target path src/mew/plan_schema.py",
+                            "target_path": "src/mew/plan_schema.py",
+                        }
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 21,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "src/mew/plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": source_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 22,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "tests/test_plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "tests/test_plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": test_text,
+                            "truncated": False,
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 21,
+                        "path": "src/mew/plan_schema.py",
+                        "offset": 0,
+                        "text": source_text,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 22,
+                        "path": "tests/test_plan_schema.py",
+                        "offset": 0,
+                        "text": test_text,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_complete_reads")
+        self.assertEqual(details["reason"], "paired_complete_reads_edit_ready")
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+        )
+
+    def test_write_ready_fast_path_does_not_use_complete_reads_for_arbitrary_not_ready_plan_item(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        source_text = "def normalize_plan(value):\n    return value\n"
+        test_text = "def test_normalize_plan():\n    assert normalize_plan(1) == 1\n"
+        context = {
+            "task": {
+                "id": 518,
+                "title": "Complete paired read frontier",
+                "description": "Complete reads alone should not bypass arbitrary work.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 500,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-500-1",
+                        "status": "queued",
+                        "source": {
+                            "plan_item": "Redesign the planning contract after investigation",
+                            "target_paths": ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+                        },
+                        "cached_window_refs": [],
+                        "attempts": {"draft": 0, "review": 0},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": False,
+                            "plan_item": "Decide whether the broader schema architecture should change",
+                            "reason": "first remaining plan item is not an inspection frontier",
+                        }
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 21,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "src/mew/plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": source_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 22,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "tests/test_plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "tests/test_plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": test_text,
+                            "truncated": False,
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 21,
+                        "path": "src/mew/plan_schema.py",
+                        "offset": 0,
+                        "text": source_text,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 22,
+                        "path": "tests/test_plan_schema.py",
+                        "offset": 0,
+                        "text": test_text,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "first_plan_item_not_edit_ready")
+
     def test_write_ready_fast_path_does_not_replace_nonpaired_frontier_with_active_todo_pair(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 
@@ -14378,6 +14567,202 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resume["next_action"], "draft one bounded patch from the cached paired windows or record one exact blocker")
         self.assertEqual(resumed_again["active_work_todo"]["id"], todo["id"])
         self.assertEqual(session["last_work_todo_ordinal"], 1)
+
+    def test_build_work_session_resume_promotes_queued_todo_after_complete_paired_reads(self):
+        session = {
+            "id": 500,
+            "task_id": 517,
+            "status": "active",
+            "title": "Complete paired read frontier",
+            "goal": "Recover the draft lane after complete source and test reads.",
+            "created_at": "2026-04-24T07:20:00Z",
+            "updated_at": "2026-04-24T07:23:59Z",
+            "default_options": {
+                "verify_command": "uv run pytest -q tests/test_plan_schema.py --no-testmon",
+            },
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/plan_schema.py", "offset": 0},
+                    "result": {
+                        "path": "src/mew/plan_schema.py",
+                        "offset": 0,
+                        "next_offset": None,
+                        "text": "def normalize_plan(value):\n    return value\n",
+                        "truncated": False,
+                    },
+                },
+                {
+                    "id": 22,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_plan_schema.py", "offset": 0},
+                    "result": {
+                        "path": "tests/test_plan_schema.py",
+                        "offset": 0,
+                        "next_offset": None,
+                        "text": "def test_normalize_plan():\n    assert normalize_plan(1) == 1\n",
+                        "truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 2402,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Inspect src/mew/plan_schema.py",
+                                "Draft one paired dry-run edit batch",
+                            ],
+                            "target_paths": ["src/mew/plan_schema.py"],
+                        }
+                    },
+                    "action": {"type": "read_file", "path": "tests/test_plan_schema.py"},
+                    "summary": "read the complete paired source and test files",
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-500-1",
+                "status": "queued",
+                "source": {
+                    "plan_item": "Inspect src/mew/plan_schema.py",
+                    "target_paths": ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+                    "verify_command": "uv run pytest -q tests/test_plan_schema.py --no-testmon",
+                },
+                "cached_window_refs": [],
+                "attempts": {"draft": 0, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {},
+                "created_at": "2026-04-24T07:23:59Z",
+                "updated_at": "2026-04-24T07:23:59Z",
+            },
+        }
+
+        resume = build_work_session_resume(session)
+        todo = resume["active_work_todo"]
+
+        self.assertEqual(resume["phase"], "drafting")
+        self.assertEqual(resume["draft_phase"], "drafting")
+        self.assertEqual(todo["id"], "todo-500-1")
+        self.assertEqual(todo["status"], "drafting")
+        self.assertEqual(
+            todo["source"]["target_paths"],
+            ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+        )
+        self.assertEqual(len(todo["cached_window_refs"]), 2)
+        self.assertEqual(
+            [item["path"] for item in todo["cached_window_refs"]],
+            ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+        )
+        self.assertEqual(resume["cached_window_ref_count"], 2)
+        self.assertTrue(resume["plan_item_observations"][0]["edit_ready"])
+        self.assertEqual(
+            [item["path"] for item in resume["plan_item_observations"][0]["cached_windows"]],
+            ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+        )
+
+    def test_build_work_session_resume_does_not_promote_complete_reads_stale_after_applied_write(self):
+        session = {
+            "id": 500,
+            "task_id": 517,
+            "status": "active",
+            "title": "Complete paired read frontier",
+            "goal": "Do not use complete reads after the target was written.",
+            "created_at": "2026-04-24T07:20:00Z",
+            "updated_at": "2026-04-24T07:23:59Z",
+            "default_options": {
+                "verify_command": "uv run pytest -q tests/test_plan_schema.py --no-testmon",
+            },
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/plan_schema.py", "offset": 0},
+                    "result": {
+                        "path": "src/mew/plan_schema.py",
+                        "offset": 0,
+                        "next_offset": None,
+                        "text": "def normalize_plan(value):\n    return value\n",
+                        "truncated": False,
+                    },
+                },
+                {
+                    "id": 22,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_plan_schema.py", "offset": 0},
+                    "result": {
+                        "path": "tests/test_plan_schema.py",
+                        "offset": 0,
+                        "next_offset": None,
+                        "text": "def test_normalize_plan():\n    assert normalize_plan(1) == 1\n",
+                        "truncated": False,
+                    },
+                },
+                {
+                    "id": 23,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "src/mew/plan_schema.py",
+                        "old": "return value",
+                        "new": "return value or {}",
+                        "apply": True,
+                    },
+                    "result": {
+                        "path": "src/mew/plan_schema.py",
+                        "changed": True,
+                        "written": True,
+                        "dry_run": False,
+                        "applied": True,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 2402,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": [
+                                "Inspect src/mew/plan_schema.py",
+                                "Draft one paired dry-run edit batch",
+                            ],
+                            "target_paths": ["src/mew/plan_schema.py"],
+                        }
+                    },
+                    "action": {"type": "read_file", "path": "tests/test_plan_schema.py"},
+                    "summary": "read the complete paired source and test files",
+                }
+            ],
+            "active_work_todo": {
+                "id": "todo-500-1",
+                "status": "queued",
+                "source": {
+                    "plan_item": "Inspect src/mew/plan_schema.py",
+                    "target_paths": ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+                    "verify_command": "uv run pytest -q tests/test_plan_schema.py --no-testmon",
+                },
+                "cached_window_refs": [],
+                "attempts": {"draft": 0, "review": 0},
+                "patch_draft_id": "",
+                "blocker": {},
+                "created_at": "2026-04-24T07:23:59Z",
+                "updated_at": "2026-04-24T07:23:59Z",
+            },
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["phase"], "idle")
+        self.assertEqual(resume["active_work_todo"], {})
+        self.assertFalse(resume["plan_item_observations"][0]["edit_ready"])
+        self.assertEqual(resume["cached_window_ref_count"], 0)
 
     def test_build_work_session_resume_skips_satisfied_leading_verifier_plan_item(self):
         session = {

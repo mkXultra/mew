@@ -611,6 +611,7 @@ def _merge_recent_read_line_window(
     existing["visible_chars"] = min(len(merged_text), merge_text_limit)
     existing["source_text_chars"] = len(merged_text)
     existing["context_truncated"] = len(merged_text) > merge_text_limit
+    existing["complete_file"] = bool(existing.get("complete_file") or candidate.get("complete_file"))
     return True
 
 
@@ -624,6 +625,32 @@ def _recent_read_window_text_limit(call, *, default):
     if result.get("truncated"):
         return default
     return max(default, _line_window_auto_max_chars(parameters))
+
+
+def _read_file_call_has_complete_file_result(call):
+    if (call or {}).get("tool") != "read_file" or (call or {}).get("status") != "completed":
+        return False
+    result = (call or {}).get("result") if isinstance((call or {}).get("result"), dict) else {}
+    parameters = (call or {}).get("parameters") if isinstance((call or {}).get("parameters"), dict) else {}
+    text = result.get("text")
+    if not isinstance(text, str) or not text:
+        return False
+    if any(bool(result.get(key)) for key in ("context_truncated", "source_truncated", "truncated")):
+        return False
+    line_start = result.get("line_start")
+    line_end = result.get("line_end")
+    if line_start is not None or line_end is not None:
+        try:
+            line_start = int(line_start or 0)
+            line_end = int(line_end or 0)
+        except (TypeError, ValueError):
+            return False
+        return line_start == 1 and line_end >= line_start and result.get("has_more_lines") is False
+    try:
+        offset = int(result.get("offset", parameters.get("offset", 0)) or 0)
+    except (TypeError, ValueError):
+        return False
+    return offset == 0 and result.get("next_offset") in (None, "")
 
 
 def build_recent_read_file_windows(
@@ -653,6 +680,7 @@ def build_recent_read_file_windows(
             "visible_chars": min(len(text), window_text_limit),
             "source_text_chars": len(text),
             "context_truncated": len(text) > window_text_limit,
+            "complete_file": _read_file_call_has_complete_file_result(call),
         }
         merged = False
         for index, existing in enumerate(windows):
@@ -1257,11 +1285,93 @@ def build_work_model_context(
     }
 
 
+def _write_ready_fast_path_steer_text(context, resume):
+    steer_text = str(((resume or {}).get("pending_steer") or {}).get("text") or "")
+    if not steer_text:
+        steer_text = str((context or {}).get("guidance") or "")
+    return steer_text
+
+
+def _write_ready_fast_path_steer_requests_write(steer_text):
+    if not steer_text:
+        return True
+    steer_lower = str(steer_text or "").lower()
+    return any(
+        needle in steer_lower
+        for needle in ("dry-run", "dry run", "paired dry-run", "paired dry run", "draft")
+    )
+
+
+def _write_ready_completed_read_frontier_plan_item(plan_item, target_paths):
+    text = str(plan_item or "").strip()
+    lowered = text.casefold()
+    if not lowered:
+        return False
+    first_word = re.sub(r"[^a-z_-].*", "", lowered)
+    if first_word not in {
+        "check",
+        "examine",
+        "inspect",
+        "open",
+        "read",
+        "review",
+        "scan",
+        "skim",
+    }:
+        return False
+    if any(marker in lowered for marker in ("apply", "draft", "edit", "finish", "repair", "run ", "verify", "write")):
+        return False
+    for path in target_paths or []:
+        normalized = _normalized_work_path(path).casefold()
+        basename = normalized.rsplit("/", 1)[-1]
+        if normalized and normalized in lowered:
+            return True
+        if basename and basename in lowered:
+            return True
+    return False
+
+
+def _write_ready_complete_read_frontier_allows_not_ready_override(first_observation, resume, complete_windows):
+    target_paths = [
+        str(item.get("path") or "").strip()
+        for item in complete_windows or []
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ]
+    if not _write_ready_paired_target_paths(target_paths):
+        return False
+    first_plan_item = str((first_observation or {}).get("plan_item") or "").strip()
+    active_work_todo = (resume or {}).get("active_work_todo") if isinstance(resume, dict) else {}
+    source = active_work_todo.get("source") if isinstance((active_work_todo or {}).get("source"), dict) else {}
+    source_plan_item = str((source or {}).get("plan_item") or "").strip()
+    return any(
+        _write_ready_completed_read_frontier_plan_item(candidate, target_paths)
+        for candidate in (first_plan_item, source_plan_item)
+        if candidate
+    )
+
+
 def _work_write_ready_fast_path_state(context):
     work_session = (context or {}).get("work_session") or {}
     resume = work_session.get("resume") or {}
     observations = resume.get("plan_item_observations") or []
+    complete_active_windows = _write_ready_complete_recent_windows_from_active_work_todo(work_session, resume)
+    steer_text = _write_ready_fast_path_steer_text(context, resume)
     if not observations:
+        if complete_active_windows and _write_ready_complete_read_frontier_allows_not_ready_override(
+            {},
+            resume,
+            complete_active_windows,
+        ):
+            if not _write_ready_fast_path_steer_requests_write(steer_text):
+                return {"active": False, "reason": "guidance_not_requesting_write"}
+            return {
+                "active": True,
+                "reason": "paired_complete_reads_edit_ready",
+                "plan_item": {},
+                "cached_windows": complete_active_windows,
+                "activation_source": "active_work_todo_complete_reads",
+                "steer_text": steer_text,
+            }
         return {"active": False, "reason": "missing_plan_item_observations"}
     first = observations[0] or {}
     if _write_ready_fast_path_verifier_closeout_passed(context):
@@ -1273,6 +1383,26 @@ def _work_write_ready_fast_path_state(context):
         if _work_plan_item_is_verifier_closeout(plan_item_text):
             return {"active": False, "reason": "verifier_closeout_plan_item"}
     if not first.get("edit_ready"):
+        plan_item_text = str(first.get("plan_item") or "").strip()
+        if (
+            complete_active_windows
+            and not _work_plan_item_is_verifier_closeout(plan_item_text)
+            and _write_ready_complete_read_frontier_allows_not_ready_override(
+                first,
+                resume,
+                complete_active_windows,
+            )
+        ):
+            if not _write_ready_fast_path_steer_requests_write(steer_text):
+                return {"active": False, "reason": "guidance_not_requesting_write"}
+            return {
+                "active": True,
+                "reason": "paired_complete_reads_edit_ready",
+                "plan_item": first,
+                "cached_windows": complete_active_windows,
+                "activation_source": "active_work_todo_complete_reads",
+                "steer_text": steer_text,
+            }
         return {"active": False, "reason": "first_plan_item_not_edit_ready"}
     cached_windows = [
         item
@@ -1290,17 +1420,8 @@ def _work_write_ready_fast_path_state(context):
     if not (has_tests and has_source):
         return {"active": False, "reason": "missing_source_test_pair"}
 
-    steer_text = str(((resume.get("pending_steer") or {}).get("text")) or "")
-    if not steer_text:
-        steer_text = str((context or {}).get("guidance") or "")
-    if steer_text:
-        steer_lower = steer_text.lower()
-        steer_requests_write = any(
-            needle in steer_lower
-            for needle in ("dry-run", "dry run", "paired dry-run", "paired dry run", "draft")
-        )
-        if not steer_requests_write:
-            return {"active": False, "reason": "guidance_not_requesting_write"}
+    if not _write_ready_fast_path_steer_requests_write(steer_text):
+        return {"active": False, "reason": "guidance_not_requesting_write"}
     return {
         "active": True,
         "reason": "paired_cached_windows_edit_ready",
@@ -1412,6 +1533,71 @@ def _write_ready_recent_windows_from_active_work_todo(work_session, resume):
                 {"path": path} for path in target_paths
             ],
         },
+    )
+
+
+def _write_ready_paired_target_paths(target_paths):
+    paths = []
+    for path in target_paths or []:
+        if not isinstance(path, str) or not path:
+            continue
+        if any(_work_paths_match(path, existing) for existing in paths):
+            continue
+        paths.append(path)
+    if len(paths) != 2:
+        return []
+    if not any(_work_batch_path_is_mew_source(path) for path in paths):
+        return []
+    if not any(_work_batch_path_is_tests(path) for path in paths):
+        return []
+    return paths
+
+
+def _write_ready_complete_recent_windows_from_target_paths(work_session, target_paths):
+    target_paths = _write_ready_paired_target_paths(target_paths)
+    if not target_paths:
+        return []
+    recent_windows = [
+        item
+        for item in (work_session or {}).get("recent_read_file_windows") or []
+        if isinstance(item, dict) and item.get("path")
+    ]
+    raw_calls_by_id = {
+        call.get("id"): call
+        for call in (work_session or {}).get("tool_calls") or []
+        if isinstance(call, dict) and call.get("id") is not None
+    }
+    windows_by_path = {}
+    for target_path in target_paths:
+        for window in recent_windows:
+            if not _work_paths_match(window.get("path"), target_path):
+                continue
+            raw_call = raw_calls_by_id.get(window.get("tool_call_id"))
+            complete_file = bool(window.get("complete_file"))
+            if not complete_file and raw_call:
+                complete_file = _read_file_call_has_complete_file_result(raw_call)
+            if not complete_file:
+                continue
+            if not window.get("text") or window.get("context_truncated"):
+                continue
+            windows_by_path[target_path] = {**window, "path": target_path, "context_truncated": False}
+            break
+        if target_path not in windows_by_path:
+            return []
+    return [windows_by_path[path] for path in target_paths]
+
+
+def _write_ready_complete_recent_windows_from_active_work_todo(work_session, resume):
+    active_work_todo = (resume or {}).get("active_work_todo") if isinstance(resume, dict) else {}
+    if not isinstance(active_work_todo, dict):
+        return []
+    status = str(active_work_todo.get("status") or "").strip()
+    if status not in ("queued", "drafting"):
+        return []
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    return _write_ready_complete_recent_windows_from_target_paths(
+        work_session,
+        source.get("target_paths") or [],
     )
 
 
@@ -2260,16 +2446,19 @@ def _work_write_ready_fast_path_details(context):
     resume = work_session.get("resume") or {}
     cached_paths = [item.get("path") for item in fast_path.get("cached_windows") or []]
     recent_windows = []
-    for cached in fast_path.get("cached_windows") or []:
-        item = _write_ready_recent_window_for_cached_ref(
-            cached,
-            work_session.get("recent_read_file_windows") or [],
-        )
-        if item:
-            recent_windows.append(item)
-        else:
-            recent_windows = []
-            break
+    if fast_path.get("activation_source") == "active_work_todo_complete_reads":
+        recent_windows = list(fast_path.get("cached_windows") or [])
+    else:
+        for cached in fast_path.get("cached_windows") or []:
+            item = _write_ready_recent_window_for_cached_ref(
+                cached,
+                work_session.get("recent_read_file_windows") or [],
+            )
+            if item:
+                recent_windows.append(item)
+            else:
+                recent_windows = []
+                break
     if not recent_windows:
         recent_windows = _write_ready_recent_windows_from_target_paths(work_session, resume)
         if not recent_windows:

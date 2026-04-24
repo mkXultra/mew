@@ -4927,6 +4927,101 @@ def _active_work_todo_frontier_key(todo):
     )
 
 
+def _source_test_paired_target_paths(target_paths):
+    paths = _relevant_resume_target_paths(target_paths)
+    if len(paths) != 2:
+        return []
+    if not any(_is_mew_source_path(path) for path in paths):
+        return []
+    if not any(_is_test_path(path) for path in paths):
+        return []
+    return paths
+
+
+def _read_file_call_complete_cached_window_for_target(call, target_path):
+    if not isinstance(call, dict) or call.get("tool") != "read_file" or call.get("status") != "completed":
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    read_path = work_call_path(call) or result.get("path") or ""
+    if not read_path or not str(read_path).endswith(str(target_path or "")):
+        return {}
+    text = result.get("text")
+    if not isinstance(text, str) or not text:
+        return {}
+    if any(bool(result.get(key)) for key in ("context_truncated", "source_truncated", "truncated")):
+        return {}
+
+    line_start = result.get("line_start")
+    line_end = result.get("line_end")
+    if line_start is not None or line_end is not None:
+        try:
+            line_start = int(line_start or 0)
+            line_end = int(line_end or 0)
+        except (TypeError, ValueError):
+            return {}
+        if line_start != 1 or line_end < line_start:
+            return {}
+        if result.get("has_more_lines") is not False:
+            return {}
+    else:
+        try:
+            offset = int(result.get("offset", parameters.get("offset", 0)) or 0)
+        except (TypeError, ValueError):
+            return {}
+        if offset != 0 or result.get("next_offset") not in (None, ""):
+            return {}
+        line_start = 1
+        line_end = max(1, len(text.splitlines()))
+
+    return {
+        "path": str(target_path or "").strip(),
+        "tool_call_id": call.get("id"),
+        "line_start": line_start,
+        "line_end": line_end,
+        "reason": f"complete read_file window already covered {target_path}",
+        "context_truncated": False,
+        "text": text,
+    }
+
+
+def _completed_write_call_touches_target_path(call, target_path):
+    if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS or call.get("status") != "completed":
+        return False
+    path = work_call_path(call)
+    if not path or not str(path).endswith(str(target_path or "")):
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    applied = bool(parameters.get("apply") or result.get("applied"))
+    non_dry_run = result.get("dry_run") is False
+    written_non_dry_run = bool(result.get("written")) and result.get("dry_run") is not True
+    return applied or non_dry_run or written_non_dry_run
+
+
+def _complete_cached_windows_for_target_paths(calls, target_paths):
+    paths = _source_test_paired_target_paths(target_paths)
+    if not paths:
+        return []
+    windows_by_path = {}
+    calls = list(calls or [])
+    for target_path in paths:
+        later_applied_write = False
+        for call in reversed(calls):
+            if _completed_write_call_touches_target_path(call, target_path):
+                later_applied_write = True
+                continue
+            window = _read_file_call_complete_cached_window_for_target(call, target_path)
+            if window:
+                if later_applied_write:
+                    return []
+                windows_by_path[target_path] = window
+                break
+        if target_path not in windows_by_path:
+            return []
+    return [windows_by_path[path] for path in paths]
+
+
 def _cached_window_ref_from_observation(window):
     window = window if isinstance(window, dict) else {}
     path = str(window.get("path") or "").strip()
@@ -5062,7 +5157,7 @@ def _observe_active_work_todo(
         ),
         "review": max((existing.get("attempts") or {}).get("review") or 0, 0),
     }
-    if not updated.get("status"):
+    if not updated.get("status") or updated.get("status") == "queued":
         updated["status"] = "drafting"
     latest_tiny_turn = _latest_tiny_write_ready_draft_turn(
         model_turns,
@@ -5541,13 +5636,43 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     )
     if not working_memory and isinstance(session.get("startup_memory"), dict):
         working_memory = dict(session.get("startup_memory") or {})
+    existing_active_work_todo = _normalize_active_work_todo(session.get("active_work_todo") or {})
+    complete_frontier_windows = []
+    if existing_active_work_todo.get("status") == "queued" and not existing_active_work_todo.get("cached_window_refs"):
+        complete_frontier_windows = _complete_cached_windows_for_target_paths(
+            calls,
+            (existing_active_work_todo.get("source") or {}).get("target_paths") or [],
+        )
+    if not complete_frontier_windows and not existing_active_work_todo:
+        complete_frontier_windows = _complete_cached_windows_for_target_paths(
+            calls,
+            _task_scope_target_paths_for_session(session, task=task),
+        )
+    complete_frontier_by_path = {
+        item.get("path"): item
+        for item in complete_frontier_windows
+        if isinstance(item, dict) and item.get("path")
+    }
     target_path_cached_window_observations = []
     cached_window_by_path = {}
     adjacent_read_observations = build_adjacent_read_observations(calls, limit=3)
     target_paths = _coerce_working_memory_target_paths((working_memory or {}).get("target_paths") or [])
+    for item in complete_frontier_windows:
+        path = item.get("path")
+        if path and path not in target_paths:
+            target_paths.append(path)
     relevant_target_paths = _relevant_resume_target_paths(target_paths)
     if relevant_target_paths:
         for target_path in relevant_target_paths:
+            complete_window = complete_frontier_by_path.get(target_path)
+            if complete_window:
+                observation = {
+                    key: complete_window.get(key)
+                    for key in ("path", "tool_call_id", "line_start", "line_end", "reason", "context_truncated")
+                }
+                target_path_cached_window_observations.append(observation)
+                cached_window_by_path[target_path] = dict(complete_window)
+                continue
             for call in reversed(calls):
                 if call.get("tool") != "read_file" or call.get("status") != "completed":
                     continue
