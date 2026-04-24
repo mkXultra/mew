@@ -3626,14 +3626,19 @@ def _work_write_ready_refresh_query(text, blocked_tokens=None):
         "line",
         "lines",
         "read",
+        "read_file",
         "refresh",
         "source",
+        "search_text",
         "structurally",
         "targeted",
         "tests",
         "the",
         "window",
         "windows",
+        "write_file",
+        "edit_file",
+        "edit_file_hunks",
     }
     stopwords |= {
         str(token or "").strip().strip("_").casefold()

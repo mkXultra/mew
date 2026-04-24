@@ -11807,7 +11807,7 @@ class WorkSessionTests(unittest.TestCase):
             },
             "capabilities": {},
             "guidance": (
-                "draft one paired dry-run edit; "
+                "draft one paired dry-run edit; convert completed refresh searches to read_file actions; "
                 "read src/mew/cli.py around cmd_memory; "
                 "read tests/test_memory.py around veto; "
                 "read src/mew/commands.py around cmd_memory"
