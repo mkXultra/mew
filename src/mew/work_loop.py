@@ -72,6 +72,7 @@ WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
+WORK_WRITE_READY_STRUCTURAL_NARROW_MIN_LINES = 80
 WORK_LINE_WINDOW_ESTIMATED_CHARS_PER_LINE = 200
 WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
@@ -1844,7 +1845,7 @@ def _write_ready_tool_call_window_for_cached_ref(work_session, cached):
             continue
         if later_write:
             return {}
-        return window
+        return _write_ready_window_with_draft_window(window)
     return {}
 
 
@@ -1894,20 +1895,129 @@ def _write_ready_recent_window_for_cached_ref(cached, recent_windows):
     ]
     if not candidates:
         return {}
+    prepared_candidates = [
+        _write_ready_window_with_draft_window(item)
+        for item in candidates
+    ]
 
     def score(item):
+        draft_window = _write_ready_structural_window_for_draft(item)
         try:
-            span = int(item.get("line_end") or 0) - int(item.get("line_start") or 0)
+            span = int(draft_window.get("line_end") or 0) - int(draft_window.get("line_start") or 0)
         except (TypeError, ValueError):
             span = 0
-        complete = _write_ready_window_text_is_structurally_complete(item.get("text") or "")
+        complete = _write_ready_window_text_is_structurally_complete(draft_window.get("text") or "")
         try:
             tool_call_id = int(item.get("tool_call_id") or 0)
         except (TypeError, ValueError):
             tool_call_id = 0
         return (1 if complete else 0, -span, tool_call_id)
 
-    return max(candidates, key=score)
+    return max(prepared_candidates, key=score)
+
+
+def _write_ready_window_structural_start_candidate(line):
+    stripped = str(line or "").lstrip()
+    if not stripped.strip():
+        return False
+    if not str(line or "")[0:1].isspace():
+        return True
+    return stripped.startswith(("def ", "async def ", "@"))
+
+
+def _write_ready_structural_window_for_draft(window):
+    window = window if isinstance(window, dict) else {}
+    draft_window = window.get("draft_window") if isinstance(window.get("draft_window"), dict) else {}
+    if draft_window.get("text"):
+        return draft_window
+    return window
+
+
+def _write_ready_window_with_draft_window(window):
+    window = window if isinstance(window, dict) else {}
+    draft_window = _write_ready_structurally_complete_draft_window(window)
+    if not draft_window:
+        return window
+    prepared = dict(window)
+    prepared["draft_window"] = draft_window
+    return prepared
+
+
+def _write_ready_structurally_complete_draft_window(window):
+    window = window if isinstance(window, dict) else {}
+    text = window.get("text")
+    if not isinstance(text, str) or not text:
+        return {}
+    if window.get("context_truncated"):
+        return {}
+    if _write_ready_window_text_is_structurally_complete(text):
+        return {}
+    try:
+        line_start = int(window.get("line_start") or 0)
+        line_end = int(window.get("line_end") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if line_start <= 0 or line_end < line_start:
+        return {}
+    lines = text.splitlines(keepends=True)
+    line_span = line_end - line_start + 1
+    if line_span < WORK_WRITE_READY_STRUCTURAL_NARROW_MIN_LINES:
+        return {}
+    if len(lines) != line_span:
+        return {}
+    start_indices = [
+        index
+        for index, line in enumerate(lines)
+        if _write_ready_window_structural_start_candidate(line)
+    ]
+    if not start_indices:
+        return {}
+    significant_end_indices = [
+        index
+        for index, line in enumerate(lines)
+        if str(line or "").strip()
+    ]
+    if not significant_end_indices:
+        return {}
+
+    def build_draft_window(start_index, end_index, candidate_text, reason):
+        return {
+            "path": window.get("path"),
+            "tool_call_id": window.get("tool_call_id"),
+            "line_start": line_start + start_index,
+            "line_end": line_start + end_index,
+            "text": candidate_text,
+            "visible_chars": len(candidate_text),
+            "source_text_chars": len(candidate_text),
+            "context_truncated": False,
+            "complete_file": False,
+            "narrowed_from_line_start": line_start,
+            "narrowed_from_line_end": line_end,
+            "narrowed_reason": reason,
+        }
+
+    for start_index in start_indices:
+        candidate_text = "".join(lines[start_index:])
+        if _write_ready_window_text_is_structurally_complete(candidate_text):
+            return build_draft_window(
+                start_index,
+                len(lines) - 1,
+                candidate_text,
+                "trimmed leading structural fragment",
+            )
+    for start_index in start_indices:
+        for end_index in reversed(significant_end_indices):
+            if end_index <= start_index:
+                continue
+            candidate_text = "".join(lines[start_index : end_index + 1])
+            if _write_ready_window_text_is_structurally_complete(candidate_text):
+                return build_draft_window(
+                    start_index,
+                    end_index,
+                    candidate_text,
+                    "trimmed structural fragments",
+                )
+    return {}
 
 
 def _write_ready_window_has_unmatched_delimiters(text):
@@ -1957,7 +2067,8 @@ def _write_ready_window_text_is_structurally_complete(text):
 
 def _write_ready_recent_windows_are_structurally_complete(recent_windows):
     for item in recent_windows or []:
-        if not _write_ready_window_text_is_structurally_complete((item or {}).get("text") or ""):
+        draft_window = _write_ready_structural_window_for_draft(item)
+        if not _write_ready_window_text_is_structurally_complete((draft_window or {}).get("text") or ""):
             return False
     return True
 
@@ -2733,6 +2844,10 @@ def _work_write_ready_fast_path_details(context):
                 "active": False,
                 "reason": "missing_exact_cached_window_texts",
             }
+    recent_windows = [
+        _write_ready_window_with_draft_window(window)
+        for window in recent_windows
+    ]
     if not _write_ready_recent_windows_are_structurally_complete(recent_windows):
         if _write_ready_fast_path_verifier_closeout_passed(context):
             return {
@@ -4107,6 +4222,35 @@ def _write_ready_tiny_draft_observation_target_paths(resume):
     return target_paths
 
 
+def _write_ready_cached_window_prompt_item(item):
+    item = item if isinstance(item, dict) else {}
+    draft_window = item.get("draft_window") if isinstance(item.get("draft_window"), dict) else {}
+    prompt_window = draft_window if draft_window.get("text") else item
+    payload = {
+        "path": item.get("path") or prompt_window.get("path"),
+        "line_start": prompt_window.get("line_start"),
+        "line_end": prompt_window.get("line_end"),
+        "tool_call_id": item.get("tool_call_id") or prompt_window.get("tool_call_id"),
+        "text": prompt_window.get("text") or "",
+    }
+    if draft_window:
+        payload["source_line_start"] = item.get("line_start")
+        payload["source_line_end"] = item.get("line_end")
+        payload["source_text_chars"] = item.get("source_text_chars")
+        payload["draft_window_reason"] = draft_window.get("narrowed_reason") or ""
+    return payload
+
+
+def _write_ready_tiny_cached_window_prompt_item(item):
+    item = item if isinstance(item, dict) else {}
+    draft_window = item.get("draft_window") if isinstance(item.get("draft_window"), dict) else {}
+    prompt_window = draft_window if draft_window.get("text") else item
+    return {
+        "path": item.get("path") or prompt_window.get("path"),
+        "text": prompt_window.get("text") or "",
+    }
+
+
 def build_write_ready_work_model_context(context):
     fast_path = _work_write_ready_fast_path_details(context)
     if not fast_path.get("active"):
@@ -4123,13 +4267,7 @@ def build_write_ready_work_model_context(context):
             "reason": "paired cached windows are edit-ready; draft one dry-run batch or report one exact blocker",
             "activation_source": fast_path.get("activation_source") or "plan_item_observations",
             "cached_window_texts": [
-                {
-                    "path": item.get("path"),
-                    "line_start": item.get("line_start"),
-                    "line_end": item.get("line_end"),
-                    "tool_call_id": item.get("tool_call_id"),
-                    "text": item.get("text") or "",
-                }
+                _write_ready_cached_window_prompt_item(item)
                 for item in recent_windows
             ],
         },
@@ -4165,10 +4303,7 @@ def build_write_ready_tiny_draft_model_context(context):
     if actionable_target_paths:
         active_todo_target_paths = actionable_target_paths
         cached_window_texts = [
-            {
-                "path": item.get("path"),
-                "text": item.get("text") or "",
-            }
+            _write_ready_tiny_cached_window_prompt_item(item)
             for item in recent_windows
             if isinstance(item, dict)
             and any(_work_paths_match(item.get("path"), action_path) for action_path in actionable_target_paths)
@@ -4176,10 +4311,7 @@ def build_write_ready_tiny_draft_model_context(context):
     else:
         active_todo_target_paths = list(((active_work_todo.get("source") or {}).get("target_paths") or []))
         cached_window_texts = [
-            {
-                "path": item.get("path"),
-                "text": item.get("text") or "",
-            }
+            _write_ready_tiny_cached_window_prompt_item(item)
             for item in recent_windows
         ]
     return {

@@ -7242,6 +7242,188 @@ class WorkSessionTests(unittest.TestCase):
             [3922, 3923],
         )
 
+    def test_write_ready_fast_path_narrows_project_snapshot_sized_refreshed_windows(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+            build_write_ready_tiny_draft_model_context,
+            build_write_ready_work_model_context,
+        )
+
+        def pad_window(lines, line_start, line_end):
+            expected = line_end - line_start + 1
+            while len(lines) < expected:
+                lines.append(f"# filler line {line_start + len(lines)}\n")
+            self.assertEqual(len(lines), expected)
+            return "".join(lines)
+
+        test_path = "tests/test_project_snapshot.py"
+        source_path = "src/mew/project_snapshot.py"
+        test_text = pad_window(
+            [
+                '            "now",\n',
+                "        )\n",
+                "\n",
+                '        snapshot = state["memory"]["deep"]["project_snapshot"]\n',
+                '        self.assertEqual(snapshot["updated_at"], "now")\n',
+                "\n",
+                "\n",
+                "\n",
+                "\n",
+                "\n",
+                "\n",
+                "    def test_read_pyproject_updates_package_summary(self):\n",
+                "        state = default_state()\n",
+                "        self.assertEqual(state['memory'], {})\n",
+                "\n",
+                "    def test_refresh_project_snapshot_reads_key_files_and_dirs(self):\n",
+                "        report = {'read_files': ['README.md', 'pyproject.toml']}\n",
+                "        self.assertIn('README.md', report['read_files'])\n",
+            ],
+            30,
+            201,
+        )
+        source_text = pad_window(
+            [
+                '    "package-lock.json": "node",\n',
+                '    "Cargo.toml": "rust",\n',
+                '    "go.mod": "go",\n',
+                "}\n",
+                "\n",
+                "\n",
+                "\n",
+                "KEY_FILE_NAMES = {\n",
+                '    "README.md",\n',
+                '    "pyproject.toml",\n',
+                "}\n",
+                "\n",
+                "def update_project_snapshot_from_read_result(state, action_type, result, current_time):\n",
+                "    if action_type == 'read_file':\n",
+                "        return {'kind': 'python'}\n",
+                "    return {}\n",
+            ],
+            20,
+            410,
+        )
+        context = {
+            "task": {
+                "id": 532,
+                "title": "project_snapshot write-ready calibration sample",
+                "description": "Draft one paired project_snapshot dry-run edit.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 513,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-513-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one paired project_snapshot dry-run edit batch",
+                            "target_paths": [test_path, source_path],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired project_snapshot dry-run edit batch",
+                            "cached_windows": [
+                                {"path": test_path, "line_start": 30, "line_end": 201},
+                                {"path": source_path, "line_start": 20, "line_end": 410},
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": test_path},
+                        {"path": source_path},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 5321,
+                        "path": test_path,
+                        "line_start": 30,
+                        "line_end": 201,
+                        "text": test_text,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 5322,
+                        "path": source_path,
+                        "line_start": 20,
+                        "line_end": 410,
+                        "text": source_text,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the refreshed cached windows.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+        fast_context = build_write_ready_work_model_context(context)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(fast_path["active"])
+        self.assertEqual(preflight_block, {})
+        recent_summary = []
+        for item in fast_path["recent_windows"]:
+            draft_window = item["draft_window"]
+            recent_summary.append(
+                (
+                    item["path"],
+                    item["line_start"],
+                    item["line_end"],
+                    draft_window["line_start"],
+                    draft_window["line_end"],
+                    draft_window["narrowed_from_line_start"],
+                    draft_window["narrowed_from_line_end"],
+                )
+            )
+            self.assertEqual(draft_window["visible_chars"], len(draft_window["text"]))
+            self.assertEqual(draft_window["source_text_chars"], len(draft_window["text"]))
+            self.assertFalse(draft_window["context_truncated"])
+            self.assertFalse(draft_window["complete_file"])
+        self.assertEqual(
+            recent_summary,
+            [
+                (test_path, 30, 201, 41, 201, 30, 201),
+                (source_path, 20, 410, 27, 410, 20, 410),
+            ],
+        )
+        self.assertEqual(
+            [
+                (
+                    item["path"],
+                    item["line_start"],
+                    item["line_end"],
+                    item["source_line_start"],
+                    item["source_line_end"],
+                )
+                for item in fast_context["write_ready_fast_path"]["cached_window_texts"]
+            ],
+            [
+                (test_path, 41, 201, 30, 201),
+                (source_path, 27, 410, 20, 410),
+            ],
+        )
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            [test_path, source_path],
+        )
+        self.assertTrue(
+            tiny_context["write_ready_fast_path"]["cached_window_texts"][0]["text"].startswith(
+                "    def test_read_pyproject_updates_package_summary"
+            )
+        )
+        self.assertTrue(
+            tiny_context["write_ready_fast_path"]["cached_window_texts"][1]["text"].startswith("KEY_FILE_NAMES")
+        )
+
     def test_write_ready_preflight_block_skips_oversized_cached_ref_refresh(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
