@@ -2439,9 +2439,12 @@ Next action:
   `#529` then landed as a counted verifier-backed no-change slice on HEAD
   `0276f3b`. `#530` then landed as a counted verifier-backed no-change slice
   on HEAD `be91d3b`. `#531` then landed as a counted paired patch/verifier
-  slice on HEAD `84eaf8c`. Continue the batch from a fresh small paired
-  surface, with codex-ultra review per phase, until the 20-slice / 50%
-  incidence criterion can be compared or a concrete fix-first blocker appears.
+  slice on HEAD `84eaf8c`. `#532` then hit a counted fix-first blocker on
+  HEAD `b9ab32d`: project_snapshot refreshed paired windows but write-ready
+  preflight ended on `cached_window_incomplete` before emitting a patch,
+  verifier-backed no-change artifact, or native replay path. Pause the batch
+  and fix that cached-window preflight/recovery path before taking more
+  calibration slices.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
