@@ -505,6 +505,31 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_memory_taxonomy_resolves_source_to_test_pair", check_names)
             self.assertIn("m6_9_memory_taxonomy_resolves_test_to_source_pair", check_names)
 
+    def test_run_dogfood_m6_9_active_memory_recall_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-active-memory-recall",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-active-memory-recall")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-active-memory-recall: pass", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertIn("M6.9 active recall dogfood pair", scenario["artifacts"]["active_memory_names"])
+            self.assertIn("precondition_miss", scenario["artifacts"]["drop_reasons"])
+            self.assertGreaterEqual(scenario["artifacts"]["kept_file_pair_count"], 1)
+            self.assertGreaterEqual(scenario["artifacts"]["stale_drop_count"], 1)
+            self.assertIn("m6_9_active_memory_recall_keeps_relevant_file_pair", check_names)
+            self.assertIn("m6_9_active_memory_recall_drops_stale_file_pair_with_precondition_miss", check_names)
+
     def test_run_dogfood_m6_11_compiler_replay_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

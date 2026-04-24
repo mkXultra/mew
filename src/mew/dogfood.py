@@ -80,6 +80,7 @@ DOGFOOD_SCENARIOS = (
     "m6_11-drafting-recovery",
     "m6_11-phase4-regression",
     "m6_9-memory-taxonomy",
+    "m6_9-active-memory-recall",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -2127,6 +2128,216 @@ def run_m6_9_memory_taxonomy_scenario(workspace, env=None):
         "rejected_cases": ["reviewer-steering-missing-why", "reasoning-trace-schema-only"],
         "resolved_source_pair": resolved_source,
         "resolved_test_pair": resolved_test,
+    }
+    return report
+
+
+def run_m6_9_active_memory_recall_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    state_dir = workspace / STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    source_path = workspace / "src" / "mew" / "dogfood.py"
+    test_path = workspace / "tests" / "test_dogfood.py"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    test_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(
+        "def active_memory_recall_anchor():\n"
+        "    return 'm6.9 active-memory-recall dogfood source'\n",
+        encoding="utf-8",
+    )
+    test_path.write_text(
+        "def test_active_memory_recall_anchor():\n"
+        "    assert 'active-memory-recall'\n",
+        encoding="utf-8",
+    )
+    state = default_state()
+    state["tasks"].append(
+        {
+            "id": 69,
+            "title": "M6.9 Active Memory Recall",
+            "description": "Implement m6_9-active-memory-recall in src/mew/dogfood.py with tests/test_dogfood.py.",
+            "status": "todo",
+            "priority": "normal",
+            "kind": "coding",
+            "notes": "Dogfood scenario should recall typed M6.9 file-pair memory.",
+            "created_at": "now",
+            "updated_at": "now",
+        }
+    )
+    write_json_file(workspace / STATE_FILE, state)
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    existing_pair_result = run(
+        [
+            "memory",
+            "--add",
+            "M6.9 active-memory-recall dogfood change pairs src/mew/dogfood.py with tests/test_dogfood.py.",
+            "--type",
+            "project",
+            "--kind",
+            "file-pair",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 active recall dogfood pair",
+            "--description",
+            "Active memory recall should keep this file-pair for the coding task.",
+            "--source-path",
+            "src/mew/dogfood.py",
+            "--test-path",
+            "tests/test_dogfood.py",
+            "--structural-evidence",
+            "temp workspace contains both files for the scenario",
+            "--focused-test-green",
+            "--json",
+        ]
+    )
+    stale_pair_result = run(
+        [
+            "memory",
+            "--add",
+            "M6.9 stale file-pair memory points at missing dogfood files and should be dropped.",
+            "--type",
+            "project",
+            "--kind",
+            "file-pair",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 stale dogfood pair",
+            "--description",
+            "Active memory recall should reject this stale file-pair precondition.",
+            "--source-path",
+            "src/mew/missing_active.py",
+            "--test-path",
+            "tests/test_missing_active.py",
+            "--structural-evidence",
+            "stale dogfood pair intentionally points at files absent from the temp workspace",
+            "--focused-test-green",
+            "--json",
+        ]
+    )
+    active_result = run(["memory", "--active", "--task-id", "69", "--json"])
+
+    existing_entry = _json_stdout(existing_pair_result).get("entry") or {}
+    stale_entry = _json_stdout(stale_pair_result).get("entry") or {}
+    active_data = _json_stdout(active_result)
+    active_memory = active_data.get("active_memory") or {}
+    active_items = active_memory.get("items") or []
+
+    def object_text(value):
+        return json.dumps(value, sort_keys=True, default=str)
+
+    def object_contains(value, needle):
+        return needle.lower() in object_text(value).lower()
+
+    def iter_dicts(value):
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from iter_dicts(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from iter_dicts(child)
+
+    def iter_strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for child in value.values():
+                yield from iter_strings(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from iter_strings(child)
+
+    kept_file_pair_objects = [
+        item
+        for item in active_items
+        if object_contains(item, "M6.9 active recall dogfood pair")
+        and not object_contains(item, "precondition_miss")
+    ]
+    stale_identifier = stale_entry.get("id") or stale_entry.get("name") or "M6.9 stale dogfood pair"
+    stale_drop_objects = [
+        item
+        for item in iter_dicts(active_data)
+        if object_contains(item, "precondition_miss")
+        and (
+            object_contains(item, "M6.9 stale dogfood pair")
+            or object_contains(item, stale_identifier)
+            or object_contains(item, "src/mew/missing_active.py")
+        )
+    ]
+    drop_reasons = sorted({text for text in iter_strings(active_data) if text == "precondition_miss"})
+    active_memory_names = sorted({item.get("name") for item in active_items if item.get("name")})
+
+    _scenario_check(
+        checks,
+        "m6_9_active_memory_recall_seeds_coding_task_and_workspace_pair",
+        source_path.exists() and test_path.exists() and bool(state.get("tasks")),
+        observed={
+            "source_exists": source_path.exists(),
+            "test_exists": test_path.exists(),
+            "task_ids": [task.get("id") for task in state.get("tasks", [])],
+        },
+        expected="temp workspace has coding task plus source/test files for the live file-pair",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_active_memory_recall_writes_existing_file_pair_memory",
+        existing_pair_result.get("exit_code") == 0
+        and existing_entry.get("memory_kind") == "file-pair"
+        and existing_entry.get("source_path") == "src/mew/dogfood.py"
+        and existing_entry.get("test_path") == "tests/test_dogfood.py",
+        observed={"exit_code": existing_pair_result.get("exit_code"), "entry": existing_entry},
+        expected="file-pair memory with existing source/test paths is accepted",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_active_memory_recall_writes_stale_file_pair_memory",
+        stale_pair_result.get("exit_code") == 0
+        and stale_entry.get("memory_kind") == "file-pair"
+        and stale_entry.get("source_path") == "src/mew/missing_active.py"
+        and stale_entry.get("test_path") == "tests/test_missing_active.py",
+        observed={"exit_code": stale_pair_result.get("exit_code"), "entry": stale_entry},
+        expected="stale file-pair memory is persisted so active recall can drop it deterministically",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_active_memory_recall_keeps_relevant_file_pair",
+        active_result.get("exit_code") == 0 and bool(kept_file_pair_objects),
+        observed=[
+            {
+                "name": item.get("name"),
+                "memory_kind": item.get("memory_kind"),
+                "reason": item.get("reason"),
+                "source_path": item.get("source_path"),
+                "test_path": item.get("test_path"),
+            }
+            for item in kept_file_pair_objects
+        ],
+        expected="active typed-memory recall keeps/revises the relevant M6.9 file-pair item",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_active_memory_recall_drops_stale_file_pair_with_precondition_miss",
+        active_result.get("exit_code") == 0 and bool(stale_drop_objects),
+        observed=stale_drop_objects[:DOGFOOD_OBSERVED_LIST_LIMIT],
+        expected="stale file-pair memory is dropped with precondition_miss",
+    )
+
+    report = _scenario_report("m6_9-active-memory-recall", workspace, commands, checks)
+    report["artifacts"] = {
+        "active_memory_names": active_memory_names,
+        "drop_reasons": drop_reasons,
+        "kept_file_pair_count": len(kept_file_pair_objects),
+        "stale_drop_count": len(stale_drop_objects),
+        "existing_file_pair_id": existing_entry.get("id"),
+        "stale_file_pair_id": stale_entry.get("id"),
     }
     return report
 
@@ -11723,6 +11934,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_11_phase4_regression_scenario(scenario_workspace, env=env))
         elif name == "m6_9-memory-taxonomy":
             reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-active-memory-recall":
+            reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
