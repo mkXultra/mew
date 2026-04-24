@@ -2645,8 +2645,13 @@ Next action:
   with 25 passed, closed verifier-backed no-change, and left no active blocker.
   Codex-ultra classified it PASS/COUNTED as
   `positive_verifier_backed_no_change`, validating the fix enough to resume
-  calibration. Next step: continue with the bounded `work_replay` source/test
-  surface.
+  calibration. `#561` / session `#542` on HEAD `ce9688d` then exercised the
+  bounded `work_replay` source/test surface: mew fully read
+  `src/mew/work_replay.py` and `tests/test_work_replay.py`, made no edits, ran
+  `uv run pytest -q tests/test_work_replay.py --no-testmon` with 24 tests and
+  4 subtests passed, and ruff passed. Codex-ultra classified it PASS/COUNTED
+  as `positive_verifier_backed_no_change`. Next step: continue with the
+  bounded `proof_summary` source/test surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
