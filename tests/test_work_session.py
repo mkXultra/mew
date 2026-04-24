@@ -7139,6 +7139,105 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_blocks_when_cached_test_window_ends_inside_new_block(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/codex_api.py", "tests/test_codex_api.py"]
+        context = {
+            "task": {
+                "id": 547,
+                "title": "codex api bounded source/test pass",
+                "description": "Draft a paired source/test edit only with complete cached windows.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 528,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-528-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Read current source timeout surface",
+                            "target_paths": target_paths,
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Read current source timeout surface",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/codex_api.py",
+                                    "tool_call_id": 4155,
+                                    "line_start": 200,
+                                    "line_end": 344,
+                                },
+                                {
+                                    "path": "tests/test_codex_api.py",
+                                    "tool_call_id": 4153,
+                                    "line_start": 180,
+                                    "line_end": 359,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": path} for path in target_paths
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 4155,
+                        "path": "src/mew/codex_api.py",
+                        "line_start": 200,
+                        "line_end": 344,
+                        "text": "def _deadline_read_timeout(deadline):\n    return 45.0\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 4153,
+                        "path": "tests/test_codex_api.py",
+                        "line_start": 180,
+                        "line_end": 359,
+                        "text": (
+                            "    def test_existing_timeout_case(self):\n"
+                            "        self.assertTrue(True)\n"
+                            "\n"
+                            "    def test_call_codex_web_api_uses_remaining_request_timeout_for_stream_reads(self):\n"
+                            "        captured = {}\n"
+                        ),
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired source/test edit only with complete cached windows.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertIn(
+            (
+                "tests/test_codex_api.py",
+                60,
+                520,
+                "refresh structurally incomplete write-ready cached window",
+            ),
+            [
+                (tool["path"], tool["line_start"], tool["line_count"], tool["reason"])
+                for tool in preflight_block["action"]["tools"]
+            ],
+        )
+
     def test_write_ready_fast_path_prefers_complete_covering_window_over_exact_fragment(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 

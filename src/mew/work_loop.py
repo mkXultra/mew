@@ -2002,18 +2002,6 @@ def _write_ready_structurally_complete_draft_window(window):
                 candidate_text,
                 "trimmed leading structural fragment",
             )
-    for start_index in start_indices:
-        for end_index in reversed(significant_end_indices):
-            if end_index <= start_index:
-                continue
-            candidate_text = "".join(lines[start_index : end_index + 1])
-            if _write_ready_window_text_is_structurally_complete(candidate_text):
-                return build_draft_window(
-                    start_index,
-                    end_index,
-                    candidate_text,
-                    "trimmed structural fragments",
-                )
     return {}
 
 
@@ -2059,7 +2047,44 @@ def _write_ready_window_text_is_structurally_complete(text):
         return False
     if _write_ready_window_has_unmatched_delimiters(text):
         return False
+    if _write_ready_window_ends_in_minimal_late_block(text):
+        return False
     return True
+
+
+def _write_ready_window_ends_in_minimal_late_block(text):
+    lines = str(text or "").splitlines()
+    significant = [(index, line) for index, line in enumerate(lines) if line.strip()]
+    if not significant:
+        return False
+    first_significant_index = significant[0][0]
+
+    block_starts = []
+    for index, line in significant:
+        stripped = line.lstrip()
+        if stripped.startswith(("def ", "async def ", "class ")):
+            block_starts.append((index, len(line) - len(stripped)))
+    if not block_starts:
+        return False
+
+    last_block_index, last_block_indent = block_starts[-1]
+    if last_block_index == first_significant_index:
+        return False
+    if not any(indent == last_block_indent for _, indent in block_starts[:-1]):
+        return False
+
+    body_lines = 0
+    saw_closing_or_sibling = False
+    for index, line in significant:
+        if index <= last_block_index:
+            continue
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if indent <= last_block_indent:
+            saw_closing_or_sibling = True
+            break
+        body_lines += 1
+    return not saw_closing_or_sibling and body_lines <= 1
 
 
 def _write_ready_recent_windows_are_structurally_complete(recent_windows):

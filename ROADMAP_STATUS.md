@@ -2518,9 +2518,22 @@ Next action:
   classified this as non-counted and not yet fix-first; next action is to
   continue or rerun `#547` with explicit steer to either produce a paired
   source+test dry-run for the deadline-timeout issue or close verifier-backed
-  no-change. If `cached_window_incomplete` repeats as terminal, pause the batch
-  for a structural window-refresh fix. Next step: continue the fresh
-  calibration batch through that reviewer-steered `codex_api` retry.
+  no-change. The reviewer-steered retry repeated `cached_window_incomplete` as
+  the terminal outcome on HEAD `1aac5d5`: the cached test window ended at
+  `captured = {}` inside
+  `test_call_codex_web_api_uses_remaining_request_timeout_for_stream_reads`,
+  but the write-ready path still treated the paired cached windows as draftable
+  instead of structurally refreshing before the tiny draft lane. Codex-ultra
+  classified the retry as counted `counted_fix_first_blocker` with blocker code
+  `cached_window_incomplete_after_mid_block_test_window`, so the batch paused
+  for structural remediation. The fix removes trailing-fragment draft-window
+  narrowing for write-ready cached windows and adds a late-minimal-block guard,
+  so a cached window that reaches a new sibling block but ends after only one
+  body line now triggers deterministic refresh instead of tiny draft. Focused
+  preflight tests, the full `tests/test_work_session.py` file, paired
+  replay/patch-draft tests, ruff, `jq`, and `git diff --check` passed, and
+  codex-ultra approved the diff. Next step: rerun a fresh `codex_api` slice on
+  the repaired head before moving to unrelated surfaces.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
