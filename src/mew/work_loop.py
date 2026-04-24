@@ -1778,9 +1778,6 @@ def _write_ready_read_call_window_for_cached_ref(call, cached):
         return {}
     if str(call.get("status") or "").strip() != "completed":
         return {}
-    cached_tool_call_id = (cached or {}).get("tool_call_id")
-    if cached_tool_call_id is not None and not _write_ready_call_id_matches(call.get("id"), cached_tool_call_id):
-        return {}
     path = (cached or {}).get("path")
     result = call.get("result") if isinstance(call.get("result"), dict) else {}
     parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}

@@ -9026,6 +9026,131 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(details["reason"], "missing_exact_cached_window_texts")
         self.assertEqual(build_write_ready_work_model_context(context), {})
 
+    def test_write_ready_fast_path_hydrates_active_refs_from_targeted_patch_draft_line_windows(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            build_write_ready_tiny_draft_model_context,
+        )
+
+        source_text = (
+            "def compile_patch_draft(todo):\n"
+            + "".join(f"    source_line_{index} = {index}\n" for index in range(388))
+            + "    return todo\n"
+        )
+        test_text = (
+            "def test_compile_patch_draft_targeted_windows():\n"
+            + "".join(f"    assert {index} == {index}\n" for index in range(425))
+            + "    assert True\n"
+        )
+        self.assertEqual(len(source_text.splitlines()), 390)
+        self.assertEqual(len(test_text.splitlines()), 427)
+
+        context = {
+            "task": {
+                "id": 540,
+                "title": "patch_draft cached-window hydration",
+                "description": "Draft from refreshed targeted patch_draft line windows.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 521,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-521-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one paired patch_draft dry-run edit batch",
+                            "target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": "src/mew/patch_draft.py",
+                                "tool_call_id": 301,
+                                "line_start": 340,
+                                "line_end": 360,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:old-source-partial",
+                            },
+                            {
+                                "path": "tests/test_patch_draft.py",
+                                "tool_call_id": 302,
+                                "line_start": 520,
+                                "line_end": 560,
+                                "context_truncated": False,
+                                "window_sha1": "sha1:old-test-partial",
+                            },
+                        ],
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired patch_draft dry-run edit batch",
+                            "cached_windows": [],
+                        }
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 401,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/patch_draft.py",
+                            "line_start": 299,
+                            "line_count": 390,
+                            "reason": "refresh structurally incomplete write-ready cached window",
+                        },
+                        "result": {
+                            "path": "src/mew/patch_draft.py",
+                            "line_start": 299,
+                            "line_end": 688,
+                            "text": source_text,
+                            "context_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 402,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_patch_draft.py",
+                            "line_start": 456,
+                            "line_count": 427,
+                            "reason": "refresh structurally incomplete write-ready cached window",
+                        },
+                        "result": {
+                            "path": "tests/test_patch_draft.py",
+                            "line_start": 456,
+                            "line_end": 882,
+                            "text": test_text,
+                            "context_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_cached_refs")
+        self.assertEqual([item["tool_call_id"] for item in details["recent_windows"]], [401, 402])
+        self.assertEqual([item["line_start"] for item in details["recent_windows"]], [299, 456])
+        self.assertEqual([item["line_end"] for item in details["recent_windows"]], [688, 882])
+        self.assertEqual([item["text"] for item in details["recent_windows"]], [source_text, test_text])
+        self.assertEqual(
+            [item["text"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            [source_text, test_text],
+        )
+
     def test_write_ready_fast_path_does_not_fallback_to_stale_recent_windows_for_cached_refs(self):
         from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
 

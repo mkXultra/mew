@@ -2478,8 +2478,13 @@ Next action:
   then hit a counted fix-first blocker on HEAD `aa839e8`: patch_draft and its
   paired tests were refreshed through targeted non-truncated windows, but the
   write-ready tiny lane still stopped on `missing_exact_cached_window_texts`.
-  Pause calibration slices and fix cached-window hydration from targeted
-  non-truncated line-window reads before rerunning a fresh `patch_draft` slice.
+  Calibration slices were paused for fix-first remediation. The follow-up patch
+  lets write-ready cached refs hydrate from later non-truncated `read_file`
+  windows that cover the cached path/span even when the original cached
+  `tool_call_id` did not carry exact text, while preserving later-write stale
+  protection. Focused `write_ready_fast_path` tests, ruff, `git diff --check`,
+  and codex-ultra review passed. Next step: rerun a fresh `patch_draft` slice
+  on the fixed head before resuming unrelated calibration surfaces.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
