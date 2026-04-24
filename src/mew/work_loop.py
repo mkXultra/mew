@@ -2224,14 +2224,28 @@ def _write_ready_structurally_complete_draft_window(window):
             "narrowed_reason": reason,
         }
 
+    min_candidate_lines = min(WORK_WRITE_READY_STRUCTURAL_NARROW_MIN_LINES, line_span)
+    last_index = len(lines) - 1
     for start_index in start_indices:
-        candidate_text = "".join(lines[start_index:])
-        if _write_ready_window_text_is_structurally_complete(candidate_text):
+        for end_index in reversed(significant_end_indices):
+            if end_index < start_index:
+                break
+            if end_index - start_index + 1 < min_candidate_lines:
+                break
+            candidate_text = "".join(lines[start_index : end_index + 1])
+            if not _write_ready_window_text_is_structurally_complete(candidate_text):
+                continue
+            if start_index == 0:
+                reason = "trimmed trailing structural fragment"
+            elif end_index == last_index:
+                reason = "trimmed leading structural fragment"
+            else:
+                reason = "trimmed leading and trailing structural fragments"
             return build_draft_window(
                 start_index,
-                len(lines) - 1,
+                end_index,
                 candidate_text,
-                "trimmed leading structural fragment",
+                reason,
             )
     return {}
 

@@ -7846,6 +7846,155 @@ class WorkSessionTests(unittest.TestCase):
             tiny_context["write_ready_fast_path"]["cached_window_texts"][1]["text"].startswith("KEY_FILE_NAMES")
         )
 
+    def test_write_ready_fast_path_narrows_trailing_partial_fragments(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+            build_write_ready_tiny_draft_model_context,
+        )
+
+        def bounded_window(lines, line_start):
+            text = "".join(lines)
+            return {
+                "line_start": line_start,
+                "line_end": line_start + len(lines) - 1,
+                "text": text,
+            }
+
+        def trailing_partial_test_window(name, line_start):
+            lines = [
+                "        self.assertEqual(previous, True)\n",
+                "\n",
+                f"    def test_{name}_drafts_from_complete_inner_window(self):\n",
+                "        value = {'records': []}\n",
+            ]
+            lines.extend("        self.assertIn('records', value)\n" for _ in range(90))
+            lines.extend(
+                [
+                    "\n",
+                    f"    def test_{name}_trailing_partial(self):\n",
+                    "        self.assertEqual(\n",
+                ]
+            )
+            return bounded_window(lines, line_start)
+
+        source_path = "src/mew/work_loop.py"
+        test_path = "tests/test_work_session.py"
+        replay_test_path = "tests/test_work_replay.py"
+        source = bounded_window(
+            [
+                "def write_ready_guard(value):\n",
+                "    if value:\n",
+                "        return 'ready'\n",
+                "    return 'blocked'\n",
+            ],
+            100,
+        )
+        test_window = trailing_partial_test_window("session", 6340)
+        replay_window = trailing_partial_test_window("replay", 360)
+        target_paths = [source_path, test_path, replay_test_path]
+        context = {
+            "task": {
+                "id": 401,
+                "title": "M6.9 bounded memory-surface draft blocker",
+                "description": "Do not block after exact broad source/test windows are refreshed.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 557,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-557-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "target_paths": target_paths,
+                        },
+                        "attempts": {"draft": 0, "review": 0},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {
+                                    "path": source_path,
+                                    "line_start": source["line_start"],
+                                    "line_end": source["line_end"],
+                                },
+                                {
+                                    "path": test_path,
+                                    "line_start": test_window["line_start"],
+                                    "line_end": test_window["line_end"],
+                                },
+                                {
+                                    "path": replay_test_path,
+                                    "line_start": replay_window["line_start"],
+                                    "line_end": replay_window["line_end"],
+                                },
+                            ],
+                        }
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 4438,
+                        "path": source_path,
+                        **source,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 4439,
+                        "path": test_path,
+                        **test_window,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 4440,
+                        "path": replay_test_path,
+                        **replay_window,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the refreshed cached windows.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertTrue(fast_path["active"])
+        self.assertEqual(preflight_block, {})
+        windows_by_path = {item["path"]: item for item in fast_path["recent_windows"]}
+        self.assertNotIn("draft_window", windows_by_path[source_path])
+        for path in (test_path, replay_test_path):
+            draft_window = windows_by_path[path]["draft_window"]
+            self.assertEqual(
+                draft_window["narrowed_reason"],
+                "trimmed leading and trailing structural fragments",
+            )
+            self.assertGreater(draft_window["line_start"], windows_by_path[path]["line_start"])
+            self.assertLess(draft_window["line_end"], windows_by_path[path]["line_end"])
+            self.assertNotIn("trailing_partial", draft_window["text"])
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["target_paths"],
+            target_paths,
+        )
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            target_paths,
+        )
+        self.assertTrue(
+            all(
+                "trailing_partial" not in item["text"]
+                for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]
+            )
+        )
+
     def test_write_ready_preflight_block_skips_oversized_cached_ref_refresh(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,

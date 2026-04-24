@@ -1922,6 +1922,15 @@ Progress / remaining proof:
   detoured before drafting, so the shipped patch is supervisor rescue/product
   progress and the failure remains input for bounded M6.9 loop hardening rather
   than autonomy credit
+- M6.9 loop hardening for the `#401` timeout/detour class is landed as product
+  progress: write-ready structural narrowing now trims both leading and
+  trailing partial fragments from broad refreshed cached windows, so a source
+  window plus multiple test windows can become an active tiny-draft context
+  instead of ending as `cached_window_incomplete` after exact-window refresh.
+  The original `#557` replay now evaluates as write-ready active locally, and
+  focused validation covered the exact work-loop/replay/session write-ready
+  matrix plus the full `tests/test_work_session.py` suite. This is still
+  supervisor rescue/product progress, not autonomy credit
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices
@@ -1931,9 +1940,10 @@ Next action:
 
 - resume bounded M6.9 work from the landed Phase 1 substrate, choosing the next
   task by mapping it to one M6.9 Done-when criterion and using the M6.12 report
-  to avoid guessing from scattered review notes. Prefer recall-time
-  observability or a repeated-task proof shape that can show durable memory
-  shortening a later iteration without reviewer rescue edits.
+  to avoid guessing from scattered review notes. Prefer the next repeated-task
+  proof shape that can show durable memory shortening a later iteration without
+  reviewer rescue edits, because the latest read-only observability and
+  write-ready detour fixes are product progress but not autonomy credit.
 
 ### M6.10: Execution Accelerators
 
