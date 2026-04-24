@@ -951,6 +951,10 @@ def build_parser():
         action="store_true",
         help="interpret artifact_dir as replay-root for the M6.11 phase2/3 calibration checkpoint",
     )
+    proof_summary_parser.add_argument(
+        "--measurement-head",
+        help="add additive M6.11 calibration cohort for bundles saved at this git head",
+    )
     proof_summary_parser.set_defaults(func=cmd_proof_summary)
 
     perceive_parser = subparsers.add_parser("perceive", help="show passive workspace observations")

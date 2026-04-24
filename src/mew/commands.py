@@ -10693,7 +10693,10 @@ def cmd_dogfood(args):
 
 def cmd_proof_summary(args):
     if getattr(args, "m6_11_phase2_calibration", False):
-        summary = summarize_m6_11_replay_calibration(args.artifact_dir)
+        summary = summarize_m6_11_replay_calibration(
+            args.artifact_dir,
+            measurement_head=getattr(args, "measurement_head", None),
+        )
     else:
         summary = summarize_proof_artifacts(args.artifact_dir)
     if args.json:

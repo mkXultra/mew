@@ -410,11 +410,29 @@ class ProofSummaryTests(unittest.TestCase):
         parser = build_parser()
 
         args = parser.parse_args(
-            ["proof-summary", "proof-artifacts/replays", "--m6_11-phase2-calibration"]
+            [
+                "proof-summary",
+                "proof-artifacts/replays",
+                "--m6_11-phase2-calibration",
+                "--measurement-head",
+                "HEAD-MEASURE",
+            ]
         )
 
         self.assertEqual(args.artifact_dir, "proof-artifacts/replays")
         self.assertTrue(args.m6_11_phase2_calibration)
+        self.assertEqual(args.measurement_head, "HEAD-MEASURE")
+
+    def test_cli_proof_summary_accepts_measurement_head_without_calibration_mode(self):
+        parser = build_parser()
+
+        args = parser.parse_args(
+            ["proof-summary", "proof-artifacts/example", "--measurement-head", "HEAD-MEASURE"]
+        )
+
+        self.assertEqual(args.artifact_dir, "proof-artifacts/example")
+        self.assertFalse(args.m6_11_phase2_calibration)
+        self.assertEqual(args.measurement_head, "HEAD-MEASURE")
 
     def test_summarize_m6_11_calibration_mixed_distribution_can_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -680,6 +698,44 @@ class ProofSummaryTests(unittest.TestCase):
             {"patch_draft_compiler.other": 1},
         )
 
+    def test_summarize_m6_11_calibration_adds_measurement_head_cohort_without_relabeling_current_head(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            with patch("mew.proof_summary._current_git_head", return_value="HEAD-CURRENT"):
+                self._write_relevant_compiler_bundle(
+                    replay_root / "current_head_compiler",
+                    1,
+                    "patch_valid",
+                    git_head="HEAD-CURRENT",
+                )
+                self._write_model_failure_bundle(
+                    replay_root / "measurement_timeout",
+                    1,
+                    "model_failed_timeout",
+                    git_head="HEAD-MEASURE",
+                )
+                summary = summarize_m6_11_replay_calibration(
+                    replay_root,
+                    measurement_head="HEAD-MEASURE",
+                )
+
+        self.assertEqual(summary["measurement_head"], "HEAD-MEASURE")
+        calibration = summary["calibration"]
+        self.assertEqual(calibration["total_bundles"], 2)
+        cohorts = calibration["cohorts"]
+        self.assertEqual(cohorts["current_head"]["total_bundles"], 1)
+        self.assertEqual(
+            cohorts["current_head"]["bundle_type_counts"],
+            {"patch_draft_compiler.other": 1},
+        )
+        self.assertEqual(cohorts["legacy"]["total_bundles"], 1)
+        self.assertEqual(cohorts["unknown"]["total_bundles"], 0)
+        self.assertEqual(cohorts["measurement_head"]["total_bundles"], 1)
+        self.assertEqual(
+            cohorts["measurement_head"]["bundle_type_counts"],
+            {"work-loop-model-failure.model_failed_timeout": 1},
+        )
+
     def test_summarize_m6_11_calibration_blocker_code_counts_split_by_current_head(self):
         with tempfile.TemporaryDirectory() as tmp:
             replay_root = Path(tmp)
@@ -937,6 +993,25 @@ class ProofSummaryTests(unittest.TestCase):
         self.assertIn("cohort[unknown]:", rendered)
         self.assertIn("cohort[current_head]_rates:", rendered)
         self.assertIn("cohort[current_head]_thresholds:", rendered)
+
+    def test_format_m6_11_calibration_output_includes_measurement_head_cohort(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_model_failure_bundle(
+                replay_root / "measurement_timeout",
+                1,
+                "model_failed_timeout",
+                git_head="HEAD-MEASURE",
+            )
+            summary = summarize_m6_11_replay_calibration(
+                replay_root,
+                measurement_head="HEAD-MEASURE",
+            )
+            rendered = format_proof_summary(summary)
+
+        self.assertIn("cohort[measurement_head]: total=1", rendered)
+        self.assertIn("cohort[measurement_head]_rates:", rendered)
+        self.assertIn("cohort[measurement_head]_thresholds:", rendered)
 
     def test_format_m6_11_calibration_refusal_breakdown_uses_real_keys(self):
         with tempfile.TemporaryDirectory() as tmp:

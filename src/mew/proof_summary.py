@@ -364,8 +364,18 @@ def _summarize_model_failure_bundle(report_path):
     return summary
 
 
-def summarize_m6_11_replay_calibration(replay_root):
+def _m6_11_cohort_targets(cohort_summaries, bundle_summary, current_head, measurement_head):
+    cohort_name = _cohort_label(bundle_summary.get("git_head"), current_head)
+    targets = [cohort_summaries[cohort_name]]
+    bundle_git_head = str(bundle_summary.get("git_head") or "").strip()
+    if measurement_head and bundle_git_head == measurement_head:
+        targets.append(cohort_summaries["measurement_head"])
+    return targets
+
+
+def summarize_m6_11_replay_calibration(replay_root, measurement_head=None):
     replay_path = Path(replay_root)
+    measurement_head = str(measurement_head or "").strip()
     errors = []
     if not replay_path.exists():
         errors.append(f"replay root not found: {replay_path}")
@@ -390,6 +400,8 @@ def summarize_m6_11_replay_calibration(replay_root):
         "legacy": _new_m6_11_cohort_summary(),
         "unknown": _new_m6_11_cohort_summary(),
     }
+    if measurement_head:
+        cohort_summaries["measurement_head"] = _new_m6_11_cohort_summary()
     current_head = _current_git_head()
 
     for metadata_path in sorted(replay_path.rglob("replay_metadata.json")):
@@ -397,13 +409,18 @@ def summarize_m6_11_replay_calibration(replay_root):
             continue
         bundle_summary = _summarize_patch_draft_compiler_bundle(metadata_path)
         bundle_type = bundle_summary.get("bundle_type") or "patch_draft_compiler"
-        cohort_name = _cohort_label(bundle_summary.get("git_head"), current_head)
-        cohort_summary = cohort_summaries[cohort_name]
+        cohort_targets = _m6_11_cohort_targets(
+            cohort_summaries,
+            bundle_summary,
+            current_head,
+            measurement_head,
+        )
         if bundle_type != "patch_draft_compiler":
             malformed_bundle_counts[f"ignored_{bundle_type}"] += 1
             malformed_bundle_count += 1
-            cohort_summary["malformed_bundle_count"] += 1
-            cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["malformed_bundle_count"] += 1
+                cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
             continue
         calibration_counted = _coerce_calibration_counted(
             bundle_summary.get("calibration_counted"),
@@ -415,57 +432,70 @@ def summarize_m6_11_replay_calibration(replay_root):
                 reason = "unspecified"
             non_counted_bundle_count += 1
             non_counted_bundle_reasons[reason] += 1
-            cohort_summary["non_counted_bundle_count"] += 1
-            cohort_summary["non_counted_bundle_reasons"][reason] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["non_counted_bundle_count"] += 1
+                cohort_summary["non_counted_bundle_reasons"][reason] += 1
             continue
 
         if bundle_summary.get("errors"):
             malformed_bundle_counts[bundle_type] += 1
             malformed_bundle_count += 1
-            cohort_summary["malformed_bundle_count"] += 1
-            cohort_summary["malformed_bundle_counts"][bundle_type] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["malformed_bundle_count"] += 1
+                cohort_summary["malformed_bundle_counts"][bundle_type] += 1
             for error in bundle_summary.get("errors") or []:
                 errors.append(error)
 
         relevant_bundles += 1
-        cohort_summary["relevant_bundles"] += 1
+        for cohort_summary in cohort_targets:
+            cohort_summary["relevant_bundles"] += 1
         if bundle_summary.get("errors"):
             malformed_relevant_bundle_count += 1
-            cohort_summary["malformed_relevant_bundle_count"] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["malformed_relevant_bundle_count"] += 1
             continue
 
         calibration_bundle_type = bundle_summary.get("calibration_bundle_type") or "patch_draft_compiler.other"
         total_bundles += 1
         compiler_bundles += 1
         bundle_type_counts[calibration_bundle_type] += 1
-        cohort_summary["total_bundles"] += 1
-        cohort_summary["compiler_bundles"] += 1
-        cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
+        for cohort_summary in cohort_targets:
+            cohort_summary["total_bundles"] += 1
+            cohort_summary["compiler_bundles"] += 1
+            cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
         if bundle_summary.get("off_schema"):
             off_schema_count += 1
-            cohort_summary["off_schema_count"] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["off_schema_count"] += 1
         if bundle_summary.get("refusal"):
             refusal_count += 1
-            cohort_summary["refusal_count"] += 1
             refusal_by_type[calibration_bundle_type] += 1
-            cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["refusal_count"] += 1
+                cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
         blocker_code = str(bundle_summary.get("blocker_code") or "").strip()
         if blocker_code:
             blocker_code_counts[blocker_code] += 1
-            cohort_summary["blocker_code_counts"][blocker_code] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["blocker_code_counts"][blocker_code] += 1
 
     for report_path in sorted(replay_path.rglob("report.json")):
         if not report_path.is_file():
             continue
         bundle_summary = _summarize_model_failure_bundle(report_path)
         bundle_type = bundle_summary.get("bundle_type") or "work-loop-model-failure"
-        cohort_name = _cohort_label(bundle_summary.get("git_head"), current_head)
-        cohort_summary = cohort_summaries[cohort_name]
+        cohort_targets = _m6_11_cohort_targets(
+            cohort_summaries,
+            bundle_summary,
+            current_head,
+            measurement_head,
+        )
         if bundle_type != "work-loop-model-failure":
             malformed_bundle_counts[f"ignored_{bundle_type}"] += 1
             malformed_bundle_count += 1
-            cohort_summary["malformed_bundle_count"] += 1
-            cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["malformed_bundle_count"] += 1
+                cohort_summary["malformed_bundle_counts"][f"ignored_{bundle_type}"] += 1
             continue
         calibration_counted = _coerce_calibration_counted(
             bundle_summary.get("calibration_counted"),
@@ -477,35 +507,41 @@ def summarize_m6_11_replay_calibration(replay_root):
                 reason = "unspecified"
             non_counted_bundle_count += 1
             non_counted_bundle_reasons[reason] += 1
-            cohort_summary["non_counted_bundle_count"] += 1
-            cohort_summary["non_counted_bundle_reasons"][reason] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["non_counted_bundle_count"] += 1
+                cohort_summary["non_counted_bundle_reasons"][reason] += 1
             continue
         relevant_bundles += 1
-        cohort_summary["relevant_bundles"] += 1
+        for cohort_summary in cohort_targets:
+            cohort_summary["relevant_bundles"] += 1
         if bundle_summary.get("errors"):
             malformed_bundle_counts[bundle_type] += 1
             malformed_bundle_count += 1
             malformed_relevant_bundle_count += 1
-            cohort_summary["malformed_bundle_count"] += 1
-            cohort_summary["malformed_relevant_bundle_count"] += 1
-            cohort_summary["malformed_bundle_counts"][bundle_type] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["malformed_bundle_count"] += 1
+                cohort_summary["malformed_relevant_bundle_count"] += 1
+                cohort_summary["malformed_bundle_counts"][bundle_type] += 1
             for error in bundle_summary.get("errors") or []:
                 errors.append(error)
             continue
         calibration_bundle_type = bundle_summary.get("calibration_bundle_type") or "work-loop-model-failure.other"
         total_bundles += 1
         bundle_type_counts[calibration_bundle_type] += 1
-        cohort_summary["total_bundles"] += 1
-        cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
+        for cohort_summary in cohort_targets:
+            cohort_summary["total_bundles"] += 1
+            cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
         if bundle_summary.get("refusal"):
             refusal_count += 1
-            cohort_summary["refusal_count"] += 1
             refusal_by_type[calibration_bundle_type] += 1
-            cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["refusal_count"] += 1
+                cohort_summary["refusal_by_type"][calibration_bundle_type] += 1
         blocker_code = str(bundle_summary.get("blocker_code") or "").strip()
         if blocker_code:
             blocker_code_counts[blocker_code] += 1
-            cohort_summary["blocker_code_counts"][blocker_code] += 1
+            for cohort_summary in cohort_targets:
+                cohort_summary["blocker_code_counts"][blocker_code] += 1
         for error in bundle_summary.get("errors") or []:
             errors.append(error)
 
@@ -545,7 +581,19 @@ def summarize_m6_11_replay_calibration(replay_root):
         )
     )
 
-    return {
+    cohorts = {
+        "current_head": _finalize_m6_11_cohort_summary(
+            cohort_summaries["current_head"]
+        ),
+        "legacy": _finalize_m6_11_cohort_summary(cohort_summaries["legacy"]),
+        "unknown": _finalize_m6_11_cohort_summary(cohort_summaries["unknown"]),
+    }
+    if measurement_head:
+        cohorts["measurement_head"] = _finalize_m6_11_cohort_summary(
+            cohort_summaries["measurement_head"]
+        )
+
+    summary = {
         "artifact_dir": str(replay_path),
         "mode": "m6_11_phase2_calibration",
         "ok": thresholds_pass,
@@ -569,16 +617,13 @@ def summarize_m6_11_replay_calibration(replay_root):
             "malformed_bundle_count": malformed_bundle_count,
             "malformed_relevant_bundle_count": malformed_relevant_bundle_count,
             "malformed_bundle_counts": dict(malformed_bundle_counts),
-            "cohorts": {
-                "current_head": _finalize_m6_11_cohort_summary(
-                    cohort_summaries["current_head"]
-                ),
-                "legacy": _finalize_m6_11_cohort_summary(cohort_summaries["legacy"]),
-                "unknown": _finalize_m6_11_cohort_summary(cohort_summaries["unknown"]),
-            },
+            "cohorts": cohorts,
             "thresholds": thresholds,
         },
     }
+    if measurement_head:
+        summary["measurement_head"] = measurement_head
+    return summary
 
 
 def _expected_passive_events_min(duration, interval):
@@ -813,7 +858,10 @@ def format_proof_summary(summary):
             ),
         ]
         cohorts = calibration.get("cohorts") or {}
-        for cohort_name in ("current_head", "legacy", "unknown"):
+        cohort_names = ["current_head", "legacy", "unknown"]
+        if "measurement_head" in cohorts:
+            cohort_names.append("measurement_head")
+        for cohort_name in cohort_names:
             cohort = cohorts.get(cohort_name) or {}
             non_counted_by_type = cohort.get("non_counted_bundle_reasons") or {}
             non_counted_breakdown = ", ".join(
