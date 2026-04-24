@@ -1953,6 +1953,17 @@ Progress / remaining proof:
   `uv run pytest -q tests/test_dogfood.py -k 'm6_9_memory_taxonomy or scenario_choices' --no-testmon`,
   full `uv run pytest -q tests/test_dogfood.py --no-testmon`, and ruff for
   `src/mew/dogfood.py` plus `tests/test_dogfood.py`
+- The `#574` mew-first retry exposed a second write-ready refresh recovery
+  issue: after manual targeted refresh reads, tiny-draft recovery still
+  preferred stale broad cached refs from `plan_item_observations`, so it
+  stopped again with `cached_window_incomplete`. The substrate now prefers
+  newer complete read windows when an active `blocked_on_patch` WorkTodo is
+  explicitly recovering a `refresh_cached_window` blocker, while leaving normal
+  smaller-window ranking unchanged. Focused validation covered the new
+  stale-broad/manual-refresh regression plus the neighboring refresh-blocker
+  tests, full `uv run pytest -q tests/test_work_session.py --no-testmon`, and
+  ruff for `src/mew/work_loop.py` plus `tests/test_work_session.py`. This is
+  loop substrate hardening for the next #574 retry, not autonomy credit
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices

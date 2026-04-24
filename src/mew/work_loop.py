@@ -1580,6 +1580,12 @@ def _work_write_ready_fast_path_state(context):
         if isinstance(item, dict) and item.get("path")
     ]
     activation_source = "plan_item_observations"
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    if _write_ready_active_todo_has_refresh_cached_window_blocker(active_work_todo):
+        refreshed_windows = _write_ready_recent_windows_from_active_work_todo(work_session, resume)
+        if refreshed_windows and _write_ready_recent_windows_are_structurally_complete(refreshed_windows):
+            cached_windows = refreshed_windows
+            activation_source = "active_work_todo_complete_reads"
     if len(cached_windows) < 2:
         cached_windows = _write_ready_cached_refs_from_active_work_todo(resume)
         if cached_windows:
@@ -1676,7 +1682,7 @@ def _work_plan_item_is_verifier_closeout(plan_item):
     return "finish" in text and "verifier" in text
 
 
-def _write_ready_recent_windows_from_target_paths(work_session, resume):
+def _write_ready_recent_windows_from_target_paths(work_session, resume, *, prefer_newer=False):
     recent_windows = list((work_session or {}).get("recent_read_file_windows") or [])
     if not recent_windows:
         return []
@@ -1710,6 +1716,8 @@ def _write_ready_recent_windows_from_target_paths(work_session, resume):
             tool_call_id = int(item.get("tool_call_id") or 0)
         except (TypeError, ValueError):
             tool_call_id = 0
+        if prefer_newer:
+            return (1 if complete else 0, tool_call_id, -span)
         return (1 if complete else 0, -span, tool_call_id)
 
     def window_complete(item):
@@ -1789,6 +1797,7 @@ def _write_ready_recent_windows_from_active_work_todo(work_session, resume):
                 {"path": path} for path in target_paths
             ],
         },
+        prefer_newer=_write_ready_active_todo_has_refresh_cached_window_blocker(active_work_todo),
     )
 
 
