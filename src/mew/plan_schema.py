@@ -59,7 +59,11 @@ def _item_has_value(item, field):
 
 def validate_plan_items(items, allowed_types, item_name):
     issues = []
-    for index, item in enumerate(items or []):
+    if items is None:
+        return issues
+    if not isinstance(items, list):
+        return [plan_schema_issue("warning", item_name, "must be a list")]
+    for index, item in enumerate(items):
         path = f"{item_name}[{index}]"
         if not isinstance(item, dict):
             issues.append(plan_schema_issue("warning", path, "must be an object"))

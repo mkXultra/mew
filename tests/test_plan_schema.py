@@ -13,6 +13,14 @@ class PlanSchemaTests(unittest.TestCase):
 
         self.assertEqual(issues, [])
 
+    def test_reports_warning_for_non_list_items_container(self):
+        issues = validate_plan_items({"type": "write_file"}, ACTION_TYPES, "actions")
+
+        self.assertEqual(
+            issues,
+            [{"level": "warning", "path": "actions", "message": "must be a list"}],
+        )
+
     def test_reports_warning_for_non_object_item(self):
         issues = validate_plan_items(["bad"], ACTION_TYPES, "actions")
 

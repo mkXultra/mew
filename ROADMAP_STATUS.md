@@ -2369,48 +2369,49 @@ Missing proof:
   paired `active_work_todo.cached_window_refs`. Codex-ultra classified this as
   current-head non-counted evidence with blocker code
   `cached_window_refs_not_hydrated_to_exact_window_texts`.
+- Commit `f37eb12` implemented the cached-ref hydration fix by recovering exact
+  write-ready text from `active_work_todo.cached_window_refs` and their
+  matching completed, non-truncated `read_file` tool calls. It also rejects
+  cached refs after later applied or non-dry-run writes and prevents
+  active-todo cached refs from falling back to generic recent target-path
+  windows. Codex-ultra reviewed the implementation as `PASS`.
+- Task `#521` on literal head `f37eb12` reran the same small `plan_schema`
+  surface. Session `#502` read both scoped files completely, then reached
+  `write_ready_fast_path=true` with
+  `write_ready_fast_path_reason=paired_cached_windows_edit_ready`,
+  `cached_window_ref_count=2`, and the tiny write-ready draft lane emitted a
+  native `patch_draft` replay at
+  `.mew/replays/work-loop/2026-04-24/session-502/todo-todo-502-1/attempt-1/replay_metadata.json`.
+  Codex-ultra reviewed the paired dry-run patch as `PASS` and approved
+  applying it. Approvals `#4010/#4011` wrote the paired source/test patch, and
+  `uv run pytest -q tests/test_plan_schema.py --no-testmon` passed with
+  `6 passed`. This is positive current-head proof that the cached-ref
+  hydration/write-ready path now reaches reviewer-visible paired patch output
+  on the previously failing surface. The inherited outer policy still matched
+  `policy` / `roadmap`, but codex-ultra classified this as no separate
+  fix-first task because the actual tiny draft used the low-effort write-ready
+  override and produced the intended artifact.
 
 Next action:
 
-- keep the Phase 2/3 calibration checkpoint active and move from Phase 4
-  surface parity into close-gate evidence collection:
-  with the full `m6_11-*` dogfood subset now green and the first non-`#402`
-  current-head source landed, continue the bounded live incidence gate against
-  `#399/#401`; use the cohort-aware replay summaries plus the additive
-  `blocker_code_breakdown` output to collect the remaining runtime slices.
-  Because evidence-only commits keep resetting literal `current_head`
-  cohorting to zero, and because `#503` / `#504` only produced non-counted
-  preflight/fix-first evidence, the next concrete step after the
-  structural-refresh recovery patch is committed is to run a fresh bounded live
-  slice on the new literal HEAD without `--measurement-head` and force the
-  outcome to be one of: a native replay bundle, a reviewer-visible paired
-  dry-run patch/diff, or a new concrete fix-first blocker. Keep the `b650319`
-  counted replay as the latest counted runtime-head evidence via
-  `--measurement-head`, but do not advance on legacy timeout-only evidence,
-  reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After `#519`, do not continue collecting evidence first and do not rerun
-  `#519` as the primary action. Implement the fix-first cached-window text
-  hydration patch for the new drafting-frontier no-artifact failure:
-  `active_work_todo.status=drafting`, paired `cached_window_refs` exist, but
-  `write_ready_fast_path=false` with
-  `write_ready_fast_path_reason=missing_exact_cached_window_texts` because the
-  fast path cannot recover exact cached text from the referenced completed
-  `read_file` calls. The patch should hydrate exact text from
-  `active_work_todo.cached_window_refs` / matching non-truncated read-file
-  tool calls into the write-ready context, preserve stale-write and arbitrary
-  non-edit-ready guardrails, and make a fresh literal-current-head
-  `plan_schema` slice reach either a reviewer-visible paired dry-run diff, a
-  verifier-backed no-change artifact, a native replay bundle, or a concrete
-  blocker. If it still times out before artifact, record the fresh evidence
-  and continue fix-first. Do not count or
-  resume `#505`, `#506`, `#507`, `#508`, or `#512` as current-head incidence
-  because they are blocked pre-fix sessions; #509/#510/#511 remain valid
-  counted evidence for HEAD `3b38ec7`, #513/#514 remain valid counted evidence
-  for HEAD `06167a9`, #515 remains valid counted evidence for HEAD `54b657a`,
-  #517 remains valid counted evidence for HEAD `517a3b7`, and #519 remains
-  valid non-counted positive/frontier blocker evidence for HEAD `f4413b0`, but
-  all should be treated as prior-head evidence after their respective fix
-  commits.
+- keep the Phase 2/3 calibration checkpoint active and move from the
+  cached-ref hydration positive proof into the next bounded literal-current-head
+  source/test slice. The next slice should use a different small paired surface
+  than `plan_schema` and should still force the outcome to one of: a native
+  replay bundle, a reviewer-visible paired dry-run patch/diff, a
+  verifier-backed no-change artifact, or a new concrete fix-first blocker. Do
+  not spend another cycle on the already-cleared
+  `missing_exact_cached_window_texts` blocker unless a fresh head reproduces it.
+  Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
+  current-head incidence because they are blocked pre-fix sessions;
+  #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
+  #513/#514 remain valid counted evidence for HEAD `06167a9`, #515 remains
+  valid counted evidence for HEAD `54b657a`, #517 remains valid counted
+  evidence for HEAD `517a3b7`, #519 remains valid non-counted
+  positive/frontier blocker evidence for HEAD `f4413b0`, and #521 is positive
+  current-head proof for HEAD `f37eb12`. After the #521 commit, treat all prior
+  literal-head evidence as prior-head and run another fresh slice on the new
+  HEAD.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
