@@ -3456,7 +3456,9 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
             result = call.get("result") if isinstance(call.get("result"), dict) else {}
             snippets = result.get("snippets") if isinstance(result.get("snippets"), list) else []
             if not snippets:
-                break
+                if not any(_work_paths_match(window.get("path"), target_path) for window in recent_windows):
+                    break
+                continue
             for snippet in snippets:
                 if not isinstance(snippet, dict) or not _work_paths_match(snippet.get("path"), target_path):
                     continue

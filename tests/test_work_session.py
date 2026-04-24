@@ -8699,6 +8699,63 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_keeps_prior_anchor_after_zero_match_near_cached_window(self):
+        from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
+
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            {
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_memory.py",
+                            "query": "veto",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [{"path": "tests/test_memory.py", "line": 860}]
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_memory.py",
+                            "query": "cmd_memory",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {"snippets": []},
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "path": "tests/test_memory.py",
+                        "line_start": 800,
+                        "line_end": 919,
+                        "text": "def test_cmd_memory_veto():\n    pass\n",
+                        "context_truncated": False,
+                    }
+                ],
+            },
+            ["tests/test_memory.py"],
+        )
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "read_file",
+                    "path": "tests/test_memory.py",
+                    "line_start": 740,
+                    "line_count": 520,
+                    "reason": "read explicitly located write-ready cached window",
+                }
+            ],
+        )
+
     def test_write_ready_preflight_block_adds_paths_from_refresh_search_results(self):
         from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
 
