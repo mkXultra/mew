@@ -2731,7 +2731,15 @@ Next action:
   instead of hand-injected `next_line`. Focused
   `write_ready or recent_read_file_windows` tests pass 81 tests plus
   5 subtests, ruff passed, `git diff --check` passed, and codex-ultra approved.
-  Next step: rerun the bounded `runtime` source/test surface on a fresh task.
+  The fresh runtime rerun `#570` / session `#552` on HEAD `d7e9986` then
+  cleared the blocker: mew read `src/mew/runtime.py` through EOF, covered
+  `tests/test_runtime.py` through line 2569 via adjacent reads, ran
+  `uv run pytest -q tests/test_runtime.py --no-testmon` with 47 passed, and
+  closed verifier-backed no-change with no edits. Codex-ultra classified it
+  APPROVE/countable as `positive_verifier_backed_no_change`; the earlier
+  cached-window wait was recovered by tail reads and is not a counting blocker.
+  Next step: continue the bounded calibration batch on a new unrelated
+  source/test surface unless the M6.11 close gate now qualifies for audit.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
