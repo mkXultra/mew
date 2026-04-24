@@ -59,7 +59,7 @@ def parse_time(value):
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+    except (AttributeError, TypeError, ValueError):
         return None
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)

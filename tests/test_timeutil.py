@@ -36,3 +36,6 @@ class TimeUtilTests(unittest.TestCase):
             timeutil.elapsed_hours("1970-01-01T00:00:00", "1970-01-01T02:30:00Z"),
             2.5,
         )
+
+    def test_elapsed_hours_returns_none_for_non_string_values(self):
+        self.assertIsNone(timeutil.elapsed_hours(object(), "1970-01-01T02:30:00Z"))

@@ -2433,10 +2433,11 @@ Next action:
   risk and did not run a literal 20-slice batch.
 - The documented 20-slice bounded calibration batch has started on literal
   HEAD `ff05830`: `#524` and `#525` are counted verifier-backed no-change
-  slices, and `#526` is a counted paired patch/verifier slice. Continue the
-  batch from a fresh small paired surface, with codex-ultra review per phase,
-  until the 20-slice / 50% incidence criterion can be compared or a concrete
-  fix-first blocker appears.
+  slices, and `#526` is a counted paired patch/verifier slice. `#527` then
+  landed as a counted paired patch/verifier slice on HEAD `4bdec4a`. Continue
+  the batch from a fresh small paired surface, with codex-ultra review per
+  phase, until the 20-slice / 50% incidence criterion can be compared or a
+  concrete fix-first blocker appears.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
