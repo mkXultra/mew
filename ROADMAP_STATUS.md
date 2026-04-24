@@ -2633,7 +2633,20 @@ Next action:
   with 25 tests, but the session remained `blocked_on_patch`. Codex-ultra
   classified this as `counted_fix_first_blocker` and directed pausing the
   calibration batch for fix-first remediation in `src/mew/work_loop.py` plus
-  `tests/test_work_session.py`, then rerunning the same step_loop slice.
+  `tests/test_work_session.py`, then rerunning the same step_loop slice. The
+  remediation landed in `b403dbd`: write-ready now clears stale refresh-blocker
+  state after complete paired cached reads and replaces the refresh-only plan
+  item with a draft/no-change item before tiny draft context is built. Focused
+  `tests/test_work_session.py` subsets, full
+  `uv run pytest tests/test_work_session.py -q --no-testmon` with 591 passed,
+  ruff, diff-check, and codex-ultra review passed. `#560` / session `#541`
+  then reran the step_loop surface on HEAD `b403dbd`, reread the scoped
+  source/test pair, ran `uv run pytest -q tests/test_step_loop.py --no-testmon`
+  with 25 passed, closed verifier-backed no-change, and left no active blocker.
+  Codex-ultra classified it PASS/COUNTED as
+  `positive_verifier_backed_no_change`, validating the fix enough to resume
+  calibration. Next step: continue with the bounded `work_replay` source/test
+  surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
