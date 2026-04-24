@@ -10692,17 +10692,39 @@ def cmd_dogfood(args):
     return 0
 
 def cmd_proof_summary(args):
-    if getattr(args, "m6_11_phase2_calibration", False):
+    if getattr(args, "m6_12_report", False) and getattr(args, "m6_11_phase2_calibration", False):
+        print("error: --m6_12-report cannot be combined with --m6_11-phase2-calibration", file=sys.stderr)
+        return 2
+    if getattr(args, "closeout_index", None) and not getattr(args, "m6_12_report", False):
+        print("error: --closeout-index is valid only with --m6_12-report", file=sys.stderr)
+        return 2
+    if getattr(args, "m6_12_report", False):
+        from mew.proof_summary import format_m6_12_report, summarize_m6_12_report
+
+        try:
+            summary = summarize_m6_12_report(
+                args.artifact_dir,
+                ledger=getattr(args, "ledger", None),
+                closeout_index=getattr(args, "closeout_index", None),
+                measurement_head=getattr(args, "measurement_head", None),
+            )
+        except (OSError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        formatter = format_m6_12_report
+    elif getattr(args, "m6_11_phase2_calibration", False):
         summary = summarize_m6_11_replay_calibration(
             args.artifact_dir,
             measurement_head=getattr(args, "measurement_head", None),
         )
+        formatter = format_proof_summary
     else:
         summary = summarize_proof_artifacts(args.artifact_dir)
+        formatter = format_proof_summary
     if args.json:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     else:
-        print(format_proof_summary(summary))
+        print(formatter(summary))
     if getattr(args, "strict", False) and not summary.get("ok"):
         return 1
     return 0

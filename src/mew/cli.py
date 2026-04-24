@@ -952,6 +952,19 @@ def build_parser():
         help="interpret artifact_dir as replay-root for the M6.11 phase2/3 calibration checkpoint",
     )
     proof_summary_parser.add_argument(
+        "--m6_12-report",
+        action="store_true",
+        help="interpret artifact_dir as an M6.12 calibration report root",
+    )
+    proof_summary_parser.add_argument(
+        "--ledger",
+        help="M6.12 calibration ledger JSONL path; defaults under artifact_dir",
+    )
+    proof_summary_parser.add_argument(
+        "--closeout-index",
+        help="M6.12 closeout bundle index JSON path; valid only with --m6_12-report",
+    )
+    proof_summary_parser.add_argument(
         "--measurement-head",
         help="add additive M6.11 calibration cohort for bundles saved at this git head",
     )

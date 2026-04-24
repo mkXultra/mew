@@ -1,5 +1,7 @@
+import hashlib
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 
@@ -378,6 +380,510 @@ def _m6_11_cohort_targets(cohort_summaries, bundle_summary, current_head, measur
     if measurement_head and bundle_git_head == measurement_head:
         targets.append(cohort_summaries["measurement_head"])
     return targets
+
+
+def _m6_12_default_ledger_path(_artifact_dir):
+    return Path("proof-artifacts/m6_11_calibration_ledger.jsonl")
+
+
+def _load_m6_12_closeout_index(closeout_index):
+    if not closeout_index:
+        return None
+    path = Path(closeout_index)
+    if not path.exists():
+        raise FileNotFoundError(f"M6.12 closeout index not found: {path}")
+    try:
+        payload = _load_json_file(path)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid M6.12 closeout index JSON: {path}: {exc}") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"invalid M6.12 closeout index: {path}: expected list")
+    index = {}
+    required = {"original_path", "export_path", "sha256", "size_bytes", "exported_at"}
+    for entry_number, entry in enumerate(payload, start=1):
+        if not isinstance(entry, dict):
+            raise ValueError(f"invalid M6.12 closeout index entry #{entry_number}: expected object")
+        missing = sorted(required - set(entry))
+        if missing:
+            raise ValueError(
+                f"invalid M6.12 closeout index entry #{entry_number}: missing {', '.join(missing)}"
+            )
+        original_path = str(entry.get("original_path") or "").strip()
+        if not original_path:
+            raise ValueError(f"invalid M6.12 closeout index entry #{entry_number}: empty original_path")
+        index[original_path] = entry
+    return index
+
+
+def _m6_12_row_ref(row):
+    return f"ledger:#{row.line_number}"
+
+
+def _m6_12_bundle_ref(row):
+    value = row.field("replay_bundle_path")
+    return str(value or "").strip()
+
+
+def _m6_12_subsystem_tag(row):
+    for field_name in ("subsystem_tag", "subsystem"):
+        value = row.text_field(field_name).strip()
+        if value:
+            return value
+    scope_files = row.field("scope_files")
+    if isinstance(scope_files, list):
+        for value in scope_files:
+            path = str(value or "").strip()
+            if path.startswith("src/mew/"):
+                return Path(path).stem
+    return "unknown"
+
+
+def _resolve_m6_12_bundle_path(artifact_dir, replay_bundle_path, closeout_index=None):
+    replay_bundle_path = str(replay_bundle_path or "").strip()
+    if not replay_bundle_path:
+        return "", True, ""
+    artifact_path = Path(artifact_dir)
+    if closeout_index is not None:
+        entry = closeout_index.get(replay_bundle_path)
+        if not isinstance(entry, dict):
+            return "", False, "closeout_index_miss"
+        candidate = artifact_path / str(entry.get("export_path") or "")
+        if not candidate.is_file():
+            return str(candidate), False, "closeout_export_missing"
+        expected_sha = str(entry.get("sha256") or "").strip()
+        if expected_sha:
+            actual_sha = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            if actual_sha != expected_sha:
+                return str(candidate), False, "closeout_export_sha_mismatch"
+        return str(candidate), True, ""
+    else:
+        candidate_text = replay_bundle_path
+        artifact_text = str(artifact_path)
+        prefixes = []
+        if artifact_text:
+            prefixes.append(artifact_text.rstrip("/") + "/")
+        prefixes.append(".mew/replays/work-loop/")
+        for prefix in prefixes:
+            if candidate_text.startswith(prefix):
+                candidate_text = candidate_text[len(prefix):]
+                break
+        candidate = Path(replay_bundle_path) if Path(replay_bundle_path).is_absolute() else artifact_path / candidate_text
+        if not candidate.is_file():
+            return str(candidate), False, "precloseout_missing"
+        return str(candidate), True, ""
+
+
+def _summarize_m6_12_archetypes(classified_rows):
+    rows_by_archetype = defaultdict(list)
+    for classified in classified_rows:
+        rows_by_archetype[classified.archetype].append(classified)
+
+    from mew.calibration_report import ARCHETYPE_PRIORITY
+
+    active = []
+    for index, archetype in enumerate(ARCHETYPE_PRIORITY, start=1):
+        items = rows_by_archetype.get(archetype, [])
+        row_refs = [_m6_12_row_ref(item.row) for item in items]
+        bundle_refs = sorted(
+            {
+                _m6_12_bundle_ref(item.row)
+                for item in items
+                if _m6_12_bundle_ref(item.row)
+            }
+        )
+        active.append(
+            {
+                "label": archetype,
+                "cohort": "all",
+                "counted": len(items),
+                "evidence_priority": index,
+                "row_refs": row_refs,
+                "bundle_refs": bundle_refs,
+            }
+        )
+    return active
+
+
+def _m6_12_calibration_rates_from_bundles(bundle_paths):
+    total_bundles = 0
+    compiler_bundles = 0
+    off_schema_count = 0
+    refusal_count = 0
+    malformed_relevant_bundle_count = 0
+    bundle_type_counts = defaultdict(int)
+
+    for bundle_path in bundle_paths:
+        path = Path(bundle_path)
+        if path.name == "replay_metadata.json":
+            summary = _summarize_patch_draft_compiler_bundle(path)
+            expected_bundle_type = "patch_draft_compiler"
+        elif path.name == "report.json":
+            summary = _summarize_model_failure_bundle(path)
+            expected_bundle_type = "work-loop-model-failure"
+        else:
+            malformed_relevant_bundle_count += 1
+            continue
+
+        if summary.get("bundle_type") != expected_bundle_type:
+            malformed_relevant_bundle_count += 1
+            continue
+        if not _coerce_calibration_counted(summary.get("calibration_counted"), default=True):
+            continue
+
+        if summary.get("errors"):
+            malformed_relevant_bundle_count += 1
+            continue
+
+        calibration_bundle_type = summary.get("calibration_bundle_type") or f"{expected_bundle_type}.other"
+        total_bundles += 1
+        bundle_type_counts[calibration_bundle_type] += 1
+        if expected_bundle_type == "patch_draft_compiler":
+            compiler_bundles += 1
+        if summary.get("off_schema"):
+            off_schema_count += 1
+        if summary.get("refusal"):
+            refusal_count += 1
+
+    dominant_bundle_type = ""
+    dominant_bundle_share = 0.0
+    if bundle_type_counts:
+        dominant_bundle_type, dominant_count = max(
+            bundle_type_counts.items(),
+            key=lambda item: item[1],
+        )
+        dominant_bundle_share = _safe_rate(dominant_count, total_bundles)
+
+    return {
+        "source": "resolved_ledger_replay_bundles",
+        "total_bundles": total_bundles,
+        "off_schema_rate": _safe_rate(off_schema_count, compiler_bundles),
+        "off_schema_count": off_schema_count,
+        "off_schema_denominator": compiler_bundles,
+        "refusal_rate": _safe_rate(refusal_count, total_bundles),
+        "refusal_count": refusal_count,
+        "dominant_bundle_type": dominant_bundle_type,
+        "dominant_bundle_share": dominant_bundle_share,
+        "malformed_relevant_bundle_count": malformed_relevant_bundle_count,
+    }
+
+
+def summarize_m6_12_report(artifact_dir, ledger=None, closeout_index=None, measurement_head=None):
+    from mew.calibration_ledger import load_calibration_ledger
+    from mew.calibration_report import (
+        ARCHETYPE_PRIORITY,
+        CLASSIFIER_VERSION,
+        classify_calibration_rows,
+        summarize_calibration_rows,
+    )
+
+    artifact_path = Path(artifact_dir)
+    measurement_head = str(measurement_head or "").strip()
+    current_head = _current_git_head()
+    ledger_path = Path(ledger) if ledger else _m6_12_default_ledger_path(artifact_path)
+    closeout_payload = _load_m6_12_closeout_index(closeout_index) if closeout_index else None
+    rows = load_calibration_ledger(ledger_path)
+    mode = "post_closeout" if closeout_payload is not None else "pre_closeout"
+    classifier_summary = summarize_calibration_rows(rows)
+    classified_rows = classify_calibration_rows(rows)
+    blocker_code_counts = defaultdict(int)
+    countedness_counts = defaultdict(int)
+    reviewer_decision_counts = defaultdict(int)
+    non_counted_reason_counts = defaultdict(int)
+    non_counted_reason_rows = defaultdict(list)
+    non_counted_countedness_rows = defaultdict(list)
+    cohort_summaries = defaultdict(
+        lambda: {"ledger_rows": 0, "counted_rows": 0, "non_counted_rows": 0}
+    )
+    subsystem_summaries = defaultdict(
+        lambda: {"counted": 0, "archetypes": defaultdict(int), "heads": set(), "row_refs": []}
+    )
+    missing_row_refs = []
+    referenced = 0
+    resolved = 0
+    resolved_bundle_paths = []
+    counted_rows = 0
+    non_counted_rows = 0
+
+    for row in rows:
+        counted = _coerce_calibration_counted(row.field("counted"), default=True)
+        if counted:
+            counted_rows += 1
+        else:
+            non_counted_rows += 1
+            reason = row.text_field("non_counted_reason").strip() or "unspecified"
+            non_counted_reason_counts[reason] += 1
+            non_counted_reason_rows[reason].append(_m6_12_row_ref(row))
+        git_head = row.text_field("head").strip() or row.text_field("git_head").strip()
+        cohort_names = [_cohort_label(git_head, current_head)]
+        if measurement_head and git_head == measurement_head:
+            cohort_names.append("measurement_head")
+        for cohort_name in cohort_names:
+            cohort = cohort_summaries[cohort_name]
+            cohort["ledger_rows"] += 1
+            if counted:
+                cohort["counted_rows"] += 1
+            else:
+                cohort["non_counted_rows"] += 1
+        blocker_code = row.text_field("blocker_code").strip()
+        if blocker_code:
+            blocker_code_counts[blocker_code] += 1
+        countedness = row.text_field("countedness").strip()
+        if countedness:
+            countedness_counts[countedness] += 1
+            if not counted:
+                non_counted_countedness_rows[countedness].append(_m6_12_row_ref(row))
+        reviewer_decision = row.text_field("reviewer_decision").strip()
+        if reviewer_decision:
+            reviewer_decision_counts[reviewer_decision] += 1
+        replay_bundle_path = _m6_12_bundle_ref(row)
+        if replay_bundle_path:
+            referenced += 1
+            candidate, bundle_resolved, missing_reason = _resolve_m6_12_bundle_path(
+                artifact_path,
+                replay_bundle_path,
+                closeout_index=closeout_payload,
+            )
+            if bundle_resolved:
+                resolved += 1
+                resolved_bundle_paths.append(candidate)
+            else:
+                missing_row_refs.append(
+                    {"row_ref": _m6_12_row_ref(row), "reason": missing_reason}
+                )
+
+    for classified in classified_rows:
+        row = classified.row
+        if not _coerce_calibration_counted(row.field("counted"), default=True):
+            continue
+        subsystem = subsystem_summaries[_m6_12_subsystem_tag(row)]
+        subsystem["counted"] += 1
+        subsystem["archetypes"][classified.archetype] += 1
+        head = row.text_field("head").strip() or row.text_field("git_head").strip()
+        if head:
+            subsystem["heads"].add(head)
+        subsystem["row_refs"].append(_m6_12_row_ref(row))
+
+    missing = len(missing_row_refs)
+    archetypes_active = _summarize_m6_12_archetypes(classified_rows)
+    hardest_archetype = next(
+        (item["label"] for item in archetypes_active if item.get("counted", 0)),
+        "",
+    )
+    errors = []
+    if missing:
+        errors.append(f"M6.12 missing replay bundles: {missing}")
+    warnings = [
+        f"missing_bundle {item['row_ref']} reason={item['reason']}"
+        for item in missing_row_refs
+    ]
+    warnings.extend(
+        f"unclassified_v0 {_m6_12_row_ref(item.row)}"
+        for item in classified_rows
+        if item.archetype == "unclassified_v0"
+    )
+
+    bundle_provenance = {
+        "mode": mode,
+        "root": str(artifact_path),
+        "closeout_index": str(closeout_index) if closeout_index else None,
+        "referenced": referenced,
+        "resolved": resolved,
+        "missing": missing,
+        "missing_row_refs": missing_row_refs,
+    }
+    canonical = {
+        "mode": mode,
+        "artifact_dir": str(artifact_path),
+        "ledger_path": str(ledger_path),
+        "ledger_rows": len(rows),
+        "current_head": current_head,
+        "measurement_head": measurement_head,
+        "cohorts": {
+            "all": {
+                "ledger_rows": len(rows),
+                "counted_rows": counted_rows,
+                "non_counted_rows": non_counted_rows,
+            },
+            **{key: dict(value) for key, value in sorted(cohort_summaries.items())},
+        },
+        "bundles": {
+            "referenced": referenced,
+            "resolved": resolved,
+            "missing": missing,
+        },
+        "counted_rows": counted_rows,
+        "non_counted_rows": non_counted_rows,
+        "bundle_provenance": bundle_provenance,
+        "blocker_code_counts": dict(blocker_code_counts),
+        "countedness_counts": dict(countedness_counts),
+        "reviewer_decision_counts": dict(reviewer_decision_counts),
+        "non_counted_reason_counts": dict(non_counted_reason_counts),
+    }
+    calibration_rates = None
+    if not missing:
+        calibration_rates = _m6_12_calibration_rates_from_bundles(resolved_bundle_paths)
+    subsystem_rows = []
+    for label, data in sorted(
+        subsystem_summaries.items(),
+        key=lambda item: (-item[1]["counted"], item[0]),
+    ):
+        top_archetypes = [
+            {"label": archetype, "counted": count}
+            for archetype, count in sorted(
+                data["archetypes"].items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:2]
+        ]
+        subsystem_rows.append(
+            {
+                "label": label,
+                "counted": data["counted"],
+                "heads_seen": len(data["heads"]),
+                "top_archetypes": top_archetypes,
+                "row_refs": data["row_refs"][:8],
+            }
+        )
+    non_counted_concentration = {
+        "reasons": [
+            {"label": reason, "count": count, "row_refs": non_counted_reason_rows[reason][:8]}
+            for reason, count in sorted(
+                non_counted_reason_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:8]
+        ],
+        "countedness": [
+            {"label": countedness, "count": len(row_refs), "row_refs": row_refs[:8]}
+            for countedness, row_refs in sorted(
+                non_counted_countedness_rows.items(),
+                key=lambda item: (-len(item[1]), item[0]),
+            )[:8]
+        ],
+    }
+    derived = {
+        "classifier_version": CLASSIFIER_VERSION,
+        "classifier_priority": list(ARCHETYPE_PRIORITY),
+        "archetypes_active": archetypes_active,
+        "archetypes_reserved_seen": [],
+        "archetype_counts": dict(classifier_summary.counts),
+        "drift_axes": [
+            {"label": "task_frontier_drift", "count": 0, "reserved": True},
+            {"label": "context_session_drift", "count": 0, "reserved": True},
+            {"label": "replay_tool_drift", "count": 0, "reserved": True},
+            {"label": "approval_review_drift", "count": 0, "reserved": True},
+            {"label": "ui_channel_drift", "count": 0, "reserved": True},
+        ],
+        "subsystems": subsystem_rows,
+        "recurrence": [
+            {
+                "subsystem": item["label"],
+                "heads_seen": item["heads_seen"],
+                "top_archetypes": item["top_archetypes"],
+            }
+            for item in subsystem_rows
+        ],
+        "comparator": {},
+        "calibration_rates": calibration_rates,
+        "non_counted_concentration": non_counted_concentration,
+        "hardest_archetype": hardest_archetype,
+        "has_missing_bundles": missing > 0,
+    }
+    return {
+        "ok": missing == 0,
+        "kind": "m6_12_report",
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "subcommand_mode": "m6_12_report",
+        "classifier_version": CLASSIFIER_VERSION,
+        "errors": errors,
+        "canonical": canonical,
+        "derived": derived,
+        "warnings": warnings,
+    }
+
+
+def format_m6_12_report(summary):
+    canonical = summary.get("canonical") if isinstance(summary, dict) else {}
+    derived = summary.get("derived") if isinstance(summary, dict) else {}
+    provenance = canonical.get("bundle_provenance") if isinstance(canonical, dict) else {}
+
+    def _format_top_archetypes(item):
+        return ", ".join(
+            f"{top.get('label')}({top.get('counted', 0)})"
+            for top in item.get("top_archetypes", [])
+            if isinstance(top, dict)
+        )
+
+    active = [
+        f"{item.get('label')}={item.get('counted', 0)}"
+        for item in derived.get("archetypes_active") or []
+        if isinstance(item, dict) and item.get("counted", 0)
+    ]
+    lines = [
+        "M6.12 proof summary",
+        f"subcommand_mode: {summary.get('subcommand_mode', '')}",
+        f"classifier_version: {summary.get('classifier_version', '')}",
+        f"mode: {canonical.get('mode', '')}",
+        f"current_head: {canonical.get('current_head', '')}",
+        f"measurement_head: {canonical.get('measurement_head', '')}",
+        f"ledger: {canonical.get('ledger_path', '')}",
+        f"ledger_rows: {canonical.get('ledger_rows', 0)}",
+        f"counted_rows: {canonical.get('counted_rows', 0)}",
+        f"non_counted_rows: {canonical.get('non_counted_rows', 0)}",
+        f"bundle_provenance: mode={provenance.get('mode', '')} root={provenance.get('root', '')} referenced={provenance.get('referenced', 0)} resolved={provenance.get('resolved', 0)} missing={provenance.get('missing', 0)}",
+        "summary:",
+        *[
+            f"  {cohort} counted={data.get('counted_rows', 0)} non_counted={data.get('non_counted_rows', 0)}"
+            for cohort, data in sorted((canonical.get("cohorts") or {}).items())
+            if isinstance(data, dict)
+        ],
+        "subsystem_heatmap:",
+        *[
+            (
+                f"  {item.get('label')} counted={item.get('counted', 0)} "
+                f"top={_format_top_archetypes(item)} "
+                f"rows={', '.join(item.get('row_refs', [])[:3])}"
+            )
+            for item in derived.get("subsystems") or []
+            if isinstance(item, dict)
+        ][:8],
+        "recurrence:",
+        *[
+            f"  {item.get('subsystem')} heads_seen={item.get('heads_seen', 0)} top_archetypes={', '.join(top.get('label', '') for top in item.get('top_archetypes', []))}"
+            for item in derived.get("recurrence") or []
+            if isinstance(item, dict)
+        ][:8],
+        "drift:",
+        *[
+            f"  {item.get('label')} count={item.get('count', 0)} (reserved)"
+            for item in derived.get("drift_axes") or []
+            if isinstance(item, dict)
+        ],
+        "calibration_rates (bundle-derived):",
+        *(
+            ["  suppressed: missing referenced bundles"]
+            if derived.get("calibration_rates") is None
+            else [
+                f"  off_schema={derived.get('calibration_rates', {}).get('off_schema_rate')} ({derived.get('calibration_rates', {}).get('off_schema_count')}/{derived.get('calibration_rates', {}).get('off_schema_denominator')})",
+                f"  refusal={derived.get('calibration_rates', {}).get('refusal_rate')} ({derived.get('calibration_rates', {}).get('refusal_count')}/{derived.get('calibration_rates', {}).get('total_bundles')})",
+                f"  dominant_share={derived.get('calibration_rates', {}).get('dominant_bundle_share')} ({derived.get('calibration_rates', {}).get('dominant_bundle_type')})",
+                f"  malformed_relevant={derived.get('calibration_rates', {}).get('malformed_relevant_bundle_count')}",
+            ]
+        ),
+        "non_counted_concentration:",
+        *[
+            f"  reason {item.get('label')} x{item.get('count', 0)} rows={', '.join(item.get('row_refs', [])[:3])}"
+            for item in (derived.get("non_counted_concentration") or {}).get("reasons", [])
+        ],
+        *[
+            f"  countedness {item.get('label')} x{item.get('count', 0)} rows={', '.join(item.get('row_refs', [])[:3])}"
+            for item in (derived.get("non_counted_concentration") or {}).get("countedness", [])
+        ],
+        f"classifier_priority: {', '.join(derived.get('classifier_priority') or [])}",
+        f"hardest_archetype: {derived.get('hardest_archetype', '')}",
+        f"archetypes_active: {', '.join(active)}",
+        "warnings:",
+        *([f"  {warning}" for warning in summary.get("warnings") or []] or ["  none"]),
+    ]
+    return "\n".join(lines)
 
 
 def summarize_m6_11_replay_calibration(replay_root, measurement_head=None):
