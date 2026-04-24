@@ -2307,6 +2307,21 @@ Missing proof:
   fix-first target. The current-head cohort now has two counted bundles, both
   `request_timed_out`, so schema health is clean but concentration remains
   `1.0`.
+- Commit `54b657a` implemented the first fix-first patch by preserving
+  field boundaries in high-risk matching and suppressing bookkeeping lines such
+  as `Keep ROADMAP_STATUS.md and proof-artifacts dirty` or
+  `Do not edit ROADMAP_STATUS.md`. Codex-ultra approved the patch after a
+  regression test proved that genuine `Update roadmap recovery gate` titles
+  remain high-risk.
+- Task `#515` on literal head `54b657a` reran a small `plan_schema` slice with
+  the same bookkeeping references. Session `#498` read the complete source/test
+  pair, then timed out again before draft. The replay was counted and showed
+  the remaining high-risk trigger was `policy`, coming from the local component
+  phrase `reasoning-policy`, not from governance/safety policy work.
+  Codex-ultra approved `#515` as current-head incidence evidence and selected a
+  second fix-first patch: ignore `reasoning-policy`, `reasoning_policy`, and
+  `reasoning policy` as local component phrases while preserving genuine
+  policy/governance/approval matches.
 
 Next action:
 
@@ -2326,14 +2341,15 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After `#513` and `#514`, stop collecting more current-head slices for this
-  cohort and implement the fix-first target: compact-memory/high-effort
-  tiny-pair pre-draft planning turns are timing out with roughly 46k think
-  prompts after complete source/test reads. Do not count or resume `#505`,
-  `#506`, `#507`, `#508`, or `#512` as current-head incidence because they are
-  blocked pre-fix sessions; #509/#510/#511 remain valid counted evidence for
-  HEAD `3b38ec7` but should be treated as prior-head evidence after the fix
-  commit.
+  After `#515`, implement and review the second reasoning-policy false-positive
+  patch for local `reasoning-policy` component phrases, then run one fresh
+  literal-current-head slice to verify the bounded bookkeeping task now selects
+  medium reasoning or exposes the next concrete timeout cause. Do not count or
+  resume `#505`, `#506`, `#507`, `#508`, or `#512` as current-head incidence
+  because they are blocked pre-fix sessions; #509/#510/#511 remain valid
+  counted evidence for HEAD `3b38ec7`, and #513/#514 remain valid counted
+  evidence for HEAD `06167a9`, but all should be treated as prior-head evidence
+  after their respective fix commits.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the

@@ -54,6 +54,35 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertIn("roadmap", policy["matched_terms"])
         self.assertIn("recovery", policy["matched_terms"])
 
+    def test_bounded_task_not_high_risk_due_to_reasoning_policy_phrase(self):
+        for title in (
+            "reasoning-policy",
+            "reasoning_policy",
+            "reasoning policy",
+        ):
+            policy = select_work_reasoning_policy(
+                {"title": title, "kind": "coding"},
+                capabilities={
+                    "allowed_write_roots": ["src/mew/timeutil.py", "tests/test_timeutil.py"],
+                    "allow_verify": True,
+                },
+                env={},
+            )
+
+            self.assertEqual(policy["effort"], "medium")
+            self.assertEqual(policy["work_type"], "small_implementation")
+
+    def test_approval_policy_flow_remains_high_risk(self):
+        policy = select_work_reasoning_policy(
+            {"title": "Update approval policy flow", "kind": "coding"},
+            capabilities={"allowed_write_roots": ["."], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "high_risk")
+        self.assertIn("policy", policy["matched_terms"])
+
     def test_ignores_historical_commit_context_for_small_implementation(self):
         policy = select_work_reasoning_policy(
             {

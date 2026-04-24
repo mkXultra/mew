@@ -70,6 +70,11 @@ def _matching_high_risk_terms(text):
     matches = []
     for line in str(text or "").splitlines() or [str(text or "")]:
         lowered = str(line or "").casefold()
+        lowered = (
+            lowered.replace("reasoning-policy", "reasoning")
+            .replace("reasoning_policy", "reasoning")
+            .replace("reasoning policy", "reasoning")
+        )
         if _line_suppresses_high_risk(lowered):
             continue
         for term in HIGH_RISK_TERMS:
