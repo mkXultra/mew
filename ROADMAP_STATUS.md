@@ -2474,7 +2474,12 @@ Next action:
   `#539` then closed as a counted verifier-backed no-change slice on HEAD
   `87e7028`: toolbox and its paired tests were freshly read, the focused
   verifier passed with 4 tests, and codex-ultra accepted the same non-blocking
-  objc warning pattern because the command/session exit was successful.
+  objc warning pattern because the command/session exit was successful. `#540`
+  then hit a counted fix-first blocker on HEAD `aa839e8`: patch_draft and its
+  paired tests were refreshed through targeted non-truncated windows, but the
+  write-ready tiny lane still stopped on `missing_exact_cached_window_texts`.
+  Pause calibration slices and fix cached-window hydration from targeted
+  non-truncated line-window reads before rerunning a fresh `patch_draft` slice.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
