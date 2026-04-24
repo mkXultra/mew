@@ -1,9 +1,11 @@
 # M6.12 Failure-Science Instrumentation Design (v0)
 
 Date: 2026-04-24
-Status: draft, pending M6.11 closeout ledger refresh
+Refreshed: 2026-04-25 (post-M6.11 closeout; ledger grew 68 → 127 rows)
+Status: draft, post-M6.11 closeout; canonical input is now the closed
+`M6.11` ledger
 Owner: M6.12 design surface
-Depends on: `M6.11 Loop Stabilization` (active)
+Depends on: `M6.11 Loop Stabilization` (closed)
 
 ## 1. Purpose And Non-Goals
 
@@ -28,8 +30,9 @@ schema.
 
 `M6.12` is explicitly **not** supposed to:
 
-- widen the canonical calibration ledger schema while `M6.11` is still open
-  ([ROADMAP.md](../ROADMAP.md) `M6.11` close-gate, last bullet)
+- widen the canonical calibration ledger schema. `M6.11` is now closed and
+  its ledger is the authoritative input ([ROADMAP.md](../ROADMAP.md)
+  `M6.11` close-gate, last bullet); M6.12 reads it, never mutates it.
 - adopt `Hermes`, `OpenClaw`, `Codex`, or `Vellum Assistant` loop architecture,
   queue abstractions, product surface, or numeric tuning as mew defaults
   ([REVIEW_2026-04-23_M6_12_CALIBRATION_INPUT_FROM_EXTERNALS.md](REVIEW_2026-04-23_M6_12_CALIBRATION_INPUT_FROM_EXTERNALS.md))
@@ -62,7 +65,8 @@ These are the only sources `M6.12` may treat as counted evidence:
 
 - `proof-artifacts/m6_11_calibration_ledger.jsonl`
   - one JSONL row per calibration sample
-  - current shape (as of 2026-04-24):
+  - current shape (unchanged across closeout; verified against the
+    post-closeout ledger):
     `recorded_at, head, task_id, session_id, attempt, scope_files, verifier,
     counted, countedness, non_counted_reason, blocker_code, reviewer_decision,
     replay_bundle_path, review_doc, notes`
@@ -103,13 +107,14 @@ These inform operator narrative but must not be merged into counted math:
 The `Hermes / OpenClaw / Codex / Vellum Assistant` failure-science memo is an
 input to the *derived* classifier layer. It is never counted. It supplies
 candidate archetype names and drift axes for `M6.12` to map onto mew-native
-evidence after `M6.11` closes.
+evidence. With `M6.11` closed, that mapping runs against the post-closeout
+ledger rather than an in-flight target.
 
 ## 3. Canonical vs Derived Data Model
 
 This is the central discipline of `M6.12`.
 
-### 3.1 Canonical Layer (frozen while M6.11 is open)
+### 3.1 Canonical Layer (frozen at M6.11 closeout)
 
 Only these fields may be used as sources of truth:
 
@@ -119,9 +124,12 @@ Only these fields may be used as sources of truth:
 | replay bundle metadata | `bundle, calibration_counted, calibration_exclusion_reason, git_head, bucket_tag, blocker_code`, validator `code` / `failure.code` |
 | cohort | derived from `git_head` vs current HEAD and optional `--measurement-head` (already implemented in [src/mew/proof_summary.py](../src/mew/proof_summary.py) `summarize_m6_11_replay_calibration`) |
 
-`M6.12` **must not** add, rename, or widen canonical fields while `M6.11` is
-open. If a new canonical field is required, that request belongs in the
-M6.11 closeout refresh step (see section 8), not the M6.12 build.
+`M6.12` **must not** add, rename, or widen canonical fields now that
+`M6.11` is closed. The post-closeout ledger shape is the contract `M6.12`
+was designed against; any new canonical field is a v1 breaking change
+requiring a `classifier_version` bump and a separate reviewer-signed
+slice (see §8 for the refresh contract this design still holds M6.12 to,
+even though closeout itself is no longer pending).
 
 ### 3.2 Derived Layer (read-time only, free to evolve)
 
@@ -221,35 +229,99 @@ calibration than the current ledger actually supports:
   `calibration_exclusion_reason`, or `notes`. P3-only labels stay reserved in
   v0 and are rendered only under `--expand`, always with a warning.
 
-Row counts below reflect
-`proof-artifacts/m6_11_calibration_ledger.jsonl` as of 2026-04-24
-(68 rows total).
+Row counts below reflect the post-M6.11-closeout
+`proof-artifacts/m6_11_calibration_ledger.jsonl` (127 rows total, of
+which 65 are counted, 62 non-counted, 30 have a `replay_bundle_path`,
+and 97 do not; the ledger spans 99 unique git heads).
+
+The enumerations in the two tables below list the named `blocker_code` /
+`reviewer_decision` / `countedness` values that were present at the
+2026-04-24 snapshot plus any close-gate additions observed in the
+127-row post-closeout state. Classifier implementation must enumerate
+the names it recognizes exactly; any *new* ledger value that a future
+slice introduces without being on these lists falls through to a
+`*_other` fallback with a warning (see §4.2.D for the post-closeout
+tail).
+
+**Raw match vs post-priority emit.** Each grounding row now carries two
+counts:
+
+- *Raw match* — the number of ledger rows whose fields satisfy this
+  archetype's enumeration in isolation. This is the count an
+  implementer will read straight out of the ledger when writing unit
+  tests against a single rule.
+- *Post-priority emit* — the number of ledger rows that actually reach
+  this archetype after the §4.2.A.2 priority list runs, i.e. what the
+  classifier prints in the cockpit and JSON. Differences between the
+  two columns are caused entirely by earlier-slot interception and
+  are spelled out in the `Priority interception` column.
+
+The distinction matters because several Tier 1 archetypes share raw
+matches with `preflight_gap` at slot 1 or with the `fix_first_*`
+fallback family; a raw-only count over-states the cohort the
+classifier actually emits. Post-priority counts below are what the
+cockpit "counted" tallies will equal when the classifier runs against
+the closeout ledger and report them under §6.3
+`derived.archetypes_active[].counted`.
 
 #### 4.2.A Tier 1 — Active v0 Archetypes
 
 **Compiler / drafting family** (derived from `patch_draft_compiler` bundles
 and `blocker_code`):
 
-| Archetype | Evidence | Grounding (current ledger, 2026-04-24) |
-|---|---|---|
-| `cached_window_integrity` | P1 | `blocker_code ∈ {insufficient_cached_window_context (13), cached_window_incomplete (3), insufficient_cached_context (2)}` |
-| `drafting_timeout` | P1 | `blocker_code ∈ {timeout (8), model_auth_timed_out_object (1)}`; plus `work-loop-model-failure` reports with `failure.code=request_timed_out` |
-| `drafting_no_change` | P1 | `blocker_code ∈ {no_material_change (4), no_concrete_draftable_change (1)}` |
-| `write_policy_block` | P1 (weak N) | `blocker_code ∈ {old_text_not_found (2), write_policy_violation (1)}` |
-| `drafting_other` | P1 (fallback) | compiler-family rows with unclassified `blocker_code` (e.g. `work_already_running (1)`); always rendered with a warning when N > 0 |
+| Archetype | Evidence | Enumerated match values (post-closeout ledger, 127 rows) | Raw | Post-priority emit | Priority interception |
+|---|---|---|---|---|---|
+| `cached_window_integrity` | P1 | `blocker_code ∈ {insufficient_cached_window_context (13), cached_window_incomplete (4), insufficient_cached_context (2), missing_exact_cached_window_texts_after_targeted_nontruncated_windows (2), cached_window_incomplete_after_mid_block_test_window (2), missing_exact_cached_window_texts (1), cached_window_refs_not_hydrated_to_exact_window_texts (1)}` | 25 | 17 | 8 rows have `countedness` or `reviewer_decision` containing `preflight`, so they are captured by `preflight_gap` at slot 1 first |
+| `drafting_timeout` | P1 | `blocker_code ∈ {timeout (8), drafting_timeout_after_complete_cached_refs_no_artifact (2), model_auth_timed_out_object (1), medium_small_impl_predraft_timeout_after_full_pair_read_no_artifact (1)}`; plus `work-loop-model-failure` reports with `failure.code=request_timed_out` | 12 | 12 | none |
+| `drafting_no_change` | P1 | `blocker_code ∈ {no_material_change (4), verifier_green_no_change_overridden_by_overlapping_hunks (2), no_concrete_draftable_change (1)}` | 7 | 6 | 1 row is a preflight-tagged `fix_first_*` row that is captured by `preflight_gap` at slot 1 first |
+| `write_policy_block` | P1 (weak N) | `blocker_code ∈ {old_text_not_found (2), write_policy_violation (1), unpaired_source_edit_blocked (1)}` | 4 | 4 | none |
+| `drafting_other` | P1 (fallback) | strict fallback: rows with a `replay_bundle_path` that points at a compiler bundle **and** a non-null `blocker_code` that is not in the enumerations above. No row in the post-closeout 127-row ledger satisfies this combined predicate: the five unrecognised blocker codes observed at closeout — `work_already_running` (row 36), `session_accounting_gap_external_patch` (row 119), `write_ready_structural_tokenize_indentation_crash` (row 122), `write_ready_preflight_adjacent_tail_read_wait_loop` (row 125), `recent_read_file_windows_missing_next_line_for_tail_refresh` (row 126) — all appear on non-bundle rows. `drafting_other` remains declared so a future row that genuinely is compiler-bundle + unrecognised blocker has a Tier 1 home without a `classifier_version` bump. Emits a `drafting_other_warning` naming the unrecognised code whenever N > 0. | — | 0 | no interception needed, because no ledger row is a `drafting_other` candidate. For the routing of the five unrecognised-blocker non-bundle rows listed in the Enumerated match values cell: rows 122, 125, 126 have `countedness=fix_first_remediation` and land in `fix_first_evidence` at slot 12; rows 36 and 119 have non-`fix_first_*` countedness and fall through to `unclassified_v0` at slot 15. Neither path involves `drafting_other`. |
 
 **Non-bundle family** (derived from `reviewer_decision` / `countedness` when
 `replay_bundle_path=null`):
 
-| Archetype | Evidence | Grounding (current ledger, 2026-04-24) |
-|---|---|---|
-| `no_change_non_calibration` | P2 | `reviewer_decision=accepted_as_no_change_non_calibration` (4 rows) |
-| `measurement_process_gap` | P2 | `reviewer_decision ∈ {accepted_as_no_bundle_measurement_process_gap_evidence (2), accepted_as_no_bundle_measurement_path_evidence (2), accepted_as_non_counted_measurement_artifact_evidence (2)}` |
-| `verifier_config_evidence` | P2 | `reviewer_decision=accepted_as_no_bundle_verifier_config_evidence` (2 rows) |
-| `timeout_family_no_bundle` | P2 | `reviewer_decision ∈ {accepted_as_no_bundle_timeout_family_evidence (3), accepted_as_no_bundle_timeout_family_fix_first_evidence (2)}`; distinct from `drafting_timeout` because no bundle was emitted |
-| `preflight_gap` | P2 | structured preflight evidence already exists in `countedness` and `reviewer_decision`; see §4.2.A.1 for the explicit match rule, the list of current ledger values that match it, and the de-duplication priority vs generic blocker-code families and `fix_first_evidence`. Explicitly handles `countedness = non_counted_no_artifact_live_preflight_validation` so it cannot fall through unclassified. |
-| `fix_first_evidence` | P2 (fallback) | rows whose `countedness` starts with `fix_first_…` and do **not** match any more specific Tier 1 archetype (including `preflight_gap`, `drafting_timeout`, `timeout_family_no_bundle`). See the priority rule in §4.2.A.2. |
-| `live_finish_gate_validation` | P2 | `reviewer_decision=accepted_as_live_finish_gate_validation_not_replay_incidence` (3 rows) |
+| Archetype | Evidence | Enumerated match values (post-closeout ledger, 127 rows) | Raw | Post-priority emit | Priority interception |
+|---|---|---|---|---|---|
+| `no_change_non_calibration` | P2 | `reviewer_decision=accepted_as_no_change_non_calibration` | 4 | 4 | none |
+| `measurement_process_gap` | P2 | `reviewer_decision ∈ {accepted_as_no_bundle_measurement_process_gap_evidence (2), accepted_as_no_bundle_measurement_path_evidence (2), accepted_as_non_counted_measurement_artifact_evidence (2)}` | 6 | 6 | none |
+| `verifier_config_evidence` | P2 | `reviewer_decision=accepted_as_no_bundle_verifier_config_evidence` | 2 | 2 | none |
+| `timeout_family_no_bundle` | P2 | `reviewer_decision ∈ {accepted_as_no_bundle_timeout_family_evidence (3), accepted_as_no_bundle_timeout_family_fix_first_evidence (2)}`; distinct from `drafting_timeout` because no bundle was emitted | 5 | 5 | none |
+| `preflight_gap` | P2 | match rule per §4.2.A.1 (structured preflight evidence in `countedness` or `reviewer_decision`, plus explicit handling of `non_counted_no_artifact_live_preflight_validation`) | 9 | 9 | none — `preflight_gap` is at slot 1, so it intercepts other rows rather than being intercepted |
+| `fix_first_evidence` | P2 (fallback) | rows whose `countedness` starts with `fix_first_` **or** equals `counted_fix_first_blocker` and that do not match any more specific Tier 1 archetype. See the priority rule in §4.2.A.2 and the `fix_first_*` exclusion from `positive_outcome_v0` in §4.2.D. Raw = 18 `fix_first_*` starts-with rows + 4 `counted_fix_first_blocker` rows = 22. | 22 | 3 | 15 of the 18 `fix_first_*` rows land in earlier slots (6 in `preflight_gap`, 6 in `cached_window_integrity`, 2 in `drafting_timeout`, 1 in `drafting_no_change`, 0 in `write_policy_block`); all 4 `counted_fix_first_blocker` rows land in `cached_window_integrity` at slot 2. The 3 rows that actually emit at slot 12 are the `fix_first_remediation` rows whose `blocker_code` is unrecognised (rows 122, 125, 126 in the post-closeout ledger). |
+| `live_finish_gate_validation` | P2 | `reviewer_decision=accepted_as_live_finish_gate_validation_not_replay_incidence` | 3 | 3 | none |
+| `positive_outcome_v0` | P2 | match rule per §4.2.D (explicit enumerations plus the `fix_first_*` exclusion guard) | 42 | 42 | none — the §4.2.D exclusion is applied inside the match itself, not by an earlier priority slot |
+
+**v0 classifier-output summary (post-priority emits against the 127-row
+closeout ledger, from the fixed §4.2.A.2 + §4.2.D rules):**
+
+- `preflight_gap`: 9
+- `cached_window_integrity`: 17
+- `drafting_timeout`: 12
+- `drafting_no_change`: 6
+- `write_policy_block`: 4
+- `timeout_family_no_bundle`: 5
+- `verifier_config_evidence`: 2
+- `measurement_process_gap`: 6
+- `live_finish_gate_validation`: 3
+- `no_change_non_calibration`: 4
+- `positive_outcome_v0`: 42
+- `fix_first_evidence`: 3
+- `drafting_other`: 0 (see table row above; no current ledger row is a `drafting_other` candidate)
+- `model_failure_other`: 0. The closeout ledger contains no `work-loop-model-failure` report row whose `failure.code` falls outside the `drafting_timeout` enumeration: every bundle with a non-null `blocker_code` already matches one of `cached_window_integrity`, `drafting_timeout`, `drafting_no_change`, or `write_policy_block`, and no current bundle carries a non-timeout model-failure `failure.code`. The slot-14 label stays declared so a future non-timeout model-failure report row has a Tier 1 home without a `classifier_version` bump.
+- `unclassified_v0`: 14. Three residual shapes, confirmed by simulation against the 127-row ledger:
+  - *No `blocker_code`, no `replay_bundle_path`, no Tier 1 reviewer/countedness match* — 7 rows (rows 6, 10, 24, 28, 30, 31, 35). Reviewer decisions such as `accepted_as_no_bundle_prompt_risk_evidence`, `accepted_as_no_bundle_verifier_only_evidence`, `accepted_as_no_bundle_closeout_recognition_evidence`, `rejected_as_no_bundle_verifier_only_false_finish`, `rejected_as_fixture_only_verifier_finish`, `accepted_as_live_finish_gate_blocker_validation_not_replay_sample`, and `rejected_as_no_artifact_timeout_read_loop` are not in any v0 Tier 1 enumeration.
+  - *Compiler bundle with `blocker_code=null` or empty, and no Tier 1 reviewer/countedness match* — 5 rows (rows 3, 25, 26, 38, 43). Under the strict `drafting_other` definition these cannot land in slot 13 (they lack an unrecognised non-null blocker), and they are not `work-loop-model-failure` reports so they cannot land in slot 14 either. They therefore fall through to slot 15.
+  - *Non-bundle row with an unrecognised `blocker_code` whose `countedness` does not start with `fix_first_`* — 2 rows: row 36 (`blocker_code=work_already_running`, `countedness=rejected_recursive_same_session_work_invocation`) and row 119 (`blocker_code=session_accounting_gap_external_patch`, `countedness=non_counted_external_patch_due_session_accounting_gap`). Neither reaches `fix_first_evidence` (countedness does not start with `fix_first_`) nor `drafting_other` (no bundle), so they fall through to slot 15.
+
+  All 14 rows trigger the §4.1 `unclassified_v0` warning with
+  `row_ref` and a field dump so operators can see exactly which
+  fields did not match any Tier 1 enumeration.
+
+Sum check: 9 + 17 + 12 + 6 + 4 + 5 + 2 + 6 + 3 + 4 + 42 + 3 + 0 + 0 + 14 = **127** ✓
+
+These are the numbers the MVP classifier implementation should reproduce
+against the closeout ledger, not the raw enumeration totals. They will
+also be emitted under §6.3 `derived.archetypes_active[].counted`.
 
 #### 4.2.A.1 `preflight_gap` Match Rule
 
@@ -260,8 +332,12 @@ A row matches `preflight_gap` when **any** of the following holds:
   `fix_first_unnumbered_preflight_refresh_gap`,
   `fix_first_preflight_refresh_gap`,
   `fix_first_preflight_search_result_read_gap`,
-  `fix_first_preflight_search_result_path_and_anchor_gap`, and
-  `non_counted_no_artifact_live_preflight_validation`;
+  `fix_first_preflight_search_result_path_and_anchor_gap`,
+  `fix_first_preflight_compact_refresh_search_history_gap`,
+  `fix_first_repeated_preflight_wait_after_paired_cached_windows`, and
+  `non_counted_no_artifact_live_preflight_validation`
+  (8 post-closeout rows from `countedness`; plus 1 match via
+  `reviewer_decision`);
 - `reviewer_decision` contains the literal substring `preflight`
   (case-insensitive);
 - `countedness` is exactly `non_counted_no_artifact_live_preflight_validation`
@@ -298,14 +374,44 @@ match. Later entries are considered only if all earlier ones failed.
 8. `measurement_process_gap` — `reviewer_decision` match per §4.2.A.
 9. `live_finish_gate_validation` — `reviewer_decision` match per §4.2.A.
 10. `no_change_non_calibration` — `reviewer_decision` match per §4.2.A.
-11. `fix_first_evidence` — fallback: `countedness` starts with `fix_first_`
-    and none of 1-10 matched. This label is therefore the *non-preflight,
-    non-timeout* remainder of the fix-first cohort.
-12. `drafting_other` — compiler-bundle fallback for unclassified
-    `blocker_code` values (e.g. `work_already_running`). Emits a
-    `drafting_other_warning` listing the unrecognised code.
-13. `model_failure_other` — `work-loop-model-failure` bundle fallback.
-14. `unclassified_v0` — no rule matched. Always emits a warning with the
+11. `positive_outcome_v0` — two-step match rule per §4.2.D: Step 1
+    excludes any row whose `countedness` starts with `fix_first_` or
+    equals `counted_fix_first_blocker`; Step 2 matches the remaining
+    rows against the positive `countedness` / `reviewer_decision`
+    enumerations. A row that passes Step 1 but does not match Step 2
+    falls through to later slots. Intentionally placed **before**
+    `fix_first_evidence` so the `positive_*` countedness values never
+    collide with the fix-first fallback, and Step 1 keeps the inverse
+    collision (fix-first `countedness` + positive-looking
+    `reviewer_decision` such as `approve_commit`) impossible.
+12. `fix_first_evidence` — fallback: `countedness` starts with
+    `fix_first_` (or equals `counted_fix_first_blocker`) and none of
+    slots 1-11 matched. This label is therefore the *non-preflight,
+    non-timeout, non-positive, non-blocker-family* remainder of the
+    fix-first cohort.
+13. `drafting_other` — strict compiler-bundle fallback: matches only
+    rows that have a `replay_bundle_path` pointing at a compiler bundle
+    **and** a non-null `blocker_code` that is not in the Tier 1
+    enumerations at slots 2–5. No row in the current 127-row closeout
+    ledger satisfies this predicate, so slot 13 emits 0 against
+    closeout. The five unrecognised `blocker_code` values that do
+    appear post-closeout (`work_already_running`,
+    `session_accounting_gap_external_patch`,
+    `write_ready_structural_tokenize_indentation_crash`,
+    `write_ready_preflight_adjacent_tail_read_wait_loop`,
+    `recent_read_file_windows_missing_next_line_for_tail_refresh`) all
+    live on non-bundle rows and are therefore **not** slot-13
+    examples: rows 122, 125, and 126 route to `fix_first_evidence` at
+    slot 12 (via `countedness=fix_first_remediation`); rows 36 and 119
+    route to `unclassified_v0` at slot 15 (non-`fix_first_*`
+    countedness). See the `drafting_other` row in §4.2.A for the full
+    grounding. Slot 13 stays declared so a future genuine
+    compiler-bundle + unrecognised-blocker row has a Tier 1 home
+    without a `classifier_version` bump; when it does emit, the
+    cockpit renders a `drafting_other_warning` naming the unrecognised
+    code.
+14. `model_failure_other` — `work-loop-model-failure` bundle fallback.
+15. `unclassified_v0` — no rule matched. Always emits a warning with the
     row-ref and the fields that failed to match.
 
 The classifier must expose this priority list explicitly in the `--json`
@@ -335,10 +441,106 @@ still renders `count=0` lines for them so silence is impossible.
 
 #### 4.2.C Boundary For Tier Promotion
 
-A reserved archetype promotes to active only during the closeout refresh
-(section 8) or by an explicit reviewer-signed expansion slice. A classifier
-bump from `m6_12.v0` to `m6_12.v1` is required whenever the Tier 1 list
-changes.
+A reserved archetype promotes to active only during a bounded refresh
+slice (historically the M6.11 closeout refresh; post-closeout, an
+explicit reviewer-signed expansion slice). A classifier bump from
+`m6_12.v0` to `m6_12.v1` is required whenever the Tier 1 list changes.
+
+#### 4.2.D Post-Closeout Positive-Outcome Cohort (out-of-scope for failure archetypes)
+
+The post-closeout refresh revealed a significant cohort of **successful
+calibration rows** that the failure-science v0 taxonomy is not designed
+to classify. These rows are canonical evidence and must not be dropped,
+but they are **not** failures and therefore cannot be pressed into any
+Tier 1 failure archetype.
+
+v0 recognises this cohort by explicit enumerations on both sides of
+the row plus a hard exclusion rule, so it cannot accidentally absorb
+ambiguous `fix_first_*` rows:
+
+**Step 1 — Exclusion guard (always runs first).** A row is excluded
+from `positive_outcome_v0` regardless of any other match if either:
+
+- `countedness` starts with `fix_first_` (e.g. `fix_first_remediation`,
+  `fix_first_preflight_refresh_gap`, `fix_first_remediation`'s
+  approve-commit siblings rows 122/125/126 in the closeout ledger), or
+- `countedness` is exactly `counted_fix_first_blocker`.
+
+These rows record that a fix-first gate fired, which is a calibration
+signal about an upstream failure, not a positive outcome. They continue
+down the §4.2.A.2 priority list and land in an earlier
+blocker-code / preflight archetype or in `fix_first_evidence` at slot
+12. The guard closes the earlier "either side matches" loophole where
+`reviewer_decision=approve_commit` paired with `fix_first_remediation`
+was being absorbed into `positive_outcome_v0`.
+
+**Step 2 — Inclusion match (only after Step 1 passes).** A non-excluded
+row matches `positive_outcome_v0` if either:
+
+- `countedness` is in the positive-countedness set:
+  - `positive_verifier_backed_no_change` (26 rows),
+  - `positive_paired_patch_verifier` (10 rows),
+  - `current_head_positive_verifier_backed_no_change` (2 rows),
+  - `positive_test_only_patch_verifier` (2 rows),
+  - `positive_current_head_paired_dry_run_applied_verified_after_reasoning_policy_fixes` (1 row, row 69 in the closeout ledger),
+  - `positive_current_head_paired_dry_run_applied_verified_after_cached_ref_hydration_fix` (1 row, row 72 in the closeout ledger);
+- **or** `reviewer_decision` is in the positive-reviewer set:
+  - `approved_positive_paired_patch_verifier` (3 rows),
+  - `approved_current_head_positive_verifier_backed_no_change` (2 rows),
+  - `approved_positive_current_head_fix_evidence_apply_and_verify` (1 row, row 69),
+  - `approved_positive_current_head_cached_ref_hydration_write_ready_path` (1 row, row 72),
+  - `approve_counted_paired_patch` (1 row),
+  - `approve_counted_test_only_patch` (1 row).
+
+The two explicit additions
+(`positive_current_head_paired_dry_run_applied_verified_after_*` and
+`approved_positive_current_head_*`) are the fix for the under-capture
+the closeout-refresh reviews flagged: rows 69 and 72 now land in
+`positive_outcome_v0` instead of falling through to `unclassified_v0`.
+
+**Deliberately omitted reviewer_decision values:** `accept_no_change`,
+`accept_recovered_no_change`, and `approve_commit`. These values appear
+on both positive rows (where `countedness` already starts with
+`positive_*` and therefore matches the inclusion set) and on fix-first
+rows (where they must not trigger a positive match). v0 does not use
+them as inclusion signals; rows where one of these is the only positive
+evidence are classified by their `countedness` or fall through the
+priority list and land in `fix_first_evidence` or earlier failure
+archetypes as appropriate. In the closeout ledger, every row where one
+of these three values *would* have matched under the old "either side"
+rule also matches the `countedness` inclusion set, so no positive row
+is lost.
+
+**Post-priority emit.** Under the fixed rule the closeout ledger
+classifies **42 rows** as `positive_outcome_v0` (zero `fix_first_*`
+leaks, rows 69 and 72 both captured). The raw inclusion-match set also
+has 42 rows; the guard catches the 3 previous fix-first leaks before
+Step 2 ever evaluates. See §4.2.A for the full raw-vs-post-priority
+summary.
+
+v0 rule for the positive cohort:
+
+- route matches to a dedicated non-failure label `positive_outcome_v0`;
+- place `positive_outcome_v0` at §4.2.A.2 priority slot 11
+  (immediately *before* `fix_first_evidence` at slot 12) so the
+  `positive_*` countedness values never collide with any `fix_first_*`
+  fallback; the guard in Step 1 above keeps the inverse collision
+  (fix-first `countedness` + positive-looking `reviewer_decision`)
+  impossible as well;
+- render the counted total in the text cockpit as a one-line
+  `positive_outcome_v0: counted=<N>` entry under the Summary line,
+  **not** in the subsystem heatmap or recurrence view (both of which
+  remain failure-focused);
+- the actual enumeration of positive countedness / reviewer-decision
+  values is frozen from the post-closeout ledger for v0. Any *new*
+  positive-outcome value in a future slice falls through to
+  `positive_outcome_v0_other` with a warning, and its promotion into
+  the main list is a reviewer-signed slice.
+
+A richer positive-outcome taxonomy (e.g. separating verifier-green
+no-change from approved-commit delta) is explicitly **deferred to v1**
+alongside the threshold work in §11.2. v0's job is to avoid
+mis-classifying these rows as failures or silently dropping them.
 
 ### 4.3 v0 Drift Axes (derived, reserved)
 
@@ -571,8 +773,8 @@ explicitly:
       "drafting_no_change", "write_policy_block", "timeout_family_no_bundle",
       "verifier_config_evidence", "measurement_process_gap",
       "live_finish_gate_validation", "no_change_non_calibration",
-      "fix_first_evidence", "drafting_other", "model_failure_other",
-      "unclassified_v0"
+      "positive_outcome_v0", "fix_first_evidence", "drafting_other",
+      "model_failure_other", "unclassified_v0"
     ],
     "archetypes_active": [...],
     "archetypes_reserved_seen": [...],
@@ -616,10 +818,17 @@ decision to defer. The MVP does not add it.
 
 ## 7. Representative Output Examples
 
-The examples below are illustrative. Row counts reflect the current ledger
-shape (68 rows, 18 counted, 50 non-counted, 45 unique heads as of
-2026-04-24); final numbers and thresholds are deliberately not committed
-here.
+The examples below are illustrative. Row counts reflect the post-M6.11
+closeout ledger shape (127 rows total, 65 counted, 62 non-counted, 99
+unique heads, 30 rows with a `replay_bundle_path`, 97 without). The
+per-section aggregates shown (e.g. "counted=3 non_counted=6" on a
+cohort line) are *shape* examples and will be recomputed by the
+classifier implementation; they are not a commitment to final numbers.
+The pre-closeout example in §7.1 is retained because pre-closeout mode
+remains a valid invocation for hosts that still have local
+`.mew/replays/**` bundles from the in-flight M6.11 slice; the
+post-closeout example in §7.4 is now the canonical operator citation
+mode.
 
 ### 7.1 Default text output (pre-closeout, current-head cohort, all bundles resolved)
 
@@ -637,11 +846,14 @@ Proof summary (M6.12): artifact_dir=.mew/replays/work-loop
 ledger: proof-artifacts/m6_11_calibration_ledger.jsonl
 classifier_version: m6_12.v0
 mode: pre_closeout
-cohort: current_head   head: 54b657a   ledger_rows: 68
+cohort: current_head   head: <current-sha>   ledger_rows: 127
 
-bundle_provenance: mode=pre_closeout root=.mew/replays/work-loop referenced=26 resolved=26 missing=0
+bundle_provenance: mode=pre_closeout root=.mew/replays/work-loop referenced=30 resolved=30 missing=0
 
-summary: current_head counted=3 non_counted=6 | legacy counted=15 non_counted=41 | unknown counted=0 non_counted=3
+# Per-cohort counted/non_counted breakdown is a classifier-implementation
+# output; the line below is a shape placeholder. Totals across cohorts
+# must sum to ledger_rows (127) under the discipline in §4.5.
+summary: current_head counted=<n> non_counted=<n> | legacy counted=<n> non_counted=<n> | unknown counted=<n> non_counted=<n>
 
 subsystem_heatmap:
   patch_draft_compiler        counted=2  top=cached_window_integrity(2), drafting_no_change(0)
@@ -693,17 +905,17 @@ in §8.5.6 only fails closed when at least one bundle is missing.
   "canonical": {
     "mode": "pre_closeout",
     "ledger_path": "proof-artifacts/m6_11_calibration_ledger.jsonl",
-    "ledger_rows": 68,
+    "ledger_rows": 127,
     "cohorts": {
-      "current_head": {"total_bundles": 3, "relevant_bundles": 3, "off_schema_rate": 0.0}
+      "current_head": {"total_bundles": "<n>", "relevant_bundles": "<n>", "off_schema_rate": "<rate>"}
     },
-    "bundles": {"patch_draft_compiler": 21, "work-loop-model-failure": 5},
+    "bundles": {"patch_draft_compiler": "<n>", "work-loop-model-failure": "<n>"},
     "bundle_provenance": {
       "mode": "pre_closeout",
       "root": ".mew/replays/work-loop",
       "closeout_index": null,
-      "referenced": 26,
-      "resolved": 26,
+      "referenced": 30,
+      "resolved": 30,
       "missing": 0,
       "missing_row_refs": []
     }
@@ -714,8 +926,8 @@ in §8.5.6 only fails closed when at least one bundle is missing.
       "drafting_no_change", "write_policy_block", "timeout_family_no_bundle",
       "verifier_config_evidence", "measurement_process_gap",
       "live_finish_gate_validation", "no_change_non_calibration",
-      "fix_first_evidence", "drafting_other", "model_failure_other",
-      "unclassified_v0"
+      "positive_outcome_v0", "fix_first_evidence", "drafting_other",
+      "model_failure_other", "unclassified_v0"
     ],
     "archetypes_active": [
       {"label": "drafting_timeout", "cohort": "current_head", "counted": 3,
@@ -758,10 +970,10 @@ Output excerpt (see §8.5 for the full rule set):
 
 ```
 mode: pre_closeout
-bundle_provenance: mode=pre_closeout root=.mew/replays/work-loop referenced=26 resolved=0 missing=26
+bundle_provenance: mode=pre_closeout root=.mew/replays/work-loop referenced=30 resolved=0 missing=30
 calibration_rates (bundle-derived): SUPPRESSED (bundle_provenance.missing > 0)
 warnings:
-  bundle_provenance_missing: 26 rows reference bundles under .mew/replays/work-loop
+  bundle_provenance_missing: 30 rows reference bundles under .mew/replays/work-loop
   that did not resolve via the pre-closeout resolver (reason=precloseout_missing);
   ledger-only archetype counts remain valid; bundle-derived rates are suppressed
 ```
@@ -775,11 +987,14 @@ Exit codes (unified rule, §8.5.6):
   `canonical.bundle_provenance.missing > 0`. This is identical to the
   post-closeout strict failure and does not depend on mode.
 
-### 7.4 Post-closeout example (authoritative citation)
+### 7.4 Post-closeout example (authoritative citation — canonical v0 mode)
 
-Invocation after M6.11 closeout, with the closeout export tree checked in
-under `proof-artifacts/m6_11_closeout_replay_bundles/` and the index at
-`proof-artifacts/m6_11_closeout_replay_index.json`:
+M6.11 is closed. The canonical M6.12 citation invocation runs against
+the closeout export tree and the closeout replay index. This example
+shows the shape the reader should produce against the current 127-row
+post-closeout ledger. Concrete counts under `referenced` / `resolved`
+depend on the export step (§8.2) populating the tree; the 30
+bundle-carrying rows in the current ledger are the upper bound.
 
 ```
 mew proof-summary proof-artifacts/m6_11_closeout_replay_bundles \
@@ -797,11 +1012,11 @@ ledger: proof-artifacts/m6_11_calibration_ledger_closeout.jsonl
 closeout_index: proof-artifacts/m6_11_closeout_replay_index.json
 classifier_version: m6_12.v0
 mode: post_closeout
-cohort: current_head   head: <closeout-sha>   ledger_rows: N
+cohort: current_head   head: <closeout-sha>   ledger_rows: 127
 
 bundle_provenance: mode=post_closeout root=proof-artifacts/m6_11_closeout_replay_bundles
                    closeout_index=proof-artifacts/m6_11_closeout_replay_index.json
-                   referenced=M resolved=M missing=0
+                   referenced=30 resolved=30 missing=0
 ```
 
 JSON fragment (abbreviated) showing the additional post-closeout fields:
@@ -810,11 +1025,12 @@ JSON fragment (abbreviated) showing the additional post-closeout fields:
 {
   "canonical": {
     "mode": "post_closeout",
+    "ledger_rows": 127,
     "bundle_provenance": {
       "mode": "post_closeout",
       "root": "proof-artifacts/m6_11_closeout_replay_bundles",
       "closeout_index": "proof-artifacts/m6_11_closeout_replay_index.json",
-      "referenced": 26, "resolved": 26, "missing": 0,
+      "referenced": 30, "resolved": 30, "missing": 0,
       "missing_row_refs": []
     }
   }
@@ -833,17 +1049,29 @@ Failure cases in post-closeout mode:
 - If sha verification fails, the reason is `closeout_export_sha_mismatch`.
 - In all three of the above cases, `--strict` fails closed per §8.5.6.
 
-## 8. M6.11 Closeout Refresh Plan
+## 8. M6.11 Closeout Refresh Contract
 
-`M6.12` cannot freeze its classifier inputs while `M6.11` is still writing
-new ledger rows. This section describes the single-step refresh `M6.12` must
-run at M6.11 closeout.
+`M6.11` is now closed. This section defines the single-step refresh the
+M6.12 reader relies on. It is retained as a normative contract (not
+just a historical note) for two reasons:
+
+- the closeout *export* step that produces the post-closeout replay
+  tree and index is still a concrete deliverable the M6.12 plan
+  depends on (see §8.2 and §9.11);
+- if M6.11 ever has to be reopened for a follow-up correction, the
+  same contract applies to a second closeout cycle.
+
+The ledger snapshot already exists at
+`proof-artifacts/m6_11_calibration_ledger.jsonl` (127 rows at the
+closeout boundary). The remaining closeout deliverables are the
+bundle export tree and index described in §8.2.
 
 ### 8.1 Trigger
 
-Refresh runs exactly once, on the commit that flips `M6.11` to `done` in
-`ROADMAP_STATUS.md`. It does not run before closure, and it does not run
-repeatedly after.
+The refresh runs exactly once per closure, on the commit that flips
+`M6.11` to `done`. If the ledger is later reopened for a follow-up
+correction, the contract is re-run against that new closure commit;
+it is never run twice against the same closure.
 
 ### 8.2 Refresh Actions (in order)
 
@@ -1102,8 +1330,9 @@ earlier wording in §7.3/§8.5.6 that was ambiguous:
 1. Ambiguity about `--strict` is a silent correctness bug. Operators in
    CI need one predictable rule.
 2. Pre-closeout runs that want to tolerate missing bundles simply do not
-   pass `--strict`; the non-strict pre-closeout invocation remains the
-   main in-flight M6.11 workflow.
+   pass `--strict`; the non-strict pre-closeout invocation is the
+   intended path for hosts that retain only local `.mew/replays/**`
+   bundles (e.g. authors running against the pre-export state).
 3. The authoritativeness of pre-closeout output is still separately
    conveyed by `canonical.mode=pre_closeout`, so no consumer will
    accidentally treat pre-closeout non-strict output as authoritative.
@@ -1128,22 +1357,27 @@ These are known and intentionally deferred. They must not block v0.
 1. **Post-closeout command promotion.** The MVP surface is committed:
    `mew proof-summary <artifact_dir> --m6_12-report` (section 6.1). The
    open question is whether to promote it to a dedicated top-level command
-   (e.g. `mew calibration report`) after closeout. That is a naming and UX
-   decision, not an MVP decision.
+   (e.g. `mew calibration report`) once there is live operator feedback
+   on the post-closeout report. Still a naming and UX decision, not an
+   MVP decision; no longer gated on closeout *itself* now that M6.11 is
+   closed.
 2. **Tier 2 archetype activation order.** When reserved labels
    (section 4.2.B) actually start matching new ledger rows, which activate
    first, and with what reviewer sign-off. This decision intentionally
-   waits until the trigger fires.
+   waits until the trigger fires. The post-closeout refresh did not
+   trigger any reserved label promotion.
 3. **Threshold floors.** Off-schema, refusal, dominant-share, counted-N,
-   drift-coverage — none of these are picked here. All of them depend on
-   closeout counts.
+   drift-coverage — none of these are picked here. All of them still
+   depend on counts recomputed against the post-closeout 127-row
+   ledger; the MVP classifier implementation produces those counts, at
+   which point v1 can propose floors (section 11.2).
 4. **Drift detection without prose.** v0 tags drift conservatively. A later
-   pass may harvest drift from replay-bundle diffs, but that is additive and
-   belongs after closeout.
+   pass may harvest drift from replay-bundle diffs, but that is additive.
 5. **Calibration-estimate view.** The Vellum-inspired
    `calibration_feedback_drift` bucket (raw vs corrected estimate vs provider
-   ground truth) requires fields the canonical ledger does not carry today.
-   Defer until `M6.11` closes and then evaluate as a separate expansion.
+   ground truth) requires fields the canonical ledger does not carry.
+   Deferred to a v1 expansion slice now that closeout froze the
+   canonical shape; see section 11.2.
 6. **Context-pressure view.** Preflight/mid-loop/reducer/media-bloat
    pressure also needs new evidence channels that do not exist in the
    current ledger; treat as an `M6.12+` expansion.
@@ -1163,11 +1397,24 @@ These are known and intentionally deferred. They must not block v0.
 10. **Reviewer UX.** Whether the report should highlight rows that currently
     have weak derived labels to a reviewer, so reviewers can upgrade them via
     review docs instead of ledger edits, is deferred but recommended for v1.
-11. **Closeout export execution owner.** Section 8 specifies the closeout
-    refresh and the bundle export (sections 8.2 and 8.5), but the owner of
-    executing that export on the M6.11-closing commit (M6.11 handoff vs a
-    dedicated M6.12 closeout task) is not fixed here. Decide when M6.11
-    closure is imminent.
+11. **Closeout export execution owner.** M6.11 has closed; the ledger
+    snapshot is the 127-row
+    `proof-artifacts/m6_11_calibration_ledger.jsonl`. The closeout
+    export tree (`proof-artifacts/m6_11_closeout_replay_bundles/`) and
+    index (`proof-artifacts/m6_11_closeout_replay_index.json`) are still
+    pending deliverables — the concrete export step from §8.2 has not
+    yet been executed. Owner of that export is the open question.
+    Until it lands, post-closeout mode (§8.5.1.3) cannot be exercised
+    and operators must use pre-closeout mode against local
+    `.mew/replays/**` bundles.
+12. **Positive-outcome taxonomy richness.** v0 treats every row matching
+    §4.2.D as a single `positive_outcome_v0` bucket. A richer v1
+    taxonomy (e.g. separating verifier-green no-change from
+    approved-commit delta, or separating "accept_no_change" reviewer
+    approvals from fresh positive verifications) is deferred. The
+    discovery of this cohort during closeout is why v0 now names the
+    bucket explicitly rather than letting these rows fall into
+    `unclassified_v0`.
 
 ## 10. Minimal MVP
 
@@ -1210,6 +1457,28 @@ The smallest `M6.12` that is worth shipping:
      `fix_first_preflight_refresh_gap` must land in `preflight_gap`, not
      `cached_window_integrity`, `drafting_timeout`, `drafting_no_change`, or
      `fix_first_evidence`)
+   - the §4.2.D Step-1 exclusion guard: a fixture row with
+     `countedness=fix_first_remediation` and
+     `reviewer_decision=approve_commit` (and a `blocker_code` outside
+     the cached-window / drafting-timeout / drafting-no-change /
+     write-policy enumerations — e.g.
+     `write_ready_structural_tokenize_indentation_crash`) must **not**
+     land in `positive_outcome_v0`; it lands in `fix_first_evidence`
+     at slot 12. Add the symmetric fixture row with
+     `countedness=counted_fix_first_blocker` and assert the same
+     guard behavior.
+   - the §4.2.D Step-2 inclusion match on the two
+     `positive_current_head_paired_dry_run_applied_verified_after_*`
+     values (rows 69 and 72 in the closeout ledger) and their
+     corresponding `approved_positive_current_head_*` reviewer
+     decisions — both variants must land in `positive_outcome_v0` at
+     slot 11 rather than falling through to `unclassified_v0`.
+   - raw-match vs post-priority emit: a fixture ledger with a full
+     mix of the Tier 1 match values must reproduce the post-priority
+     emit totals listed in the §4.2.A "v0 classifier-output summary"
+     block (e.g. `cached_window_integrity: 17`,
+     `drafting_no_change: 6`, `fix_first_evidence: 3`), not the raw
+     enumeration totals.
    - cohort-fenced aggregates
    - `--json` contract separation between `canonical` and `derived`,
      including `canonical.mode`, `canonical.bundle_provenance` with
@@ -1252,13 +1521,15 @@ The MVP is *not* allowed to:
   any other consumer that could cause M6.12 output to influence milestone
   decisions; those wirings are post-MVP and remain blocked on the
   governance question in section 9.8
-- depend on the M6.11 closeout refresh having happened (the MVP should
-  render honestly against an in-flight ledger, albeit with more
-  `warnings`)
+- depend on the closeout bundle export tree (§8.2) having been
+  produced. The MVP must still render honestly in pre-closeout mode
+  against local `.mew/replays/**` bundles (with `missing_bundle`
+  warnings where applicable); post-closeout mode becomes the
+  authoritative operator citation as soon as the export step lands.
 
 ## 11. Later Expansion
 
-### 11.1 Post-MVP, pre-closeout
+### 11.1 MVP follow-ups (pre-v1)
 
 - flesh out section 5.1.4 (recurrence across heads) and 5.1.7 (before/after
   comparator) if they did not land in the MVP slice
@@ -1270,15 +1541,19 @@ The MVP is *not* allowed to:
   window; external wiring stays blocked on the governance decision in
   section 9.8
 
-### 11.2 Post-closeout (v1)
+### 11.2 v1 (requires recomputed post-closeout counts)
 
 - commit initial threshold floors (dominant-share, drift-coverage,
-  non-counted concentration) based on the closeout snapshot; never before it
+  non-counted concentration) based on the recomputed post-closeout
+  counts from the MVP classifier run; never before the classifier has
+  actually been run against the 127-row ledger
 - activate previously reserved archetypes (section 4.2.B) whose trigger
-  conditions are met on the closeout ledger, under a `m6_12.v1` classifier
-  bump
-- upgrade drift tags from `reserved` to evidence-backed once the
-  post-closeout drift harvester exists
+  conditions are met on the post-closeout ledger, under a `m6_12.v1`
+  classifier bump
+- promote `positive_outcome_v0` (section 4.2.D) into a richer
+  positive-outcome sub-taxonomy if v0 operator feedback warrants it
+- upgrade drift tags from `reserved` to evidence-backed once a
+  drift harvester exists
 - introduce `calibration-estimate` and `context-pressure` views if the
   evidence channels are added (section 9.5, 9.6)
 - decide whether a dedicated top-level command (e.g.
@@ -1303,10 +1578,21 @@ The MVP is *not* allowed to:
    receives an archetype label via rule 4.1 and the priority list in
    §4.2.A.2 (Tier 1 only), or is explicitly tagged `unclassified_v0` with
    a warning. No ledger row drops between archetypes ambiguously; the
-   v0 taxonomy in particular must classify
-   `non_counted_no_artifact_live_preflight_validation` as
-   `preflight_gap` and must not double-count any `fix_first_preflight_*`
-   row in both `preflight_gap` and `fix_first_evidence`.
+   v0 taxonomy in particular must:
+   - classify `non_counted_no_artifact_live_preflight_validation` as
+     `preflight_gap` and must not double-count any `fix_first_preflight_*`
+     row in both `preflight_gap` and `fix_first_evidence`;
+   - classify the two
+     `positive_current_head_paired_dry_run_applied_verified_after_*`
+     rows (rows 69 and 72 in the closeout ledger) as
+     `positive_outcome_v0`, not `unclassified_v0`;
+   - never classify a `fix_first_remediation` or
+     `counted_fix_first_blocker` row as `positive_outcome_v0`, even
+     when its `reviewer_decision` is `approve_commit` — the §4.2.D
+     Step-1 exclusion guard must fire first;
+   - emit the archetype cohort counts from the §4.2.A "v0
+     classifier-output summary" (the post-priority totals), not the
+     raw enumeration totals.
 2. Every derived label trace-backs to a `row_ref` and, where applicable, a
    `bundle_ref`.
 3. The cockpit renders on one screen for the current ledger without
@@ -1347,14 +1633,16 @@ The MVP is *not* allowed to:
 
 Not v0 criteria (explicitly deferred):
 
-- The closeout refresh plan (section 8) executing cleanly against the
-  chosen closeout commit. That proof belongs to the M6.11 closeout
-  handoff, not to the v0 design-slice gate. v0 only defines the plan;
-  executing it is a separate bounded slice.
+- The closeout bundle export step from §8.2 actually having been run.
+  M6.11 is closed and the 127-row ledger is the canonical input, but
+  `proof-artifacts/m6_11_closeout_replay_bundles/` and
+  `proof-artifacts/m6_11_closeout_replay_index.json` are still pending
+  deliverables (see §9.11). v0 MVP must run in pre-closeout mode today
+  and must be ready to switch to post-closeout mode as soon as the
+  export step lands, without changing classifier_version.
 - Any downstream wiring of the `--json` contract into
   `mew-product-evaluator`, `mew-adversarial-verifier`, roadmap-governance,
   or other surfaces. Those remain post-MVP and governance-gated
   (sections 9.8, 11.3).
 
-If any v0 criterion fails, `M6.12` v0 is not done and the closeout refresh
-must not be executed.
+If any v0 criterion fails, `M6.12` v0 is not done.
