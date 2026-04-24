@@ -2436,9 +2436,10 @@ Next action:
   slices, and `#526` is a counted paired patch/verifier slice. `#527` then
   landed as a counted paired patch/verifier slice on HEAD `4bdec4a`. `#528`
   then landed as a counted verifier-backed no-change slice on HEAD `29744bd`.
-  Continue the batch from a fresh small paired surface, with codex-ultra review
-  per phase, until the 20-slice / 50% incidence criterion can be compared or a
-  concrete fix-first blocker appears.
+  `#529` then landed as a counted verifier-backed no-change slice on HEAD
+  `0276f3b`. Continue the batch from a fresh small paired surface, with
+  codex-ultra review per phase, until the 20-slice / 50% incidence criterion
+  can be compared or a concrete fix-first blocker appears.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
