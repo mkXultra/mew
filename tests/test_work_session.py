@@ -8652,6 +8652,156 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(planned["model_metrics"]["think"]["prompt_chars"], 0)
         self.assertEqual(planned["model_metrics"]["total_model_seconds"], 0.0)
 
+    def test_plan_work_model_turn_preflight_refreshes_structurally_incomplete_cached_windows_from_steer(self):
+        from mew.work_loop import plan_work_model_turn
+        from mew.work_session import finish_work_model_turn, start_work_model_turn
+
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Write-ready preflight refresh",
+            "goal": "Refresh explicit cached windows before drafting.",
+            "created_at": "then",
+            "updated_at": "then",
+            "pending_steer": {
+                "source": "user",
+                "text": (
+                    "Before drafting, read src/mew/patch_draft.py lines 416-646 "
+                    "and tests/test_patch_draft.py lines 325-640."
+                ),
+                "created_at": "now",
+            },
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/patch_draft.py", "line_start": 416, "line_count": 36},
+                    "result": {
+                        "path": "src/mew/patch_draft.py",
+                        "line_start": 416,
+                        "line_end": 451,
+                        "text": (
+                            "def _compile_file(*, todo, proposal_file, cached_windows, live_files):\n"
+                            "    return {\n"
+                            "        'path': proposal_file['path'],\n"
+                        ),
+                        "next_line": 452,
+                        "context_truncated": False,
+                        "source_truncated": False,
+                        "truncated": False,
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_patch_draft.py", "line_start": 576, "line_count": 48},
+                    "result": {
+                        "path": "tests/test_patch_draft.py",
+                        "line_start": 576,
+                        "line_end": 623,
+                        "text": (
+                            "def test_compile_patch_draft_blocks_missing_exact_cached_window_texts(self):\n"
+                            "    artifact = {'code': 'missing_exact_cached_window_texts'}\n"
+                            "    self.assertEqual(artifact['code'], 'missing_exact_cached_window_texts')\n"
+                        ),
+                        "next_line": 624,
+                        "context_truncated": False,
+                        "source_truncated": False,
+                        "truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+        state["work_sessions"].append(session)
+        task = {
+            "id": 1,
+            "title": "Current-head replay sample: patch_draft compiler on 1150351",
+            "description": (
+                "Scope fence: src/mew/patch_draft.py + tests/test_patch_draft.py only. "
+                "Collect one fresh current-head live bundle on this pair."
+            ),
+            "status": "todo",
+            "kind": "coding",
+        }
+        decision_plan = {
+            "summary": "prepare paired dry-run edit",
+            "working_memory": {
+                "hypothesis": "The paired source/test windows are enough for a dry-run edit.",
+                "next_step": "Draft one paired dry-run edit batch.",
+                "plan_items": [
+                    "Read anchored src/test windows",
+                    "Assess whether native blocker contract already matches guidance",
+                    "If needed, prepare paired dry-run edit or finish with exact no-delta/blocker conclusion",
+                ],
+                "target_paths": ["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                "last_verified_state": "Exact paired windows are cached and complete.",
+            },
+        }
+        turn = start_work_model_turn(
+            state,
+            session,
+            decision_plan,
+            {"summary": decision_plan["summary"]},
+            {"type": "wait", "reason": "ready for the write-ready draft step"},
+        )
+        finish_work_model_turn(state, 1, turn["id"])
+
+        with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                timeout=60,
+                allowed_read_roots=["."],
+                allowed_write_roots=["src/mew/patch_draft.py", "tests/test_patch_draft.py"],
+                allow_verify=True,
+                verify_command=(
+                    "uv run python -m unittest "
+                    "tests.test_patch_draft.PatchDraftTests.test_compile_patch_draft_blocks_missing_exact_cached_window_texts"
+                ),
+                guidance=(
+                    "Refresh/read src/mew/patch_draft.py lines 416-646 and "
+                    "tests/test_patch_draft.py lines 325-640 before the paired draft."
+                ),
+                act_mode="deterministic",
+            )
+
+        call_model.assert_not_called()
+        self.assertEqual(planned["action"]["type"], "batch")
+        self.assertEqual(
+            planned["action"]["tools"],
+            [
+                {
+                    "type": "read_file",
+                    "path": "src/mew/patch_draft.py",
+                    "line_start": 416,
+                    "line_count": 231,
+                    "reason": "refresh explicitly requested write-ready cached window",
+                },
+                {
+                    "type": "read_file",
+                    "path": "tests/test_patch_draft.py",
+                    "line_start": 325,
+                    "line_count": 316,
+                    "reason": "refresh explicitly requested write-ready cached window",
+                },
+            ],
+        )
+        self.assertIn("write-ready preflight blocker", planned["action"]["reason"])
+        self.assertFalse(planned["model_metrics"]["write_ready_fast_path"])
+        self.assertEqual(
+            planned["model_metrics"]["write_ready_fast_path_reason"],
+            "insufficient_cached_window_context",
+        )
+        self.assertEqual(planned["model_metrics"]["think"]["prompt_chars"], 0)
+        self.assertEqual(planned["model_metrics"]["total_model_seconds"], 0.0)
+
     def test_tiny_write_ready_draft_reasoning_effort_respects_auto_and_env_override_source(self):
         from mew.work_loop import _attempt_write_ready_tiny_draft_turn
 

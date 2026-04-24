@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import hashlib
 from pathlib import Path
+import re
 import time
 from io import StringIO
 import tokenize
@@ -2223,6 +2224,66 @@ def _work_write_ready_fast_path_details(context):
     }
 
 
+def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
+    text_parts = []
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    pending_steer = resume.get("pending_steer") if isinstance(resume.get("pending_steer"), dict) else {}
+    steer_text = str(pending_steer.get("text") or "").strip()
+    if steer_text:
+        text_parts.append(steer_text)
+    guidance = str((context or {}).get("guidance") or "").strip()
+    if guidance:
+        text_parts.append(guidance)
+    if not text_parts:
+        return []
+
+    allowed_paths = [str(path or "").strip() for path in target_paths or [] if str(path or "").strip()]
+    if not allowed_paths:
+        return []
+    text = "\n".join(text_parts)
+    path_pattern = r"[A-Za-z0-9_./-]+\.[A-Za-z0-9_]+"
+    span_pattern = re.compile(
+        rf"(?P<path>{path_pattern})\s*(?:[:,]?\s*)"
+        r"(?:lines?|line span|line window|window)\s+"
+        r"(?P<start>\d{1,7})\s*(?:-|\.{2}|:|to)\s*(?P<end>\d{1,7})",
+        re.IGNORECASE,
+    )
+    actions = []
+    seen = set()
+    for match in span_pattern.finditer(text):
+        raw_path = match.group("path").strip().strip("`'\"")
+        path = next((item for item in allowed_paths if _work_paths_match(raw_path, item)), "")
+        if not path:
+            continue
+        try:
+            line_start = int(match.group("start"))
+            line_end = int(match.group("end"))
+        except (TypeError, ValueError):
+            continue
+        if line_start <= 0 or line_end < line_start:
+            continue
+        line_count = line_end - line_start + 1
+        if line_count > 1000:
+            continue
+        key = (path, line_start, line_count)
+        if key in seen:
+            continue
+        seen.add(key)
+        actions.append(
+            {
+                "type": "read_file",
+                "path": path,
+                "line_start": line_start,
+                "line_count": line_count,
+                "reason": "refresh explicitly requested write-ready cached window",
+            }
+        )
+        if len(actions) >= 5:
+            break
+    return actions
+
+
 def _work_write_ready_preflight_block(context, write_ready_fast_path):
     fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
     if fast_path.get("active"):
@@ -2275,13 +2336,24 @@ def _work_write_ready_preflight_block(context, write_ready_fast_path):
             "last_verified_state": "Drafting was preflight-blocked before a model call.",
         },
     }
-    action = {
-        "type": "wait",
-        "reason": (
-            "write-ready preflight blocker: paired cached windows are not structurally complete; "
-            "refresh cached windows before drafting"
-        ),
-    }
+    refresh_actions = _work_write_ready_explicit_refresh_read_actions(context, target_paths)
+    if refresh_actions:
+        action = {
+            "type": "batch",
+            "tools": refresh_actions,
+            "reason": (
+                "write-ready preflight blocker: refresh explicitly requested cached windows "
+                "before drafting"
+            ),
+        }
+    else:
+        action = {
+            "type": "wait",
+            "reason": (
+                "write-ready preflight blocker: paired cached windows are not structurally complete; "
+                "refresh cached windows before drafting"
+            ),
+        }
     return {
         "decision_plan": decision_plan,
         "action_plan": {
