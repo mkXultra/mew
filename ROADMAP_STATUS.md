@@ -2166,6 +2166,15 @@ Missing proof:
   anchors. The current patch fixes that search-result-to-read recovery and
   refuses to fall back to stale older search anchors; codex-ultra approved the
   patch after focused and full `tests/test_work_session.py` validation.
+- Task `#501` on `777e5f7` then verified the search-result-to-read path far
+  enough to read a widened target window, but exposed two more non-counted
+  recovery defects: target paths could narrow to only one side of the
+  source/test pair, and a search result could prefer a self-test/query fixture
+  line over the actual definition anchor. The current follow-up patch augments
+  target paths from completed explicit-refresh search calls and prefers
+  `def` / `class` / `def test_` snippets over query fixture lines while
+  preserving stale-search protection. Codex-ultra approved the patch after
+  focused and full `tests/test_work_session.py` validation.
 
 Next action:
 
@@ -2176,15 +2185,16 @@ Next action:
   `#399/#401`; use the cohort-aware replay summaries plus the additive
   `blocker_code_breakdown` output to collect the remaining runtime slices.
   Because evidence-only commits keep resetting literal `current_head`
-  cohorting to zero, the next concrete step after the search-result-to-read
-  recovery commit is to run a fresh bounded live slice on the new literal HEAD
-  without `--measurement-head`, ideally on the same
+  cohorting to zero, the next concrete step after the search-result path and
+  anchor recovery commit is to run a fresh bounded live slice on the new
+  literal HEAD without `--measurement-head`, ideally on the same
   `src/mew/work_session.py` + `tests/test_work_session.py` surface, and prove
-  whether the loop can now advance from cue-only refresh to widened reads and
-  then to either a native replay, a reviewer-visible patch, or a new concrete
-  fix-first blocker. Keep the `b650319` counted replay as the latest counted
-  runtime-head evidence via `--measurement-head`, but do not advance on legacy
-  timeout-only evidence or reviewer/non-native non-counted replays alone
+  whether the loop can now advance from cue-only refresh to paired widened
+  reads and then to either a native replay, a reviewer-visible patch, or a new
+  concrete fix-first blocker. Keep the `b650319` counted replay as the latest
+  counted runtime-head evidence via `--measurement-head`, but do not advance
+  on legacy timeout-only evidence or reviewer/non-native non-counted replays
+  alone
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the

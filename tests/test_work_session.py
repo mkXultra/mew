@@ -7339,6 +7339,126 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_block_adds_paths_from_refresh_search_results(self):
+        from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
+
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            {
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/work_session.py",
+                            "query": "finish_work_model_turn",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "src/mew/work_session.py",
+                                    "line": 1690,
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_work_session.py",
+                            "query": "no_change_replay_for_current_head_validation_slice",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line": 10967,
+                                }
+                            ]
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [],
+            },
+            ["tests/test_work_session.py"],
+        )
+
+        self.assertEqual(
+            [action["path"] for action in actions],
+            ["tests/test_work_session.py", "src/mew/work_session.py"],
+        )
+
+    def test_write_ready_preflight_block_prefers_definition_anchor_over_query_fixture(self):
+        from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
+
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            {
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_work_session.py",
+                            "query": "no_change_replay_for_current_head_validation_slice",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line": 7208,
+                                    "lines": [
+                                        {
+                                            "line": 7208,
+                                            "text": (
+                                                '"query": '
+                                                '"no_change_replay_for_current_head_validation_slice",'
+                                            ),
+                                            "match": True,
+                                        }
+                                    ],
+                                },
+                                {
+                                    "path": "tests/test_work_session.py",
+                                    "line": 10967,
+                                    "lines": [
+                                        {
+                                            "line": 10967,
+                                            "text": (
+                                                "    def "
+                                                "test_plan_work_model_turn_writes_no_change_replay_for_current_head_validation_slice(self):"
+                                            ),
+                                            "match": True,
+                                        }
+                                    ],
+                                },
+                            ]
+                        },
+                    }
+                ],
+                "recent_read_file_windows": [],
+            },
+            ["tests/test_work_session.py"],
+        )
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "read_file",
+                    "path": "tests/test_work_session.py",
+                    "line_start": 10847,
+                    "line_count": 520,
+                    "reason": "read explicitly located write-ready cached window",
+                }
+            ],
+        )
+
     def test_write_ready_fast_path_does_not_activate_without_plan_item_observations(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 

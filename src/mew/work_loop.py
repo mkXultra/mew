@@ -2322,7 +2322,17 @@ def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths):
 
 def _work_write_ready_refresh_search_result_read_actions(work_session, target_paths):
     work_session = work_session if isinstance(work_session, dict) else {}
+    tool_calls = [call for call in (work_session.get("tool_calls") or []) if isinstance(call, dict)]
     target_paths = [str(path or "").strip() for path in target_paths or [] if str(path or "").strip()]
+    for call in tool_calls:
+        if call.get("tool") != "search_text" or str(call.get("status") or "") != "completed":
+            continue
+        parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+        if str(parameters.get("reason") or "") != "locate explicitly requested write-ready cached window":
+            continue
+        path = str(parameters.get("path") or "").strip()
+        if path and not any(_work_paths_match(path, existing) for existing in target_paths):
+            target_paths.append(path)
     if not target_paths:
         return []
 
@@ -2346,9 +2356,39 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
                     return True
         return False
 
+    def snippet_anchor(snippet):
+        if not isinstance(snippet, dict):
+            return (0, 0)
+        try:
+            anchor_line = int(snippet.get("line") or snippet.get("start_line") or 0)
+        except (TypeError, ValueError):
+            anchor_line = 0
+        if anchor_line <= 0:
+            return (0, 0)
+        match_text = ""
+        for line in snippet.get("lines") or []:
+            if not isinstance(line, dict):
+                continue
+            try:
+                line_number = int(line.get("line") or 0)
+            except (TypeError, ValueError):
+                line_number = 0
+            if line.get("match") or line_number == anchor_line:
+                match_text = str(line.get("text") or "")
+                break
+        stripped = match_text.strip()
+        score = 1
+        if stripped.startswith(("def ", "async def ", "class ")):
+            score += 5
+        if stripped.startswith("def test_"):
+            score += 2
+        if "\"query\"" in stripped or "'query'" in stripped:
+            score -= 3
+        return (score, anchor_line)
+
     actions = []
     for target_path in target_paths:
-        for call in reversed(work_session.get("tool_calls") or []):
+        for call in reversed(tool_calls):
             if not isinstance(call, dict) or call.get("tool") != "search_text":
                 continue
             if str(call.get("status") or "") != "completed":
@@ -2361,15 +2401,14 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
             result = call.get("result") if isinstance(call.get("result"), dict) else {}
             snippets = result.get("snippets") if isinstance(result.get("snippets"), list) else []
             anchor_line = 0
+            anchor_score = -10
             for snippet in snippets:
                 if not isinstance(snippet, dict) or not _work_paths_match(snippet.get("path"), target_path):
                     continue
-                try:
-                    anchor_line = int(snippet.get("line") or snippet.get("start_line") or 0)
-                except (TypeError, ValueError):
-                    anchor_line = 0
-                if anchor_line > 0:
-                    break
+                score, line = snippet_anchor(snippet)
+                if line > 0 and score > anchor_score:
+                    anchor_score = score
+                    anchor_line = line
             if anchor_line <= 0:
                 break
             line_start = max(1, anchor_line - 120)
