@@ -685,6 +685,8 @@ def build_recent_read_file_windows(
             "line_start": result.get("line_start"),
             "line_end": result.get("line_end"),
             "offset": result.get("offset"),
+            "next_line": result.get("next_line"),
+            "has_more_lines": result.get("has_more_lines"),
             "text": clipped,
             "visible_chars": min(len(text), window_text_limit),
             "source_text_chars": len(text),

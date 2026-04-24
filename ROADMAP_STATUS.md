@@ -2722,6 +2722,15 @@ Next action:
   `test_write_ready_preflight_block_uses_adjacent_reads_for_top_broad_incomplete_cache`.
   Focused `write_ready` tests now pass 79 tests plus 5 subtests, ruff passed,
   `git diff --check` passed, and codex-ultra approved the fix-first patch.
+  The first rerun after that fix, `#569` / session `#551` on HEAD
+  `3bc939b`, proved the fix incomplete: `build_recent_read_file_windows`
+  dropped `next_line` / `has_more_lines`, so real work-loop context still
+  could not trigger adjacent tail reads. The follow-up remediation preserves
+  those read-file tail metadata fields in recent windows and strengthens the
+  regression to build the preflight context through `build_recent_read_file_windows`
+  instead of hand-injected `next_line`. Focused
+  `write_ready or recent_read_file_windows` tests pass 81 tests plus
+  5 subtests, ruff passed, `git diff --check` passed, and codex-ultra approved.
   Next step: rerun the bounded `runtime` source/test surface on a fresh task.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;

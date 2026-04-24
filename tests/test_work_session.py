@@ -7308,9 +7308,51 @@ class WorkSessionTests(unittest.TestCase):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
             _work_write_ready_preflight_block,
+            build_recent_read_file_windows,
         )
 
         target_paths = ["src/mew/work_loop.py", "tests/test_work_session.py"]
+        tool_calls = [
+            {
+                "id": 5001,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {
+                    "path": target_paths[0],
+                    "line_start": 1,
+                    "line_count": 1000,
+                },
+                "result": {
+                    "path": target_paths[0],
+                    "line_start": 1,
+                    "line_end": 1000,
+                    "next_line": 1001,
+                    "has_more_lines": True,
+                    "text": "def _work_write_ready_preflight_block(context, write_ready_fast_path):\n" * 10,
+                    "truncated": False,
+                },
+            },
+            {
+                "id": 5002,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {
+                    "path": target_paths[1],
+                    "line_start": 1,
+                    "line_count": 1000,
+                },
+                "result": {
+                    "path": target_paths[1],
+                    "line_start": 1,
+                    "line_end": 1000,
+                    "next_line": 1001,
+                    "has_more_lines": True,
+                    "text": "def test_write_ready_preflight_block_uses_adjacent_reads_for_top_broad_incomplete_cache(self):\n"
+                    * 10,
+                    "truncated": False,
+                },
+            },
+        ]
         context = {
             "task": {
                 "id": 511,
@@ -7354,26 +7396,8 @@ class WorkSessionTests(unittest.TestCase):
                         {"path": target_paths[1]},
                     ],
                 },
-                "recent_read_file_windows": [
-                    {
-                        "tool_call_id": 5001,
-                        "path": target_paths[0],
-                        "line_start": 1,
-                        "line_end": 1000,
-                        "next_line": 1001,
-                        "text": "def _work_write_ready_preflight_block(context, write_ready_fast_path):\n",
-                        "context_truncated": False,
-                    },
-                    {
-                        "tool_call_id": 5002,
-                        "path": target_paths[1],
-                        "line_start": 1,
-                        "line_end": 1000,
-                        "next_line": 1001,
-                        "text": "def test_write_ready_preflight_block_uses_adjacent_reads_for_top_broad_incomplete_cache(self):\n",
-                        "context_truncated": False,
-                    },
-                ],
+                "tool_calls": tool_calls,
+                "recent_read_file_windows": build_recent_read_file_windows(tool_calls),
             },
             "capabilities": {},
             "guidance": "Draft one paired dry-run edit using cached windows.",
@@ -7395,6 +7419,48 @@ class WorkSessionTests(unittest.TestCase):
                 (target_paths[1], 1001, 1000),
             ],
         )
+
+    def test_build_recent_read_file_windows_preserves_next_line_and_has_more_lines(self):
+        from mew.work_loop import build_recent_read_file_windows
+
+        tool_calls = [
+            {
+                "id": 1,
+                "tool": "read_file",
+                "status": "completed",
+                "result": {
+                    "path": "src/mew/work_loop.py",
+                    "line_start": 1,
+                    "line_end": 1000,
+                    "next_line": 1001,
+                    "has_more_lines": True,
+                    "text": "source window line\n" * 12,
+                    "truncated": False,
+                },
+            },
+            {
+                "id": 2,
+                "tool": "read_file",
+                "status": "completed",
+                "result": {
+                    "path": "tests/test_work_session.py",
+                    "line_start": 1,
+                    "line_end": 1000,
+                    "next_line": 1001,
+                    "has_more_lines": True,
+                    "text": "test window line\n" * 12,
+                    "truncated": False,
+                },
+            },
+        ]
+
+        windows = build_recent_read_file_windows(tool_calls)
+        self.assertEqual(len(windows), 2)
+        windows_by_path = {window["path"]: window for window in windows}
+        self.assertEqual(windows_by_path["src/mew/work_loop.py"]["next_line"], 1001)
+        self.assertEqual(windows_by_path["tests/test_work_session.py"]["next_line"], 1001)
+        self.assertTrue(windows_by_path["src/mew/work_loop.py"]["has_more_lines"])
+        self.assertTrue(windows_by_path["tests/test_work_session.py"]["has_more_lines"])
 
     def test_write_ready_preflight_blocks_when_cached_test_window_ends_inside_new_block(self):
         from mew.work_loop import (
