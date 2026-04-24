@@ -7430,6 +7430,130 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
         self.assertEqual(preflight_block["action"]["type"], "wait")
 
+    def test_write_ready_preflight_does_not_repeat_structural_refresh_when_prior_refresh_exists_for_path(self):
+        from mew.work_loop import _work_write_ready_cached_window_refresh_read_actions
+
+        actions = _work_write_ready_cached_window_refresh_read_actions(
+            {
+                "tool_calls": [
+                    {
+                        "id": 100,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/proof_summary.py",
+                            "line_start": 1,
+                            "line_count": 939,
+                            "reason": "refresh structurally incomplete write-ready cached window",
+                        },
+                    },
+                    {
+                        "id": 101,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_proof_summary.py",
+                            "line_start": 199,
+                            "line_count": 1000,
+                            "reason": "refresh structurally incomplete write-ready cached window",
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 100,
+                        "path": "src/mew/proof_summary.py",
+                        "line_start": 1,
+                        "line_end": 939,
+                        "text": "import json\n\ndef summarize_m6_11_replay_calibration():\n    if current_head:\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 101,
+                        "path": "tests/test_proof_summary.py",
+                        "line_start": 199,
+                        "line_end": 1198,
+                        "text": "class ProofSummaryTests(unittest.TestCase):\n    def test_current_head(self):\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            [
+                {"path": "src/mew/proof_summary.py", "line_start": 383, "line_end": 522},
+                {"path": "tests/test_proof_summary.py", "line_start": 800, "line_end": 884},
+            ],
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_write_ready_preflight_no_refresh_guidance_suppresses_explicit_refresh_searches(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/proof_summary.py", "tests/test_proof_summary.py"]
+        context = {
+            "task": {
+                "id": 507,
+                "title": "M6.11 current-head incidence slice",
+                "description": "Produce an incidence artifact or concrete blocker.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 490,
+                "status": "active",
+                "resume": {
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Refresh the paired exact cached windows before drafting again.",
+                            "cached_windows": [
+                                {"path": target_paths[0], "line_start": 1, "line_end": 939},
+                                {"path": target_paths[1], "line_start": 199, "line_end": 1198},
+                            ],
+                        }
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 3964,
+                        "path": target_paths[0],
+                        "line_start": 1,
+                        "line_end": 939,
+                        "text": "import json\n\ndef summarize_m6_11_replay_calibration():\n    if current_head:\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 3963,
+                        "path": target_paths[1],
+                        "line_start": 199,
+                        "line_end": 1198,
+                        "text": "class ProofSummaryTests(unittest.TestCase):\n    def test_current_head(self):\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": (
+                "Continue only if paired cached windows are sufficient to draft. "
+                "Do not refresh again. If drafting still cannot proceed, emit a blocker."
+            ),
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "wait")
+        self.assertEqual(
+            preflight_block["action"]["reason"],
+            "write-ready tiny draft blocker: cached_window_incomplete",
+        )
+        self.assertEqual(preflight_block["action_plan"]["blocker"]["code"], "cached_window_incomplete")
+
     def test_write_ready_preflight_block_searches_explicit_unnumbered_refresh_cues(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
@@ -9822,6 +9946,154 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertEqual(planned["model_metrics"]["think"]["prompt_chars"], 0)
         self.assertEqual(planned["model_metrics"]["total_model_seconds"], 0.0)
+
+    def test_plan_work_model_turn_writes_cached_window_incomplete_replay_when_refresh_exhausted(self):
+        from mew.work_loop import plan_work_model_turn
+        from mew.work_session import finish_work_model_turn, start_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                source_path = Path("src/mew/proof_summary.py")
+                test_path = Path("tests/test_proof_summary.py")
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                test_path.parent.mkdir(parents=True, exist_ok=True)
+                source_text = (
+                    "import json\n\n"
+                    "def summarize_m6_11_replay_calibration():\n"
+                    "    if current_head:\n"
+                )
+                test_text = (
+                    "class ProofSummaryTests(unittest.TestCase):\n"
+                    "    def test_current_head(self):\n"
+                )
+                source_path.write_text(source_text, encoding="utf-8")
+                test_path.write_text(test_text, encoding="utf-8")
+
+                state = {"next_ids": {"work_model_turn": 1}, "work_sessions": []}
+                session = {
+                    "id": 490,
+                    "task_id": 507,
+                    "status": "active",
+                    "title": "Write-ready preflight exhausted",
+                    "goal": "Emit a native blocker replay when structural refresh is exhausted.",
+                    "created_at": "then",
+                    "updated_at": "then",
+                    "tool_calls": [
+                        {
+                            "id": 3964,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {
+                                "path": "src/mew/proof_summary.py",
+                                "line_start": 1,
+                                "line_count": 939,
+                                "reason": "refresh structurally incomplete write-ready cached window",
+                            },
+                            "result": {
+                                "path": "src/mew/proof_summary.py",
+                                "line_start": 1,
+                                "line_end": 939,
+                                "text": source_text,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                        {
+                            "id": 3963,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {
+                                "path": "tests/test_proof_summary.py",
+                                "line_start": 199,
+                                "line_count": 1000,
+                                "reason": "refresh structurally incomplete write-ready cached window",
+                            },
+                            "result": {
+                                "path": "tests/test_proof_summary.py",
+                                "line_start": 199,
+                                "line_end": 1198,
+                                "text": test_text,
+                                "context_truncated": False,
+                                "source_truncated": False,
+                                "truncated": False,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+                state["work_sessions"].append(session)
+                task = {
+                    "id": 507,
+                    "title": "M6.11 current-head incidence slice",
+                    "description": "Produce an incidence artifact or concrete blocker.",
+                    "status": "todo",
+                    "kind": "coding",
+                }
+                decision_plan = {
+                    "summary": "prepare paired dry-run edit",
+                    "working_memory": {
+                        "hypothesis": "The paired source/test windows are enough for a dry-run edit.",
+                        "next_step": "Draft one paired dry-run edit batch.",
+                        "plan_items": [
+                            "Inspect calibration source/test windows",
+                            "Identify one bounded source+test improvement or blocker",
+                            "Prepare paired dry-run patch or blocker closeout",
+                        ],
+                        "target_paths": [
+                            "src/mew/proof_summary.py",
+                            "tests/test_proof_summary.py",
+                        ],
+                        "last_verified_state": "Exact paired windows are cached and complete.",
+                    },
+                }
+                turn = start_work_model_turn(
+                    state,
+                    session,
+                    decision_plan,
+                    {"summary": decision_plan["summary"]},
+                    {"type": "wait", "reason": "ready for the write-ready draft step"},
+                )
+                finish_work_model_turn(state, 490, turn["id"])
+
+                with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        timeout=60,
+                        allowed_read_roots=["."],
+                        allowed_write_roots=[
+                            "src/mew/proof_summary.py",
+                            "tests/test_proof_summary.py",
+                        ],
+                        allow_verify=True,
+                        verify_command="uv run pytest -q tests/test_proof_summary.py --no-testmon",
+                        guidance="Draft one paired dry-run edit using the cached windows.",
+                        act_mode="deterministic",
+                    )
+
+                call_model.assert_not_called()
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    "write-ready tiny draft blocker: cached_window_incomplete",
+                )
+                metrics = planned["model_metrics"]
+                self.assertEqual(metrics["tiny_write_ready_draft_outcome"], "blocker")
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                self.assertEqual(metrics["patch_draft_compiler_artifact_kind"], "patch_blocker")
+                replay_path = Path(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(replay_path.is_file())
+                replay_metadata = json.loads(replay_path.read_text(encoding="utf-8"))
+                self.assertTrue(replay_metadata["calibration_counted"])
+                self.assertEqual(replay_metadata["calibration_exclusion_reason"], "")
+                self.assertEqual(replay_metadata["blocker_code"], "cached_window_incomplete")
+            finally:
+                os.chdir(old_cwd)
 
     def test_plan_work_model_turn_preflight_refreshes_structurally_incomplete_cached_windows_from_steer(self):
         from mew.work_loop import plan_work_model_turn

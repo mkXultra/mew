@@ -2266,6 +2266,8 @@ def _work_write_ready_fast_path_details(context):
             **fast_path,
             "active": False,
             "reason": "insufficient_cached_window_context",
+            "recent_windows": recent_windows,
+            "cached_paths": cached_paths,
         }
     return {
         **fast_path,
@@ -2415,6 +2417,37 @@ def _work_write_ready_explicit_refresh_search_already_zero_match(work_session, p
             if not isinstance(matches, list) and isinstance(snippets, list) and len(snippets) == 0:
                 return True
     return False
+
+
+def _work_write_ready_structural_refresh_paths(work_session):
+    paths = []
+    if not isinstance(work_session, dict):
+        return paths
+    for call in work_session.get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        if call.get("tool") != "read_file" or str(call.get("status") or "") != "completed":
+            continue
+        parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+        if str(parameters.get("reason") or "") != "refresh structurally incomplete write-ready cached window":
+            continue
+        path = str(parameters.get("path") or "").strip()
+        if path and not any(_work_paths_match(path, existing) for existing in paths):
+            paths.append(path)
+    return paths
+
+
+def _work_write_ready_structural_refresh_exhausted_for_paths(work_session, target_paths):
+    target_paths = [str(path or "").strip() for path in target_paths or [] if str(path or "").strip()]
+    if not target_paths:
+        return False
+    refreshed_paths = _work_write_ready_structural_refresh_paths(work_session)
+    if not refreshed_paths:
+        return False
+    return all(
+        any(_work_paths_match(path, refreshed_path) for refreshed_path in refreshed_paths)
+        for path in target_paths
+    )
 
 
 def _work_write_ready_refresh_search_result_read_actions(work_session, target_paths):
@@ -2574,6 +2607,7 @@ def _work_write_ready_cached_window_refresh_read_actions(work_session, cached_wi
 
     actions = []
     seen = set()
+    structurally_refreshed_paths = _work_write_ready_structural_refresh_paths(work_session)
     for cached in cached_windows or []:
         if not isinstance(cached, dict):
             continue
@@ -2581,6 +2615,8 @@ def _work_write_ready_cached_window_refresh_read_actions(work_session, cached_wi
             continue
         path = str(cached.get("path") or "").strip()
         if not path:
+            continue
+        if any(_work_paths_match(path, existing) for existing in structurally_refreshed_paths):
             continue
         try:
             cached_start = int(cached.get("line_start") or 0)
@@ -2714,6 +2750,53 @@ def _work_write_ready_guidance_forbids_widening(context, resume):
     )
 
 
+def _work_write_ready_guidance_forbids_refresh(context, resume):
+    text_parts = []
+    guidance = str((context or {}).get("guidance") or "").strip()
+    if guidance:
+        text_parts.append(guidance)
+    pending_steer = (resume or {}).get("pending_steer")
+    if isinstance(pending_steer, dict):
+        steer_text = str(pending_steer.get("text") or "").strip()
+        if steer_text:
+            text_parts.append(steer_text)
+    text = "\n".join(text_parts).casefold()
+    if not text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "do not refresh",
+            "don't refresh",
+            "no refresh",
+            "do not reread",
+            "don't reread",
+            "no reread",
+            "do not read again",
+            "don't read again",
+        )
+    )
+
+
+def _work_write_ready_cached_window_incomplete_preflight_blocker(
+    *,
+    refresh_forbidden,
+    refresh_exhausted,
+):
+    if refresh_forbidden:
+        detail = "refresh is forbidden by current guidance and cached windows remain structurally incomplete"
+    elif refresh_exhausted:
+        detail = "structural refresh was already attempted for each paired target path"
+    else:
+        detail = "paired cached windows remain structurally incomplete before drafting"
+    return {
+        "kind": "patch_blocker",
+        "summary": "cached windows remain structurally incomplete",
+        "code": "cached_window_incomplete",
+        "detail": detail,
+    }
+
+
 def _work_write_ready_preflight_block(context, write_ready_fast_path):
     fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
     if fast_path.get("active"):
@@ -2766,10 +2849,17 @@ def _work_write_ready_preflight_block(context, write_ready_fast_path):
             "last_verified_state": "Drafting was preflight-blocked before a model call.",
         },
     }
-    refresh_actions = _work_write_ready_explicit_refresh_read_actions(context, target_paths)
-    if not refresh_actions:
+    refresh_forbidden = _work_write_ready_guidance_forbids_refresh(context, resume)
+    refresh_exhausted = _work_write_ready_structural_refresh_exhausted_for_paths(
+        work_session,
+        target_paths,
+    )
+    refresh_actions = []
+    if not refresh_forbidden:
+        refresh_actions = _work_write_ready_explicit_refresh_read_actions(context, target_paths)
+    if not refresh_actions and not refresh_forbidden:
         refresh_actions = _work_write_ready_refresh_search_result_read_actions(work_session, target_paths)
-    if not refresh_actions:
+    if not refresh_actions and not refresh_forbidden:
         if not _work_write_ready_guidance_forbids_widening(context, resume):
             refresh_actions = _work_write_ready_cached_window_refresh_read_actions(
                 work_session,
@@ -2785,21 +2875,39 @@ def _work_write_ready_preflight_block(context, write_ready_fast_path):
             ),
         }
     else:
+        blocker = {}
+        if refresh_forbidden or refresh_exhausted:
+            blocker = _work_write_ready_cached_window_incomplete_preflight_blocker(
+                refresh_forbidden=refresh_forbidden,
+                refresh_exhausted=refresh_exhausted,
+            )
         action = {
             "type": "wait",
-            "reason": (
+            "reason": _stable_write_ready_tiny_draft_blocker_reason(blocker)
+            if blocker
+            else (
                 "write-ready preflight blocker: paired cached windows are not structurally complete; "
                 "refresh cached windows before drafting"
             ),
         }
+        if blocker:
+            decision_plan["blocker"] = blocker
     return {
         "decision_plan": decision_plan,
         "action_plan": {
             "summary": action["reason"],
             "action": action,
-            "act_mode": "deterministic",
+            "act_mode": "tiny_write_ready_draft" if decision_plan.get("blocker") else "deterministic",
+            **({"blocker": decision_plan["blocker"]} if decision_plan.get("blocker") else {}),
         },
         "action": action,
+        "cached_windows_for_replay": (
+            write_ready_fast_path.get("recent_windows")
+            if isinstance(write_ready_fast_path, dict)
+            else []
+        )
+        or _write_ready_recent_windows_from_active_work_todo(work_session, resume)
+        or cached_windows,
     }
 
 
@@ -4332,6 +4440,35 @@ def plan_work_model_turn(
     }
     preflight_block = _work_write_ready_preflight_block(context, write_ready_fast_path)
     if preflight_block:
+        preflight_blocker = (
+            (preflight_block.get("action_plan") or {}).get("blocker")
+            if isinstance(preflight_block.get("action_plan"), dict)
+            else {}
+        )
+        if isinstance(preflight_blocker, dict) and preflight_blocker:
+            preflight_replay_fast_path = {
+                **(write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}),
+                "recent_windows": preflight_block.get("cached_windows_for_replay") or [],
+                "cached_windows": preflight_block.get("cached_windows_for_replay") or [],
+            }
+            compiled = _compile_write_ready_patch_draft_proposal(
+                session=session,
+                context=context,
+                proposal=preflight_blocker,
+                write_ready_fast_path=preflight_replay_fast_path,
+                allowed_write_roots=allowed_write_roots or [],
+            )
+            observation = compiled.get("observation") or _empty_patch_draft_compiler_observation()
+            if any(observation.get(key) for key in observation):
+                model_metrics.update(observation)
+                model_metrics["tiny_write_ready_draft_outcome"] = "blocker"
+                model_metrics["tiny_write_ready_draft_compiler_artifact_kind"] = (
+                    observation.get("patch_draft_compiler_artifact_kind") or ""
+                )
+                if observation.get("patch_draft_compiler_error"):
+                    model_metrics["tiny_write_ready_draft_error"] = (
+                        observation.get("patch_draft_compiler_error") or ""
+                    )
         model_metrics["think"] = {
             "prompt_chars": 0,
             "timeout_seconds": 0.0,

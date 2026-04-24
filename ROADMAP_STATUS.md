@@ -2226,6 +2226,17 @@ Missing proof:
   proves proof-summary taxonomy plus work-loop replay counting behavior with
   focused tests. Codex-ultra approved this plan; the pre-fix `#506` replay
   remains non-counted and must not be retroactively counted.
+- Task `#507` on `ed2e27d` exercised the post-vocabulary proof-summary slice
+  and exposed the next non-counted fix-first infrastructure gap: deterministic
+  write-ready preflight kept refreshing/searching after paired cached windows
+  were already structurally refreshed, and even explicit "do not refresh"
+  guidance still produced refresh searches instead of a replay, paired patch,
+  verifier, or concrete artifact. The current patch makes no-refresh guidance
+  suppress all preflight refresh recovery, treats one structural refresh per
+  paired path as exhausted, and emits a native `cached_window_incomplete`
+  patch-draft compiler replay when paired windows remain structurally
+  insufficient after refresh is forbidden or exhausted. Codex-ultra approved
+  the plan; the pre-fix `#507` session remains non-counted.
 
 Next action:
 
@@ -2245,9 +2256,9 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After committing the #506 `cached_window_incomplete` vocabulary fix, repeat a
-  fresh literal-head slice again; do not resume `#505` or `#506` as counted
-  evidence because both are blocked pre-fix sessions.
+  After committing the #507 repeated structural refresh/no-replay fix, repeat a
+  fresh literal-head slice again; do not resume `#505`, `#506`, or `#507` as
+  counted evidence because they are blocked pre-fix sessions.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
