@@ -2563,8 +2563,24 @@ Next action:
   closed as counted `positive_verifier_backed_no_change`. Codex-ultra
   classified it PASS/COUNTED, accepted the non-blocking objc warning because
   the verifier exit was clean and the session closed, and approved marking task
-  `#551` done. Next step: continue the fresh literal-current-head calibration
-  batch on a new bounded surface.
+  `#551` done. `#552` / session `#533` on HEAD `b42567b` then exposed a
+  non-counted fix-first blocker on the sweep source/test pair: mew read
+  `src/mew/sweep.py` and `tests/test_sweep.py` completely, recovered from one
+  request timeout, ran `uv run pytest -q tests/test_sweep.py --no-testmon` with
+  6 passed, but then let the write-ready tiny draft lane override the green
+  verifier-backed no-change route with `overlapping_hunks` and ended
+  `blocked_on_patch`. Codex-ultra classified this as
+  `non_counted_fix_first` with blocker code
+  `verifier_green_no_change_overridden_by_overlapping_hunks` and directed a
+  fix-first remediation before more calibration slices. The remediation now
+  recognizes conditional green no-change closeout plan items such as
+  "Finish no-change if green; otherwise repair..." as verifier closeout after a
+  matching focused verifier, so the tiny draft lane is skipped before it can
+  manufacture a later patch blocker. The focused regression group passed 12
+  tests, the broader write-ready/no-change subset passed 32 tests with 5
+  subtests, ruff passed, `git diff --check` passed, and codex-ultra returned
+  PASS/no findings. Next step: rerun a fresh literal-current-head sweep slice
+  before continuing unrelated calibration surfaces.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,

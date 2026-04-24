@@ -1507,6 +1507,37 @@ def _work_plan_item_is_verifier_closeout(plan_item):
     text = str(plan_item or "").strip().casefold()
     if not text:
         return False
+    no_change_finish = ("no-change" in text or "no change" in text) and any(
+        marker in text for marker in ("record", "finish", "close")
+    )
+    conditional_green = any(
+        marker in text
+        for marker in (
+            "if green",
+            "if it passes",
+            "if it succeeds",
+            "if verifier passes",
+            "if verification passes",
+            "if the verifier passes",
+            "if the verifier succeeds",
+            "if the focused verifier passes",
+            "if the focused verifier succeeds",
+        )
+    )
+    conditional_failure_branch = any(
+        marker in text
+        for marker in (
+            "otherwise repair",
+            "otherwise edit",
+            "if it fails",
+            "if verifier fails",
+            "if verification fails",
+            "if the verifier fails",
+            "if the focused verifier fails",
+        )
+    )
+    if no_change_finish and conditional_green and conditional_failure_branch:
+        return True
     repair_or_edit = any(marker in text for marker in ("repair", "edit"))
     source_test_intent = any(
         marker in text
@@ -1535,9 +1566,7 @@ def _work_plan_item_is_verifier_closeout(plan_item):
     )
     if any(marker in text for marker in closeout_markers):
         return True
-    if ("no-change" in text or "no change" in text) and any(
-        marker in text for marker in ("record", "finish", "close")
-    ):
+    if no_change_finish:
         if not any(marker in text for marker in ("repair", "edit", "patch")):
             return True
     return "finish" in text and "verifier" in text

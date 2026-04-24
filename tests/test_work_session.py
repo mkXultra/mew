@@ -13578,6 +13578,167 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_plan_work_model_turn_skips_tiny_draft_after_green_conditional_no_change_closeout(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        verify_command = "uv run pytest -q tests/test_sweep.py --no-testmon"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target_paths = ["src/mew/sweep.py", "tests/test_sweep.py"]
+                source_text = "def collect_candidates():\n    return []\n"
+                test_text = "def test_collect_candidates():\n    assert collect_candidates() == []\n"
+                for path, text in zip(target_paths, [source_text, test_text]):
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(text, encoding="utf-8")
+                absolute_target_paths = [str(Path(path).resolve()) for path in target_paths]
+                source_lines = len(source_text.splitlines())
+                test_lines = len(test_text.splitlines())
+
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "M6.11 calibration slice: sweep bounded source/test pass"
+                task["description"] = (
+                    "Fresh literal-current-head bounded M6.11 calibration slice. "
+                    "Find one small justified paired improvement, or finish with verifier-backed no-change."
+                )
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0], "line_start": 1, "line_count": source_lines},
+                        "result": {
+                            "path": absolute_target_paths[0],
+                            "line_start": 1,
+                            "line_end": source_lines,
+                            "text": source_text,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[1], "line_start": 1, "line_count": test_lines},
+                        "result": {
+                            "path": absolute_target_paths[1],
+                            "line_start": 1,
+                            "line_end": test_lines,
+                            "text": test_text,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 3,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": verify_command},
+                        "result": {"command": verify_command, "exit_code": 0},
+                    },
+                ]
+                session["model_turns"] = [
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "tool_call_id": 3,
+                        "decision_plan": {
+                            "working_memory": {
+                                "plan_items": [
+                                    "Run focused sweep verifier",
+                                    "Finish no-change if green; otherwise repair the reported sweep issue",
+                                ],
+                                "target_paths": target_paths,
+                            },
+                        },
+                        "action": {"type": "run_tests", "command": verify_command},
+                        "model_metrics": {
+                            "write_ready_fast_path": False,
+                            "write_ready_fast_path_reason": "guidance_not_requesting_write",
+                        },
+                    }
+                ]
+                session["active_work_todo"] = {
+                    "id": "todo-533-1",
+                    "status": "drafting",
+                    "source": {
+                        "plan_item": "Finish no-change if green; otherwise repair the reported sweep issue",
+                        "target_paths": target_paths,
+                        "verify_command": verify_command,
+                    },
+                    "cached_window_refs": [
+                        {
+                            "path": absolute_target_paths[0],
+                            "tool_call_id": 1,
+                            "line_start": 1,
+                            "line_end": source_lines,
+                            "context_truncated": False,
+                            "window_sha1": "sha1:source-window",
+                        },
+                        {
+                            "path": absolute_target_paths[1],
+                            "tool_call_id": 2,
+                            "line_start": 1,
+                            "line_end": test_lines,
+                            "context_truncated": False,
+                            "window_sha1": "sha1:test-window",
+                        },
+                    ],
+                    "attempts": {"draft": 0, "review": 0},
+                    "patch_draft_id": "",
+                    "blocker": {},
+                    "created_at": "2026-04-22T00:00:00Z",
+                    "updated_at": "2026-04-22T00:02:00Z",
+                }
+
+                observed_prefixes = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    observed_prefixes.append(str(log_prefix or ""))
+                    if "work_write_ready_tiny_draft" in str(log_prefix or ""):
+                        self.fail("tiny draft lane should not run after a green verifier closeout")
+                    return {
+                        "summary": "focused verifier passed; finish with verifier-backed no-change",
+                        "action": {"type": "finish", "reason": "verifier-backed no-change"},
+                    }
+
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=target_paths,
+                        allow_verify=True,
+                        verify_command=verify_command,
+                        guidance=(
+                            "If no specific paired source/test issue is immediately visible, "
+                            "run the focused verifier and finish as verifier-backed no-change if green."
+                        ),
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(len(observed_prefixes), 1)
+                self.assertIn("work_think", observed_prefixes[0])
+                self.assertEqual(planned["action"]["type"], "finish")
+                self.assertEqual(planned["model_metrics"]["write_ready_fast_path"], False)
+                self.assertEqual(
+                    planned["model_metrics"]["write_ready_fast_path_reason"],
+                    "verifier_closeout_plan_item",
+                )
+            finally:
+                os.chdir(old_cwd)
+
     def test_plan_work_model_turn_blocks_no_change_replay_without_active_work_todo_for_suffix_line_windows(self):
         from mew.work_loop import plan_work_model_turn
 
