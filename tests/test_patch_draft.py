@@ -622,6 +622,37 @@ class PatchDraftTests(unittest.TestCase):
         self.assertEqual(artifact["kind"], "patch_blocker")
         self.assertEqual(artifact["code"], "cached_window_text_truncated")
 
+    def test_compile_patch_draft_blocks_when_live_file_hash_differs_from_cached_window_hash(self):
+        path = "tests/test_patch_draft.py"
+        before_text = "value = 1\n"
+        proposal = {
+            "kind": "patch_proposal",
+            "files": [
+                {
+                    "path": path,
+                    "edits": [{"old": "value = 1", "new": "value = 2"}],
+                }
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo=_todo(path),
+            proposal=proposal,
+            cached_windows={
+                path: {
+                    **_window(path, before_text),
+                    "file_sha256": sha256_text("older\n"),
+                }
+            },
+            live_files={path: _live_file(before_text)},
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_blocker")
+        self.assertEqual(artifact["code"], "stale_cached_window_text")
+        self.assertEqual(artifact["detail"], "live file hash differs from cached window hash")
+        self.assertEqual(artifact["recovery_action"], "refresh_cached_window")
+
     def test_compile_patch_draft_blocks_no_material_change(self):
         path = "tests/test_patch_draft.py"
         before_text = "a = 1\n"
