@@ -2184,6 +2184,14 @@ Missing proof:
   explicit-refresh searches and makes preflight consult it before ordinary
   recent tool calls. Codex-ultra approved the patch after a requested
   completed-only filter fix and full `tests/test_work_session.py` rerun.
+- Task `#503` on `2523622` then validated that recovery path live: after one
+  setup broad-read guard, the session moved from explicit-refresh
+  `search_text` to paired widened `read_file` windows for
+  `src/mew/work_session.py` and `tests/test_work_session.py`, passed the
+  scoped verifier, and finished with no material change. Codex-ultra approved
+  the classification as useful non-counted preflight validation, not M6.11
+  incidence, because the session emitted no replay bundle, no compiler
+  artifact, no reviewer-visible dry-run patch, and no source/test diff.
 
 Next action:
 
@@ -2194,16 +2202,15 @@ Next action:
   `#399/#401`; use the cohort-aware replay summaries plus the additive
   `blocker_code_breakdown` output to collect the remaining runtime slices.
   Because evidence-only commits keep resetting literal `current_head`
-  cohorting to zero, the next concrete step after the durable
-  explicit-refresh-search history commit is to run a fresh bounded live slice
-  on the new literal HEAD without `--measurement-head`, ideally on the same
-  `src/mew/work_session.py` + `tests/test_work_session.py` surface, and prove
-  whether the loop can now advance from cue-only refresh to paired widened
-  reads and then to either a native replay, a reviewer-visible patch, or a new
-  concrete fix-first blocker. Keep the `b650319` counted replay as the latest
-  counted runtime-head evidence via `--measurement-head`, but do not advance
-  on legacy timeout-only evidence or reviewer/non-native non-counted replays
-  alone
+  cohorting to zero, and because `#503` only proved the deterministic
+  preflight path without producing an incidence artifact, the next concrete
+  step after recording `#503` is to run a fresh bounded live slice on the new
+  literal HEAD without `--measurement-head` and force the outcome to be one of:
+  a native replay bundle, a reviewer-visible paired dry-run patch/diff, or a
+  new concrete fix-first blocker. Keep the `b650319` counted replay as the
+  latest counted runtime-head evidence via `--measurement-head`, but do not
+  advance on legacy timeout-only evidence, reviewer/non-native non-counted
+  replays, or no-artifact live validation alone
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the
