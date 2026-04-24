@@ -2595,8 +2595,17 @@ Next action:
   `uv run ruff check src/mew/dream.py tests/test_dream.py` also passed.
   Codex-ultra classified the slice PASS/COUNTED as
   `positive_test_only_patch_verifier` and recommended `src/mew/journal.py` plus
-  `tests/test_journal.py` as the next bounded surface. Next step: continue the
-  fresh literal-current-head calibration batch on the journal source/test pair.
+  `tests/test_journal.py` as the next bounded surface. `#555` / session `#536`
+  on HEAD `2a9374b` then exercised that journal pair: after one drafting
+  timeout, a narrow steer produced a paired source/test patch so Morning >
+  Yesterday renders completed work plus runtime effects rather than hiding
+  effects when completed tasks exist. `uv run pytest -q tests/test_journal.py
+  --no-testmon` passed 7 tests, `uv run ruff check src/mew/journal.py
+  tests/test_journal.py` passed, and codex-ultra classified the slice
+  PASS/COUNTED as `positive_paired_patch_verifier`; the objc fork warning after
+  the mew verifier was non-blocking because verifier exit and session close
+  were successful. Next step: continue the fresh literal-current-head
+  calibration batch on the mood source/test pair.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,

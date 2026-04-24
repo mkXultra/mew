@@ -266,6 +266,7 @@ def render_journal_markdown(view_model: dict[str, Any]) -> str:
     sessions = view_model["sessions"]
     effects = view_model["runtime_effects"]
     hints = view_model["tomorrow_hints"]
+    yesterday = completed + effects
 
     lines = [
         f"# Mew Journal {view_model['date']}",
@@ -273,7 +274,7 @@ def render_journal_markdown(view_model: dict[str, Any]) -> str:
         "## Morning",
         "",
         "### Yesterday",
-        *render_list(completed or effects, "No completed work or runtime effects recorded"),
+        *render_list(yesterday, "No completed work or runtime effects recorded"),
         "",
         "### Today",
         *render_list(active, "No active tasks recorded"),

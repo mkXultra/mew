@@ -55,6 +55,10 @@ class JournalTests(unittest.TestCase):
         )
         self.assertIn("effect #6 [applied/passive_tick] actions=ask_user: Asked one question", view["runtime_effects"])
         self.assertIn("# Mew Journal 2026-04-17", text)
+        self.assertIn(
+            "### Yesterday\n- #2 Done work [done]: shipped the first report\n- effect #6 [applied/passive_tick] actions=ask_user: Asked one question",
+            text,
+        )
         self.assertIn("## Morning", text)
         self.assertIn("## Evening", text)
 
