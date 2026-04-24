@@ -2670,7 +2670,15 @@ Next action:
   because session `#544` stayed idle/queued and did not record reads,
   files_touched, command history, approvals, or verifier history. Next step:
   rerun the bounded `desk` surface as a fresh mew-recorded slice before moving
-  to another surface.
+  to another surface. The post-accounting-gap rerun on HEAD `57e47e3` reused
+  task `#563` / session `#544` but is now mew-recorded: it captured complete
+  non-truncated reads for `src/mew/desk.py` and `tests/test_desk.py`, ran
+  `uv run pytest -q tests/test_desk.py --no-testmon` with 21 passed, closed
+  cleanly as verifier-backed no-change, and made no edits after the committed
+  test alignment. Codex-ultra classified the rerun PASS/COUNTED as
+  `positive_verifier_backed_no_change`; the non-blocking objc warning is
+  ignored because `run_tests` exit code was 0. Next step: continue with the
+  bounded `metrics` source/test surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
