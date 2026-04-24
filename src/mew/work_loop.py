@@ -1642,13 +1642,13 @@ def _is_calibration_measured_patch_draft_task(task, context=None):
             "do not finish from a passing verifier alone",
         )
     )
+    has_current_head_patch_draft_markers = has_current_head_marker and has_patch_draft_marker
+    if has_current_head_patch_draft_markers and has_measurement_contract_marker:
+        return True
     has_current_head_sample_patch_draft_markers = (
         has_sample_marker
-        and has_current_head_marker
-        and has_patch_draft_marker
+        and has_current_head_patch_draft_markers
     )
-    if has_current_head_sample_patch_draft_markers and has_measurement_contract_marker:
-        return True
     return bool(
         has_current_head_sample_patch_draft_markers
         and _calibration_measured_patch_draft_task_scope_target_paths(task)
@@ -1717,8 +1717,7 @@ def _calibration_measured_patch_draft_expected_target_paths(target_paths):
         normalized_path = normalize_work_path(path)
         if normalized_path:
             normalized_paths.append(normalized_path)
-    expected_paths = {"src/mew/patch_draft.py", "tests/test_patch_draft.py"}
-    if set(normalized_paths) != expected_paths or len(normalized_paths) != len(expected_paths):
+    if len(normalized_paths) != 2 or len(set(normalized_paths)) != 2:
         return []
     if not any(_work_batch_path_is_mew_source(path) for path in normalized_paths):
         return []
@@ -1851,7 +1850,10 @@ def _calibration_measured_patch_draft_exact_recent_windows(context, task=None, s
             session=session,
         )
     refs_by_path = {}
-    for ref in active_work_todo.get("cached_window_refs") or []:
+    window_refs = list(active_work_todo.get("cached_window_refs") or [])
+    if not window_refs:
+        window_refs = list(resume.get("target_path_cached_window_observations") or [])
+    for ref in window_refs:
         if not isinstance(ref, dict):
             continue
         path = _calibration_measured_patch_draft_matching_target_path(
@@ -1889,7 +1891,7 @@ def _calibration_measured_patch_draft_exact_recent_windows(context, task=None, s
             line_end = int(window.get("line_end") or 0)
         except (TypeError, ValueError):
             continue
-        if line_start != ref["line_start"] or line_end != ref["line_end"]:
+        if line_start > ref["line_start"] or line_end < ref["line_end"]:
             continue
         if any(bool(window.get(key)) for key in ("context_truncated", "source_truncated", "truncated")):
             return []

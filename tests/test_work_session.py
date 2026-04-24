@@ -10653,6 +10653,166 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_plan_work_model_turn_writes_no_change_replay_for_current_head_validation_slice(self):
+        from mew.work_loop import plan_work_model_turn
+
+        old_cwd = os.getcwd()
+        verify_command = "uv run pytest -q tests/test_proof_summary.py --no-testmon"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target_paths = ["src/mew/proof_summary.py", "tests/test_proof_summary.py"]
+                source_prefix = "".join(f"# filler {index}\n" for index in range(1, 20))
+                source_text = "def summarize_m6_11_replay_calibration():\n    return {}\n"
+                test_text = "class ProofSummaryTests:\n    pass\n"
+                for path, text in zip(target_paths, [source_prefix + source_text, test_text]):
+                    file_path = Path(path)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    file_path.write_text(text, encoding="utf-8")
+                absolute_target_paths = [str(Path(path).resolve()) for path in target_paths]
+
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                task["title"] = "M6.11 current-head validation after compiler taxonomy refinement"
+                task["description"] = (
+                    "M6.11 current-head validation slice after compiler taxonomy refinement. "
+                    "Do not finish from a passing verifier alone; produce either a reviewer-visible "
+                    "patch_draft proposal, an exact native patch_draft blocker such as no_material_change, "
+                    "or a replay/model-failure bundle suitable for M6.11 calibration accounting."
+                )
+                task["scope"] = {"target_paths": target_paths}
+                session["tool_calls"] = [
+                    {
+                        "id": 1,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0], "line_start": 1, "line_count": 19},
+                        "result": {
+                            "path": absolute_target_paths[0],
+                            "line_start": 1,
+                            "line_end": 19,
+                            "text": source_prefix,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[0], "line_start": 20, "line_count": 2},
+                        "result": {
+                            "path": absolute_target_paths[0],
+                            "line_start": 20,
+                            "line_end": 21,
+                            "text": source_text,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 3,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": target_paths[1], "line_start": 40, "line_count": 2},
+                        "result": {
+                            "path": absolute_target_paths[1],
+                            "line_start": 40,
+                            "line_end": 41,
+                            "text": test_text,
+                            "context_truncated": False,
+                            "source_truncated": False,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 4,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": verify_command},
+                        "result": {"command": verify_command, "exit_code": 0},
+                    },
+                ]
+                session["model_turns"] = [
+                    {
+                        "id": 2,
+                        "status": "completed",
+                        "tool_call_id": 4,
+                        "decision_plan": {
+                            "working_memory": {
+                                "plan_items": ["Run scoped verifier"],
+                                "target_paths": target_paths,
+                            },
+                        },
+                        "action": {"type": "run_tests", "command": verify_command},
+                        "model_metrics": {
+                            "write_ready_fast_path": False,
+                            "write_ready_fast_path_reason": "missing_exact_cached_window_texts",
+                        },
+                    }
+                ]
+
+                with patch(
+                    "mew.work_loop.call_model_json_with_retries",
+                    return_value={
+                        "summary": "patch_blocker/no_material_change",
+                        "action": {
+                            "type": "finish",
+                            "reason": "patch_blocker/no_material_change",
+                        },
+                    },
+                ):
+                    planned = plan_work_model_turn(
+                        state,
+                        session,
+                        task,
+                        {"path": "auth.json"},
+                        allowed_read_roots=["."],
+                        allowed_write_roots=target_paths,
+                        allow_verify=True,
+                        verify_command=verify_command,
+                        act_mode="deterministic",
+                    )
+
+                self.assertEqual(planned["action"]["type"], "wait")
+                self.assertEqual(
+                    planned["action"]["reason"],
+                    "write-ready tiny draft blocker: no_material_change",
+                )
+                active_todo = planned["context"]["work_session"]["resume"]["active_work_todo"]
+                self.assertEqual(active_todo["source"]["target_paths"], target_paths)
+                self.assertEqual(active_todo["cached_window_refs"], [])
+                self.assertEqual(
+                    set(
+                        item["path"]
+                        for item in planned["context"]["work_session"]["resume"][
+                            "target_path_cached_window_observations"
+                        ]
+                    ),
+                    set(target_paths),
+                )
+                blocker = planned["action"].get("blocker") or {}
+                self.assertEqual(blocker["code"], "no_material_change")
+                metrics = planned["model_metrics"]
+                self.assertTrue(metrics["patch_draft_compiler_ran"])
+                replay_path = Path(metrics["patch_draft_compiler_replay_path"])
+                self.assertTrue(replay_path.is_file())
+                replay_metadata = json.loads(replay_path.read_text(encoding="utf-8"))
+                self.assertTrue(replay_metadata["calibration_counted"])
+                self.assertEqual(replay_metadata["blocker_code"], "no_material_change")
+                cached_windows = json.loads(
+                    (replay_path.parent / replay_metadata["files"]["cached_windows"]).read_text(
+                        encoding="utf-8",
+                    )
+                )
+                self.assertEqual(set(cached_windows), set(target_paths))
+            finally:
+                os.chdir(old_cwd)
+
     def test_plan_work_model_turn_blocks_no_change_replay_without_active_work_todo_for_suffix_line_windows(self):
         from mew.work_loop import plan_work_model_turn
 
