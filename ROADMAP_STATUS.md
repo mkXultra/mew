@@ -2704,8 +2704,15 @@ Next action:
   `tests/test_programmer.py` lines 1-1350 through adjacent reads, reran
   `uv run pytest -q tests/test_programmer.py --no-testmon` with 53 passed, and
   closed verifier-backed no-change. Codex-ultra classified the recovery
-  PASS/COUNTED as `positive_verifier_backed_no_change`. Next step: run the
-  bounded `self_improve` source/test surface.
+  PASS/COUNTED as `positive_verifier_backed_no_change`. `#567` / session
+  `#549` then exercised the bounded `self_improve` source/test surface on HEAD
+  `ac62952`: it read `src/mew/self_improve.py` through EOF and covered
+  `tests/test_self_improve.py` lines 1-1329 through adjacent reads, ran
+  `uv run pytest -q tests/test_self_improve.py --no-testmon` with 33 passed
+  plus 8 subtests, closed verifier-backed no-change, and made no edits.
+  Codex-ultra classified it PASS/COUNTED as
+  `positive_verifier_backed_no_change`. Next step: run the bounded `runtime`
+  source/test surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
