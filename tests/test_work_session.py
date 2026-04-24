@@ -16193,6 +16193,176 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_pre_active_todo_current_head_planning_timeout_replay_is_counted(self):
+        from mew.errors import ModelBackendError
+
+        task = {
+            "id": 495,
+            "title": "M6.11 current-head incidence slice for report_io surfaces",
+            "description": (
+                "Collect one replay bundle and count this current-head diversity/incidence slice "
+                "on src/mew/report_io.py + tests/test_report_io.py. "
+                "Do not finish from a passing verifier alone."
+            ),
+        }
+        session = {
+            "id": 495,
+            "task_id": 495,
+            "status": "active",
+            "active_work_todo": {},
+            "model_turns": [
+                {
+                    "id": 19,
+                    "status": "running",
+                    "summary": "model turn failed: request timed out",
+                    "model_metrics": {
+                        "prompt_context_mode": "compact_memory",
+                        "context_chars": 10240,
+                        "resume_chars": 2048,
+                        "recent_read_window_chars": 4096,
+                        "recent_read_window_count": 2,
+                        "think": {"prompt_chars": 6789, "timeout_seconds": 90.0},
+                        "write_ready_fast_path": False,
+                        "write_ready_fast_path_reason": "first_plan_item_not_edit_ready",
+                    },
+                }
+            ],
+        }
+        model_turn = session["model_turns"][0]
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay._current_git_head", return_value="4b1d0a1"):
+                    report_path = write_work_model_failure_replay(
+                        session=session,
+                        model_turn=model_turn,
+                        exc=ModelBackendError("request timed out"),
+                        task=task,
+                    )
+
+                self.assertTrue(report_path)
+                bundle = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                self.assertEqual(bundle["bundle"], "work-loop-model-failure")
+                self.assertTrue(bundle["calibration_counted"])
+                self.assertEqual(bundle["failure"]["code"], "request_timed_out")
+                self.assertEqual(bundle["git_head"], "4b1d0a1")
+                self.assertEqual(bundle["session_id"], 495)
+                self.assertEqual(bundle["model_turn_id"], 19)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_pre_active_todo_non_draft_planning_failure_still_skips_replay(self):
+        from mew.errors import ModelBackendError
+
+        task = {
+            "id": 496,
+            "title": "Regular coding task",
+            "description": "Make requested change with no calibration accounting.",
+        }
+        session = {
+            "id": 496,
+            "task_id": 496,
+            "status": "active",
+            "active_work_todo": {},
+            "model_turns": [
+                {
+                    "id": 20,
+                    "status": "running",
+                    "summary": "ordinary planning failure",
+                    "model_metrics": {
+                        "prompt_context_mode": "compact_memory",
+                        "context_chars": 10240,
+                        "resume_chars": 2048,
+                        "recent_read_window_chars": 4096,
+                        "recent_read_window_count": 2,
+                        "think": {"prompt_chars": 6789, "timeout_seconds": 90.0},
+                        "write_ready_fast_path": False,
+                        "write_ready_fast_path_reason": "first_plan_item_not_edit_ready",
+                    },
+                }
+            ],
+        }
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay._current_git_head", return_value="4b1d0a1"):
+                    report_path = write_work_model_failure_replay(
+                        session=session,
+                        model_turn=session["model_turns"][0],
+                        exc=ModelBackendError("schema mismatch for model action"),
+                        task=task,
+                    )
+
+                self.assertIsNone(report_path)
+                self.assertFalse((Path(".mew") / "replays" / "work-loop").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_pre_active_todo_current_head_replay_includes_prompt_resume_bloat_metrics(self):
+        from mew.errors import ModelBackendError
+
+        task = {
+            "id": 497,
+            "title": "M6.11 current-head incidence slice on report_io",
+            "description": (
+                "Collect one replay bundle and count the current-head incidence slice "
+                "for src/mew/report_io.py + tests/test_report_io.py. "
+                "Do not finish from a passing verifier alone."
+            ),
+        }
+        session = {
+            "id": 497,
+            "task_id": 497,
+            "status": "active",
+            "active_work_todo": {},
+        }
+        model_turn = {
+            "id": 21,
+            "status": "running",
+            "summary": "model turn failed: request timed out",
+            "model_metrics": {
+                "prompt_context_mode": "compact_memory",
+                "context_chars": 10240,
+                "resume_chars": 2048,
+                "recent_read_window_chars": 4096,
+                "recent_read_window_count": 2,
+                "think": {"prompt_chars": 6789, "timeout_seconds": 90.0},
+                "write_ready_fast_path": False,
+                "write_ready_fast_path_reason": "first_plan_item_not_edit_ready",
+            },
+        }
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay._current_git_head", return_value="4b1d0a1"):
+                    report_path = write_work_model_failure_replay(
+                        session=session,
+                        model_turn=model_turn,
+                        exc=ModelBackendError("request timed out"),
+                        task=task,
+                    )
+
+                self.assertTrue(report_path)
+                bundle = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                metrics = bundle["model_metrics"]
+                self.assertEqual(metrics.get("prompt_context_mode"), "compact_memory")
+                self.assertGreater(metrics.get("context_chars", 0), 0)
+                self.assertGreater(metrics.get("resume_chars", 0), 0)
+                self.assertGreater(metrics.get("recent_read_window_chars", 0), 0)
+                self.assertGreater(metrics.get("recent_read_window_count", 0), 0)
+                think = metrics.get("think") or {}
+                self.assertIsInstance(think, dict)
+                self.assertGreater(think.get("prompt_chars", 0), 0)
+                self.assertGreater(think.get("timeout_seconds", 0), 0)
+                self.assertEqual(metrics.get("write_ready_fast_path_reason"), "first_plan_item_not_edit_ready")
+            finally:
+                os.chdir(old_cwd)
+
     def test_replay_bundle_path_is_stable_and_attempt_increments(self):
         old_cwd = os.getcwd()
         session = {

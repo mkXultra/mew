@@ -2247,6 +2247,45 @@ Missing proof:
   context and using it for structural-refresh exhaustion. Codex-ultra approved
   the metadata-only durable history fix; the pre-fix `#508` session remains
   non-counted.
+- Task `#509` on `3b38ec7` is the first post-fix literal-head counted bundle
+  for this micro-surface: session `#492` emitted a native
+  `patch_draft_compiler.cached_window_incomplete` replay with
+  `calibration_counted=true`, `off_schema_rate=0`, `refusal_rate=0`, and no
+  malformed relevant bundles. Codex-ultra approved the classification as valid
+  counted M6.11 current-head incidence evidence. M6.11 remains open because the
+  current-head cohort has only one counted bundle and therefore
+  `failure_mode_concentration=1.0`.
+- Task `#510` on the same `3b38ec7` head broadened the current-head cohort on
+  the `patch_draft` surface: session `#493` emitted a
+  `work-loop-model-failure.request_timed_out` bundle with
+  `calibration_counted=true` after reaching `write_ready_fast_path=true` with
+  paired cached windows and timing out in the tiny draft lane. Codex-ultra
+  approved this as counted incidence evidence rather than a fix-first
+  exclusion. The current-head cohort now has two counted bundles, no
+  off-schema/refusal/malformed evidence, and `failure_mode_concentration=0.5`,
+  so M6.11 remains open until more diverse slices reduce concentration below
+  the close gate.
+- Task `#511` on the same `3b38ec7` head sampled the large `dogfood` surface:
+  session `#494` emitted another native
+  `patch_draft_compiler.cached_window_incomplete` replay with
+  `calibration_counted=true` after paired structural refresh was already
+  attempted. Codex-ultra approved counting it even though it worsens
+  concentration, because duplicate counted evidence is still real incidence
+  evidence. The current-head cohort now has three counted bundles and no
+  off-schema/refusal/malformed evidence, but `failure_mode_concentration`
+  worsened to `0.666...`; next slices should avoid large or mid-file surfaces
+  and target small complete source/test pairs such as `report_io`.
+- Task `#512` on the same `3b38ec7` head sampled the small `report_io`
+  surface and exposed a non-counted fix-first accounting gap: session `#495`
+  timed out during ordinary planning before `active_work_todo` was seeded, with
+  fully read tiny source/test files and prompt/resume metrics visible, but no
+  replay bundle was written. Codex-ultra classified this as a fix-first
+  infrastructure blocker, not retryable incidence, because no artifact means it
+  cannot advance M6.11. The current patch adds a narrow pre-active-todo
+  current-head incidence replay path for compact-memory planning timeouts while
+  preserving ordinary non-calibration failures as non-replay. Codex-ultra
+  approved the code and accounting fix; the pre-fix `#512` session remains
+  non-counted.
 
 Next action:
 
@@ -2266,9 +2305,13 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After committing the #508 durable structural-refresh history fix, repeat a
-  fresh literal-head slice again; do not resume `#505`, `#506`, `#507`, or
-  `#508` as counted evidence because they are blocked pre-fix sessions.
+  After the #512 pre-active-todo replay-accounting fix is reviewed and
+  committed, rerun the `report_io` small complete source/test slice on the new
+  literal HEAD before broadening to other small pairs. Do not count or resume
+  `#505`, `#506`, `#507`, `#508`, or `#512` as current-head incidence because
+  they are blocked pre-fix sessions; #509/#510/#511 remain valid counted
+  evidence for HEAD `3b38ec7` but should be treated as prior-head evidence
+  after the fix commit.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the

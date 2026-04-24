@@ -58,13 +58,126 @@ def _is_calibration_measured_patch_draft_task(task):
     )
 
 
+def _is_calibration_measured_current_head_incidence_task(task):
+    task = task or {}
+    text = " ".join(
+        str(task.get(field) or "").strip().lower()
+        for field in ("title", "description", "notes")
+        if task.get(field) is not None
+    ).strip()
+    if not text:
+        return False
+    has_current_head_marker = any(
+        marker in text
+        for marker in (
+            "current-head",
+            "current head",
+            "current_head",
+        )
+    )
+    if not has_current_head_marker:
+        return False
+    has_counting_marker = any(
+        marker in text
+        for marker in (
+            "replay bundle",
+            "replay",
+            "counted",
+            "counting",
+            "ledger",
+            "current-head sample",
+            "incidence",
+            "get one live replay result",
+            "do not finish from a passing verifier alone",
+        )
+    )
+    if not has_counting_marker:
+        return False
+    has_surface_marker = any(
+        marker in text
+        for marker in (
+            "report_io",
+            "tests/test_report_io.py",
+            "incidence",
+            "diversity",
+            "slice",
+        )
+    )
+    return has_surface_marker
+
+
 def _is_draft_related_failure(session, model_turn, task=None):
     if not session or not isinstance(model_turn, dict):
         return False
     model_metrics = model_turn.get("model_metrics") or {}
     measured_patch_draft_task = _is_calibration_measured_patch_draft_task(task)
+    measured_incidence_task = _is_calibration_measured_current_head_incidence_task(task)
+    measured_calibration_task = measured_patch_draft_task or measured_incidence_task
+
     if bool(model_metrics.get("write_ready_fast_path")):
         return True
+
+    def _safe_non_negative_int(value):
+        value = _safe_int(value)
+        return value if value is not None and value >= 0 else None
+
+    def _has_responsive_metrics(metrics):
+        if not isinstance(metrics, dict):
+            return False
+        if str(metrics.get("prompt_context_mode") or "").strip() != "compact_memory":
+            return False
+
+        think_metrics = metrics.get("think") or {}
+        if not isinstance(think_metrics, dict):
+            return False
+
+        context_chars = _safe_non_negative_int(metrics.get("context_chars"))
+        resume_chars = _safe_non_negative_int(metrics.get("resume_chars"))
+        recent_read_window_chars = _safe_non_negative_int(metrics.get("recent_read_window_chars"))
+        recent_read_window_count = _safe_non_negative_int(metrics.get("recent_read_window_count"))
+        think_prompt_chars = _safe_non_negative_int(think_metrics.get("prompt_chars"))
+        think_timeout_seconds = _safe_non_negative_int(think_metrics.get("timeout_seconds"))
+        if (
+            context_chars is None
+            or resume_chars is None
+            or recent_read_window_chars is None
+            or recent_read_window_count is None
+            or think_prompt_chars is None
+            or think_timeout_seconds is None
+        ):
+            return False
+        if recent_read_window_count <= 0:
+            return False
+        if recent_read_window_chars <= 0:
+            return False
+        if think_prompt_chars <= 0:
+            return False
+        if think_timeout_seconds <= 0:
+            return False
+        return context_chars > 0 and resume_chars > 0
+
+    def _is_plan_timeout_failure(turn):
+        if not isinstance(turn, dict):
+            return False
+        summary = str(turn.get("summary") or "").lower()
+        error = str(turn.get("error") or "").lower()
+        return "timed out" in summary or "timed out" in error
+
+    def _is_current_head_pre_active_todo_planning_failure():
+        if not measured_calibration_task:
+            return False
+        if bool(active_work_todo):
+            return False
+        if str(model_metrics.get("write_ready_fast_path_reason") or "").strip() != (
+            "first_plan_item_not_edit_ready"
+        ):
+            return False
+        if not _is_plan_timeout_failure(model_turn):
+            return False
+        if _current_git_head() == "":
+            return False
+        return _has_responsive_metrics(model_metrics)
+
     active_work_todo = session.get("active_work_todo") or {}
     todo_status = str(active_work_todo.get("status") or "").strip()
     if todo_status in WORK_TODO_PHASE_STATUSES:
@@ -78,7 +191,9 @@ def _is_draft_related_failure(session, model_turn, task=None):
     )
     failure_reason = str(model_metrics.get("write_ready_fast_path_reason") or "").strip()
     if failure_reason == "first_plan_item_not_edit_ready":
-        return has_target_paths
+        if has_target_paths:
+            return True
+        return _is_current_head_pre_active_todo_planning_failure()
     if failure_reason == "missing_plan_item_observations":
         return has_target_paths and measured_patch_draft_task
     if failure_reason in {
