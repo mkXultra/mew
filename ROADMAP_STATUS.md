@@ -2532,8 +2532,15 @@ Next action:
   body line now triggers deterministic refresh instead of tiny draft. Focused
   preflight tests, the full `tests/test_work_session.py` file, paired
   replay/patch-draft tests, ruff, `jq`, and `git diff --check` passed, and
-  codex-ultra approved the diff. Next step: rerun a fresh `codex_api` slice on
-  the repaired head before moving to unrelated surfaces.
+  codex-ultra approved the diff. The fresh post-fix rerun `#548` / session
+  `#529` on HEAD `30ac12a` then cleared the blocker: mew read
+  `src/mew/codex_api.py` and `tests/test_codex_api.py` completely, ran
+  `uv run pytest -q tests/test_codex_api.py --no-testmon` with 14 passed, and
+  closed as counted `positive_verifier_backed_no_change`. Codex-ultra
+  classified it PASS/COUNTED, accepted the non-blocking objc warning because
+  the verifier exit was clean and the session closed, and approved marking task
+  `#548` done. Next step: continue the fresh literal-current-head calibration
+  batch on a new bounded surface.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
