@@ -475,6 +475,36 @@ class DogfoodTests(unittest.TestCase):
             self.assertGreaterEqual(report["scenarios"][0]["artifacts"]["passive_events"], 2)
             self.assertIsNotNone(report["scenarios"][0]["artifacts"]["watcher_event_id"])
 
+    def test_run_dogfood_m6_9_memory_taxonomy_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-memory-taxonomy",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-memory-taxonomy")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-memory-taxonomy: pass", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(
+                set(scenario["artifacts"]["populated_kinds"]),
+                {"reviewer-steering", "task-template", "failure-shield", "file-pair"},
+            )
+            self.assertIn("reviewer-steering-missing-why", scenario["artifacts"]["rejected_cases"])
+            self.assertIn("reasoning-trace-schema-only", scenario["artifacts"]["rejected_cases"])
+            self.assertIn("m6_9_memory_taxonomy_reviewer-steering_write_accepts_required_evidence", check_names)
+            self.assertIn("m6_9_memory_taxonomy_missing_reviewer_why_rejected", check_names)
+            self.assertIn("m6_9_memory_taxonomy_reasoning_trace_schema_only_rejected", check_names)
+            self.assertIn("m6_9_memory_taxonomy_resolves_source_to_test_pair", check_names)
+            self.assertIn("m6_9_memory_taxonomy_resolves_test_to_source_pair", check_names)
+
     def test_run_dogfood_m6_11_compiler_replay_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

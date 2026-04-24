@@ -1940,6 +1940,19 @@ Progress / remaining proof:
   focused validation covered the exact work-loop/replay/session write-ready
   matrix plus the full `tests/test_work_session.py` suite. This is still
   supervisor rescue/product progress, not autonomy credit
+- The deterministic `m6_9-memory-taxonomy` dogfood scenario is landed as
+  supervisor/product progress for task `#573`. It registers a reusable M6.9
+  proof surface that writes the four currently writable coding memory kinds
+  (`reviewer-steering`, `task-template`, `failure-shield`, and `file-pair`),
+  proves the reviewer-steering missing-`--why` gate and direct
+  `reasoning-trace` schema-only rejection, and checks typed-memory list/search
+  plus source/test file-pair resolution. The mew-first attempts `#559` and
+  `#560` did not implement the scenario, so this closes the product gap but is
+  not autonomy credit. Validation covered
+  `./mew dogfood --scenario m6_9-memory-taxonomy --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_memory_taxonomy or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, and ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices

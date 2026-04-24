@@ -79,6 +79,7 @@ DOGFOOD_SCENARIOS = (
     "m6_11-refusal-separation",
     "m6_11-drafting-recovery",
     "m6_11-phase4-regression",
+    "m6_9-memory-taxonomy",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -1879,6 +1880,255 @@ def run_memory_search_scenario(workspace, env=None):
         expected="desk --json surfaces a compact latest context checkpoint",
     )
     return _scenario_report("memory-search", workspace, commands, checks)
+
+
+def run_m6_9_memory_taxonomy_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    state_dir = workspace / STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    write_json_file(workspace / STATE_FILE, default_state())
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    reviewer_result = run(
+        [
+            "memory",
+            "--add",
+            "Reviewer steering keeps scope fences explicit before durable-memory writes.",
+            "--type",
+            "project",
+            "--kind",
+            "reviewer-steering",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 reviewer steering",
+            "--description",
+            "Dogfood reviewer steering memory.",
+            "--approved",
+            "--why",
+            "reviewer approved durable steering",
+            "--how-to-apply",
+            "reuse on future memory edits",
+            "--json",
+        ]
+    )
+    task_template_result = run(
+        [
+            "memory",
+            "--add",
+            "Use one bounded paired src/test slice with a focused verifier.",
+            "--type",
+            "project",
+            "--kind",
+            "task-template",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 bounded task template",
+            "--description",
+            "Dogfood task template memory.",
+            "--approved",
+            "--rationale",
+            "reusable coding task shape",
+            "--json",
+        ]
+    )
+    failure_shield_result = run(
+        [
+            "memory",
+            "--add",
+            "Stop repeated cached-window retries when exact windows are stale.",
+            "--type",
+            "project",
+            "--kind",
+            "failure-shield",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 cached-window shield",
+            "--description",
+            "Dogfood failure-shield memory.",
+            "--approved",
+            "--symptom",
+            "cached-window retries repeat without patch",
+            "--root-cause",
+            "stale active_work_todo refs outrank refreshed windows",
+            "--fix",
+            "refresh exact windows and preserve task goal",
+            "--stop-rule",
+            "after two identical blockers, replan before retry",
+            "--json",
+        ]
+    )
+    file_pair_result = run(
+        [
+            "memory",
+            "--add",
+            "dogfood.py changes pair with tests/test_dogfood.py.",
+            "--type",
+            "project",
+            "--kind",
+            "file-pair",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 dogfood pair",
+            "--description",
+            "Dogfood file-pair memory.",
+            "--source-path",
+            "src/mew/dogfood.py",
+            "--test-path",
+            "tests/test_dogfood.py",
+            "--structural-evidence",
+            "same-session dogfood scenario registration and test",
+            "--focused-test-green",
+            "--json",
+        ]
+    )
+    missing_why_result = run(
+        [
+            "memory",
+            "--add",
+            "Reviewer steering without why should be rejected.",
+            "--type",
+            "project",
+            "--kind",
+            "reviewer-steering",
+            "--approved",
+            "--how-to-apply",
+            "do not persist missing evidence",
+            "--json",
+        ]
+    )
+    reasoning_trace_result = run(
+        [
+            "memory",
+            "--add",
+            "Reasoning trace direct writes are not enabled yet.",
+            "--type",
+            "project",
+            "--kind",
+            "reasoning-trace",
+            "--json",
+        ]
+    )
+    list_result = run(["memory", "--list", "--type", "project", "--json"])
+    search_result = run(["memory", "--search", "scope fences", "--type", "project", "--kind", "reviewer-steering", "--json"])
+    resolve_source_result = run(["memory", "--resolve-source-path", "src/mew/dogfood.py", "--json"])
+    resolve_test_result = run(["memory", "--resolve-test-path", "tests/test_dogfood.py", "--json"])
+
+    entry_results = {
+        "reviewer-steering": (reviewer_result, _json_stdout(reviewer_result).get("entry") or {}),
+        "task-template": (task_template_result, _json_stdout(task_template_result).get("entry") or {}),
+        "failure-shield": (failure_shield_result, _json_stdout(failure_shield_result).get("entry") or {}),
+        "file-pair": (file_pair_result, _json_stdout(file_pair_result).get("entry") or {}),
+    }
+    list_entries = _json_stdout(list_result).get("entries") or []
+    list_kinds = sorted({entry.get("memory_kind") for entry in list_entries if entry.get("memory_kind")})
+    search_matches = _json_stdout(search_result).get("matches") or []
+    resolved_source = (_json_stdout(resolve_source_result).get("resolved") or {})
+    resolved_test = (_json_stdout(resolve_test_result).get("resolved") or {})
+
+    for memory_kind, (result, entry) in entry_results.items():
+        _scenario_check(
+            checks,
+            f"m6_9_memory_taxonomy_{memory_kind}_write_accepts_required_evidence",
+            result.get("exit_code") == 0 and entry.get("memory_kind") == memory_kind,
+            observed={"exit_code": result.get("exit_code"), "entry": entry, "stderr": result.get("stderr")},
+            expected=f"{memory_kind} write succeeds and records memory_kind",
+        )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_reviewer_steering_persists_gate_fields",
+        bool((entry_results["reviewer-steering"][1]).get("approved"))
+        and bool((entry_results["reviewer-steering"][1]).get("why"))
+        and bool((entry_results["reviewer-steering"][1]).get("how_to_apply")),
+        observed=entry_results["reviewer-steering"][1],
+        expected="reviewer-steering persists approved, why, and how_to_apply",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_failure_shield_persists_gate_fields",
+        all(
+            (entry_results["failure-shield"][1]).get(key)
+            for key in ("approved", "symptom", "root_cause", "fix", "stop_rule")
+        ),
+        observed=entry_results["failure-shield"][1],
+        expected="failure-shield persists approved symptom root_cause fix stop_rule",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_file_pair_persists_pair_fields",
+        (entry_results["file-pair"][1]).get("source_path") == "src/mew/dogfood.py"
+        and (entry_results["file-pair"][1]).get("test_path") == "tests/test_dogfood.py"
+        and bool((entry_results["file-pair"][1]).get("focused_test_green")),
+        observed=entry_results["file-pair"][1],
+        expected="file-pair persists source_path, test_path, and focused_test_green",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_missing_reviewer_why_rejected",
+        missing_why_result.get("exit_code") != 0 and "--why" in (missing_why_result.get("stderr") or ""),
+        observed=command_result_tail(missing_why_result),
+        expected="reviewer-steering without --why fails at the write gate",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_reasoning_trace_schema_only_rejected",
+        reasoning_trace_result.get("exit_code") != 0
+        and "schema-only until Phase 2" in (reasoning_trace_result.get("stderr") or ""),
+        observed=command_result_tail(reasoning_trace_result),
+        expected="reasoning-trace direct write remains schema-only",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_list_surfaces_all_populated_kinds",
+        {"reviewer-steering", "task-template", "failure-shield", "file-pair"}.issubset(set(list_kinds)),
+        observed=list_kinds,
+        expected="list output includes the four currently writable M6.9 memory kinds",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_search_filters_reviewer_steering",
+        search_result.get("exit_code") == 0
+        and any(match.get("memory_kind") == "reviewer-steering" for match in search_matches),
+        observed=search_matches,
+        expected="typed memory search can filter reviewer-steering entries",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_resolves_source_to_test_pair",
+        resolve_source_result.get("exit_code") == 0
+        and resolved_source.get("source_path") == "src/mew/dogfood.py"
+        and resolved_source.get("test_path") == "tests/test_dogfood.py"
+        and bool(resolved_source.get("memory_ids")),
+        observed=resolved_source,
+        expected="source-path lookup resolves the durable file-pair index",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_memory_taxonomy_resolves_test_to_source_pair",
+        resolve_test_result.get("exit_code") == 0
+        and resolved_test.get("source_path") == "src/mew/dogfood.py"
+        and resolved_test.get("test_path") == "tests/test_dogfood.py"
+        and bool(resolved_test.get("memory_ids")),
+        observed=resolved_test,
+        expected="test-path lookup resolves the durable file-pair index",
+    )
+    report = _scenario_report("m6_9-memory-taxonomy", workspace, commands, checks)
+    report["artifacts"] = {
+        "populated_kinds": list_kinds,
+        "entry_names": sorted(entry.get("name") for _, entry in entry_results.values() if entry.get("name")),
+        "rejected_cases": ["reviewer-steering-missing-why", "reasoning-trace-schema-only"],
+        "resolved_source_pair": resolved_source,
+        "resolved_test_pair": resolved_test,
+    }
+    return report
 
 
 def run_runtime_focus_scenario(workspace, env=None):
@@ -11471,6 +11721,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_11_drafting_recovery_scenario(scenario_workspace, env=env))
         elif name == "m6_11-phase4-regression":
             reports.append(run_m6_11_phase4_regression_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-memory-taxonomy":
+            reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
