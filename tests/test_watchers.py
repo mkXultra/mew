@@ -42,6 +42,30 @@ class WatcherTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_scan_watch_paths_prunes_unrequested_file_watchers(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                first = Path("first.txt")
+                second = Path("second.txt")
+                first.write_text("one\n", encoding="utf-8")
+                second.write_text("two\n", encoding="utf-8")
+                state = default_state()
+
+                baseline = scan_watch_paths(state, [str(first)], current_time="2026-04-20T00:00:00Z", active=True)
+                rebound = scan_watch_paths(state, [str(second)], current_time="2026-04-20T00:00:01Z", active=True)
+
+                self.assertTrue(baseline["changed"])
+                self.assertTrue(rebound["changed"])
+                self.assertEqual(state["watchers"]["count"], 1)
+                self.assertEqual(state["watchers"]["active_count"], 1)
+                self.assertEqual(len(state["watchers"]["items"]), 1)
+                self.assertEqual(state["watchers"]["items"][0]["path"], "second.txt")
+                self.assertEqual(state["watchers"]["items"][0]["status"], "active")
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

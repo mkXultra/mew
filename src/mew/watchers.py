@@ -106,12 +106,16 @@ def scan_watch_paths(state, paths, *, current_time=None, active=False, source="d
         item["last_event_id"] = event.get("id")
         events.append(event)
 
+    retained_items = []
+    removed = False
     for item in items:
-        if item.get("kind") != "file":
+        if item.get("kind") != "file" or item.get("key") in requested_set:
+            retained_items.append(item)
             continue
-        if item.get("key") not in requested_set and item.get("status") == "active":
-            item["status"] = "idle"
-            changed = True
+        removed = True
+    if removed:
+        items[:] = retained_items
+        changed = True
 
     watcher_state["updated_at"] = current_time
     watcher_state["active_count"] = len([item for item in items if item.get("status") == "active"])

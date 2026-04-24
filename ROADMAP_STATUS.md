@@ -2505,6 +2505,11 @@ Next action:
   HEAD `2ef003e`: daemon status now downgrades persisted `running` state with a
   pid to `stale` when no active lock backs it, the paired regression covers the
   unlocked-running case, focused daemon pytest passed with 5 tests, ruff
+  passed, and codex-ultra approved the diff. `#546` / session `#527` then
+  landed as counted `positive_paired_patch_verifier` on HEAD `5dc06a7`:
+  watchers now prune unrequested file watcher items while preserving requested
+  file watchers and non-file items, the paired regression covers rebinding from
+  one watched file to another, focused watcher pytest passed with 2 tests, ruff
   passed, and codex-ultra approved the diff. Next step: continue the fresh
   calibration batch.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
