@@ -3487,12 +3487,34 @@ def _work_write_ready_cached_window_refresh_read_actions(work_session, cached_wi
         cached_span = cached_end - cached_start + 1
         if cached_span > 1000:
             continue
-        line_start = max(1, cached_start - 120)
-        line_count = max(520, cached_end - line_start + 121)
-        if line_count > 1000:
+        top_broad_next_line = cached.get("next_line")
+        if top_broad_next_line is not None:
+            try:
+                top_broad_next_line = int(top_broad_next_line)
+            except (TypeError, ValueError):
+                top_broad_next_line = None
+        if top_broad_next_line is None:
+            for window in recent_windows:
+                if not _work_paths_match(window.get("path"), path):
+                    continue
+                if window.get("line_start") != cached_start or window.get("line_end") != cached_end:
+                    continue
+                try:
+                    top_broad_next_line = int(window.get("next_line"))
+                except (TypeError, ValueError):
+                    pass
+                break
+
+        if cached_start == 1 and cached_span >= 1000 and top_broad_next_line:
+            line_start = max(1, top_broad_next_line)
             line_count = 1000
-            min_start_to_cover_ref = max(1, cached_end - line_count + 1)
-            line_start = min(max(line_start, min_start_to_cover_ref), cached_start)
+        else:
+            line_start = max(1, cached_start - 120)
+            line_count = max(520, cached_end - line_start + 121)
+            if line_count > 1000:
+                line_count = 1000
+                min_start_to_cover_ref = max(1, cached_end - line_count + 1)
+                line_start = min(max(line_start, min_start_to_cover_ref), cached_start)
         line_end = line_start + line_count - 1
         key = (path, line_start, line_count)
         if key in seen or already_read(path, line_start, line_end):

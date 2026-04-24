@@ -7304,6 +7304,98 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_block_uses_adjacent_reads_for_top_broad_incomplete_cache(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        target_paths = ["src/mew/work_loop.py", "tests/test_work_session.py"]
+        context = {
+            "task": {
+                "id": 511,
+                "title": "Top broad incomplete write-ready recovery",
+                "description": "Read adjacent windows when cached top reads are incomplete.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 492,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-511",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft paired dry-run using recovered windows",
+                            "target_paths": target_paths,
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft paired dry-run using recovered windows",
+                            "cached_windows": [
+                                {
+                                    "path": target_paths[0],
+                                    "line_start": 1,
+                                    "line_end": 1000,
+                                },
+                                {
+                                    "path": target_paths[1],
+                                    "line_start": 1,
+                                    "line_end": 1000,
+                                },
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": target_paths[0]},
+                        {"path": target_paths[1]},
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 5001,
+                        "path": target_paths[0],
+                        "line_start": 1,
+                        "line_end": 1000,
+                        "next_line": 1001,
+                        "text": "def _work_write_ready_preflight_block(context, write_ready_fast_path):\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 5002,
+                        "path": target_paths[1],
+                        "line_start": 1,
+                        "line_end": 1000,
+                        "next_line": 1001,
+                        "text": "def test_write_ready_preflight_block_uses_adjacent_reads_for_top_broad_incomplete_cache(self):\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using cached windows.",
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        self.assertFalse(fast_path["active"])
+        self.assertEqual(fast_path["reason"], "insufficient_cached_window_context")
+        self.assertEqual(preflight_block["action"]["type"], "batch")
+        self.assertEqual(
+            [
+                (tool["path"], tool["line_start"], tool["line_count"])
+                for tool in preflight_block["action"]["tools"]
+            ],
+            [
+                (target_paths[0], 1001, 1000),
+                (target_paths[1], 1001, 1000),
+            ],
+        )
+
     def test_write_ready_preflight_blocks_when_cached_test_window_ends_inside_new_block(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,

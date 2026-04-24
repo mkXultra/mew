@@ -2711,8 +2711,18 @@ Next action:
   `uv run pytest -q tests/test_self_improve.py --no-testmon` with 33 passed
   plus 8 subtests, closed verifier-backed no-change, and made no edits.
   Codex-ultra classified it PASS/COUNTED as
-  `positive_verifier_backed_no_change`. Next step: run the bounded `runtime`
-  source/test surface.
+  `positive_verifier_backed_no_change`. The first bounded `runtime` run
+  `#568` / session `#550` on HEAD `e09a4fc` exposed another non-counted
+  fix-first loop defect: after reading `src/mew/runtime.py` and
+  `tests/test_runtime.py` lines 1-1000, write-ready preflight repeatedly
+  returned `wait` with `paired cached windows are not structurally complete`
+  instead of scheduling adjacent tail reads. The remediation makes top/broad
+  incomplete cached windows with `next_line` schedule forward `read_file`
+  windows before falling back to `cached_window_incomplete`, and adds
+  `test_write_ready_preflight_block_uses_adjacent_reads_for_top_broad_incomplete_cache`.
+  Focused `write_ready` tests now pass 79 tests plus 5 subtests, ruff passed,
+  `git diff --check` passed, and codex-ultra approved the fix-first patch.
+  Next step: rerun the bounded `runtime` source/test surface on a fresh task.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
