@@ -1072,6 +1072,14 @@ def build_work_session_context(
             for turn in prompt_model_turns[-recent_turn_count:]
         ],
     }
+    work_context["explicit_refresh_search_tool_calls"] = [
+        work_tool_call_for_model(call, prompt_context_mode=prompt_context_mode)
+        for call in tool_calls
+        if (call or {}).get("tool") == "search_text"
+        and str((call or {}).get("status") or "") == "completed"
+        and str(((call or {}).get("parameters") or {}).get("reason") or "")
+        == "locate explicitly requested write-ready cached window"
+    ][-10:]
     work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
     if compacted or prompt_compacted:
         note = "Recent work context was compacted due to session size; use remember for durable observations."
@@ -2322,7 +2330,18 @@ def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths):
 
 def _work_write_ready_refresh_search_result_read_actions(work_session, target_paths):
     work_session = work_session if isinstance(work_session, dict) else {}
-    tool_calls = [call for call in (work_session.get("tool_calls") or []) if isinstance(call, dict)]
+    tool_calls = []
+    seen_call_ids = set()
+    for collection_name in ("explicit_refresh_search_tool_calls", "tool_calls"):
+        for call in work_session.get(collection_name) or []:
+            if not isinstance(call, dict):
+                continue
+            call_id = call.get("id")
+            if call_id is not None and call_id in seen_call_ids:
+                continue
+            if call_id is not None:
+                seen_call_ids.add(call_id)
+            tool_calls.append(call)
     target_paths = [str(path or "").strip() for path in target_paths or [] if str(path or "").strip()]
     for call in tool_calls:
         if call.get("tool") != "search_text" or str(call.get("status") or "") != "completed":

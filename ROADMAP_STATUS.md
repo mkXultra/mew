@@ -2175,6 +2175,15 @@ Missing proof:
   `def` / `class` / `def test_` snippets over query fixture lines while
   preserving stale-search protection. Codex-ultra approved the patch after
   focused and full `tests/test_work_session.py` validation.
+- Task `#502` on `d2f5e32` then showed the paired-anchor fix still depended
+  on the compact recent-tool window: the source/test explicit refresh searches
+  were both successful, but preflight recovered only the test-side widened read
+  because the source-side search could fall out of the compact context used by
+  the deterministic preflight. The current patch adds a bounded
+  `explicit_refresh_search_tool_calls` context lane containing only completed
+  explicit-refresh searches and makes preflight consult it before ordinary
+  recent tool calls. Codex-ultra approved the patch after a requested
+  completed-only filter fix and full `tests/test_work_session.py` rerun.
 
 Next action:
 
@@ -2185,9 +2194,9 @@ Next action:
   `#399/#401`; use the cohort-aware replay summaries plus the additive
   `blocker_code_breakdown` output to collect the remaining runtime slices.
   Because evidence-only commits keep resetting literal `current_head`
-  cohorting to zero, the next concrete step after the search-result path and
-  anchor recovery commit is to run a fresh bounded live slice on the new
-  literal HEAD without `--measurement-head`, ideally on the same
+  cohorting to zero, the next concrete step after the durable
+  explicit-refresh-search history commit is to run a fresh bounded live slice
+  on the new literal HEAD without `--measurement-head`, ideally on the same
   `src/mew/work_session.py` + `tests/test_work_session.py` surface, and prove
   whether the loop can now advance from cue-only refresh to paired widened
   reads and then to either a native replay, a reviewer-visible patch, or a new

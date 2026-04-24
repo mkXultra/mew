@@ -7392,6 +7392,155 @@ class WorkSessionTests(unittest.TestCase):
             ["tests/test_work_session.py", "src/mew/work_session.py"],
         )
 
+    def test_write_ready_preflight_uses_refresh_search_calls_outside_recent_window(self):
+        from mew.work_loop import (
+            _work_write_ready_refresh_search_result_read_actions,
+            build_work_session_context,
+        )
+
+        source_search = {
+            "id": 1,
+            "tool": "search_text",
+            "status": "completed",
+            "parameters": {
+                "path": "src/mew/work_session.py",
+                "query": "finish_work_model_turn",
+                "reason": "locate explicitly requested write-ready cached window",
+            },
+            "result": {
+                "snippets": [
+                    {
+                        "path": "src/mew/work_session.py",
+                        "line": 1690,
+                    }
+                ]
+            },
+        }
+        test_search = {
+            "id": 99,
+            "tool": "search_text",
+            "status": "completed",
+            "parameters": {
+                "path": "tests/test_work_session.py",
+                "query": "no_change_replay_for_current_head_validation_slice",
+                "reason": "locate explicitly requested write-ready cached window",
+            },
+            "result": {
+                "snippets": [
+                    {
+                        "path": "tests/test_work_session.py",
+                        "line": 11087,
+                    }
+                ]
+            },
+        }
+        context = build_work_session_context(
+            {"id": 1, "goal": "proof"},
+            {"id": 1, "title": "proof"},
+            [source_search, *({"id": index, "tool": "read_file", "status": "completed"} for index in range(2, 20)), test_search],
+            [],
+            {},
+            {},
+            recent_tool_count=1,
+            prompt_context_mode="compact_memory",
+        )
+
+        self.assertEqual([call["id"] for call in context["tool_calls"]], [99])
+        self.assertEqual(
+            [call["id"] for call in context["explicit_refresh_search_tool_calls"]],
+            [1, 99],
+        )
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            context,
+            ["tests/test_work_session.py"],
+        )
+
+        self.assertEqual(
+            [action["path"] for action in actions],
+            ["tests/test_work_session.py", "src/mew/work_session.py"],
+        )
+
+    def test_write_ready_preflight_ignores_incomplete_refresh_searches_in_durable_list(self):
+        from mew.work_loop import (
+            _work_write_ready_refresh_search_result_read_actions,
+            build_work_session_context,
+        )
+
+        source_search = {
+            "id": 1,
+            "tool": "search_text",
+            "status": "completed",
+            "parameters": {
+                "path": "src/mew/work_session.py",
+                "query": "finish_work_model_turn",
+                "reason": "locate explicitly requested write-ready cached window",
+            },
+            "result": {
+                "snippets": [
+                    {
+                        "path": "src/mew/work_session.py",
+                        "line": 1690,
+                    }
+                ]
+            },
+        }
+        test_search = {
+            "id": 2,
+            "tool": "search_text",
+            "status": "completed",
+            "parameters": {
+                "path": "tests/test_work_session.py",
+                "query": "no_change_replay_for_current_head_validation_slice",
+                "reason": "locate explicitly requested write-ready cached window",
+            },
+            "result": {
+                "snippets": [
+                    {
+                        "path": "tests/test_work_session.py",
+                        "line": 11087,
+                    }
+                ]
+            },
+        }
+        incomplete_searches = [
+            {
+                "id": index,
+                "tool": "search_text",
+                "status": "failed",
+                "parameters": {
+                    "path": "src/mew/work_session.py",
+                    "query": f"failed_{index}",
+                    "reason": "locate explicitly requested write-ready cached window",
+                },
+                "result": {},
+            }
+            for index in range(3, 16)
+        ]
+        context = build_work_session_context(
+            {"id": 1, "goal": "proof"},
+            {"id": 1, "title": "proof"},
+            [source_search, test_search, *incomplete_searches],
+            [],
+            {},
+            {},
+            recent_tool_count=1,
+            prompt_context_mode="compact_memory",
+        )
+
+        self.assertEqual(
+            [call["id"] for call in context["explicit_refresh_search_tool_calls"]],
+            [1, 2],
+        )
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            context,
+            ["tests/test_work_session.py"],
+        )
+
+        self.assertEqual(
+            [action["path"] for action in actions],
+            ["tests/test_work_session.py", "src/mew/work_session.py"],
+        )
+
     def test_write_ready_preflight_block_prefers_definition_anchor_over_query_fixture(self):
         from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
 
