@@ -596,6 +596,33 @@ class PatchDraftTests(unittest.TestCase):
         self.assertEqual(artifact["kind"], "patch_blocker")
         self.assertEqual(artifact["code"], "missing_exact_cached_window_texts")
 
+    def test_compile_patch_draft_accepts_cached_window_text_when_not_truncated(self):
+        path = "tests/test_patch_draft.py"
+        before_text = "a = 1\n"
+        proposal = {
+            "kind": "patch_proposal",
+            "files": [
+                {
+                    "path": path,
+                    "edits": [{"old": "a = 1", "new": "a = 2"}],
+                }
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo=_todo(path),
+            proposal=proposal,
+            cached_windows={
+                path: _window(path, before_text, context_truncated=False),
+            },
+            live_files={path: _live_file(before_text)},
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_draft")
+        self.assertEqual(artifact["status"], "validated")
+        self.assertEqual(artifact["files"][0]["path"], path)
+
     def test_compile_patch_draft_blocks_cached_window_text_truncated(self):
         path = "tests/test_patch_draft.py"
         before_text = "a = 1\n"

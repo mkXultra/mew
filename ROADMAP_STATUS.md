@@ -2483,8 +2483,13 @@ Next action:
   windows that cover the cached path/span even when the original cached
   `tool_call_id` did not carry exact text, while preserving later-write stale
   protection. Focused `write_ready_fast_path` tests, ruff, `git diff --check`,
-  and codex-ultra review passed. Next step: rerun a fresh `patch_draft` slice
-  on the fixed head before resuming unrelated calibration surfaces.
+  and codex-ultra review passed. The fresh post-fix rerun `#541` / session
+  `#522` on HEAD `d9ca46f` cleared the blocker: mew reached a drafting-ready
+  lane on the same `patch_draft` pair, added a focused non-truncated
+  cached-window success regression in `tests/test_patch_draft.py`, and the
+  scoped verifier passed with 33 tests. Codex-ultra classified it as counted
+  `positive_test_only_patch_verifier` evidence. Next step: resume unrelated
+  fresh calibration surfaces.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
