@@ -3199,6 +3199,12 @@ def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths, work_
         query = _work_write_ready_refresh_query(segment, blocked_tokens=blocked_tokens)
         if not query:
             continue
+        if _work_write_ready_explicit_refresh_search_already_completed(
+            work_session,
+            path,
+            query,
+        ):
+            continue
         if _work_write_ready_explicit_refresh_search_already_zero_match(
             work_session,
             path,
@@ -3220,6 +3226,26 @@ def _work_write_ready_explicit_refresh_search_actions(text, allowed_paths, work_
         if len(actions) >= 5:
             break
     return actions
+
+
+def _work_write_ready_explicit_refresh_search_already_completed(work_session, path, query):
+    if not isinstance(work_session, dict):
+        return False
+    for collection_name in ("explicit_refresh_search_tool_calls", "tool_calls"):
+        for call in work_session.get(collection_name) or []:
+            if not isinstance(call, dict):
+                continue
+            if call.get("tool") != "search_text" or str(call.get("status") or "") != "completed":
+                continue
+            parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+            if str(parameters.get("reason") or "") != "locate explicitly requested write-ready cached window":
+                continue
+            if not _work_paths_match(parameters.get("path"), path):
+                continue
+            if str(parameters.get("query") or "") != str(query or ""):
+                continue
+            return True
+    return False
 
 
 def _work_write_ready_refresh_path_query_tokens(paths):

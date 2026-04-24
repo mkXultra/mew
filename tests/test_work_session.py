@@ -11646,6 +11646,183 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_converts_completed_refresh_searches_to_reads(self):
+        from mew.work_loop import (
+            _work_write_ready_fast_path_details,
+            _work_write_ready_preflight_block,
+        )
+
+        context = {
+            "task": {
+                "id": 402,
+                "title": "M6.9 D7: veto-log read-only memory surface",
+                "description": "Add mew memory --veto-log.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 392,
+                "status": "active",
+                "resume": {
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft paired dry-run edits",
+                            "cached_windows": [
+                                {
+                                    "path": "src/mew/cli.py",
+                                    "tool_call_id": 10,
+                                    "line_start": 1500,
+                                    "line_end": 1579,
+                                },
+                                {
+                                    "path": "tests/test_memory.py",
+                                    "tool_call_id": 11,
+                                    "line_start": 800,
+                                    "line_end": 919,
+                                },
+                                {
+                                    "path": "src/mew/commands.py",
+                                    "tool_call_id": 12,
+                                    "line_start": 11765,
+                                    "line_end": 12284,
+                                },
+                            ],
+                        }
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 10,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/cli.py",
+                            "line_start": 1500,
+                            "line_count": 80,
+                        },
+                        "result": {"text": "    memory_parser.add_argument('--veto')\n"},
+                    },
+                    {
+                        "id": 11,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_memory.py",
+                            "line_start": 800,
+                            "line_count": 120,
+                        },
+                        "result": {"text": "def test_cmd_memory_veto():\n    pass\n"},
+                    },
+                    {
+                        "id": 12,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/commands.py",
+                            "line_start": 11765,
+                            "line_count": 520,
+                        },
+                        "result": {"text": "def cmd_memory(args):\n    pass\n"},
+                    },
+                    {
+                        "id": 13,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/cli.py",
+                            "query": "cmd_memory",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "src/mew/cli.py",
+                                    "line": 46,
+                                    "lines": [{"line": 46, "text": "    cmd_memory,", "match": True}],
+                                },
+                                {
+                                    "path": "src/mew/cli.py",
+                                    "line": 1561,
+                                    "lines": [
+                                        {
+                                            "line": 1561,
+                                            "text": "    memory_parser.set_defaults(func=cmd_memory)",
+                                            "match": True,
+                                        }
+                                    ],
+                                },
+                            ]
+                        },
+                    },
+                    {
+                        "id": 14,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "tests/test_memory.py",
+                            "query": "cmd_memory",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {"snippets": [{"path": "tests/test_memory.py", "line": 860}]},
+                    },
+                    {
+                        "id": 15,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/commands.py",
+                            "query": "cmd_memory",
+                            "reason": "locate explicitly requested write-ready cached window",
+                        },
+                        "result": {"snippets": [{"path": "src/mew/commands.py", "line": 11885}]},
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 10,
+                        "path": "src/mew/cli.py",
+                        "line_start": 1500,
+                        "line_end": 1579,
+                        "text": "    memory_parser.add_argument('--veto')\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 11,
+                        "path": "tests/test_memory.py",
+                        "line_start": 800,
+                        "line_end": 919,
+                        "text": "def test_cmd_memory_veto():\n    pass\n",
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 12,
+                        "path": "src/mew/commands.py",
+                        "line_start": 11765,
+                        "line_end": 12284,
+                        "text": "def cmd_memory(args):\n    pass\n",
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": (
+                "draft one paired dry-run edit; "
+                "read src/mew/cli.py around cmd_memory; "
+                "read tests/test_memory.py around veto; "
+                "read src/mew/commands.py around cmd_memory"
+            ),
+        }
+
+        fast_path = _work_write_ready_fast_path_details(context)
+        preflight_block = _work_write_ready_preflight_block(context, fast_path)
+
+        tools = preflight_block["action"]["tools"]
+        self.assertEqual([tool["type"] for tool in tools], ["read_file", "read_file"])
+        self.assertEqual([tool["path"] for tool in tools], ["src/mew/cli.py", "tests/test_memory.py"])
+        self.assertEqual(tools[0]["line_start"], 1441)
+        self.assertEqual(tools[1]["line_start"], 740)
+
     def test_tiny_write_ready_draft_reasoning_effort_respects_auto_and_env_override_source(self):
         from mew.work_loop import _attempt_write_ready_tiny_draft_turn
 
