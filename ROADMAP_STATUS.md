@@ -2427,6 +2427,10 @@ Next action:
   materially incomplete, record the gap and either continue a planned batch or
   get a reviewer-signed documented reason for a smaller reduction; do not
   silently declare M6.11 closed from the cached-ref subgate alone.
+- 2026-04-24 reviewer-signed close-gate audit is in
+  `docs/M6_11_CLOSE_GATE_GAP_RATIONALE_2026-04-24.md`; M6.11 remains
+  **not close-ready**. The audit passed all immediate checks but retained gap
+  risk and did not run a literal 20-slice batch.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
