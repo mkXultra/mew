@@ -1411,10 +1411,15 @@ def _work_write_ready_fast_path_state(context):
     ]
     activation_source = "plan_item_observations"
     if len(cached_windows) < 2:
-        cached_windows = _write_ready_recent_windows_from_active_work_todo(work_session, resume)
+        cached_windows = _write_ready_cached_refs_from_active_work_todo(resume)
+        if cached_windows:
+            activation_source = "active_work_todo_cached_refs"
+        else:
+            cached_windows = _write_ready_recent_windows_from_active_work_todo(work_session, resume)
+            if cached_windows:
+                activation_source = "active_work_todo_fallback"
         if not cached_windows:
             return {"active": False, "reason": "insufficient_cached_windows"}
-        activation_source = "active_work_todo_fallback"
     has_tests = any(_work_batch_path_is_tests(item.get("path")) for item in cached_windows)
     has_source = any(_work_batch_path_is_mew_source(item.get("path")) for item in cached_windows)
     if not (has_tests and has_source):
@@ -1580,10 +1585,15 @@ def _write_ready_complete_recent_windows_from_target_paths(work_session, target_
                 continue
             if not window.get("text") or window.get("context_truncated"):
                 continue
+            if _write_ready_window_stale_after_later_write(work_session, window, target_path):
+                continue
             windows_by_path[target_path] = {**window, "path": target_path, "context_truncated": False}
             break
         if target_path not in windows_by_path:
-            return []
+            window = _write_ready_latest_complete_read_window_for_path(work_session, target_path)
+            if not window:
+                return []
+            windows_by_path[target_path] = window
     return [windows_by_path[path] for path in target_paths]
 
 
@@ -1599,6 +1609,262 @@ def _write_ready_complete_recent_windows_from_active_work_todo(work_session, res
         work_session,
         source.get("target_paths") or [],
     )
+
+
+def _write_ready_completed_write_touches_target_path(call, target_path):
+    if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+        return False
+    if str(call.get("status") or "").strip() != "completed":
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    path = result.get("path") or parameters.get("path") or ""
+    if not path or not _work_paths_match(path, target_path):
+        return False
+    applied = bool(parameters.get("apply") or result.get("applied"))
+    non_dry_run = result.get("dry_run") is False
+    written_non_dry_run = bool(result.get("written")) and result.get("dry_run") is not True
+    return applied or non_dry_run or written_non_dry_run
+
+
+def _write_ready_call_id_matches(left, right):
+    if left is None or right is None:
+        return False
+    return str(left) == str(right)
+
+
+def _write_ready_call_id_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_ready_window_stale_after_later_write(work_session, window, target_path):
+    tool_call_id = (window or {}).get("tool_call_id")
+    if tool_call_id is None:
+        return False
+    calls = [call for call in (work_session or {}).get("tool_calls") or [] if isinstance(call, dict)]
+    later_write = False
+    for call in reversed(calls):
+        if _write_ready_completed_write_touches_target_path(call, target_path):
+            later_write = True
+            continue
+        if _write_ready_call_id_matches(call.get("id"), tool_call_id):
+            return later_write
+
+    read_id = _write_ready_call_id_int(tool_call_id)
+    if read_id is None:
+        return False
+    for call in calls:
+        call_id = _write_ready_call_id_int(call.get("id"))
+        if call_id is None or call_id <= read_id:
+            continue
+        if _write_ready_completed_write_touches_target_path(call, target_path):
+            return True
+    return False
+
+
+def _write_ready_text_line_count(text):
+    return max(1, len(str(text or "").splitlines()))
+
+
+def _write_ready_complete_read_window_from_call(call, target_path):
+    if not _read_file_call_has_complete_file_result(call):
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    path = result.get("path") or parameters.get("path") or ""
+    if not path or not _work_paths_match(path, target_path):
+        return {}
+    text = result.get("text")
+    if not isinstance(text, str) or not text:
+        return {}
+    line_start = result.get("line_start")
+    line_end = result.get("line_end")
+    if line_start is not None or line_end is not None:
+        try:
+            line_start = int(line_start or 0)
+            line_end = int(line_end or 0)
+        except (TypeError, ValueError):
+            return {}
+        if line_start <= 0 or line_end < line_start:
+            return {}
+    else:
+        line_start = 1
+        line_end = _write_ready_text_line_count(text)
+    return {
+        "path": target_path,
+        "tool_call_id": call.get("id"),
+        "line_start": line_start,
+        "line_end": line_end,
+        "offset": result.get("offset", parameters.get("offset")),
+        "text": text,
+        "visible_chars": len(text),
+        "source_text_chars": len(text),
+        "context_truncated": False,
+        "complete_file": True,
+    }
+
+
+def _write_ready_latest_complete_read_window_for_path(work_session, target_path):
+    later_write = False
+    for call in reversed(list((work_session or {}).get("tool_calls") or [])):
+        if not isinstance(call, dict):
+            continue
+        if _write_ready_completed_write_touches_target_path(call, target_path):
+            later_write = True
+            continue
+        window = _write_ready_complete_read_window_from_call(call, target_path)
+        if not window:
+            continue
+        if later_write:
+            return {}
+        return window
+    return {}
+
+
+def _write_ready_cached_ref_bounds(cached):
+    try:
+        line_start = int((cached or {}).get("line_start") or 0)
+        line_end = int((cached or {}).get("line_end") or 0)
+    except (TypeError, ValueError):
+        return ()
+    if line_start <= 0 or line_end < line_start:
+        return ()
+    return line_start, line_end
+
+
+def _write_ready_cached_refs_from_active_work_todo(resume):
+    active_work_todo = (resume or {}).get("active_work_todo") if isinstance(resume, dict) else {}
+    if not isinstance(active_work_todo, dict):
+        return []
+    status = str(active_work_todo.get("status") or "").strip()
+    if status not in ("queued", "drafting"):
+        return []
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    target_paths = _write_ready_paired_target_paths(source.get("target_paths") or [])
+    if not target_paths:
+        return []
+
+    refs_by_path = {}
+    for ref in active_work_todo.get("cached_window_refs") or []:
+        if not isinstance(ref, dict) or bool(ref.get("context_truncated")):
+            continue
+        bounds = _write_ready_cached_ref_bounds(ref)
+        if not bounds:
+            continue
+        matching_path = ""
+        for target_path in target_paths:
+            if _work_paths_match(ref.get("path"), target_path):
+                matching_path = target_path
+                break
+        if not matching_path:
+            continue
+        refs_by_path[matching_path] = {
+            **ref,
+            "path": matching_path,
+            "line_start": bounds[0],
+            "line_end": bounds[1],
+        }
+    if set(refs_by_path) != set(target_paths):
+        return []
+    return [refs_by_path[path] for path in target_paths]
+
+
+def _write_ready_read_call_window_for_cached_ref(call, cached):
+    if not isinstance(call, dict) or call.get("tool") != "read_file":
+        return {}
+    if str(call.get("status") or "").strip() != "completed":
+        return {}
+    cached_tool_call_id = (cached or {}).get("tool_call_id")
+    if cached_tool_call_id is not None and not _write_ready_call_id_matches(call.get("id"), cached_tool_call_id):
+        return {}
+    path = (cached or {}).get("path")
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    call_path = result.get("path") or parameters.get("path") or ""
+    if not path or not call_path or not _work_paths_match(call_path, path):
+        return {}
+    text = result.get("text")
+    if not isinstance(text, str) or not text:
+        return {}
+    if any(bool(result.get(key)) for key in ("context_truncated", "source_truncated", "truncated")):
+        return {}
+
+    bounds = _write_ready_cached_ref_bounds(cached)
+    if not bounds:
+        return {}
+    cached_start, cached_end = bounds
+    line_start = result.get("line_start")
+    line_end = result.get("line_end")
+    complete_file = False
+    if line_start is not None or line_end is not None:
+        try:
+            line_start = int(line_start or 0)
+            line_end = int(line_end or 0)
+        except (TypeError, ValueError):
+            return {}
+        if line_start <= 0 or line_end < line_start:
+            return {}
+        complete_file = _read_file_call_has_complete_file_result(call)
+    else:
+        if not _read_file_call_has_complete_file_result(call):
+            return {}
+        line_start = 1
+        line_end = _write_ready_text_line_count(text)
+        complete_file = True
+    if line_start > cached_start or line_end < cached_end:
+        return {}
+    return {
+        "path": path,
+        "tool_call_id": call.get("id"),
+        "line_start": line_start,
+        "line_end": line_end,
+        "offset": result.get("offset", parameters.get("offset")),
+        "text": text,
+        "visible_chars": len(text),
+        "source_text_chars": len(text),
+        "context_truncated": False,
+        "complete_file": complete_file,
+    }
+
+
+def _write_ready_tool_call_window_for_cached_ref(work_session, cached):
+    later_write = False
+    path = (cached or {}).get("path")
+    for call in reversed(list((work_session or {}).get("tool_calls") or [])):
+        if not isinstance(call, dict):
+            continue
+        if _write_ready_completed_write_touches_target_path(call, path):
+            later_write = True
+            continue
+        window = _write_ready_read_call_window_for_cached_ref(call, cached)
+        if not window:
+            continue
+        if later_write:
+            return {}
+        return window
+    return {}
+
+
+def _write_ready_exact_windows_for_cached_refs(work_session, cached_refs):
+    windows = []
+    for cached in cached_refs or []:
+        if not isinstance(cached, dict):
+            return []
+        window = _write_ready_recent_window_for_cached_ref(
+            cached,
+            (work_session or {}).get("recent_read_file_windows") or [],
+        )
+        if window and _write_ready_window_stale_after_later_write(work_session, window, cached.get("path")):
+            window = {}
+        if not window:
+            window = _write_ready_tool_call_window_for_cached_ref(work_session, cached)
+        if not window:
+            return []
+        windows.append(window)
+    return windows
 
 
 def _write_ready_recent_window_covers_cached_ref(window, cached):
@@ -2449,17 +2715,17 @@ def _work_write_ready_fast_path_details(context):
     if fast_path.get("activation_source") == "active_work_todo_complete_reads":
         recent_windows = list(fast_path.get("cached_windows") or [])
     else:
-        for cached in fast_path.get("cached_windows") or []:
-            item = _write_ready_recent_window_for_cached_ref(
-                cached,
-                work_session.get("recent_read_file_windows") or [],
-            )
-            if item:
-                recent_windows.append(item)
-            else:
-                recent_windows = []
-                break
+        recent_windows = _write_ready_exact_windows_for_cached_refs(
+            work_session,
+            fast_path.get("cached_windows") or [],
+        )
     if not recent_windows:
+        if fast_path.get("activation_source") == "active_work_todo_cached_refs":
+            return {
+                **fast_path,
+                "active": False,
+                "reason": "missing_exact_cached_window_texts",
+            }
         recent_windows = _write_ready_recent_windows_from_target_paths(work_session, resume)
         if not recent_windows:
             return {

@@ -8642,6 +8642,334 @@ class WorkSessionTests(unittest.TestCase):
             ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
         )
 
+    def test_write_ready_fast_path_hydrates_cached_window_refs_from_offset_complete_reads(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        source_text = "def normalize_plan(value):\n    return value\n"
+        test_text = "def test_normalize_plan():\n    assert normalize_plan(1) == 1\n"
+        context = {
+            "task": {
+                "id": 520,
+                "title": "Hydrate cached refs from complete reads",
+                "description": "Draft from active cached refs when only raw offset reads remain.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 501,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-501-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "target_paths": ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+                            "verify_command": "uv run pytest -q tests/test_plan_schema.py --no-testmon",
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": "src/mew/plan_schema.py",
+                                "tool_call_id": 21,
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                            {
+                                "path": "tests/test_plan_schema.py",
+                                "tool_call_id": 22,
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                        ],
+                        "attempts": {"draft": 1, "review": 0},
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [],
+                        }
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 21,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "src/mew/plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": source_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 22,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "tests/test_plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "tests/test_plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": test_text,
+                            "truncated": False,
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+        fast_context = build_write_ready_work_model_context(context)
+
+        self.assertTrue(details["active"])
+        self.assertEqual(details["activation_source"], "active_work_todo_cached_refs")
+        self.assertEqual(
+            [item["tool_call_id"] for item in details["recent_windows"]],
+            [21, 22],
+        )
+        self.assertEqual(
+            [item["text"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
+            [source_text, test_text],
+        )
+
+    def test_write_ready_fast_path_does_not_hydrate_stale_cached_window_refs_after_applied_write(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        source_text = "def normalize_plan(value):\n    return value\n"
+        test_text = "def test_normalize_plan():\n    assert normalize_plan(1) == 1\n"
+        context = {
+            "task": {
+                "id": 520,
+                "title": "Reject stale cached refs",
+                "description": "Do not draft from complete reads made stale by a later write.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 501,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-501-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "target_paths": ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": "src/mew/plan_schema.py",
+                                "tool_call_id": 21,
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                            {
+                                "path": "tests/test_plan_schema.py",
+                                "tool_call_id": 22,
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                        ],
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [],
+                        }
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 21,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "src/mew/plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": source_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 22,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "tests/test_plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "tests/test_plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": test_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 23,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/plan_schema.py",
+                            "old": "return value",
+                            "new": "return value or {}",
+                            "apply": True,
+                        },
+                        "result": {
+                            "path": "src/mew/plan_schema.py",
+                            "changed": True,
+                            "written": True,
+                            "dry_run": False,
+                            "applied": True,
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_exact_cached_window_texts")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
+    def test_write_ready_fast_path_does_not_fallback_to_stale_recent_windows_for_cached_refs(self):
+        from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
+
+        source_text = "def normalize_plan(value):\n    return value\n"
+        test_text = "def test_normalize_plan():\n    assert normalize_plan(1) == 1\n"
+        context = {
+            "task": {
+                "id": 520,
+                "title": "Reject stale recent cached refs",
+                "description": "Do not bypass exact cached refs with stale target-path windows.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 501,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-501-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "target_paths": ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": "src/mew/plan_schema.py",
+                                "tool_call_id": 21,
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                            {
+                                "path": "tests/test_plan_schema.py",
+                                "tool_call_id": 22,
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                        ],
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Draft one paired dry-run edit batch",
+                            "cached_windows": [],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [
+                        {"path": "src/mew/plan_schema.py"},
+                        {"path": "tests/test_plan_schema.py"},
+                    ],
+                },
+                "tool_calls": [
+                    {
+                        "id": 21,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "src/mew/plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": source_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 22,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "tests/test_plan_schema.py", "offset": 0},
+                        "result": {
+                            "path": "tests/test_plan_schema.py",
+                            "offset": 0,
+                            "next_offset": None,
+                            "text": test_text,
+                            "truncated": False,
+                        },
+                    },
+                    {
+                        "id": 23,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/plan_schema.py",
+                            "old": "return value",
+                            "new": "return value or {}",
+                            "apply": True,
+                        },
+                        "result": {
+                            "path": "src/mew/plan_schema.py",
+                            "changed": True,
+                            "written": True,
+                            "dry_run": False,
+                            "applied": True,
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 21,
+                        "path": "src/mew/plan_schema.py",
+                        "line_start": 1,
+                        "line_end": 2,
+                        "text": source_text,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 22,
+                        "path": "tests/test_plan_schema.py",
+                        "line_start": 1,
+                        "line_end": 2,
+                        "text": test_text,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "missing_exact_cached_window_texts")
+        self.assertEqual(build_write_ready_work_model_context(context), {})
+
     def test_write_ready_fast_path_does_not_use_complete_reads_for_arbitrary_not_ready_plan_item(self):
         from mew.work_loop import _work_write_ready_fast_path_details
 
