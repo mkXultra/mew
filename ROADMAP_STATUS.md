@@ -2237,6 +2237,16 @@ Missing proof:
   patch-draft compiler replay when paired windows remain structurally
   insufficient after refresh is forbidden or exhausted. Codex-ultra approved
   the plan; the pre-fix `#507` session remains non-counted.
+- Task `#508` on `90dc28e` showed the follow-up compact-context gap: the
+  previous fix could detect refresh exhaustion only from the prompt's recent
+  `tool_calls`, so once the paired structural refresh reads aged partly out of
+  that compact recent window, deterministic preflight still ended in a plain
+  wait with no replay bundle, paired patch/diff, or verifier artifact. The
+  current patch mirrors the explicit-refresh search history pattern by carrying
+  a bounded durable `structural_refresh_read_tool_calls` list in the work
+  context and using it for structural-refresh exhaustion. Codex-ultra approved
+  the metadata-only durable history fix; the pre-fix `#508` session remains
+  non-counted.
 
 Next action:
 
@@ -2256,9 +2266,9 @@ Next action:
   counted replay as the latest counted runtime-head evidence via
   `--measurement-head`, but do not advance on legacy timeout-only evidence,
   reviewer/non-native non-counted replays, or no-artifact live validation alone.
-  After committing the #507 repeated structural refresh/no-replay fix, repeat a
-  fresh literal-head slice again; do not resume `#505`, `#506`, or `#507` as
-  counted evidence because they are blocked pre-fix sessions.
+  After committing the #508 durable structural-refresh history fix, repeat a
+  fresh literal-head slice again; do not resume `#505`, `#506`, `#507`, or
+  `#508` as counted evidence because they are blocked pre-fix sessions.
 - while M6.11 remains open, append a canonical calibration ledger at
   `proof-artifacts/m6_11_calibration_ledger.jsonl` for every measured or
   reviewer-rejected current-head sample. Each line should capture the

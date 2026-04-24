@@ -7486,6 +7486,47 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(actions, [])
 
+    def test_write_ready_preflight_tracks_structural_refreshes_outside_recent_tool_window(self):
+        from mew.work_loop import _work_write_ready_structural_refresh_exhausted_for_paths
+
+        work_session = {
+            "structural_refresh_read_tool_calls": [
+                {
+                    "id": 3978,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "tests/test_proof_summary.py",
+                        "reason": "refresh structurally incomplete write-ready cached window",
+                    },
+                },
+                {
+                    "id": 3979,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "src/mew/proof_summary.py",
+                        "reason": "refresh structurally incomplete write-ready cached window",
+                    },
+                },
+            ],
+            "tool_calls": [
+                {
+                    "id": 3980,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/proof_summary.py"},
+                }
+            ],
+        }
+
+        self.assertTrue(
+            _work_write_ready_structural_refresh_exhausted_for_paths(
+                work_session,
+                ["src/mew/proof_summary.py", "tests/test_proof_summary.py"],
+            )
+        )
+
     def test_write_ready_preflight_no_refresh_guidance_suppresses_explicit_refresh_searches(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
@@ -8174,6 +8215,53 @@ class WorkSessionTests(unittest.TestCase):
             [action["path"] for action in actions],
             ["tests/test_work_session.py", "src/mew/work_session.py"],
         )
+
+    def test_write_ready_preflight_carries_structural_refresh_reads_outside_recent_window(self):
+        from mew.work_loop import build_work_session_context
+
+        source_refresh = {
+            "id": 1,
+            "tool": "read_file",
+            "status": "completed",
+            "parameters": {
+                "path": "src/mew/proof_summary.py",
+                "line_start": 1,
+                "line_count": 939,
+                "reason": "refresh structurally incomplete write-ready cached window",
+            },
+            "result": {"text": "source body must not be retained in durable refresh history"},
+        }
+        test_refresh = {
+            "id": 99,
+            "tool": "read_file",
+            "status": "completed",
+            "parameters": {
+                "path": "tests/test_proof_summary.py",
+                "line_start": 200,
+                "line_count": 1000,
+                "reason": "refresh structurally incomplete write-ready cached window",
+            },
+            "result": {"text": "test body must not be retained in durable refresh history"},
+        }
+        context = build_work_session_context(
+            {"id": 1, "goal": "proof"},
+            {"id": 1, "title": "proof"},
+            [source_refresh, *({"id": index, "tool": "search_text", "status": "completed"} for index in range(2, 20)), test_refresh],
+            [],
+            {},
+            {},
+            recent_tool_count=1,
+            prompt_context_mode="compact_memory",
+        )
+
+        self.assertEqual([call["id"] for call in context["tool_calls"]], [99])
+        self.assertEqual(
+            [call["id"] for call in context["structural_refresh_read_tool_calls"]],
+            [1, 99],
+        )
+        for call in context["structural_refresh_read_tool_calls"]:
+            self.assertNotIn("result", call)
+        self.assertNotIn("text", json.dumps(context["structural_refresh_read_tool_calls"]))
 
     def test_write_ready_preflight_ignores_incomplete_refresh_searches_in_durable_list(self):
         from mew.work_loop import (

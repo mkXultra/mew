@@ -1048,6 +1048,21 @@ def build_work_session_context(
     compacted=False,
     prompt_context_mode="full",
 ):
+    def structural_refresh_history_call(call):
+        parameters = (call or {}).get("parameters")
+        parameters = parameters if isinstance(parameters, dict) else {}
+        return {
+            "id": (call or {}).get("id"),
+            "tool": (call or {}).get("tool"),
+            "status": (call or {}).get("status"),
+            "parameters": {
+                "path": parameters.get("path"),
+                "line_start": parameters.get("line_start"),
+                "line_count": parameters.get("line_count"),
+                "reason": parameters.get("reason"),
+            },
+        }
+
     prompt_compacted = prompt_context_mode != "full"
     prompt_model_turns = compact_model_turns_for_prompt(model_turns)
     goal = session.get("goal")
@@ -1079,6 +1094,14 @@ def build_work_session_context(
         and str((call or {}).get("status") or "") == "completed"
         and str(((call or {}).get("parameters") or {}).get("reason") or "")
         == "locate explicitly requested write-ready cached window"
+    ][-10:]
+    work_context["structural_refresh_read_tool_calls"] = [
+        structural_refresh_history_call(call)
+        for call in tool_calls
+        if (call or {}).get("tool") == "read_file"
+        and str((call or {}).get("status") or "") == "completed"
+        and str(((call or {}).get("parameters") or {}).get("reason") or "")
+        == "refresh structurally incomplete write-ready cached window"
     ][-10:]
     work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
     if compacted or prompt_compacted:
@@ -2423,7 +2446,19 @@ def _work_write_ready_structural_refresh_paths(work_session):
     paths = []
     if not isinstance(work_session, dict):
         return paths
-    for call in work_session.get("tool_calls") or []:
+    tool_calls = []
+    seen_call_ids = set()
+    for collection_name in ("structural_refresh_read_tool_calls", "tool_calls"):
+        for call in work_session.get(collection_name) or []:
+            if not isinstance(call, dict):
+                continue
+            call_id = call.get("id")
+            if call_id is not None and call_id in seen_call_ids:
+                continue
+            if call_id is not None:
+                seen_call_ids.add(call_id)
+            tool_calls.append(call)
+    for call in tool_calls:
         if not isinstance(call, dict):
             continue
         if call.get("tool") != "read_file" or str(call.get("status") or "") != "completed":
