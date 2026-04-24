@@ -2497,7 +2497,11 @@ Next action:
   `positive_verifier_backed_no_change`: action_application source/test files
   were read completely, `uv run pytest -q tests/test_action_application.py
   --no-testmon` passed 6 tests, and codex-ultra accepted the no-change
-  closeout. Next step: continue the fresh calibration batch.
+  closeout. `#544` / session `#525` then closed as counted
+  `positive_verifier_backed_no_change`: model_backends source/test files were
+  read completely, `uv run pytest -q tests/test_model_backends.py --no-testmon`
+  passed 13 tests, and codex-ultra accepted the no-change closeout. Next step:
+  continue the fresh calibration batch.
   Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
   current-head incidence because they are blocked pre-fix sessions;
   #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
