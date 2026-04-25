@@ -27003,6 +27003,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("working_memory.target_paths", prompt)
         self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
         self.assertIn("prefer those paths before a broader project search", prompt)
+        self.assertIn("work_session.world_state.files marks a target_path as exists=false", prompt)
+        self.assertIn("do not read_file that missing path", prompt)
+        self.assertIn("write_file with create=true", prompt)
         self.assertIn("work_session.resume.target_path_cached_window_observations", prompt)
         self.assertIn("prefer refreshing that direct cached window before repeating same-surface search_text", prompt)
         self.assertIn("Drop a working_memory.target_paths entry once it is no longer needed for the next step", prompt)
@@ -30166,6 +30169,63 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(files[0]["source"], "workspace_snapshot")
                 self.assertTrue(any(item["path"] == "README.md" for item in files))
                 self.assertTrue(any(item["path"] == "sample" for item in files))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_world_state_surfaces_missing_scope_target_paths(self):
+        from mew.work_world import build_work_world_state
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                world = build_work_world_state(
+                    {
+                        "working_memory": {
+                            "target_paths": [
+                                "src/mew/memory_explore.py",
+                                "tests/test_memory_explore.py",
+                            ],
+                        }
+                    },
+                    ["."],
+                )
+
+                files = world["files"]
+                self.assertEqual([item["source"] for item in files], ["target_path", "target_path"])
+                self.assertEqual([item["path"] for item in files], ["src/mew/memory_explore.py", "tests/test_memory_explore.py"])
+                self.assertEqual([item["exists"] for item in files], [False, False])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_world_state_refuses_sensitive_target_paths(self):
+        from mew.work_world import build_work_world_state
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path(".mew/memory/private").mkdir(parents=True)
+                Path(".mew/memory/private/secret.md").write_text("secret\n", encoding="utf-8")
+                world = build_work_world_state(
+                    {
+                        "working_memory": {
+                            "target_paths": [
+                                ".mew/memory/private/secret.md",
+                                ".mew/memory/private/missing.md",
+                            ],
+                        }
+                    },
+                    ["."],
+                )
+
+                files = world["files"]
+                self.assertEqual([item["path"] for item in files], [".mew/memory/private/secret.md", ".mew/memory/private/missing.md"])
+                self.assertEqual([item["exists"] for item in files], [None, None])
+                self.assertTrue(all("refusing to inspect sensitive path" in item["error"] for item in files))
+                self.assertTrue(all("size" not in item and "mtime_ns" not in item for item in files))
             finally:
                 os.chdir(old_cwd)
 
