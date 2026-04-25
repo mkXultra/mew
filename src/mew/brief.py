@@ -876,6 +876,25 @@ def recent_focus_friction(state, kind=None, *, session_limit=10, sample_limit=2)
     }
 
 
+def _format_focus_work_todos(todos, *, limit=3):
+    open_todos = [
+        todo
+        for todo in todos or []
+        if (todo.get("status") or "") in {"todo", "in_progress", "blocked"}
+    ]
+    if not open_todos:
+        return ""
+    parts = []
+    for todo in open_todos[:limit]:
+        text = " ".join(str(todo.get("text") or "").split())
+        if len(text) > 70:
+            text = text[:67].rstrip() + "..."
+        parts.append(f"{todo.get('id')} [{todo.get('status')}] {text}".rstrip())
+    remaining = len(open_todos) - len(parts)
+    suffix = f" (+{remaining} more)" if remaining > 0 else ""
+    return "; ".join(parts) + suffix
+
+
 def active_work_session_items(state, limit=3, kind=None, current_time=None):
     current_time = current_time or now_iso()
     items = []
@@ -922,6 +941,7 @@ def active_work_session_items(state, limit=3, kind=None, current_time=None):
                 "continuity": resume.get("continuity") or {},
                 "compressed_prior_think": resume.get("compressed_prior_think") or {},
                 "working_memory": resume.get("working_memory") or {},
+                "work_todos": resume.get("work_todos") or [],
                 "pending_steer": resume.get("pending_steer") or {},
                 "queued_followups": resume.get("queued_followups") or [],
                 "queued_followups_total": resume.get("queued_followups_total") or 0,
@@ -1212,6 +1232,9 @@ def format_focus(data):
                 lines.append(f"  memory_stale: {stale_memory}")
             elif memory.get("next_step"):
                 lines.append(f"  memory_next: {memory.get('next_step')}")
+            work_todos = _format_focus_work_todos(session.get("work_todos") or [])
+            if work_todos:
+                lines.append(f"  work_todos: {work_todos}")
             pending_steer = session.get("pending_steer") or {}
             if pending_steer.get("text") and not stop_request:
                 lines.append(f"  pending_steer: {pending_steer.get('text')}")

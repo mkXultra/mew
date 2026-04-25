@@ -999,6 +999,29 @@ class BriefTests(unittest.TestCase):
                 "goal": "Make reentry obvious.",
                 "created_at": "then",
                 "updated_at": "now",
+                "work_todos": [
+                    {
+                        "id": "work-todo-3-1",
+                        "text": "Read source/test pair",
+                        "status": "in_progress",
+                        "created_at": "then",
+                        "updated_at": "now",
+                    },
+                    {
+                        "id": "work-todo-3-2",
+                        "text": "Run focused verifier",
+                        "status": "todo",
+                        "created_at": "then",
+                        "updated_at": "now",
+                    },
+                    {
+                        "id": "work-todo-3-3",
+                        "text": "Already closed item",
+                        "status": "done",
+                        "created_at": "then",
+                        "updated_at": "now",
+                    },
+                ],
                 "tool_calls": [],
                 "model_turns": [
                     {
@@ -1035,6 +1058,13 @@ class BriefTests(unittest.TestCase):
         self.assertIn("#3 task=#7 phase=idle Implement cockpit polish", focus)
         self.assertIn("memory: Cockpit polish needs one readable reentry cue.", focus)
         self.assertIn("memory_next: Surface memory in focus.", focus)
+        self.assertEqual(len(data["active_work_sessions"][0]["work_todos"]), 3)
+        self.assertIn(
+            "work_todos: work-todo-3-1 [in_progress] Read source/test pair; "
+            "work-todo-3-2 [todo] Run focused verifier",
+            focus,
+        )
+        self.assertNotIn("Already closed item", focus)
         self.assertIn("resume: ./mew work 7 --session --resume", focus)
         self.assertIn("continue: ./mew work 7 --live --max-steps 1", focus)
         self.assertIn("follow: ./mew work 7 --follow --max-steps 10", focus)
