@@ -7,8 +7,14 @@ description: Run bounded mew roadmap/coding tasks with mew as the first implemen
 
 Use this skill for bounded mew roadmap/coding implementation unless the user
 explicitly asks for direct Codex implementation or the task is governance,
-milestone-close, roadmap-status, permission, safety, or agent-loop substrate
-surgery.
+milestone-close, roadmap-status, permission, safety, skill-policy, or
+agent-loop substrate surgery.
+
+From M6.9 onward, bounded roadmap/coding implementation is mew-owned by
+default. Codex acts as the human-style reviewer/approver and may directly edit
+only reviewer-owned policy/status artifacts or loop substrate repairs. Do not
+fill a mew implementation gap with supervisor product code unless there is an
+explicit emergency override; record it as no autonomy credit.
 
 Goal: make product progress while measuring whether mew can actually implement
 the work. Do not hide failures behind supervisor rescue edits.
@@ -20,12 +26,16 @@ the work. Do not hide failures behind supervisor rescue edits.
 2. Start with mew as implementer. Codex acts as human-style reviewer/approver.
 3. Require a scoped patch, proof command, and reviewer-visible rationale.
 4. If mew succeeds, classify the result as `success_mew_first`.
-5. If mew fails, classify the failure before fixing anything.
-6. If the failure is a reproducible loop/substrate blocker, make at most one
-   bounded substrate repair, then retry the same task.
+5. If mew fails, classify the failure before fixing any product code.
+6. If the failure is a reproducible loop/substrate blocker, immediately pause
+   the active product milestone as `pending`, create or activate a substrate
+   repair milestone, make the bounded substrate repair, then retry the same
+   task.
 7. If retry succeeds, classify as `success_after_substrate_fix`.
-8. If retry fails or the failure is not a narrow substrate blocker, record it
-   and either supervisor-rescue the product gap or choose another task.
+8. If retry fails, keep the product milestone pending and either continue the
+   substrate repair milestone with the new blocker or explicitly record why the
+   failure is invalid/transient. Do not move to unrelated polish while the
+   same class blocks mew-owned implementation.
 
 ## Failure Classes
 
@@ -45,15 +55,25 @@ the work. Do not hide failures behind supervisor rescue edits.
 
 ## Immediate Repair Rule
 
-Repair immediately only when all are true:
+For M6.9+ work, repair immediately when all are true:
 
 - the same failure is reproducible or has clear replay/cached-window evidence;
 - the repair is narrower than the task itself;
 - the repair protects future mew-first work, not just the current patch;
 - the active milestone still benefits from retrying the same task.
 
-Otherwise record the failure and move on. Do not spend multiple cycles turning
-one task into hidden polish.
+When this fires:
+
+- set the active product milestone to `pending` until the substrate blocker is
+  fixed;
+- create or activate a named repair milestone with a concrete Done-when gate;
+- keep the failed task as the retry target after the repair;
+- count direct Codex edits as substrate/product progress, not mew autonomy
+  credit.
+
+If the failure is not structural, fix the task spec, classify a transient, or
+record a deferred blocker. Do not spend cycles turning the product task into
+hidden supervisor rescue.
 
 ## Accounting
 

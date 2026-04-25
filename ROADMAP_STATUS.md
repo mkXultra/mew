@@ -26,11 +26,12 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Resume condition fired after M6.10 closed: durable-memory proof should continue at drift-canary, novel-task, and simulated alignment-decay evidence. |
+| 6.9. Durable Coding Intelligence | `pending` | Paused again after task #613 exposed a reproducible mew-first implementation drift; resume after M6.14 repairs the substrate and retries the same task. |
 | 6.10. Execution Accelerators and Mew-First Reliability | `done` | Closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: latest 10 attempts reached 7/10 clean-or-practical with classified failures and no rescue edits for counted successes. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
+| 6.14. Mew-First Failure Repair Gate | `in_progress` | Active substrate repair milestone: M6.9+ bounded implementation must stay mew-owned; reproducible mew-first failures pause the product milestone until repaired and retried. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -39,22 +40,28 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 19:14 JST.
+Last assessed: 2026-04-25 19:38 JST.
 
-Active work: **M6.9 Durable Coding Intelligence**.
-M6.10 is closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: recent
-bounded mew-first implementation reached `7/10` clean-or-practical successes,
-with `rescue_edits=0` for counted successes and every failure classified
-through the calibration economics surface. The reason M6.9 was pending is now
-resolved.
+Active work: **M6.14 Mew-First Failure Repair Gate**.
+M6.10 is still closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`, but the
+first resumed M6.9 task exposed a stricter operating problem: task `#613`
+(`M6.9 drift-canary dogfood scenario v0`) drifted twice after reviewer
+correction. It first proposed edits for `m6_9-phase1-regression`, then after
+targeted read-only rescue proposed an unrelated `queued_message_event_id`
+patch. That is a reproducible mew-first substrate blocker, not a product gap
+for Codex to fill by hand.
 
-Resume M6.9 at its clean proof-slice boundary. Phase 1 durable-memory
-substrate exists, the repeated-task proof matrix has 10/10 deterministic
-shapes, comparator regression passes, reviewer-steering and failure-shield
-proofs fire, and reasoning-trace recall covers two iterations including one
-abstract task. The next valuable work is the remaining M6.9 drift-canary,
-novel-task, and simulated alignment-decay proof, using M6.10 metrics to avoid
-hiding supervisor rescue edits.
+M6.9 is therefore paused as `pending` again. Resume M6.9 only after M6.14
+repairs this class of mew-first implementation drift and retries task `#613`
+as mew-owned work. Direct Codex edits during M6.14 are allowed only for the
+skill/status policy update and the loop-substrate repair itself; they do not
+count as mew-first autonomy credit.
+
+The durable execution contract from this point forward is: M6.9+ bounded
+roadmap/coding implementation belongs to mew. If mew fails, classify the
+failure, pause the active product milestone, fix the substrate or task spec,
+and retry the same task. Do not silently convert mew-owned implementation into
+Codex-authored product rescue.
 
 M6.13 is registered as the later deliberation-lane milestone, but it stays
 inactive until M6.10/M6.9 evidence shows that a narrow high-effort lane would
@@ -245,6 +252,10 @@ Current next action:
     roadmap-status, permission, safety, skill-policy, or explicit agent-loop
     substrate surgery. Record mew-first failures instead of silently converting
     them into supervisor-authored autonomy credit.
+17. From M6.9 onward, bounded roadmap/coding implementation is mew-owned by
+    default. If mew fails a task with reproducible structural evidence, pause
+    the active product milestone as `pending`, activate a repair milestone,
+    fix the substrate, and retry the same task before resuming product work.
 
 Human-role transition rule:
 
@@ -254,6 +265,10 @@ Human-role transition rule:
 - From M6.7 onward, the default implementation mode is **mew first** for
   bounded roadmap/coding work: mew is the implementer, Codex plays the
   human-style reviewer/approver, and the loop stays reviewer-gated.
+- From M6.9 onward, treat this as stronger than a preference: bounded
+  roadmap/coding implementation is mew-owned. Codex may directly edit only
+  governance/status/policy, safety, permissions, and loop substrate repair
+  surfaces unless the user gives an explicit emergency override.
 - The M6.11 reviewer-implemented exception is closed with the residual
   hardening audit. Count those residual changes as roadmap-wide platform
   progress, not mew-first autonomy credit. Bounded roadmap/coding work now
@@ -262,6 +277,9 @@ Human-role transition rule:
   or another explicit substrate, safety, governance, or permission change.
 - Treat rescue edits by Codex as a signal that mew is not ready to own that
   class of task yet. Record the blocker instead of silently fixing around it.
+- If rescue would be needed because mew drifted, stalled, or patched the wrong
+  surface, move the product milestone to `pending` and repair the mew-first
+  substrate before retrying the same task.
 - Low- and medium-risk implementation can now use mew as primary implementer
   with Codex acting as human reviewer/approver. Rescue edits by Codex still
   disqualify the loop from autonomy credit and should be recorded as blockers.
@@ -1879,7 +1897,7 @@ Next action:
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `in_progress`.
+Status: `pending`.
 
 Goal:
 
@@ -2338,9 +2356,12 @@ Resume condition:
   coding tasks with clean/practical success in 7 of the latest 10 attempts,
   `rescue_edits=0` for counted successes, and every failure classified through
   the calibration-economics surface.
+- superseded on 2026-04-25 by the task `#613` failure: the first resumed M6.9
+  drift-canary task produced two reviewer-rejected off-scope drafts after
+  correction and targeted read-only recovery. M6.9 is paused until M6.14 fixes
+  that mew-first substrate failure and retries task `#613`.
 - next M6.9 work should resume the drift-canary / novel-task and simulated
-  alignment-decay proof without pulling in new platform milestones unless the
-  proof produces measured blocker evidence.
+  alignment-decay proof only after the M6.14 retry gate passes.
 
 ### M6.10: Execution Accelerators and Mew-First Reliability
 
@@ -3539,10 +3560,61 @@ Missing proof:
 
 Next action:
 
-- keep M6.13 inactive while M6.9 is active. Revisit after M6.9 ranked recall
-  exists or after a repeated M6.9 blocker shows that a small Phase 1 lane
-  framework slice would produce clearer proof faster than continuing the
+- keep M6.13 inactive while M6.14/M6.9 is active. Revisit after M6.9 ranked
+  recall exists or after a repeated M6.9 blocker shows that a small Phase 1
+  lane framework slice would produce clearer proof faster than continuing the
   durable-memory proof directly.
+
+### M6.14: Mew-First Failure Repair Gate
+
+Status: `in_progress`.
+
+Goal:
+
+- make M6.9+ bounded roadmap/coding implementation genuinely mew-owned by
+  repairing mew-first substrate failures immediately instead of letting Codex
+  rescue product patches
+
+Entry gate:
+
+- M6.10 must be closed enough that ordinary mew-first success/failure
+  accounting exists
+- a real M6.9+ mew-first implementation task must expose reproducible
+  structural failure evidence
+
+Evidence:
+
+- Task `#613` (`M6.9 drift-canary dogfood scenario v0`) started as a
+  gpt-5.5/high mew-first implementation. It was scoped to
+  `src/mew/dogfood.py` and `tests/test_dogfood.py` and asked for a new
+  `m6_9-drift-canary` scenario.
+- The first dry-run patch edited `m6_9-phase1-regression` instead of adding
+  `m6_9-drift-canary`; the reviewer rejected it as wrong-target drift.
+- After targeted read-only recovery, the next dry-run patch edited
+  `queued_message_event_id` and its test, again outside task `#613`.
+- The supervisor intentionally did not land a product rescue patch. This is
+  recorded as a mew-first substrate blocker requiring repair before M6.9
+  resumes.
+- Task `#614` now tracks the active M6.14 substrate repair:
+  `M6.14 repair #613 wrong-target draft drift`.
+- `.codex/skills/mew-first-implementation-loop/SKILL.md` now states the
+  M6.9+ rule: bounded implementation is mew-owned; reproducible structural
+  failures pause the product milestone, activate repair, and retry the same
+  task.
+
+Missing proof:
+
+- no substrate fix has landed yet for the `#613` wrong-target/off-scope patch
+  drift class
+- task `#613` has not yet been retried mew-first after the repair
+- no `success_after_substrate_fix` evidence exists yet for this class
+
+Next action:
+
+- execute task `#614`: identify the smallest loop-substrate fix that prevents
+  a write-ready session from replacing the task goal with a nearby
+  cached-window or unrelated helper patch after reviewer correction, add
+  focused tests/replay evidence, then retry task `#613` mew-first.
 
 ### M7: Senses - Inbound Signals
 
@@ -3646,19 +3718,22 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.9 Durable Coding Intelligence**.
+Active focus: **M6.14 Mew-First Failure Repair Gate**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- resume the M6.9 drift-canary / novel-task and simulated alignment-decay proof
-  that was paused while M6.10 repaired mew-first implementation reliability;
+- execute task `#614` to repair the reproducible task `#613` mew-first drift
+  where the implementation twice replaced `m6_9-drift-canary` with a nearby
+  or unrelated patch;
+- keep M6.9 pending until that substrate repair lands and the same task is
+  retried mew-first;
 - use the closed M6.10 calibration economics as the active autonomy-accounting
-  baseline: latest 10 attempts reached 7/10 clean-or-practical, and failures
-  remain classified through `mew metrics --mew-first`;
-- use Todo D1/D2 and structured rejection/frontier D1 during M6.9 work, but do
-  not turn them into more M6.10 polish unless M6.9 proof exposes a measured
-  regression;
+  baseline, but do not let the 7/10 close gate justify supervisor product
+  rescue for M6.9+ implementation;
+- use Todo D1/D2 and structured rejection/frontier D1 during the repair, but
+  do not turn them into more M6.10 polish unless the #613 replay evidence
+  directly shows a missing accelerator;
 - keep M6.12 closed as the read-only failure-science baseline unless a fresh
   regression appears;
 - use the closed M6.11 residual surfaces (isolated review, executor lifecycle,
@@ -3675,15 +3750,16 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
   ordinary bounded roadmap/coding tasks after the active milestone criterion is
   chosen, while direct Codex implementation remains acceptable only for
   reviewer-owned status/audit work or explicit substrate, safety, governance,
-  or permission changes;
+  skill-policy, or permission changes;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
 Keep M5.1, M6, M6.6, M6.7, M6.10, M6.11 core plus residual hardening, and
-M6.12 as closed baselines while M6.9 completes durable coding intelligence
-proof. Deeper M7 signal work, provider-specific prompt caching, full concurrent
+M6.12 as closed baselines while M6.14 repairs the mew-first substrate and then
+M6.9 completes durable coding intelligence proof. Deeper M7 signal work,
+provider-specific prompt caching, full concurrent
 executor work, memory explore agentization, and unattended self-hosting remain
-deferred until they map to the active M6.9 gate or a later explicit milestone
+deferred until they map to the active M6.14/M6.9 gate or a later explicit milestone
 switch.
 
 ## Maintenance Rule
