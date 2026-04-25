@@ -633,15 +633,15 @@ Target:
 - design spec: see `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` and
   `docs/REVIEW_2026-04-22_LOOP_STABILIZATION_DESIGN_REVIEW.md`
 - phase split:
-  - active close-gate phases: 0-4
-  - deferred inside the same milestone: Phase 5 isolated review lane, Phase 6
-    executor lifecycle tightening, provisional `MemoryExploreProvider`
-    protocol work
+  - core close-gate phases: 0-4
+  - residual hardening phases: Phase 5 isolated review lane, Phase 6 executor
+    lifecycle tightening, provisional read-only `MemoryExploreProvider`, and
+    prompt/cache-aware drafting contract boundaries
 
 Done when:
 
 - Phase 0-4 of `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` are landed and
-  validated; deferred phases are explicitly non-blocking for milestone close
+  validated; this closed the original M6.11 core gate
 - `#399` becomes replayable offline and resolves to either a validated
   patch-draft path or one exact blocker without same-surface reread regression
 - `#401` becomes replayable offline and recovery preserves the same drafting
@@ -670,6 +670,23 @@ Done when:
   scope, verifier, counted/non-counted status, blocker code, replay bundle
   path, and reviewer decision, so M6.12 can consume one canonical ledger
   instead of reconstructing method and evidence from scattered review notes
+
+Residual hardening is done when:
+
+- a validated patch artifact can pass through an isolated review lane before
+  approval/apply, and review findings attach to the active `WorkTodo` rather
+  than only to the exploratory transcript
+- executor lifecycle states distinguish `queued`, `executing`, `completed`,
+  `cancelled`, and `yielded`, and interrupted/fallback work leaves terminal
+  records instead of orphaned in-flight state
+- a read-only `MemoryExploreProvider` v0 can feed typed/durable memory and
+  symbol/file-pair hits into the same explore handoff shape as filesystem
+  exploration, without adding a second autonomous planner
+- drafting prompt/cache metrics make stable contract text and dynamic payload
+  boundaries observable, so cache-sensitive prompt changes are deliberate
+- after the residual hardening, the next M6.9 bounded slice can run mew-first
+  with clearer failure classification across review, executor lifecycle,
+  memory explore, and task-spec causes
 
 Why it matters:
 
