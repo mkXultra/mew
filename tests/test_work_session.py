@@ -2070,6 +2070,221 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_verified_active_work_todo_completes_instead_of_redrafting(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/workbench.py").write_text("def value():\n    return 42\n", encoding="utf-8")
+                Path("tests/test_workbench.py").write_text("def test_value():\n    assert True\n", encoding="utf-8")
+                command = "uv run pytest -q tests/test_workbench.py --no-testmon"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verified active todo",
+                    "active_work_todo": {
+                        "id": "todo-3-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Apply paired source/test patch",
+                            "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
+                            "verify_command": command,
+                        },
+                        "cached_window_refs": [
+                            {"path": "src/mew/workbench.py", "tool_call_id": 1, "line_start": 1, "line_end": 2},
+                            {"path": "tests/test_workbench.py", "tool_call_id": 2, "line_start": 1, "line_end": 2},
+                        ],
+                        "attempts": {"draft": 1, "review": 0},
+                    },
+                    "tool_calls": [
+                        {
+                            "id": 1,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/workbench.py"},
+                            "result": {
+                                "path": "src/mew/workbench.py",
+                                "text": "def value():\n    return 42\n",
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_workbench.py"},
+                            "result": {
+                                "path": "tests/test_workbench.py",
+                                "text": "def test_value():\n    assert True\n",
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                        },
+                        {
+                            "id": 3,
+                            "tool": "edit_file_hunks",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/workbench.py"},
+                            "result": {
+                                "path": "src/mew/workbench.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                                "applied": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "edit_file_hunks",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_workbench.py"},
+                            "result": {
+                                "path": "tests/test_workbench.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                                "applied": True,
+                            },
+                        },
+                        {
+                            "id": 5,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0},
+                        },
+                    ],
+                    "model_turns": [
+                        {
+                            "id": 1,
+                            "status": "completed",
+                            "decision_plan": {
+                                "working_memory": {
+                                    "plan_items": ["Apply paired source/test patch"],
+                                    "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
+                                }
+                            },
+                        }
+                    ],
+                }
+
+                resume = build_work_session_resume(session)
+
+                self.assertEqual(resume["verification_confidence"]["status"], "verified")
+                self.assertEqual(resume["active_work_todo"]["status"], "completed")
+                self.assertEqual(resume["phase"], "idle")
+                self.assertNotIn("draft one bounded patch", resume["next_action"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_narrow_verified_active_work_todo_stays_drafting(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/workbench.py").write_text("def value():\n    return 42\n", encoding="utf-8")
+                Path("tests/test_workbench.py").write_text("def test_value():\n    assert True\n", encoding="utf-8")
+                command = "uv run pytest -q tests/test_workbench.py -k value --no-testmon"
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Narrow verifier active todo",
+                    "active_work_todo": {
+                        "id": "todo-3-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Apply paired source/test patch",
+                            "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
+                            "verify_command": command,
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                    },
+                    "tool_calls": [
+                        {
+                            "id": 1,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/workbench.py"},
+                            "result": {
+                                "path": "src/mew/workbench.py",
+                                "text": "def value():\n    return 42\n",
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "tool": "read_file",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_workbench.py"},
+                            "result": {
+                                "path": "tests/test_workbench.py",
+                                "text": "def test_value():\n    assert True\n",
+                                "line_start": 1,
+                                "line_end": 2,
+                            },
+                        },
+                        {
+                            "id": 3,
+                            "tool": "edit_file_hunks",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/workbench.py"},
+                            "result": {
+                                "path": "src/mew/workbench.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "tool": "edit_file_hunks",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_workbench.py"},
+                            "result": {
+                                "path": "tests/test_workbench.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 5,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0},
+                        },
+                    ],
+                    "model_turns": [
+                        {
+                            "id": 1,
+                            "status": "completed",
+                            "decision_plan": {
+                                "working_memory": {
+                                    "plan_items": ["Apply paired source/test patch"],
+                                    "target_paths": ["src/mew/workbench.py", "tests/test_workbench.py"],
+                                }
+                            },
+                        }
+                    ],
+                }
+
+                resume = build_work_session_resume(session)
+
+                self.assertEqual(resume["verification_confidence"]["status"], "narrow")
+                self.assertEqual(resume["active_work_todo"]["status"], "drafting")
+                self.assertEqual(resume["phase"], "drafting")
+            finally:
+                os.chdir(old_cwd)
+
     def test_resume_keeps_python_m_pytest_module_run_high_confidence(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -5625,6 +5625,70 @@ def _observe_active_work_todo(
     return existing
 
 
+def _work_call_applied_write_path(call):
+    call = call if isinstance(call, dict) else {}
+    if call.get("tool") not in {"write_file", "edit_file", "edit_file_hunks"}:
+        return ""
+    if call.get("status") != "completed":
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("dry_run"):
+        return ""
+    if not (result.get("changed") or result.get("written") or result.get("applied")):
+        return ""
+    return _normalized_work_path_text(work_call_path(call) or result.get("path") or "")
+
+
+def _active_work_todo_target_paths_written(todo, calls):
+    source = (todo or {}).get("source") if isinstance((todo or {}).get("source"), dict) else {}
+    target_paths = [_normalized_work_path_text(path) for path in (source.get("target_paths") or [])]
+    target_paths = [path for path in target_paths if path]
+    if not target_paths:
+        return False
+    written_paths = []
+    for call in calls or []:
+        path = _work_call_applied_write_path(call)
+        if path:
+            written_paths.append(path)
+    if not written_paths:
+        return False
+    return all(any(written == target or written.endswith(f"/{target}") for written in written_paths) for target in target_paths)
+
+
+def _complete_verified_active_work_todo(
+    session,
+    active_work_todo,
+    *,
+    calls,
+    pending_approvals,
+    verification_confidence,
+    current_time=None,
+):
+    todo = _normalize_active_work_todo(active_work_todo)
+    if not todo:
+        return {}
+    if pending_approvals:
+        return todo
+    if str(todo.get("status") or "").strip() != "drafting":
+        return todo
+    if not (verification_confidence or {}).get("finish_ready"):
+        return todo
+    if not _active_work_todo_target_paths_written(todo, calls):
+        return todo
+    completed = dict(todo)
+    completed["status"] = "completed"
+    completed["updated_at"] = current_time or session.get("updated_at") or now_iso()
+    completed["completed_at"] = completed["updated_at"]
+    completed["verification"] = {
+        "status": (verification_confidence or {}).get("status") or "",
+        "confidence": (verification_confidence or {}).get("confidence") or "",
+        "command": (verification_confidence or {}).get("command") or "",
+        "tool_call_id": (verification_confidence or {}).get("latest_verification_tool_call_id"),
+    }
+    session["active_work_todo"] = _normalize_active_work_todo(completed)
+    return session["active_work_todo"]
+
+
 def _task_scope_target_paths_for_session(session, *, task=None):
     target_paths = task_scope_target_paths(task)
     if target_paths:
@@ -6299,6 +6363,15 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             verify_command=verify_command,
             current_time=current_time,
         )
+    verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
+    active_work_todo = _complete_verified_active_work_todo(
+        session,
+        active_work_todo,
+        calls=calls,
+        pending_approvals=pending_approvals,
+        verification_confidence=verification_confidence,
+        current_time=current_time,
+    )
     latest_tiny_turn = _latest_tiny_write_ready_draft_turn(
         turns,
         todo_id=(active_work_todo or {}).get("id"),
@@ -6390,7 +6463,6 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     active_memory = build_work_active_memory(session=session, task=task, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
     same_surface_audit = build_same_surface_audit_checkpoint(session, task, calls)
-    verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
     prompt_cache_boundary = _build_prompt_cache_boundary(draft_state)
 
     resume = {
