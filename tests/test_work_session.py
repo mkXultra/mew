@@ -12760,7 +12760,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(tools[1]["line_start"], 740)
 
     def test_tiny_write_ready_draft_reasoning_effort_respects_auto_and_env_override_source(self):
-        from mew.work_loop import _attempt_write_ready_tiny_draft_turn
+        from mew.work_loop import (
+            WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV,
+            _attempt_write_ready_tiny_draft_turn,
+        )
 
         class _EffortScope:
             def __init__(self, observed):
@@ -12778,34 +12781,48 @@ class WorkSessionTests(unittest.TestCase):
 
                 return _Context()
 
-        for inherited_source, inherited_effort, expected_reasoning_effort, expected_source in (
-            ("auto", "medium", "low", "tiny_draft_auto_override"),
-            ("auto", "high", "low", "tiny_draft_auto_override"),
-            ("env_override", "xhigh", "xhigh", "env_override"),
+        for (
+            inherited_source,
+            inherited_effort,
+            env_override,
+            expected_reasoning_effort,
+            expected_source,
+        ) in (
+            ("auto", "medium", {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""}, "low", "tiny_draft_auto_override"),
+            ("auto", "high", {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""}, "low", "tiny_draft_auto_override"),
+            ("env_override", "xhigh", {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""}, "low", "tiny_draft_auto_override"),
+            (
+                "env_override",
+                "xhigh",
+                {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: "medium"},
+                "medium",
+                "tiny_draft_env_override",
+            ),
         ):
             observed_scope = []
             with self.subTest(
                 inherited_reasoning_source=inherited_source,
                 inherited_reasoning_effort=inherited_effort,
             ):
-                with patch(
-                    "mew.work_loop.codex_reasoning_effort_scope",
-                    side_effect=_EffortScope(observed_scope),
-                ):
-                    with patch("mew.work_loop.call_model_json_with_retries", return_value="invalid-shape"):
-                        result = _attempt_write_ready_tiny_draft_turn(
-                            session={"id": "write"},
-                            context={},
-                            tiny_context={},
-                            write_ready_fast_path={},
-                            model_auth={},
-                            model="codex",
-                            base_url="",
-                            model_backend="codex",
-                            timeout=60,
-                            reasoning_effort_source=inherited_source,
-                            reasoning_effort=inherited_effort,
-                        )
+                with patch.dict(os.environ, env_override, clear=False):
+                    with patch(
+                        "mew.work_loop.codex_reasoning_effort_scope",
+                        side_effect=_EffortScope(observed_scope),
+                    ):
+                        with patch("mew.work_loop.call_model_json_with_retries", return_value="invalid-shape"):
+                            result = _attempt_write_ready_tiny_draft_turn(
+                                session={"id": "write"},
+                                context={},
+                                tiny_context={},
+                                write_ready_fast_path={},
+                                model_auth={},
+                                model="codex",
+                                base_url="",
+                                model_backend="codex",
+                                timeout=60,
+                                reasoning_effort_source=inherited_source,
+                                reasoning_effort=inherited_effort,
+                            )
                 self.assertEqual(observed_scope, [expected_reasoning_effort])
                 metrics = result["metrics"]
                 self.assertEqual(
@@ -12818,6 +12835,7 @@ class WorkSessionTests(unittest.TestCase):
 
     def test_tiny_write_ready_draft_pre_model_sink_records_reasoning_effort_context(self):
         from mew.work_loop import WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
+        from mew.work_loop import WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV
         from mew.work_loop import plan_work_model_turn
 
         scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
@@ -12841,9 +12859,28 @@ class WorkSessionTests(unittest.TestCase):
                         raise TimeoutError("timed out while generating tiny draft")
                     return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
 
-                for source, effort, expected_reasoning_effort, expected_reasoning_source in (
-                    ("auto", "high", WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT, "tiny_draft_auto_override"),
-                    ("env_override", "xhigh", "xhigh", "env_override"),
+                for source, effort, env_override, expected_reasoning_effort, expected_reasoning_source in (
+                    (
+                        "auto",
+                        "high",
+                        {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""},
+                        WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT,
+                        "tiny_draft_auto_override",
+                    ),
+                    (
+                        "env_override",
+                        "xhigh",
+                        {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""},
+                        WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT,
+                        "tiny_draft_auto_override",
+                    ),
+                    (
+                        "env_override",
+                        "xhigh",
+                        {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: "medium"},
+                        "medium",
+                        "tiny_draft_env_override",
+                    ),
                 ):
                     pre_model_payloads = []
                     with self.subTest(inherited_reasoning_source=source, inherited_reasoning_effort=effort):
@@ -12852,23 +12889,24 @@ class WorkSessionTests(unittest.TestCase):
                         def capture_pre_model_metrics(metrics):
                             pre_model_payloads.append(metrics)
 
-                        with patch(
-                            "mew.work_loop.select_work_reasoning_policy",
-                            return_value={"effort": effort, "source": source},
-                        ):
-                            with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
-                                planned = plan_work_model_turn(
-                                    state,
-                                    session,
-                                    task,
-                                    {"path": "auth.json"},
-                                    allowed_read_roots=["."],
-                                    allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
-                                    allow_verify=True,
-                                    verify_command="uv run python -m unittest tests.test_patch_draft",
-                                    act_mode="deterministic",
-                                    pre_model_metrics_sink=capture_pre_model_metrics,
-                                )
+                        with patch.dict(os.environ, env_override, clear=False):
+                            with patch(
+                                "mew.work_loop.select_work_reasoning_policy",
+                                return_value={"effort": effort, "source": source},
+                            ):
+                                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                                    planned = plan_work_model_turn(
+                                        state,
+                                        session,
+                                        task,
+                                        {"path": "auth.json"},
+                                        allowed_read_roots=["."],
+                                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                                        allow_verify=True,
+                                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                                        act_mode="deterministic",
+                                        pre_model_metrics_sink=capture_pre_model_metrics,
+                                    )
 
                         self.assertTrue(pre_model_payloads)
                         self.assertNotIn(
