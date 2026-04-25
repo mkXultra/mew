@@ -140,8 +140,8 @@ class WorkSessionTests(unittest.TestCase):
         from mew.work_session import finish_work_model_turn, start_work_model_turn
 
         task = add_coding_task(state)
-        task["title"] = f"Shadow compiler {scenario['name']}"
-        task["description"] = "Exercise shadow-mode live bridge."
+        task["title"] = f"Shadow compiler {str(scenario['name']).replace('_', ' ')}"
+        task["description"] = "Exercise shadow mode live bridge."
         session, _created = create_work_session(state, task)
         target_paths = list((scenario.get("todo") or {}).get("source", {}).get("target_paths") or [])
         session["tool_calls"] = []
@@ -2178,6 +2178,82 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(resume["active_work_todo"]["status"], "completed")
                 self.assertEqual(resume["phase"], "idle")
                 self.assertNotIn("draft one bounded patch", resume["next_action"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_verified_blocked_active_work_todo_recovers_to_completed(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                Path("src/mew/dogfood.py").write_text("def scenario():\n    return 1\n", encoding="utf-8")
+                Path("tests/test_dogfood.py").write_text("def test_scenario():\n    assert True\n", encoding="utf-8")
+                command = "uv run pytest -q tests/test_dogfood.py --no-testmon"
+                session = {
+                    "id": 600,
+                    "task_id": 615,
+                    "status": "active",
+                    "title": "Recover verified stale redraft blocker",
+                    "active_work_todo": {
+                        "id": "todo-600-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": "Apply paired source/test patch",
+                            "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                            "verify_command": command,
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                        "blocker": {
+                            "code": "old_text_not_found",
+                            "recovery_action": "refresh_cached_window",
+                        },
+                    },
+                    "tool_calls": [
+                        {
+                            "id": 1,
+                            "tool": "edit_file_hunks",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/dogfood.py"},
+                            "result": {
+                                "path": "src/mew/dogfood.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "tool": "edit_file_hunks",
+                            "status": "completed",
+                            "parameters": {"path": "tests/test_dogfood.py"},
+                            "result": {
+                                "path": "tests/test_dogfood.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                        {
+                            "id": 3,
+                            "tool": "run_tests",
+                            "status": "completed",
+                            "parameters": {"command": command},
+                            "result": {"command": command, "exit_code": 0},
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+
+                self.assertEqual(resume["verification_confidence"]["status"], "verified")
+                self.assertTrue(resume["verification_confidence"]["finish_ready"])
+                self.assertEqual(resume["active_work_todo"]["status"], "completed")
+                self.assertEqual(resume["active_work_todo"]["blocker"], {})
+                self.assertEqual(resume["phase"], "idle")
+                self.assertEqual(session["active_work_todo"]["status"], "completed")
             finally:
                 os.chdir(old_cwd)
 
@@ -7058,7 +7134,11 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         tiny_context = build_write_ready_tiny_draft_model_context(context)
-        self.assertEqual(set(tiny_context.keys()), {"active_work_todo", "write_ready_fast_path", "allowed_roots"})
+        self.assertEqual(
+            set(tiny_context.keys()),
+            {"active_work_todo", "write_ready_fast_path", "allowed_roots", "task_goal"},
+        )
+        self.assertEqual(tiny_context["task_goal"]["required_terms"], ["Scope-limited"])
         self.assertEqual(set(tiny_context["active_work_todo"].keys()), {"source"})
         self.assertEqual(
             set(tiny_context["active_work_todo"]["source"].keys()),
@@ -7330,6 +7410,73 @@ class WorkSessionTests(unittest.TestCase):
             [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
             ["src/mew/commands.py", "tests/test_work_session.py"],
         )
+
+    def test_write_ready_fast_path_ignores_completed_active_work_todo(self):
+        from mew.work_loop import _work_write_ready_fast_path_details
+
+        context = {
+            "task": {
+                "id": 615,
+                "title": "Completed active todo must finish, not redraft",
+                "description": "The verifier is already green after source/test edits.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 600,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-600-1",
+                        "status": "completed",
+                        "source": {
+                            "plan_item": "Apply paired source/test patch",
+                            "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Apply paired source/test patch",
+                            "cached_windows": [
+                                {"path": "src/mew/dogfood.py", "line_start": 10, "line_end": 20},
+                                {"path": "tests/test_dogfood.py", "line_start": 30, "line_end": 40},
+                            ],
+                        }
+                    ],
+                    "verification_confidence": {
+                        "finish_ready": True,
+                        "status": "verified",
+                        "confidence": "high",
+                    },
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 1,
+                        "path": "src/mew/dogfood.py",
+                        "line_start": 10,
+                        "line_end": 20,
+                        "text": "source window\n" * 10,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 2,
+                        "path": "tests/test_dogfood.py",
+                        "line_start": 30,
+                        "line_end": 40,
+                        "text": "test window\n" * 10,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {},
+            "guidance": "Draft one paired dry-run edit using the exact cached windows.",
+        }
+
+        details = _work_write_ready_fast_path_details(context)
+
+        self.assertFalse(details["active"])
+        self.assertEqual(details["reason"], "active_work_todo_completed")
 
     def test_write_ready_fast_path_leaves_stale_refresh_blocker_after_complete_paired_reads(self):
         from mew.work_loop import (
@@ -17476,6 +17623,19 @@ class WorkSessionTests(unittest.TestCase):
             session["active_work_todo"]["source"]["target_paths"],
             ["src/mew/work_session.py", "tests/test_work_session.py"],
         )
+
+    def test_build_work_session_resume_does_not_seed_active_work_todo_for_closed_session(self):
+        state = {"tasks": [], "work_sessions": [], "next_ids": {"task": 1, "work_session": 1}}
+        task = add_coding_task(state)
+        task["scope"] = {"target_paths": ["tests/test_work_session.py", "src/mew/work_session.py"]}
+        session, _created = create_work_session(state, task, current_time="2026-04-23T00:00:00Z")
+        session["status"] = "closed"
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["phase"], "closed")
+        self.assertEqual(resume["active_work_todo"], {})
+        self.assertEqual(session.get("active_work_todo") or {}, {})
 
     def test_build_work_session_resume_seeded_scope_still_fails_closed_without_observations(self):
         from mew.work_loop import _work_write_ready_fast_path_details

@@ -5669,7 +5669,8 @@ def _complete_verified_active_work_todo(
         return {}
     if pending_approvals:
         return todo
-    if str(todo.get("status") or "").strip() != "drafting":
+    todo_status = str(todo.get("status") or "").strip()
+    if todo_status not in {"drafting", "blocked_on_patch"}:
         return todo
     if not (verification_confidence or {}).get("finish_ready"):
         return todo
@@ -5677,6 +5678,7 @@ def _complete_verified_active_work_todo(
         return todo
     completed = dict(todo)
     completed["status"] = "completed"
+    completed["blocker"] = {}
     completed["updated_at"] = current_time or session.get("updated_at") or now_iso()
     completed["completed_at"] = completed["updated_at"]
     completed["verification"] = {
@@ -5709,6 +5711,8 @@ def _seed_active_work_todo_from_task_scope(
     verify_command="",
     current_time=None,
 ):
+    if str((session or {}).get("status") or "").strip() == "closed":
+        return {}
     if _normalize_active_work_todo((session or {}).get("active_work_todo") or {}):
         return {}
     first_observation = (plan_item_observations or [{}])[0] if plan_item_observations else {}
@@ -6167,7 +6171,10 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     )
     if not working_memory and isinstance(session.get("startup_memory"), dict):
         working_memory = dict(session.get("startup_memory") or {})
+    session_is_closed = str((session or {}).get("status") or "").strip() == "closed"
     existing_active_work_todo = _normalize_active_work_todo(session.get("active_work_todo") or {})
+    if session_is_closed:
+        existing_active_work_todo = {}
     complete_frontier_windows = []
     if existing_active_work_todo.get("status") == "queued" and not existing_active_work_todo.get("cached_window_refs"):
         complete_frontier_windows = _complete_cached_windows_for_target_paths(
@@ -6364,9 +6371,12 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             current_time=current_time,
         )
     verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
+    completion_candidate_todo = active_work_todo
+    if not completion_candidate_todo and (verification_confidence or {}).get("finish_ready"):
+        completion_candidate_todo = existing_active_work_todo
     active_work_todo = _complete_verified_active_work_todo(
         session,
-        active_work_todo,
+        completion_candidate_todo,
         calls=calls,
         pending_approvals=pending_approvals,
         verification_confidence=verification_confidence,

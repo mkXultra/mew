@@ -868,6 +868,38 @@ Why it matters:
   path toward mew surpassing reactive coding CLIs rather than being wrapped by
   one.
 
+## Milestone 6.15: Verified Closeout Redraft Repair
+
+Keep mew-first implementation sessions from redrafting after they have already
+applied their paired source/test edits and reached a broad verifier green.
+
+Target:
+
+- task/session `#615` / `#600` is the replay source: after the scoped
+  `m6_9-alignment-decay-rehearsal` patch and broad verifier passed, stale
+  write-ready memory attempted another edit and hit `old_text_not_found`
+  instead of finishing
+- completed active work todos must not activate write-ready fast path again
+- stale `blocked_on_patch` todos with applied paired writes plus
+  `finish_ready=true` must recover to `completed`, clear their blocker, and
+  let the session finish
+- M6.9 remains the product milestone; this repair is substrate-only and does
+  not count as a mew-authored product patch
+
+Done when:
+
+- focused tests cover both the completed-todo no-redraft guard and the
+  verified blocked-todo recovery
+- task `#615` can finish from the same session after the repair
+- the repair is committed separately from the mew-authored product patch and
+  M6.9 resumes from the same proof slice
+
+Why it matters:
+
+- A mew-owned patch is not enough if the loop cannot stop after verified work.
+  This repair protects future M6.9+ tasks from spending their post-verifier
+  turn on stale cached windows and preserves the M6.14 immediate-repair rule.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only

@@ -95,6 +95,11 @@ WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
 WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS = 1.0
 WORK_TASK_GOAL_TERM_RE = re.compile(r"\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+\b")
+WORK_TASK_GOAL_TERM_STOPWORDS = {
+    "dry-run",
+    "write-ready",
+}
+WORK_TASK_GOAL_PATH_FRAGMENT_RE = re.compile(r"\b(?:src|tests)/[A-Za-z0-9_./-]+")
 
 
 def _work_model_timeout_guard_available():
@@ -1640,6 +1645,10 @@ def _write_ready_complete_read_frontier_allows_not_ready_override(first_observat
 def _work_write_ready_fast_path_state(context):
     work_session = (context or {}).get("work_session") or {}
     resume = work_session.get("resume") or {}
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    active_todo_status = str((active_work_todo or {}).get("status") or "").strip()
+    if active_todo_status == "completed":
+        return {"active": False, "reason": "active_work_todo_completed"}
     observations = resume.get("plan_item_observations") or []
     complete_active_windows = _write_ready_complete_recent_windows_from_active_work_todo(work_session, resume)
     steer_text = _write_ready_fast_path_steer_text(context, resume)
@@ -1663,7 +1672,6 @@ def _work_write_ready_fast_path_state(context):
     first = observations[0] or {}
     if _write_ready_fast_path_verifier_closeout_passed(context):
         source = {}
-        active_work_todo = resume.get("active_work_todo")
         if isinstance(active_work_todo, dict) and isinstance(active_work_todo.get("source"), dict):
             source = active_work_todo.get("source") or {}
         plan_item_text = str(first.get("plan_item") or source.get("plan_item") or "").strip()
@@ -2482,9 +2490,13 @@ def _write_ready_indented_statement_fragment_is_allowed(significant_lines):
     if not first_line or not first_line[0].isspace():
         return True
     first_stripped = first_line.lstrip()
-    if first_stripped.startswith(("def ", "async def ", "@")):
-        return True
     first_indent = len(first_line) - len(first_stripped)
+    if first_stripped.startswith(("def ", "async def ", "@")):
+        for line in significant_lines:
+            stripped = line.lstrip()
+            if len(line) - len(stripped) < first_indent and not stripped.startswith("#"):
+                return False
+        return True
     for line in significant_lines:
         stripped = line.lstrip()
         if len(line) - len(stripped) < first_indent:
@@ -2622,9 +2634,12 @@ def _write_ready_task_goal_required_terms(context, resume=None):
     terms = []
     seen = set()
     for text in text_parts:
+        text = WORK_TASK_GOAL_PATH_FRAGMENT_RE.sub(" ", text)
         for match in WORK_TASK_GOAL_TERM_RE.finditer(text):
             term = match.group(0).strip()
             key = term.casefold()
+            if key in WORK_TASK_GOAL_TERM_STOPWORDS:
+                continue
             if key in seen:
                 continue
             seen.add(key)
