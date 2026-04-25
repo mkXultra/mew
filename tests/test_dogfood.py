@@ -810,6 +810,56 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_drift_canary_novel_task_forces_exploration", check_names)
             self.assertIn("m6_9_drift_canary_writes_deterministic_trace", check_names)
 
+    def test_run_dogfood_m6_9_alignment_decay_rehearsal_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-alignment-decay-rehearsal",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            report_json = json.loads(json.dumps(report, sort_keys=True))
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            scenario_json = report_json["scenarios"][0]
+            artifacts = scenario["artifacts"]
+            trace = artifacts["trace"]
+            trace_json = json.loads(Path(artifacts["trace_path"]).read_text(encoding="utf-8"))
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(report_json["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-alignment-decay-rehearsal")
+            self.assertEqual(scenario_json["name"], "m6_9-alignment-decay-rehearsal")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-alignment-decay-rehearsal: pass", text)
+            self.assertIn("m6_9_alignment_decay_rehearsal_recovers_prior_conventions_without_steering", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertTrue(artifacts["simulated_gap_or_decay"])
+            self.assertTrue(artifacts["rehearsal_pass_ran"])
+            self.assertEqual(artifacts["recovered_within_iterations"], 1)
+            self.assertFalse(artifacts["reviewer_steering_required"])
+            self.assertTrue(artifacts["prior_convention_reused"])
+            self.assertTrue(scenario_json["artifacts"]["simulated_gap_or_decay"])
+            self.assertTrue(scenario_json["artifacts"]["rehearsal_pass_ran"])
+            self.assertEqual(scenario_json["artifacts"]["recovered_within_iterations"], 1)
+            self.assertFalse(scenario_json["artifacts"]["reviewer_steering_required"])
+            self.assertTrue(scenario_json["artifacts"]["prior_convention_reused"])
+            for payload in (trace, trace_json, scenario_json["artifacts"]["trace"]):
+                self.assertEqual(payload["scenario"], "m6_9-alignment-decay-rehearsal")
+                self.assertTrue(payload["simulated_gap_or_decay"])
+                self.assertTrue(payload["rehearsal_pass_ran"])
+                self.assertEqual(payload["recovered_within_iterations"], 1)
+                self.assertFalse(payload["reviewer_steering_required"])
+                self.assertTrue(payload["prior_convention_reused"])
+                self.assertEqual(payload["gap_or_decay"]["available_conventions_after_decay"], [])
+                self.assertEqual([item["iteration"] for item in payload["iterations"]], [1])
+            self.assertIn("m6_9_alignment_decay_rehearsal_simulates_gap_or_decay", check_names)
+            self.assertIn("m6_9_alignment_decay_rehearsal_runs_rehearsal_pass", check_names)
+            self.assertIn("m6_9_alignment_decay_rehearsal_recovers_prior_conventions_without_steering", check_names)
+            self.assertIn("m6_9_alignment_decay_rehearsal_writes_deterministic_trace", check_names)
+
     def test_run_dogfood_m6_11_compiler_replay_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

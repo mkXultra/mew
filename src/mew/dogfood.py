@@ -88,6 +88,7 @@ DOGFOOD_SCENARIOS = (
     "m6_9-phase1-regression",
     "m6_9-symbol-index-hit",
     "m6_9-drift-canary",
+    "m6_9-alignment-decay-rehearsal",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -13315,6 +13316,130 @@ def run_m6_9_drift_canary_scenario(workspace, env=None):
     return report
 
 
+def run_m6_9_alignment_decay_rehearsal_scenario(workspace, env=None):
+    del env
+    commands = []
+    checks = []
+    output_dir = Path(workspace) / STATE_DIR / "dogfood"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    prior_conventions = [
+        {
+            "name": "bounded_source_test_pair",
+            "source_path": "src/mew/dogfood.py",
+            "test_path": "tests/test_dogfood.py",
+        },
+        {
+            "name": "deterministic_trace_json",
+            "trace_suffix": "-trace.json",
+        },
+        {
+            "name": "text_and_json_report_coverage",
+            "text_report": True,
+            "json_report": True,
+        },
+    ]
+    prior_convention_names = [item["name"] for item in prior_conventions]
+    gap_or_decay = {
+        "simulated_gap_or_decay": True,
+        "decay_kind": "simulated_alignment_decay",
+        "available_conventions_after_decay": [],
+        "decayed_convention_count": len(prior_conventions),
+    }
+    rehearsal_iterations = [
+        {
+            "iteration": 1,
+            "phase": "rehearsal",
+            "rehearsal_pass_ran": True,
+            "recovered_conventions": prior_convention_names,
+            "reviewer_steering_required": False,
+        }
+    ]
+    recovered_names = rehearsal_iterations[0]["recovered_conventions"]
+    prior_convention_reused = recovered_names == prior_convention_names
+    rehearsal_pass_ran = rehearsal_iterations[0]["rehearsal_pass_ran"] is True
+    reviewer_steering_required = rehearsal_iterations[0]["reviewer_steering_required"] is True
+    recovered_within_iterations = 1 if rehearsal_pass_ran and prior_convention_reused else None
+    trace = {
+        "scenario": "m6_9-alignment-decay-rehearsal",
+        "simulated_gap_or_decay": gap_or_decay["simulated_gap_or_decay"],
+        "rehearsal_pass_ran": rehearsal_pass_ran,
+        "recovered_within_iterations": recovered_within_iterations,
+        "reviewer_steering_required": reviewer_steering_required,
+        "prior_convention_reused": prior_convention_reused,
+        "prior_conventions": prior_conventions,
+        "gap_or_decay": gap_or_decay,
+        "iterations": rehearsal_iterations,
+    }
+    json_path = output_dir / "m6_9-alignment-decay-rehearsal-trace.json"
+    write_json_file(json_path, trace)
+    loaded = read_json_file(json_path, {})
+
+    _scenario_check(
+        checks,
+        "m6_9_alignment_decay_rehearsal_simulates_gap_or_decay",
+        loaded.get("simulated_gap_or_decay") is True
+        and (loaded.get("gap_or_decay") or {}).get("available_conventions_after_decay") == [],
+        observed={
+            "simulated_gap_or_decay": loaded.get("simulated_gap_or_decay"),
+            "gap_or_decay": loaded.get("gap_or_decay"),
+        },
+        expected="a deterministic simulated gap/decay pass clears available convention context",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_alignment_decay_rehearsal_runs_rehearsal_pass",
+        loaded.get("rehearsal_pass_ran") is True
+        and [item.get("iteration") for item in loaded.get("iterations") or []] == [1],
+        observed={
+            "rehearsal_pass_ran": loaded.get("rehearsal_pass_ran"),
+            "iterations": loaded.get("iterations"),
+        },
+        expected="one deterministic rehearsal pass runs after the simulated decay",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_alignment_decay_rehearsal_recovers_prior_conventions_without_steering",
+        loaded.get("recovered_within_iterations") == 1
+        and loaded.get("reviewer_steering_required") is False
+        and loaded.get("prior_convention_reused") is True,
+        observed={
+            "recovered_within_iterations": loaded.get("recovered_within_iterations"),
+            "reviewer_steering_required": loaded.get("reviewer_steering_required"),
+            "prior_convention_reused": loaded.get("prior_convention_reused"),
+        },
+        expected={
+            "recovered_within_iterations": 1,
+            "reviewer_steering_required": False,
+            "prior_convention_reused": True,
+        },
+    )
+    _scenario_check(
+        checks,
+        "m6_9_alignment_decay_rehearsal_writes_deterministic_trace",
+        json_path.exists()
+        and loaded == trace
+        and loaded.get("scenario") == "m6_9-alignment-decay-rehearsal",
+        observed={"path": str(json_path), "trace": loaded},
+        expected="deterministic alignment-decay rehearsal trace JSON is written",
+    )
+
+    report = _scenario_report("m6_9-alignment-decay-rehearsal", workspace, commands, checks)
+    report["artifacts"] = {
+        "simulated_gap_or_decay": loaded.get("simulated_gap_or_decay"),
+        "rehearsal_pass_ran": loaded.get("rehearsal_pass_ran"),
+        "recovered_within_iterations": loaded.get("recovered_within_iterations"),
+        "reviewer_steering_required": loaded.get("reviewer_steering_required"),
+        "prior_convention_reused": loaded.get("prior_convention_reused"),
+        "prior_conventions": loaded.get("prior_conventions"),
+        "gap_or_decay": loaded.get("gap_or_decay"),
+        "iterations": loaded.get("iterations"),
+        "trace_path": str(json_path),
+        "trace": loaded,
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -13392,6 +13517,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_9_symbol_index_hit_scenario(scenario_workspace, env=env))
         elif name == "m6_9-drift-canary":
             reports.append(run_m6_9_drift_canary_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-alignment-decay-rehearsal":
+            reports.append(run_m6_9_alignment_decay_rehearsal_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
