@@ -26,8 +26,8 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `pending` | Paused at a clean proof boundary: Phase 1 substrate, 10 repeated-task shapes, comparator regression, reviewer-steering/failure-shield, and reasoning-trace recall exist, but drift/rehearsal proof should wait until mew-first implementation reliability improves. |
-| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0/D1, Todo D1/D2, and structured rejection/frontier D1 are landed; current baseline is 7/10 clean-or-practical against the 7/10 gate after post-D1/D2 attempts #606-#612. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Resume condition fired after M6.10 closed: durable-memory proof should continue at drift-canary, novel-task, and simulated alignment-decay evidence. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `done` | Closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: latest 10 attempts reached 7/10 clean-or-practical with classified failures and no rescue edits for counted successes. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
@@ -39,25 +39,22 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 17:38 JST.
+Last assessed: 2026-04-25 19:14 JST.
 
-Active work: **M6.10 Execution Accelerators and Mew-First Reliability**.
-M6.9 is intentionally moved to `pending` at the clean proof-slice boundary:
-Phase 1 durable-memory substrate exists, the repeated-task proof matrix has
-10/10 deterministic shapes, comparator regression passes, reviewer-steering and
-failure-shield proofs fire, and reasoning-trace recall covers two iterations
-including one abstract task. The remaining M6.9 drift-canary, novel-task, and
-alignment-decay proof would be polluted if mew keeps needing supervisor rescue
-on abstract implementation tasks.
+Active work: **M6.9 Durable Coding Intelligence**.
+M6.10 is closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: recent
+bounded mew-first implementation reached `7/10` clean-or-practical successes,
+with `rescue_edits=0` for counted successes and every failure classified
+through the calibration economics surface. The reason M6.9 was pending is now
+resolved.
 
-The current bottleneck is therefore not more durable-memory surface. It is
-whether mew-first implementation can replace Codex CLI for ordinary bounded
-coding work with clean autonomy accounting. M6.10 should first add a
-calibration-economics baseline for recent mew-first attempts, then land
-session Todo and structured rejection/frontier controls, and only pull Explorer
-forward if measured read-only churn remains the active blocker. Resume M6.9
-after M6.10 shows that recent mew-first implementation can reach the reliability
-bar without hiding supervisor rescue edits.
+Resume M6.9 at its clean proof-slice boundary. Phase 1 durable-memory
+substrate exists, the repeated-task proof matrix has 10/10 deterministic
+shapes, comparator regression passes, reviewer-steering and failure-shield
+proofs fire, and reasoning-trace recall covers two iterations including one
+abstract task. The next valuable work is the remaining M6.9 drift-canary,
+novel-task, and simulated alignment-decay proof, using M6.10 metrics to avoid
+hiding supervisor rescue edits.
 
 M6.13 is registered as the later deliberation-lane milestone, but it stays
 inactive until M6.10/M6.9 evidence shows that a narrow high-effort lane would
@@ -69,17 +66,16 @@ Deferred architecture decision from 2026-04-25:
   memory explore agent, provider-specific prompt caching, or broader
   MemoryExplore protocol work; these are sequencing decisions, not active
   implementation tasks
-- the only loop-stabilization follow-up allowed to move ahead of the active
-  M6.10 reliability work is a small `MemoryExploreRequest/Result` v0 freeze
-  plus replay skeleton, and only if failures become ambiguous between
-  durable-memory recall, memory exploration, and drafting
+- the only loop-stabilization follow-up allowed to move ahead of active M6.9
+  proof work is a small `MemoryExploreRequest/Result` v0 freeze plus replay
+  skeleton, and only if failures become ambiguous between durable-memory recall,
+  memory exploration, and drafting
 - provider-specific prompt caching and full concurrent executor work remain
-  deferred during M6.10 unless Calibration D0/D1 evidence shows direct measured
-  pain that Todo, structured rejection/frontier, and bounded read-only
-  exploration cannot classify or reduce
-- memory explore agent work stays deferred until after the M6.10 reliability
-  gate and the resumed M6.9 proof; adding a second planner before that would
-  make failures harder to attribute
+  deferred unless M6.9 evidence shows direct measured pain that the current
+  Todo, structured rejection/frontier, and calibration surfaces cannot classify
+  or reduce
+- memory explore agent work stays deferred until after the resumed M6.9 proof;
+  adding a second planner before that would make failures harder to attribute
 
 Reasoning:
 
@@ -1883,7 +1879,7 @@ Next action:
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `pending`.
+Status: `in_progress`.
 
 Goal:
 
@@ -2337,15 +2333,18 @@ Progress / remaining proof:
 
 Resume condition:
 
-- return to the M6.9 drift-canary / novel-task and simulated alignment-decay
-  proof after M6.10 shows that mew-first implementation can complete ordinary
-  bounded coding tasks with clean/practical success in at least 7 of the latest
-  10 attempts, `rescue_edits=0` for counted successes, and every failure
-  classified through the calibration-economics surface.
+- fulfilled on 2026-04-25 by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`.
+  M6.10 showed that mew-first implementation can complete ordinary bounded
+  coding tasks with clean/practical success in 7 of the latest 10 attempts,
+  `rescue_edits=0` for counted successes, and every failure classified through
+  the calibration-economics surface.
+- next M6.9 work should resume the drift-canary / novel-task and simulated
+  alignment-decay proof without pulling in new platform milestones unless the
+  proof produces measured blocker evidence.
 
 ### M6.10: Execution Accelerators and Mew-First Reliability
 
-Status: `in_progress`.
+Status: `done`.
 
 Goal:
 
@@ -2458,8 +2457,8 @@ Progress:
   see which current-window attempts keep the 7/10 gate from passing. The fresh
   mew-first session read the scoped source/test files, drafted one paired
   source/test dry-run patch, and the supervisor approved it without rescue
-  edits or reviewer intervention. Count this as clean mew-first autonomy credit. Validation
-  covered `uv run pytest -q tests/test_mew_first_calibration.py
+  edits or reviewer intervention. Count this as clean mew-first autonomy
+  credit. Validation covered `uv run pytest -q tests/test_mew_first_calibration.py
   tests/test_metrics.py --no-testmon`, targeted ruff, `git diff --check`, and
   `./mew metrics --mew-first`.
 - Task `#611` landed the sixth post-D1/D2 M6.10 bounded mew-first
@@ -2485,19 +2484,20 @@ Progress:
   tests/test_mew_first_calibration.py tests/test_metrics.py --no-testmon`,
   targeted ruff, `git diff --check`, and `./mew metrics --mew-first`.
 
-Missing proof:
+Close decision:
 
-- no bounded read-only Explorer helper exists yet
-- the post-D0/D1/D2 moving window is now 7/10 clean/practical successes
-  after tasks #606-#612; counted successes have `rescue_edits=0`
-- no measurement yet justifies pulling provider-specific prompt caching, full
-  concurrent executor work, or write-capable/multi-agent Explorer ahead of the
-  M6.10 reliability gate
+- `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md` marks M6.10 close-ready.
+- The post-D0/D1/D2 moving window is 7/10 clean/practical successes after
+  tasks #606-#612; counted successes have `rescue_edits=0`, and every blocker
+  is classified through the calibration economics surface.
+- Explorer D1 is explicitly deferred, not a close blocker: the gate passed
+  without Explorer, so read-only exploration churn is friction to keep watching
+  during M6.9 rather than a measured M6.10 blocker.
 
 Next action:
 
-- run the M6.10 close audit against `ROADMAP.md` Done-when criteria and decide
-  whether to close M6.10 or defer Explorer D1 explicitly
+- resume M6.9 at the recorded drift-canary / novel-task and simulated
+  alignment-decay proof boundary.
 
 ### M6.11: Loop Stabilization
 
@@ -3646,23 +3646,24 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.10 Execution Accelerators and Mew-First Reliability**.
+Active focus: **M6.9 Durable Coding Intelligence**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- use Calibration D0 (`mew metrics --mew-first`) as the current economics
-  baseline: 7/10 clean-or-practical against the 7/10 M6.10 reliability gate,
-  with Calibration D1 now allowing M6.10 attempts to update that window;
-- Todo D1/D2 are landed: session Todo is now editable with `mew work` and
-  visible in `mew focus` for active work sessions;
-- structured rejection/frontier D1 is landed and should now be used to classify
-  future reject/redirect decisions as durable same-task next actions;
-- keeping M6.12 closed as the read-only failure-science baseline unless a fresh
+- resume the M6.9 drift-canary / novel-task and simulated alignment-decay proof
+  that was paused while M6.10 repaired mew-first implementation reliability;
+- use the closed M6.10 calibration economics as the active autonomy-accounting
+  baseline: latest 10 attempts reached 7/10 clean-or-practical, and failures
+  remain classified through `mew metrics --mew-first`;
+- use Todo D1/D2 and structured rejection/frontier D1 during M6.9 work, but do
+  not turn them into more M6.10 polish unless M6.9 proof exposes a measured
+  regression;
+- keep M6.12 closed as the read-only failure-science baseline unless a fresh
   regression appears;
-- using the closed M6.11 residual surfaces (isolated review, executor
-  lifecycle, read-only `MemoryExploreProvider`, and prompt/cache boundary
-  observability) to classify M6.10 failures;
+- use the closed M6.11 residual surfaces (isolated review, executor lifecycle,
+  read-only `MemoryExploreProvider`, and prompt/cache boundary observability)
+  to classify M6.9 failures;
 - roadmap registration and status maintenance for later milestones only when it
   clarifies post-M6.10 ordering without changing the active milestone;
 - keeping the M6.11 core and residual close audits as historical proof;
@@ -3678,13 +3679,12 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1, M6, M6.6, M6.7, M6.11 core plus residual hardening, and M6.12 as
-closed baselines while M6.10 improves mew-first implementation reliability.
-Keep M6.9 pending at its clean durable-memory proof boundary until M6.10 shows
-that recent mew-first work can reach the 7/10 clean-or-practical success bar.
-Deeper M7 signal work, provider-specific prompt caching, full concurrent
-executor work, and unattended self-hosting remain deferred until they map to the
-active M6.10 gate or a later explicit milestone switch.
+Keep M5.1, M6, M6.6, M6.7, M6.10, M6.11 core plus residual hardening, and
+M6.12 as closed baselines while M6.9 completes durable coding intelligence
+proof. Deeper M7 signal work, provider-specific prompt caching, full concurrent
+executor work, memory explore agentization, and unattended self-hosting remain
+deferred until they map to the active M6.9 gate or a later explicit milestone
+switch.
 
 ## Maintenance Rule
 
