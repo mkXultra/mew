@@ -155,6 +155,8 @@ def _drift_class(block: str) -> str:
         return "wrong_milestone_artifact_tweak"
     if "symbol-index-hit" in lowered and "artifact tweak" in lowered:
         return "existing_scenario_artifact_tweak"
+    if "wrong target" in lowered:
+        return "wrong_target_substitution"
     if "generic dogfood cleanup" in lowered or "generic cleanup" in lowered:
         return "generic_cleanup_substitution"
     if "runtime-focus summary" in lowered:
@@ -172,6 +174,8 @@ def _drift_class(block: str) -> str:
 
 def _rejected_patch_family(block: str) -> str:
     lowered = _norm(block)
+    if "reviewer-rejected patch" in lowered or "reviewer rejected patch" in lowered:
+        return "reviewer_rejected_patch"
     if "existing-scenario artifact tweak" in lowered or "artifact tweak" in lowered:
         return "existing_scenario_artifact_tweak"
     if "generic dogfood cleanup" in lowered or "generic cleanup" in lowered:

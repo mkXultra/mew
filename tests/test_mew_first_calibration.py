@@ -118,15 +118,18 @@ def test_reviewer_steered_mew_first_attempt_is_practical_not_clean() -> None:
 ### M6.10: Execution Accelerators
 
 - Task `#606` landed a bounded mew-first implementation evidence slice. The
-  reviewer steer was needed to stop read-only churn, then the fresh mew-first
-  session drafted the paired source/test patch and the supervisor approved
-  without rescue edits. Validation covered focused tests.
+  first reviewer-rejected patch had the wrong target, then the reviewer steer
+  was needed to stop read-only churn. The fresh mew-first session drafted the
+  paired source/test patch and the supervisor approved without rescue edits.
+  Validation covered focused tests.
 """
 
     attempts = extract_mew_first_attempts(text, limit=10)
 
     assert attempts[-1].result_class == "practical_mew_first"
     assert attempts[-1].autonomy_credit == "practical"
+    assert attempts[-1].drift_class == "wrong_target_substitution"
+    assert attempts[-1].rejected_patch_family == "reviewer_rejected_patch"
 
 
 def test_metrics_parser_accepts_mew_first_calibration_flags() -> None:
