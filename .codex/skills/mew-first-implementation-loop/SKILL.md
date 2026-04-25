@@ -28,12 +28,15 @@ the work. Do not hide failures behind supervisor rescue edits.
 4. If mew succeeds, classify the result as `success_mew_first`.
 5. If mew fails, classify the failure before fixing any product code.
 6. If the failure is a reproducible loop/substrate blocker, immediately pause
-   the active product milestone as `pending`, create or activate a substrate
-   repair milestone, make the bounded substrate repair, then retry the same
-   task.
+   the active product milestone as `pending`, record or activate a bounded
+   repair episode under the M6.14 repair ledger, make the bounded substrate
+   repair, then retry the same task. Use M6.14 episodes for implementation
+   drift, wrong-target, scope, task-goal, patch-selection, verified-closeout,
+   and stale-redraft failures. Create a new milestone only for a genuinely new
+   product or architecture axis that does not fit M6.14.
 7. If retry succeeds, classify as `success_after_substrate_fix`.
 8. If retry fails, keep the product milestone pending and either continue the
-   substrate repair milestone with the new blocker or explicitly record why the
+   M6.14 repair episode with the new blocker or explicitly record why the
    failure is invalid/transient. Do not move to unrelated polish while the
    same class blocks mew-owned implementation.
 
@@ -66,10 +69,14 @@ When this fires:
 
 - set the active product milestone to `pending` until the substrate blocker is
   fixed;
-- create or activate a named repair milestone with a concrete Done-when gate;
+- record or activate a named M6.14 repair episode with a concrete Done-when
+  gate;
 - keep the failed task as the retry target after the repair;
 - count direct Codex edits as substrate/product progress, not mew autonomy
   credit.
+
+Do not mint M6.15/M6.16 just because another repair happened. New milestones
+are for new product or architecture axes, not for each repair incident.
 
 If the failure is not structural, fix the task spec, classify a transient, or
 record a deferred blocker. Do not spend cycles turning the product task into
@@ -86,7 +93,7 @@ context compression:
 - patch owner: `mew`, `supervisor`, or `mixed`
 - verification commands and status
 - reviewer rescue edits count
-- substrate blocker, if any
+- substrate blocker and repair episode, if any
 - next action: retry, repair, rescue, defer, or close
 
 Roadmap/status edits, milestone close decisions, and governance changes remain

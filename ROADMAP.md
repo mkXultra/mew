@@ -824,7 +824,7 @@ Why it matters:
   visible, and then internalize the useful result so later tiny-lane work gets
   smarter instead of merely calling a stronger model again.
 
-## Milestone 6.14: Mew-First Failure Repair Gate
+## Milestone 6.14: Mew-First Failure Repair Ledger
 
 Make M6.9+ implementation genuinely mew-owned by treating mew implementation
 failures as first-class substrate blockers instead of letting Codex silently
@@ -839,8 +839,15 @@ Target:
   rather than filling the product gap by hand
 - active product milestones move to `pending` while their mew-first blocker is
   under repair, then resume at the same failed task after repair
-- every repair milestone names the failed task/session, blocker class,
+- repair incidents are normally recorded as repair episodes under M6.14, not
+  minted as M6.15/M6.16 just because another incident happened
+- known M6.14 episode families include implementation-drift, wrong-target,
+  scope, task-goal, patch-selection, verified-closeout, and stale-redraft
+  failures
+- every repair episode names the failed task/session, blocker class,
   replay/evidence source, focused fix, verifier, and retry target
+- new repair milestones are exceptional and only for genuinely new product or
+  architecture axes that do not fit M6.14
 - direct Codex edits remain allowed for governance, roadmap/status, permission,
   safety, skill policy, and loop substrate surgery; they never count as
   mew-first autonomy credit
@@ -852,12 +859,12 @@ Done when:
 - a real failed mew-first task is recorded with task/session id, rejected patch
   family, reviewer decision, and no hidden supervisor product rescue
 - the active product milestone is paused as `pending` while the structural
-  repair milestone is active
+  repair episode is active
 - the identified substrate blocker is fixed with focused tests or replay
   evidence, and the same failed task is retried mew-first
 - the retry either lands with `success_after_substrate_fix` and
   `rescue_edits=0`, or produces a new classified blocker that remains inside
-  the active repair milestone instead of drifting back to product rescue
+  the active repair episode/ledger instead of drifting back to product rescue
 
 Why it matters:
 
@@ -867,38 +874,6 @@ Why it matters:
   implementation failure into a repair loop for the body itself, which is the
   path toward mew surpassing reactive coding CLIs rather than being wrapped by
   one.
-
-## Milestone 6.15: Verified Closeout Redraft Repair
-
-Keep mew-first implementation sessions from redrafting after they have already
-applied their paired source/test edits and reached a broad verifier green.
-
-Target:
-
-- task/session `#615` / `#600` is the replay source: after the scoped
-  `m6_9-alignment-decay-rehearsal` patch and broad verifier passed, stale
-  write-ready memory attempted another edit and hit `old_text_not_found`
-  instead of finishing
-- completed active work todos must not activate write-ready fast path again
-- stale `blocked_on_patch` todos with applied paired writes plus
-  `finish_ready=true` must recover to `completed`, clear their blocker, and
-  let the session finish
-- M6.9 remains the product milestone; this repair is substrate-only and does
-  not count as a mew-authored product patch
-
-Done when:
-
-- focused tests cover both the completed-todo no-redraft guard and the
-  verified blocked-todo recovery
-- task `#615` can finish from the same session after the repair
-- the repair is committed separately from the mew-authored product patch and
-  M6.9 resumes from the same proof slice
-
-Why it matters:
-
-- A mew-owned patch is not enough if the loop cannot stop after verified work.
-  This repair protects future M6.9+ tasks from spending their post-verifier
-  turn on stale cached windows and preserves the M6.14 immediate-repair rule.
 
 ## Milestone 7: Senses - Inbound Signals
 

@@ -59,18 +59,21 @@ M6.9 is therefore resumed. Task `#615`
 mew-authored product patch in commit `4500e0d`. Its closeout exposed a smaller
 substrate blocker: after broad verifier green, stale write-ready memory tried
 to redraft against old cached windows and hit `old_text_not_found` instead of
-finishing. M6.15 / task `#616` repaired that closeout class, and the same
-session `#600` then finished. The next work should continue the drift-canary /
-novel-task and simulated alignment-decay proof sequence, still using the
-M6.9+ rule that bounded roadmap/coding implementation is mew-owned by default.
-Direct Codex edits remain allowed for reviewer-owned roadmap/status/policy
-updates and loop-substrate fixes, not hidden product rescue.
+finishing. M6.14 closeout-repair episode task `#616` repaired that class, and
+the same session `#600` then finished. The next work should continue the
+drift-canary / novel-task and simulated alignment-decay proof sequence, still
+using the M6.9+ rule that bounded roadmap/coding implementation is mew-owned
+by default. Direct Codex edits remain allowed for reviewer-owned
+roadmap/status/policy updates and loop-substrate fixes, not hidden product
+rescue.
 
 The durable execution contract from this point forward is: M6.9+ bounded
 roadmap/coding implementation belongs to mew. If mew fails, classify the
 failure, pause the active product milestone, fix the substrate or task spec,
 and retry the same task. Do not silently convert mew-owned implementation into
-Codex-authored product rescue.
+Codex-authored product rescue. Repair incidents should normally be appended as
+bounded episodes under M6.14 instead of creating a new milestone for each
+incident.
 
 M6.13 is registered as the later deliberation-lane milestone, but it stays
 inactive until M6.10/M6.9 evidence shows that a narrow high-effort lane would
@@ -263,8 +266,9 @@ Current next action:
     them into supervisor-authored autonomy credit.
 17. From M6.9 onward, bounded roadmap/coding implementation is mew-owned by
     default. If mew fails a task with reproducible structural evidence, pause
-    the active product milestone as `pending`, activate a repair milestone,
-    fix the substrate, and retry the same task before resuming product work.
+    the active product milestone as `pending`, append or activate a bounded
+    M6.14 repair episode, fix the substrate, and retry the same task before
+    resuming product work.
 
 Human-role transition rule:
 
@@ -2353,14 +2357,14 @@ Progress / remaining proof:
   `prior_convention_reused=true`. The finish step exposed a post-verifier
   stale-redraft substrate issue rather than a product failure: write-ready
   memory tried to reapply stale cached windows and hit `old_text_not_found`.
-  Task `#616` / M6.15 repaired that closeout class, and the same session then
-  finished. Count this as practical mew-first implementation evidence without
-  rescue edits; reviewer steer was needed only for loop closeout repair, with
-  no supervisor product rescue. Validation covered
+  Task `#616` / M6.14 closeout-repair episode repaired that class, and the
+  same session then finished. Count this as practical mew-first implementation
+  evidence without rescue edits; reviewer steer was needed only for loop
+  closeout repair, with no supervisor product rescue. Validation covered
   `./mew dogfood --scenario m6_9-alignment-decay-rehearsal --json`,
   `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff for
-  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, focused M6.15
-  work-session tests, and `git diff --check`.
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, focused M6.14
+  closeout-repair work-session tests, and `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
   purpose. Phase 1 substrate and thirteen post-M6.12 proof/report/substrate slices
   have landed, and the repeated-task proof matrix has 10/10 deterministic shapes
@@ -2398,11 +2402,11 @@ Resume condition:
 - fulfilled again on 2026-04-25 by the M6.14 close loop: task `#613` exposed
   the wrong-target drift class, M6.14 fixed the loop policy/substrate, and the
   same task landed as a verified mew-owned retry in commit `4e62c4b`.
-- fulfilled again on 2026-04-25 by the M6.15 closeout repair: task `#615`
-  landed the alignment-decay proof as mew-authored code, task `#616` fixed the
-  stale-redraft finish blocker, and the same session finished.
+- fulfilled again on 2026-04-25 by the M6.14 closeout-repair episode: task
+  `#615` landed the alignment-decay proof as mew-authored code, task `#616`
+  fixed the stale-redraft finish blocker, and the same session finished.
 - next M6.9 work should continue the drift-canary / novel-task and remaining
-  durable-memory proof sequence from the #615/M6.15 repair boundary.
+  durable-memory proof sequence from the #615/M6.14 closeout-repair boundary.
 
 ### M6.10: Execution Accelerators and Mew-First Reliability
 
@@ -3606,7 +3610,7 @@ Next action:
   lane framework slice would produce clearer proof faster than continuing the
   durable-memory proof directly.
 
-### M6.14: Mew-First Failure Repair Gate
+### M6.14: Mew-First Failure Repair Ledger
 
 Status: `done`.
 
@@ -3656,38 +3660,15 @@ Evidence:
   `4e62c4b`, full `tests/test_dogfood.py` passed, and the task was marked done.
   This is recorded as `success_after_substrate_fix` / practical mew-first
   evidence, not supervisor product rescue.
-
-Missing proof:
-
-- none for the M6.14 gate. Longer-run M6.9 proof will continue to determine
-  whether more failure classes need new repair milestones.
-
-Next action:
-
-- resume M6.9 from the clean #613 retry boundary and continue the durable
-  drift-canary / novel-task proof sequence under the M6.9+ mew-first rule.
-
-### M6.15: Verified Closeout Redraft Repair
-
-Status: `done`.
-
-Goal:
-
-- repair the post-verifier stale redraft class exposed by task `#615` /
-  session `#600`, where a completed mew-authored source/test patch reached
-  broad verifier green but the next live step attempted another write-ready
-  draft and hit `old_text_not_found` instead of finishing
-
-Evidence:
-
 - Task `#615` added `m6_9-alignment-decay-rehearsal` through mew session
   `#600`, scoped to `src/mew/dogfood.py` and `tests/test_dogfood.py`.
 - The product patch was committed separately as `4500e0d` after scenario JSON,
   full `tests/test_dogfood.py`, ruff, and `git diff --check` passed.
 - The finish attempt then exposed a substrate issue: stale cached windows and
   an already-completed active todo could still activate write-ready redraft.
-- Task `#616` tracked the repair. The substrate now prevents completed active
-  work todos from activating write-ready fast path, and verified
+- Task `#616` tracked the M6.14 closeout-repair episode. The substrate now
+  prevents completed active work todos from activating write-ready fast path,
+  and verified
   `blocked_on_patch` todos with applied paired writes recover to `completed`
   and clear their blockers.
 - The same session `#600` then finished with a `finish` action after the repair,
@@ -3700,11 +3681,20 @@ Validation:
 - `uv run ruff check src/mew/work_loop.py src/mew/work_session.py tests/test_work_session.py`
 - `git diff --check`
 
+Missing proof:
+
+- none for the current M6.14 gate. Longer-run M6.9 proof will continue to
+  determine whether more failure classes need M6.14 repair episodes. New
+  milestones are reserved for genuinely new product or architecture axes that
+  do not fit the M6.14 repair ledger.
+
 Next action:
 
 - keep M6.9 active and continue the durable-memory proof sequence. If another
-  mew-first structural failure appears, create the next bounded repair
-  milestone, pause M6.9 while repairing it, and retry the same task.
+  mew-first structural failure appears, append or activate a bounded repair
+  episode under M6.14, pause M6.9 while repairing it, and retry the same task.
+  Create a new milestone only when the failure is a genuinely new product or
+  architecture axis, not just another repair incident.
 
 ### M7: Senses - Inbound Signals
 
@@ -3813,12 +3803,13 @@ Active focus: **M6.9 Durable Coding Intelligence**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- continue M6.9 from the verified #615 / M6.15 repair boundary, focusing on
-  the remaining drift-canary / novel-task and simulated alignment-decay
-  durable-memory proof;
-- keep applying the M6.14/M6.15 rule: if a mew-owned M6.9+ implementation fails
-  structurally, pause the active product milestone, create/activate a repair
-  milestone, fix the loop substrate or task spec, and retry the same task;
+- continue M6.9 from the verified #615 / M6.14 closeout-repair boundary,
+  focusing on the remaining drift-canary / novel-task and simulated
+  alignment-decay durable-memory proof;
+- keep applying the M6.14 repair-ledger rule: if a mew-owned M6.9+
+  implementation fails structurally, pause the active product milestone,
+  append or activate a bounded M6.14 repair episode, fix the loop substrate or
+  task spec, and retry the same task;
 - use the closed M6.10 calibration economics as the active autonomy-accounting
   baseline, but do not let the 7/10 close gate justify supervisor product
   rescue for M6.9+ implementation;
