@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import hashlib
+import os
 from pathlib import Path
 import re
 import time
@@ -15,7 +16,11 @@ from .patch_draft import (
     compile_patch_draft,
     compile_patch_draft_previews,
 )
-from .reasoning_policy import codex_reasoning_effort_scope, select_work_reasoning_policy
+from .reasoning_policy import (
+    codex_reasoning_effort_scope,
+    normalize_reasoning_effort,
+    select_work_reasoning_policy,
+)
 from .tasks import clip_output, task_scope_target_paths
 from .test_discovery import normalize_work_path
 from .timeutil import now_iso
@@ -72,6 +77,7 @@ WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
+WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV = "MEW_WRITE_READY_TINY_DRAFT_REASONING_EFFORT"
 WORK_WRITE_READY_RECENT_WINDOWS_PER_TARGET_PATH = 3
 WORK_WRITE_READY_TIMEOUT_BLOCKER_CODE = "drafting_timeout_after_complete_cached_refs_no_artifact"
 WORK_WRITE_READY_REFRESH_RECOVERABLE_BLOCKER_CODES = {
@@ -767,6 +773,27 @@ def _write_ready_tiny_draft_timeout(timeout):
     if timeout_value <= 0:
         timeout_value = WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS
     return min(timeout_value, WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS)
+
+
+def _tiny_write_ready_draft_reasoning_metrics(reasoning_effort="", reasoning_effort_source="", env=None):
+    env = os.environ if env is None else env
+    inherited_reasoning_effort = str(reasoning_effort or "")
+    inherited_reasoning_effort_source = str(reasoning_effort_source or "auto")
+    dedicated_override = normalize_reasoning_effort(
+        env.get(WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV)
+    )
+    if dedicated_override:
+        effective_reasoning_effort = dedicated_override
+        effective_reasoning_effort_source = "tiny_draft_env_override"
+    else:
+        effective_reasoning_effort = WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
+        effective_reasoning_effort_source = "tiny_draft_auto_override"
+    return {
+        "tiny_write_ready_draft_reasoning_effort": effective_reasoning_effort,
+        "tiny_write_ready_draft_inherited_reasoning_effort": inherited_reasoning_effort,
+        "tiny_write_ready_draft_reasoning_effort_source": effective_reasoning_effort_source,
+        "tiny_write_ready_draft_inherited_reasoning_effort_source": inherited_reasoning_effort_source,
+    }
 
 
 def _work_model_error_looks_like_timeout(exc):
@@ -4385,33 +4412,19 @@ def _attempt_write_ready_tiny_draft_turn(
 ):
     prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
     timeout_seconds = _write_ready_tiny_draft_timeout(timeout)
-    tiny_write_ready_draft_inherited_reasoning_effort = reasoning_effort or ""
-    tiny_write_ready_draft_inherited_reasoning_effort_source = reasoning_effort_source or "auto"
-    tiny_write_ready_draft_reasoning_effort = (
-        tiny_write_ready_draft_inherited_reasoning_effort
-        if tiny_write_ready_draft_inherited_reasoning_effort_source == "env_override"
-        else WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
+    tiny_reasoning_metrics = _tiny_write_ready_draft_reasoning_metrics(
+        reasoning_effort,
+        reasoning_effort_source,
     )
-    tiny_write_ready_draft_reasoning_effort_source = (
-        "env_override"
-        if tiny_write_ready_draft_inherited_reasoning_effort_source == "env_override"
-        else "tiny_draft_auto_override"
-    )
+    tiny_write_ready_draft_reasoning_effort = tiny_reasoning_metrics[
+        "tiny_write_ready_draft_reasoning_effort"
+    ]
     metrics = {
         "tiny_write_ready_draft_attempted": True,
         "tiny_write_ready_draft_outcome": "",
         "tiny_write_ready_draft_prompt_chars": len(prompt),
         "tiny_write_ready_draft_timeout_seconds": timeout_seconds,
-        "tiny_write_ready_draft_reasoning_effort": tiny_write_ready_draft_reasoning_effort,
-        "tiny_write_ready_draft_inherited_reasoning_effort": (
-            tiny_write_ready_draft_inherited_reasoning_effort
-        ),
-        "tiny_write_ready_draft_reasoning_effort_source": (
-            tiny_write_ready_draft_reasoning_effort_source
-        ),
-        "tiny_write_ready_draft_inherited_reasoning_effort_source": (
-            tiny_write_ready_draft_inherited_reasoning_effort_source
-        ),
+        **tiny_reasoning_metrics,
         "tiny_write_ready_draft_fallback_reason": "",
         "tiny_write_ready_draft_error": "",
         "tiny_write_ready_draft_compiler_artifact_kind": "",
@@ -5791,21 +5804,9 @@ def plan_work_model_turn(
                 "tiny_write_ready_draft_fallback_reason": "",
                 "tiny_write_ready_draft_error": "",
                 "tiny_write_ready_draft_compiler_artifact_kind": "",
-                "tiny_write_ready_draft_reasoning_effort": (
-                    reasoning_policy.get("effort") or ""
-                    if (reasoning_policy.get("source") or "auto") == "env_override"
-                    else WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
-                ),
-                "tiny_write_ready_draft_reasoning_effort_source": (
-                    "env_override"
-                    if (reasoning_policy.get("source") or "auto") == "env_override"
-                    else "tiny_draft_auto_override"
-                ),
-                "tiny_write_ready_draft_inherited_reasoning_effort": (
-                    reasoning_policy.get("effort") or ""
-                ),
-                "tiny_write_ready_draft_inherited_reasoning_effort_source": (
-                    reasoning_policy.get("source") or "auto"
+                **_tiny_write_ready_draft_reasoning_metrics(
+                    reasoning_policy.get("effort") or "",
+                    reasoning_policy.get("source") or "auto",
                 ),
                 "tiny_write_ready_draft_prompt_contract_version": (
                     WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION

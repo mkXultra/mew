@@ -26,9 +26,9 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `pending` | Phase 1 substrate plus three post-M6.12 proof slices landed; intentionally paused before the 10-shape/comparator push while M6.11 residual hardening closes review/executor/memory-explore boundaries. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus three post-M6.12 proof slices landed; M6.11 residual hardening is closed, so broad durable-coding proof can resume from the clean proof-slice boundary. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
-| 6.11. Loop Stabilization | `in_progress` | Core close-gate phases 0-4 remain closed; residual Phase 5/6 plus read-only MemoryExploreProvider and prompt/cache boundary hardening are now active for roadmap-wide mew-first throughput. |
+| 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
@@ -38,14 +38,16 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 09:48 JST.
+Last assessed: 2026-04-25 12:55 JST.
 
-Active work: **M6.11 Loop Stabilization residual hardening** while M6.9 is
-pending at a clean proof-slice boundary. M6.9 has landed its Phase 1 substrate
-and three post-M6.12 proof slices, but the broader 10-shape/comparator push is
-paused so the remaining M6.11 review/executor/memory-explore boundaries can be
-finished before mew-first implementation is scaled. M6.10 stays registered but
-inactive until M6.9 resumes, and M7 remains deferred.
+Active work: **M6.9 Durable Coding Intelligence** from the clean proof-slice
+boundary. M6.9 has landed its Phase 1 substrate and three post-M6.12 proof
+slices, and the M6.11 residual hardening pause is now closed by
+`docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The next M6.9 push should use
+the closed review, executor-lifecycle, memory-explore, and prompt/cache
+surfaces to scale durable-coding proof without losing failure diagnosis.
+M6.10 stays registered but inactive until the M6.9 proof push creates an
+accelerator-sized need, and M7 remains deferred.
 
 Reasoning:
 
@@ -116,10 +118,7 @@ Reasoning:
   the close-gate audit, `./mew dogfood --all --json` passed,
   `uv run pytest -q tests/test_dogfood.py -k 'm6_11' --no-testmon` passed,
   strict `mew proof-summary --m6_11-phase2-calibration --strict` returned
-  `ok=true`, and codex-ultra approved the corrected audit as close-ready. The
-  freeze is lifted, but M6.12 now takes a short active slot before broad M6.9
-  resumes so future M6.9 slices can read recurrence and failure-family evidence
-  from the closed M6.11 ledger instead of scattered review notes.
+  `ok=true`, and codex-ultra approved the corrected audit as close-ready.
 - M6.12 is now closed as a bounded read-only instrumentation milestone.
   `docs/M6_12_CLOSE_GATE_AUDIT_2026-04-25.md` records the close-gate audit:
   commits `ec0e0d4` and `c7b6dcd` added the classifier/report surface,
@@ -127,6 +126,13 @@ Reasoning:
   `ok=true` with `ledger_rows=127`, `referenced=30`, `resolved=30`,
   `missing=0`, strict live text rendered the cockpit, and the existing
   M6.11 strict calibration mode still returned `ok=true`.
+- M6.11 residual hardening is now also closed.
+  `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md` maps Phase 5 review,
+  Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache
+  boundary evidence to commits `f69b94b`, `2e27c9f`, `72dd8ba`, `d5513e8`,
+  and `df397ae`. Current validation stayed green:
+  `./mew dogfood --all --json` passed, the M6.11 dogfood pytest subset passed
+  with 6 tests, and strict M6.11 proof-summary returned `ok=true`.
 - The first pull-forward item from the M6.11 review is refusal separation in
   `src/mew/codex_api.py`, because without it the
   `model_returned_refusal` blocker code is unreachable.
@@ -134,8 +140,8 @@ Reasoning:
   that M6.6 can be marked done honestly after the fresh B rerun and C
   comparator completed.
 - Broad polish and general refactor remain non-goals. The next useful work is
-  bounded M6.11 residual hardening that directly improves future mew-first
-  throughput and failure diagnosis: isolated review, executor lifecycle,
+  to resume M6.9 durable-coding proof with the M6.11 residual surfaces
+  available for failure diagnosis: isolated review, executor lifecycle,
   read-only memory exploration, and prompt/cache boundary observability.
 - The mew-first implementation loop is now a cross-cutting operating policy in
   `ROADMAP.md` and an executable Codex skill at
@@ -147,8 +153,8 @@ Reasoning:
 - On 2026-04-25, the user approved a roadmap-wide optimization: pause M6.9 at
   the clean proof-slice boundary after `#574`/`#575`/`#576`, then finish the
   M6.11 residual phases that make future mew-first loops easier to debug and
-  scale. This does not invalidate the M6.11 core close audit; it opens the
-  previously deferred residual hardening scope as the active focus.
+  scale. That pause has now served its purpose and is closed by the residual
+  audit; resume M6.9 from the same clean proof-slice boundary.
 
 Current next action:
 
@@ -178,18 +184,17 @@ Current next action:
 9. Treat M6.12 as a closed baseline. Reopen only if the M6.12 report stops
    classifying the closed 127-row ledger, loses bundle provenance, mutates the
    canonical M6.11 ledger, or regresses the existing proof-summary strict modes.
-10. Treat M6.11 core phases 0-4 as a closed baseline, but make M6.11 residual
-   hardening the active focus until Phase 5 isolated review, Phase 6 executor
-   lifecycle tightening, read-only `MemoryExploreProvider` v0, and
-   prompt/cache boundary observability are closed.
+10. Treat M6.11 core phases 0-4 and the residual hardening slices as closed
+   baselines. Reopen only if isolated review, executor lifecycle,
+   `MemoryExploreProvider` privacy/read-only behavior, or prompt/cache
+   boundary observability regresses.
 11. Calibration checkpoint evaluator for M6.11 phase2/3 is now implemented via
    `mew proof-summary --m6_11-phase2-calibration`, scanning
    `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure
    bundles.
-12. Keep M6.9 pending until the M6.11 residual hardening close criteria are
-    satisfied. When M6.9 resumes, continue from the landed active-recall,
-    symbol-index, and repeated-task proof slices by scaling the repeated-task
-    matrix or runner/report structure.
+12. Resume M6.9 from the landed active-recall, symbol-index, and repeated-task
+    proof slices by scaling the repeated-task matrix or runner/report
+    structure under mew-first implementation and codex-ultra review.
 13. Do not let mew self-author roadmap-status or milestone-close edits; those
     remain reviewer-controlled until a later milestone explicitly moves that
     boundary.
@@ -221,13 +226,12 @@ Human-role transition rule:
 - From M6.7 onward, the default implementation mode is **mew first** for
   bounded roadmap/coding work: mew is the implementer, Codex plays the
   human-style reviewer/approver, and the loop stays reviewer-gated.
-- The M6.11 reviewer-implemented exception is temporarily active again for
-  residual hardening, because this is agent-loop substrate work. Count these
-  changes as roadmap-wide platform progress, not mew-first autonomy credit.
-  After residual hardening closes, bounded roadmap/coding work should return
-  to mew-first implementation with Codex acting as human-style
-  reviewer/approver unless the next task is another explicit substrate,
-  safety, governance, or permission change.
+- The M6.11 reviewer-implemented exception is closed with the residual
+  hardening audit. Count those residual changes as roadmap-wide platform
+  progress, not mew-first autonomy credit. Bounded roadmap/coding work now
+  returns to mew-first implementation with Codex acting as human-style
+  reviewer/approver unless the next task is reviewer-owned status/audit work
+  or another explicit substrate, safety, governance, or permission change.
 - Treat rescue edits by Codex as a signal that mew is not ready to own that
   class of task yet. Record the blocker instead of silently fixing around it.
 - Low- and medium-risk implementation can now use mew as primary implementer
@@ -1847,7 +1851,7 @@ Next action:
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `pending`.
+Status: `in_progress`.
 
 Goal:
 
@@ -2038,26 +2042,25 @@ Progress / remaining proof:
   `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
   Count this as one proof-shape slice toward the repeated-task criterion, not
   the full predeclared 10-shape gate
-- M6.9 is intentionally pending as of 2026-04-25. The pause boundary is clean:
-  Phase 1 substrate and three post-M6.12 proof slices have landed, but the
-  predeclared 10-shape repeated-task matrix and comparator rerun have not
-  started. The active focus moves to M6.11 residual hardening so future
-  mew-first M6.9 slices have clearer review, executor lifecycle, and memory
-  exploration boundaries.
+- M6.9 resumed on 2026-04-25 after the clean pause boundary served its
+  purpose. Phase 1 substrate and three post-M6.12 proof slices have landed,
+  but the predeclared 10-shape repeated-task matrix and comparator rerun have
+  not started. The now-closed M6.11 residual review, executor lifecycle, memory
+  exploration, and prompt/cache boundaries should be used to classify the next
+  mew-first proof slices.
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices
 - later observability and broader retrieval changes remain unstarted
 
-Resume condition:
+Next proof step:
 
-- resume bounded M6.9 work after M6.11 residual hardening closes. The first
-  resumed slice should scale the `#576` proof shape toward the predeclared
-  repeated-task set: either add the second task shape to the dogfood proof
-  matrix or introduce the small runner/report structure needed to track
-  multiple shapes without inflating the close gate. Rerun an appropriate M6.6
-  comparator once there is enough repeated-task evidence to attribute a
-  measurable gain to durable recall.
+- scale the `#576` proof shape toward the predeclared repeated-task set:
+  either add the second task shape to the dogfood proof matrix or introduce the
+  small runner/report structure needed to track multiple shapes without
+  inflating the close gate. Rerun an appropriate M6.6 comparator once there is
+  enough repeated-task evidence to attribute a measurable gain to durable
+  recall.
 
 ### M6.10: Execution Accelerators
 
@@ -2096,7 +2099,7 @@ Next action:
 
 ### M6.11: Loop Stabilization
 
-Status: `in_progress`.
+Status: `done`.
 
 Goal:
 
@@ -2132,7 +2135,7 @@ Closed proof:
   close-ready, no findings, and no further bounded calibration task required
   before close.
 
-Residual active scope:
+Residual closed scope:
 
 - Phase 5 isolated review lane: `done` in `f69b94b`. Validated patch
   artifacts can pass through `review_patch_draft_previews()` before
@@ -2141,18 +2144,30 @@ Residual active scope:
   `patch_draft_id`, review metadata, and preserved findings. Task `#577` is
   intentionally recorded as `product_progress_supervisor_rescue` because the
   mew-first attempt still timed out after the bounded substrate repair.
-- Phase 6 executor lifecycle tightening: `done` for the first terminal
-  yielded overlay. Failed model turns with an active `WorkTodo` now persist
-  `active_work_todo.executor_lifecycle.state=yielded` with the failed turn id,
-  turn status, reason, and replay bundle path while preserving the canonical
-  draft-domain `WorkTodo.status`. Remaining lifecycle expansion, if needed,
-  should add other terminal overlays without replacing `WorkTodo.status`.
-- Provisional read-only `MemoryExploreProvider` v0: memory-assisted
-  exploration should feed the same explore handoff shape as filesystem
-  exploration, without adding a second autonomous planner.
-- Prompt/cache boundary observability: the drafting contract should expose
-  stable-prefix and dynamic-payload measurements so future prompt-cache
-  behavior is deliberate.
+- Phase 6 executor lifecycle tightening: `done` through task `#583`.
+  `active_work_todo.executor_lifecycle` is now an overlay rather than the
+  canonical draft state: the recorder accepts `queued`, `executing`,
+  `completed`, `cancelled`, and `yielded`, while producer paths record
+  executing/completed/yielded/cancelled across non-batch tools, batch tools,
+  model/tool failure replay, explicit stops, user interrupts, and `mew repair`
+  stale-running-work recovery. The draft-domain `WorkTodo.status` and blocker
+  fields remain unchanged by lifecycle updates.
+- Provisional read-only `MemoryExploreProvider` v0: `done` in task `#580`.
+  Memory-assisted exploration now feeds the same explore handoff keys as
+  filesystem exploration (`target_paths`, `cached_window_refs`,
+  `candidate_edit_paths`, `exact_blockers`, `memory_refs`) without adding a
+  second autonomous planner, new CLI/tool surface, writes, or prompt rewrites.
+  The privacy boundary rejects traversal, tilde, drive-letter absolute, NUL,
+  and private memory paths from path-bearing fields and omits free-text fields
+  from `memory_refs`.
+- Prompt/cache boundary observability: `done` in task `#582`. Work-session
+  resume now exposes a compact `prompt_cache_boundary` derived from the
+  existing draft prompt contract/runtime/static/dynamic/retry metrics while
+  preserving the flat resume fields.
+- Residual close audit: `done` in
+  `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The audit maps each
+  residual slice to reviewed commits, records current dogfood/proof-summary
+  validation, and returns active focus to M6.9.
 
 Evidence:
 
@@ -2186,6 +2201,38 @@ Evidence:
   --no-testmon` passed with 605 tests and 24 subtests, ruff passed for touched
   files, `git diff --check` was clean, and codex-ultra approved review session
   `019dc24c-11db-7951-a51a-63595df08087`.
+- residual Phase 6 expansion evidence: task `#583` completed the remaining
+  executor lifecycle overlays as a reviewed supervisor rescue after two
+  mew-first attempts timed out before a patch. Validation: `uv run pytest -q
+  tests/test_work_session.py -k 'executor_lifecycle or draft_failure_bundle'
+  --no-testmon` passed with 7 tests, full `uv run pytest -q
+  tests/test_work_session.py --no-testmon` passed with 613 tests and 24
+  subtests, `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
+  with 24 tests and 4 subtests, ruff passed for touched files, `git diff
+  --check` was clean, and codex-ultra approved review session
+  `019dc2b2-22d9-7cb0-b915-4d9f2b89df2b`.
+- residual MemoryExploreProvider evidence: task `#580` first exposed a narrow
+  mew-first missing-target substrate blocker, fixed by `97433f0`; after retry,
+  mew implemented the provider and repaired two codex-ultra privacy review
+  findings. This is counted as `success_after_substrate_fix`: the implementation
+  patch owner is mew, with Codex acting as reviewer/approver. Validation:
+  `uv run pytest -q tests/test_memory_explore.py tests/test_work_session.py -k
+  'memory_explore or active_memory' --no-testmon` passed with 5 tests, `uv run
+  pytest -q tests/test_memory_explore.py --no-testmon` passed with 3 tests,
+  ruff passed for touched files, `git diff --check --cached` was clean, and
+  codex-ultra approved final static review session
+  `019dc287-8591-7610-a0c7-135d5a52cc98`.
+- residual prompt/cache evidence: task `#582` exposed one non-counted mew-first
+  drift patch that codex-ultra rejected, then the supervisor reworked the slice
+  to the intended resume boundary. This is recorded as `supervisor_rescue`, not
+  mew-first autonomy credit. Validation: `uv run pytest -q
+  tests/test_work_session.py -k 'prompt_cache_boundary or draft_prompt'
+  --no-testmon` passed with 1 test, full `uv run pytest -q
+  tests/test_work_session.py --no-testmon` passed with 607 tests and 24
+  subtests, `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
+  with 24 tests and 4 subtests, ruff passed for touched files, `git diff
+  --check` was clean, and codex-ultra approved review session
+  `019dc29c-2015-7432-b44e-06eca6f517a5`.
 
 Historical proof trail before core close:
 - refusal separation is landed in `src/mew/codex_api.py`, but the later
@@ -2980,19 +3027,20 @@ Next action:
   Future loop regressions should create a fresh reopen/follow-up task with a
   concrete blocker instead of silently extending the closed M6.11 batch.
 
-Missing proof:
+Closed residual proof:
 
-- no residual Phase 5 isolated review lane proof exists yet
-- no residual Phase 6 executor lifecycle proof exists yet
-- no read-only `MemoryExploreProvider` v0 proof exists yet
-- no post-residual mew-first M6.9 slice has shown clearer classification
-  across review, executor lifecycle, memory explore, and task-spec causes
+- residual Phase 5 isolated review lane proof exists in `f69b94b`
+- residual Phase 6 executor lifecycle proof exists in `2e27c9f` and `72dd8ba`
+- read-only `MemoryExploreProvider` proof exists in `d5513e8`
+- prompt/cache boundary proof exists in `df397ae`
+- post-residual M6.9 proof is the next active work, using these closed
+  boundaries to classify review, executor lifecycle, memory explore, and
+  task-spec causes
 
 Next action:
 
-- implement M6.11 residual hardening in small slices, starting with the
-  highest-leverage boundary that makes future mew-first failures easier to
-  classify. Keep M6.9 pending until the residual close criteria above are met.
+- resume M6.9 in small mew-first slices, starting with the repeated-task proof
+  matrix or the runner/report structure needed to scale it.
 
 ### M6.12: Failure-Science Instrumentation
 
@@ -3149,41 +3197,41 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.11 Loop Stabilization residual hardening**.
+Active focus: **M6.9 Durable Coding Intelligence**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- bounded M6.11 residual hardening from
-  `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md`;
-- Phase 5 isolated review lane, Phase 6 executor lifecycle tightening,
-  provisional read-only `MemoryExploreProvider` v0, and prompt/cache boundary
-  observability;
-- keeping M6.9 pending at the current proof-slice boundary until residual
-  hardening closes, then resuming the repeated-task proof matrix or its
-  runner/report structure;
+- bounded M6.9 durable-coding proof expansion from the clean proof-slice
+  boundary;
+- using the closed M6.11 residual surfaces (isolated review, executor
+  lifecycle, read-only `MemoryExploreProvider`, and prompt/cache boundary
+  observability) to classify future mew-first failures;
+- scaling the repeated-task proof matrix or introducing the small runner/report
+  structure needed to track multiple proof shapes without inflating the close
+  gate;
 - keeping M6.12 closed as a read-only instrumentation baseline unless a fresh
   regression appears;
 - roadmap registration and status maintenance for later milestones only when it
-  clarifies post-M6.11-residual ordering without changing the active milestone;
-- keeping the M6.11 core close audit as historical proof while implementing the
-  residual phases as roadmap-wide mew-first platform hardening;
+  clarifies post-M6.9 ordering without changing the active milestone;
+- keeping the M6.11 core and residual close audits as historical proof;
 - keeping M6.6 as a closed regression baseline for resident coding work;
 - keeping M6 and M6.7 close artifacts as closed baseline evidence;
-- reviewer-owned roadmap/status updates and checkpointing around M6.11
-  residual runs;
+- reviewer-owned roadmap/status updates and checkpointing around milestone
+  transitions;
 - `mew-first-implementation-loop` as the default implementation protocol for
   ordinary bounded roadmap/coding tasks after the active milestone criterion is
-  chosen, while direct Codex implementation remains acceptable for this
-  explicit agent-loop substrate work;
+  chosen, while direct Codex implementation remains acceptable only for
+  reviewer-owned status/audit work or explicit substrate, safety, governance,
+  or permission changes;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 
-Keep M5.1, M6, M6.6, M6.7, M6.11 core phases 0-4, and M6.12 as closed
-baselines while M6.11 residual hardening closes the boundaries needed to scale
-mew-first work. M6.9 durable-memory proof expansion, M6.10 accelerator work,
-deeper M7 signal work, and unattended self-hosting remain deferred until they
-map to the active M6.11 residual gate or a later explicit milestone switch.
+Keep M5.1, M6, M6.6, M6.7, M6.11 core plus residual hardening, and M6.12 as
+closed baselines while M6.9 durable-memory proof expansion resumes. M6.10
+accelerator work, deeper M7 signal work, and unattended self-hosting remain
+deferred until they map to the active M6.9 gate or a later explicit milestone
+switch.
 
 ## Maintenance Rule
 

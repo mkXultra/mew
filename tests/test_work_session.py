@@ -20,6 +20,7 @@ from mew.commands import (
     format_work_cli_controls,
     format_work_cockpit_controls,
     format_work_live_step_result,
+    pause_work_session_after_user_interrupt,
     remember_successful_work_verification,
     work_cockpit_recovery_command,
     work_recovery_suggestion_from_plan,
@@ -53,6 +54,7 @@ from mew.work_session import (
     latest_work_verify_command,
     _normalize_active_work_todo,
     _tiny_write_ready_draft_recovery_action,
+    request_work_session_stop,
     select_work_recovery_plan_item,
     start_work_tool_call,
     work_tool_repeat_guard,
@@ -12758,7 +12760,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(tools[1]["line_start"], 740)
 
     def test_tiny_write_ready_draft_reasoning_effort_respects_auto_and_env_override_source(self):
-        from mew.work_loop import _attempt_write_ready_tiny_draft_turn
+        from mew.work_loop import (
+            WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV,
+            _attempt_write_ready_tiny_draft_turn,
+        )
 
         class _EffortScope:
             def __init__(self, observed):
@@ -12776,34 +12781,48 @@ class WorkSessionTests(unittest.TestCase):
 
                 return _Context()
 
-        for inherited_source, inherited_effort, expected_reasoning_effort, expected_source in (
-            ("auto", "medium", "low", "tiny_draft_auto_override"),
-            ("auto", "high", "low", "tiny_draft_auto_override"),
-            ("env_override", "xhigh", "xhigh", "env_override"),
+        for (
+            inherited_source,
+            inherited_effort,
+            env_override,
+            expected_reasoning_effort,
+            expected_source,
+        ) in (
+            ("auto", "medium", {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""}, "low", "tiny_draft_auto_override"),
+            ("auto", "high", {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""}, "low", "tiny_draft_auto_override"),
+            ("env_override", "xhigh", {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""}, "low", "tiny_draft_auto_override"),
+            (
+                "env_override",
+                "xhigh",
+                {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: "medium"},
+                "medium",
+                "tiny_draft_env_override",
+            ),
         ):
             observed_scope = []
             with self.subTest(
                 inherited_reasoning_source=inherited_source,
                 inherited_reasoning_effort=inherited_effort,
             ):
-                with patch(
-                    "mew.work_loop.codex_reasoning_effort_scope",
-                    side_effect=_EffortScope(observed_scope),
-                ):
-                    with patch("mew.work_loop.call_model_json_with_retries", return_value="invalid-shape"):
-                        result = _attempt_write_ready_tiny_draft_turn(
-                            session={"id": "write"},
-                            context={},
-                            tiny_context={},
-                            write_ready_fast_path={},
-                            model_auth={},
-                            model="codex",
-                            base_url="",
-                            model_backend="codex",
-                            timeout=60,
-                            reasoning_effort_source=inherited_source,
-                            reasoning_effort=inherited_effort,
-                        )
+                with patch.dict(os.environ, env_override, clear=False):
+                    with patch(
+                        "mew.work_loop.codex_reasoning_effort_scope",
+                        side_effect=_EffortScope(observed_scope),
+                    ):
+                        with patch("mew.work_loop.call_model_json_with_retries", return_value="invalid-shape"):
+                            result = _attempt_write_ready_tiny_draft_turn(
+                                session={"id": "write"},
+                                context={},
+                                tiny_context={},
+                                write_ready_fast_path={},
+                                model_auth={},
+                                model="codex",
+                                base_url="",
+                                model_backend="codex",
+                                timeout=60,
+                                reasoning_effort_source=inherited_source,
+                                reasoning_effort=inherited_effort,
+                            )
                 self.assertEqual(observed_scope, [expected_reasoning_effort])
                 metrics = result["metrics"]
                 self.assertEqual(
@@ -12816,6 +12835,7 @@ class WorkSessionTests(unittest.TestCase):
 
     def test_tiny_write_ready_draft_pre_model_sink_records_reasoning_effort_context(self):
         from mew.work_loop import WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT
+        from mew.work_loop import WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV
         from mew.work_loop import plan_work_model_turn
 
         scenario = self._load_patch_draft_fixture_scenario("paired_src_test_happy")
@@ -12839,9 +12859,28 @@ class WorkSessionTests(unittest.TestCase):
                         raise TimeoutError("timed out while generating tiny draft")
                     return {"summary": "wait", "action": {"type": "wait", "reason": "stop"}}
 
-                for source, effort, expected_reasoning_effort, expected_reasoning_source in (
-                    ("auto", "high", WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT, "tiny_draft_auto_override"),
-                    ("env_override", "xhigh", "xhigh", "env_override"),
+                for source, effort, env_override, expected_reasoning_effort, expected_reasoning_source in (
+                    (
+                        "auto",
+                        "high",
+                        {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""},
+                        WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT,
+                        "tiny_draft_auto_override",
+                    ),
+                    (
+                        "env_override",
+                        "xhigh",
+                        {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: ""},
+                        WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT,
+                        "tiny_draft_auto_override",
+                    ),
+                    (
+                        "env_override",
+                        "xhigh",
+                        {WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV: "medium"},
+                        "medium",
+                        "tiny_draft_env_override",
+                    ),
                 ):
                     pre_model_payloads = []
                     with self.subTest(inherited_reasoning_source=source, inherited_reasoning_effort=effort):
@@ -12850,23 +12889,24 @@ class WorkSessionTests(unittest.TestCase):
                         def capture_pre_model_metrics(metrics):
                             pre_model_payloads.append(metrics)
 
-                        with patch(
-                            "mew.work_loop.select_work_reasoning_policy",
-                            return_value={"effort": effort, "source": source},
-                        ):
-                            with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
-                                planned = plan_work_model_turn(
-                                    state,
-                                    session,
-                                    task,
-                                    {"path": "auth.json"},
-                                    allowed_read_roots=["."],
-                                    allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
-                                    allow_verify=True,
-                                    verify_command="uv run python -m unittest tests.test_patch_draft",
-                                    act_mode="deterministic",
-                                    pre_model_metrics_sink=capture_pre_model_metrics,
-                                )
+                        with patch.dict(os.environ, env_override, clear=False):
+                            with patch(
+                                "mew.work_loop.select_work_reasoning_policy",
+                                return_value={"effort": effort, "source": source},
+                            ):
+                                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                                    planned = plan_work_model_turn(
+                                        state,
+                                        session,
+                                        task,
+                                        {"path": "auth.json"},
+                                        allowed_read_roots=["."],
+                                        allowed_write_roots=scenario.get("allowed_write_roots") or ["."],
+                                        allow_verify=True,
+                                        verify_command="uv run python -m unittest tests.test_patch_draft",
+                                        act_mode="deterministic",
+                                        pre_model_metrics_sink=capture_pre_model_metrics,
+                                    )
 
                         self.assertTrue(pre_model_payloads)
                         self.assertNotIn(
@@ -15904,7 +15944,7 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertFalse(_write_ready_window_text_is_structurally_complete(partial_window))
 
-    def test_build_work_session_resume_surfaces_draft_placeholders(self):
+    def test_build_work_session_resume_surfaces_draft_placeholders_and_prompt_cache_boundary(self):
         session = {
             "id": 1,
             "task_id": 1,
@@ -15963,6 +16003,31 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resume["draft_prompt_static_chars"], 100)
         self.assertEqual(resume["draft_prompt_dynamic_chars"], 200)
         self.assertTrue(resume["draft_retry_same_prefix"])
+        self.assertEqual(
+            resume["prompt_cache_boundary"],
+            {
+                "contract_version": "v2",
+                "runtime_mode": "guarded",
+                "static_chars": 100,
+                "dynamic_chars": 200,
+                "retry_same_prefix": True,
+            },
+        )
+        empty_resume = build_work_session_resume(
+            {
+                "id": 2,
+                "task_id": 2,
+                "status": "active",
+                "title": "No draft metrics",
+                "goal": "Keep the prompt cache boundary empty without draft metrics.",
+                "created_at": "2026-04-21T13:25:16Z",
+                "updated_at": "2026-04-21T13:25:16Z",
+                "tool_calls": [],
+                "calls": [],
+                "model_turns": [],
+            }
+        )
+        self.assertEqual(empty_resume["prompt_cache_boundary"], {})
 
     def test_active_work_todo_round_trips_through_session_state(self):
         old_cwd = os.getcwd()
@@ -19246,6 +19311,355 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(bundle["active_work_todo"]["status"], "blocked_on_patch")
                 self.assertEqual(bundle["active_work_todo"]["id"], "todo-1-1")
                 self.assertEqual(str(bundle["attempt"]), replay_path.split("/attempt-")[-1].split("/")[0])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_active_work_todo_executor_lifecycle_recorder_accepts_all_states(self):
+        from mew.work_session import record_active_work_todo_executor_lifecycle
+
+        state = {
+            "work_sessions": [
+                {
+                    "id": 9,
+                    "status": "active",
+                    "updated_at": "2026-04-25T00:00:00Z",
+                    "active_work_todo": {
+                        "id": "todo-9-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": "Draft a paired patch",
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                        "blocker": {"code": "missing_exact_cached_window_texts"},
+                    },
+                }
+            ]
+        }
+
+        for lifecycle_state in ("queued", "executing", "completed", "cancelled", "yielded"):
+            observed = record_active_work_todo_executor_lifecycle(
+                state,
+                9,
+                lifecycle_state,
+                model_turn={"id": 17, "status": "completed"},
+                tool_call={"id": 23, "status": "completed", "summary": "tool done"},
+                reason=f"{lifecycle_state} reason",
+                current_time="2026-04-25T00:01:00Z",
+            )
+            self.assertEqual(observed["status"], "blocked_on_patch")
+            self.assertEqual(observed["blocker"]["code"], "missing_exact_cached_window_texts")
+            self.assertEqual(observed["executor_lifecycle"]["state"], lifecycle_state)
+            self.assertEqual(observed["executor_lifecycle"]["model_turn_id"], 17)
+            self.assertEqual(observed["executor_lifecycle"]["tool_call_id"], 23)
+            self.assertEqual(observed["executor_lifecycle"]["reason"], f"{lifecycle_state} reason")
+
+        unchanged = record_active_work_todo_executor_lifecycle(state, 9, "invalid")
+        self.assertEqual(unchanged, {})
+        self.assertEqual(state["work_sessions"][0]["active_work_todo"]["executor_lifecycle"]["state"], "yielded")
+
+    def test_work_ai_completed_tool_updates_executor_lifecycle_overlay(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("lifecycle\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["work_sessions"][0]["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": "Observe README",
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                        "blocker": {"code": "missing_exact_cached_window_texts"},
+                    }
+                    save_state(state)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {"summary": "read README", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                session = load_state()["work_sessions"][0]
+                todo = session["active_work_todo"]
+                self.assertEqual(todo["status"], "blocked_on_patch")
+                self.assertEqual(todo["blocker"]["code"], "missing_exact_cached_window_texts")
+                lifecycle = todo["executor_lifecycle"]
+                self.assertEqual(lifecycle["state"], "completed")
+                self.assertEqual(lifecycle["tool_call_id"], session["tool_calls"][-1]["id"])
+                self.assertEqual(lifecycle["model_turn_id"], session["model_turns"][-1]["id"])
+                self.assertEqual(lifecycle["model_turn_status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_batch_completed_tool_updates_executor_lifecycle_overlay(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("batch lifecycle\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["work_sessions"][0]["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "blocked_on_patch",
+                        "source": {
+                            "plan_item": "Observe README in a batch",
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                        "blocker": {"code": "missing_exact_cached_window_texts"},
+                    }
+                    save_state(state)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {
+                        "summary": "batch read README",
+                        "action": {
+                            "type": "batch",
+                            "tools": [{"type": "read_file", "path": "README.md"}],
+                        },
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                session = load_state()["work_sessions"][0]
+                todo = session["active_work_todo"]
+                self.assertEqual(todo["status"], "blocked_on_patch")
+                self.assertEqual(todo["blocker"]["code"], "missing_exact_cached_window_texts")
+                lifecycle = todo["executor_lifecycle"]
+                self.assertEqual(lifecycle["state"], "completed")
+                self.assertEqual(lifecycle["tool_call_id"], session["tool_calls"][-1]["id"])
+                self.assertEqual(lifecycle["model_turn_id"], session["model_turns"][-1]["id"])
+                self.assertEqual(lifecycle["model_turn_status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_stop_before_tool_records_cancelled_executor_lifecycle(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("cancel lifecycle\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    state["work_sessions"][0]["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Observe README",
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                    }
+                    save_state(state)
+
+                def stop_after_planning(*args, **kwargs):
+                    with state_lock():
+                        state = load_state()
+                        request_work_session_stop(state["work_sessions"][0], reason="pause before tool")
+                        save_state(state)
+                    return {
+                        "decision_plan": {"summary": "read README"},
+                        "action_plan": {"summary": "read README"},
+                        "action": {"type": "read_file", "path": "README.md"},
+                        "model_metrics": {},
+                    }
+
+                with patch("mew.commands.plan_work_model_turn", side_effect=stop_after_planning):
+                    with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "stop_requested")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"], [])
+                lifecycle = session["active_work_todo"]["executor_lifecycle"]
+                self.assertEqual(lifecycle["state"], "cancelled")
+                self.assertEqual(lifecycle["model_turn_status"], "completed")
+                self.assertIn("pause before tool", lifecycle["reason"])
+                self.assertEqual(session["active_work_todo"]["status"], "drafting")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_user_interrupt_records_cancelled_executor_lifecycle_overlay(self):
+        from mew.work_session import start_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                    session["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Read while interrupted",
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                    }
+                    turn = start_work_model_turn(
+                        state,
+                        session,
+                        {"summary": "read"},
+                        {"summary": "read"},
+                        {"type": "read_file", "path": "README.md"},
+                    )
+                    tool_call = start_work_tool_call(state, session, "read_file", {"path": "README.md"})
+                    turn["tool_call_id"] = tool_call["id"]
+                    save_state(state)
+
+                interrupt = pause_work_session_after_user_interrupt(session["id"], 3)
+
+                self.assertEqual(
+                    {repair["type"] for repair in interrupt["repairs"]},
+                    {"interrupted_work_tool_call", "interrupted_work_model_turn"},
+                )
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "interrupted")
+                self.assertEqual(session["model_turns"][0]["status"], "interrupted")
+                lifecycle = session["active_work_todo"]["executor_lifecycle"]
+                self.assertEqual(lifecycle["state"], "cancelled")
+                self.assertEqual(lifecycle["tool_call_id"], session["tool_calls"][0]["id"])
+                self.assertEqual(lifecycle["model_turn_id"], session["model_turns"][0]["id"])
+                self.assertEqual(lifecycle["model_turn_status"], "interrupted")
+                self.assertEqual(session["active_work_todo"]["status"], "drafting")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_repair_running_work_records_cancelled_executor_lifecycle_overlay(self):
+        from mew.work_session import record_active_work_todo_executor_lifecycle, start_work_model_turn
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                    session["active_work_todo"] = {
+                        "id": "todo-1-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Read before process death",
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        },
+                        "attempts": {"draft": 1, "review": 0},
+                    }
+                    turn = start_work_model_turn(
+                        state,
+                        session,
+                        {"summary": "read"},
+                        {"summary": "read"},
+                        {"type": "read_file", "path": "README.md"},
+                    )
+                    tool_call = start_work_tool_call(state, session, "read_file", {"path": "README.md"})
+                    turn["tool_call_id"] = tool_call["id"]
+                    record_active_work_todo_executor_lifecycle(
+                        state,
+                        session["id"],
+                        "executing",
+                        model_turn=turn,
+                        tool_call=tool_call,
+                        reason="executing before process death",
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["repair", "--force", "--json"]), 0)
+                data = json.loads(stdout.getvalue())
+                self.assertTrue(data["ok"])
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "interrupted")
+                self.assertEqual(session["model_turns"][0]["status"], "interrupted")
+                lifecycle = session["active_work_todo"]["executor_lifecycle"]
+                self.assertEqual(lifecycle["state"], "cancelled")
+                self.assertEqual(lifecycle["tool_call_id"], session["tool_calls"][0]["id"])
+                self.assertEqual(lifecycle["model_turn_id"], session["model_turns"][0]["id"])
+                self.assertEqual(lifecycle["model_turn_status"], "interrupted")
+                self.assertIn("Interrupted before", lifecycle["reason"])
+                self.assertEqual(session["active_work_todo"]["status"], "drafting")
             finally:
                 os.chdir(old_cwd)
 
