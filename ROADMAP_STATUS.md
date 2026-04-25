@@ -26,7 +26,7 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate exists; post-M6.12 bounded mew-first active-recall and symbol-index dogfood slices landed, but repeated-task and comparator proof remain missing. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate exists; post-M6.12 bounded mew-first active-recall, symbol-index, and first repeated-task proof-shape slices landed, but 10-shape and comparator proof remain missing. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 6.11. Loop Stabilization | `done` | Close-gate audit passed with dogfood, strict replay calibration, 20-slice incidence reduction, canonical ledger evidence, and codex-ultra approval. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
@@ -38,7 +38,7 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 08:55 JST.
+Last assessed: 2026-04-25 09:04 JST.
 
 Active work: **M6.9 Durable Coding Intelligence** while M5.1, M6, M6.6,
 M6.7, M6.11, and M6.12 remain closed baselines. M6.12 v0 has turned the
@@ -1999,6 +1999,22 @@ Progress / remaining proof:
   `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
   Count this as bounded mew-first evidence with human approval/review, not as
   unattended auto-merge or enough evidence to close M6.9
+- The follow-up `#576` slice is now landed as bounded mew-first implementation
+  evidence on `gpt-5.5/high`: session `#565` produced an on-scope paired
+  dry-run patch for `m6_9-repeated-task-recall`, the supervisor approved the
+  paired source/test tools, and the scenario proves the first deterministic
+  repeated-task proof shape. Repetition 1 starts without durable repeated-task
+  file-pair memory and records four fresh discovery/search steps; repetition 1
+  then writes typed file-pair memory; repetition 2 uses durable active
+  recall/index evidence, records two deliberation/search steps, resolves the
+  same `src/mew/dogfood.py` -> `tests/test_dogfood.py` pair, and keeps
+  `reviewer_rescue_edits=0`. Validation covered
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+  Count this as one proof-shape slice toward the repeated-task criterion, not
+  the full predeclared 10-shape gate
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices
@@ -2007,10 +2023,12 @@ Progress / remaining proof:
 Next action:
 
 - continue bounded M6.9 work from the landed Phase 1 substrate. The next slice
-  should build on `#574` and `#575` by moving from deterministic memory/index
-  dogfood to a repeated-task proof shape that can show durable memory
-  shortening a later iteration without reviewer rescue edits, then rerun an
-  appropriate M6.6 comparator once there is enough repeated-task evidence.
+  should scale the `#576` proof shape toward the predeclared repeated-task set:
+  either add the second task shape to the dogfood proof matrix or introduce the
+  small runner/report structure needed to track multiple shapes without
+  inflating the close gate. Rerun an appropriate M6.6 comparator once there is
+  enough repeated-task evidence to attribute a measurable gain to durable
+  recall.
 
 ### M6.10: Execution Accelerators
 

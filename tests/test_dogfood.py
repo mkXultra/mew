@@ -530,6 +530,48 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_active_memory_recall_keeps_relevant_file_pair", check_names)
             self.assertIn("m6_9_active_memory_recall_drops_stale_file_pair_with_precondition_miss", check_names)
 
+    def test_run_dogfood_m6_9_repeated_task_recall_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-repeated-task-recall",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+            trace = artifacts["trace"]
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-repeated-task-recall")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-repeated-task-recall: pass", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertTrue(artifacts["recall_shortened_deliberation"])
+            self.assertEqual(artifacts["reviewer_rescue_edits"], 0)
+            self.assertGreater(
+                artifacts["repetition_1_deliberation_search_step_count"],
+                artifacts["repetition_2_deliberation_search_step_count"],
+            )
+            self.assertEqual(artifacts["resolved_source_path"], "src/mew/dogfood.py")
+            self.assertEqual(artifacts["resolved_test_path"], "tests/test_dogfood.py")
+            self.assertEqual(trace["scenario"], "m6_9-repeated-task-recall")
+            self.assertFalse(trace["repetitions"][0]["durable_recall_used"])
+            self.assertTrue(trace["repetitions"][1]["durable_recall_used"])
+            self.assertEqual(trace["repetitions"][1]["reviewer_rescue_edits"], 0)
+            self.assertTrue(trace["recall_shortened_deliberation"])
+            self.assertEqual(trace["durable_index_evidence"]["kind"], "file-pair")
+            self.assertEqual(trace["durable_index_evidence"]["source_path"], "src/mew/dogfood.py")
+            self.assertEqual(trace["durable_index_evidence"]["test_path"], "tests/test_dogfood.py")
+            self.assertIn("m6_9_repeated_task_recall_first_repetition_starts_without_durable_memory", check_names)
+            self.assertIn("m6_9_repeated_task_recall_first_repetition_writes_typed_memory_index_evidence", check_names)
+            self.assertIn("m6_9_repeated_task_recall_second_repetition_uses_durable_recall_index", check_names)
+            self.assertIn("m6_9_repeated_task_recall_second_repetition_shortens_deliberation_without_rescue", check_names)
+            self.assertIn("m6_9_repeated_task_recall_writes_deterministic_trace_artifact", check_names)
+
     def test_run_dogfood_m6_9_symbol_index_hit_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
