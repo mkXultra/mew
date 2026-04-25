@@ -86,6 +86,7 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
         "clean_or_practical_successes": 4,
         "success_gap": 3,
         "success_rate": 0.4,
+        "gate_blocking_task_ids": [592, 598, 599, 600, 601, 602],
         "passed": False,
     }
     assert summary["attempt_window_task_ids"] == [592, 593, 595, 596, 597, 598, 599, 600, 601, 602]
@@ -95,6 +96,7 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
     assert "included_attempt_sections: ### M6.9:, ### M6.10:" in text
     assert "attempt_window: #592 #593 #595 #596 #597 #598 #599 #600 #601 #602" in text
     assert "gate: 4/10 clean_or_practical threshold=7 success_gap=3 passed=False" in text
+    assert "gate_blockers: #592 #598 #599 #600 #601 #602" in text
     assert "#599 supervisor_rescue" in text
 
 
