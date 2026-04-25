@@ -6604,6 +6604,157 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Pair commands.py and tests/test_memory.py edits", tiny_prompt)
         self.assertNotIn("src/mew/cli.py", tiny_prompt)
 
+    def test_tiny_write_ready_draft_context_replaces_locator_plan_item_with_task_goal(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        source_path = "src/mew/patch_draft.py"
+        test_path = "tests/test_patch_draft.py"
+        source_text = "source review lane window\n" * 40
+        test_text = "test review lane window\n" * 40
+        context = {
+            "task": {
+                "id": 577,
+                "title": "M6.11 residual Phase 5: isolated patch review lane v0",
+                "description": (
+                    "Implement the smallest isolated review lane API in patch_draft.py "
+                    "with paired tests."
+                ),
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 566,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-566-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Locate exact review helper and test insertion points",
+                            "target_paths": [source_path, test_path],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Locate exact review helper and test insertion points",
+                            "cached_windows": [
+                                {"path": source_path, "tool_call_id": 1, "line_start": 600, "line_end": 710},
+                                {"path": test_path, "tool_call_id": 2, "line_start": 325, "line_end": 494},
+                            ],
+                        }
+                    ],
+                    "target_path_cached_window_observations": [{"path": source_path}, {"path": test_path}],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 1,
+                        "path": source_path,
+                        "line_start": 600,
+                        "line_end": 710,
+                        "text": source_text,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 2,
+                        "path": test_path,
+                        "line_start": 325,
+                        "line_end": 494,
+                        "text": test_text,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft and implement the isolated review lane now using the complete cached windows.",
+        }
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        plan_item = tiny_context["active_work_todo"]["source"]["plan_item"]
+
+        self.assertIn("Task goal: M6.11 residual Phase 5", plan_item)
+        self.assertIn("Current guidance: Draft and implement the isolated review lane now", plan_item)
+        self.assertIn("draft only the patch that implements this task goal", plan_item)
+        self.assertNotIn("Locate exact review helper", plan_item)
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["target_paths"],
+            [source_path, test_path],
+        )
+        self.assertEqual(
+            [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            [source_path, test_path],
+        )
+        self.assertEqual(
+            [item["text"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
+            [source_text, test_text],
+        )
+
+    def test_tiny_write_ready_draft_context_keeps_locator_when_guidance_is_no_change(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        source_path = "src/mew/patch_draft.py"
+        test_path = "tests/test_patch_draft.py"
+        context = {
+            "task": {
+                "id": 577,
+                "title": "M6.11 residual Phase 5: isolated patch review lane v0",
+                "description": "Inspect the cached windows without changing files.",
+                "status": "todo",
+                "kind": "coding",
+            },
+            "work_session": {
+                "id": 566,
+                "status": "active",
+                "resume": {
+                    "active_work_todo": {
+                        "id": "todo-566-1",
+                        "status": "drafting",
+                        "source": {
+                            "plan_item": "Locate exact review helper and test insertion points",
+                            "target_paths": [source_path, test_path],
+                        },
+                    },
+                    "plan_item_observations": [
+                        {
+                            "edit_ready": True,
+                            "plan_item": "Locate exact review helper and test insertion points",
+                            "cached_windows": [
+                                {"path": source_path, "tool_call_id": 1, "line_start": 600, "line_end": 710},
+                                {"path": test_path, "tool_call_id": 2, "line_start": 325, "line_end": 494},
+                            ],
+                        }
+                    ],
+                },
+                "recent_read_file_windows": [
+                    {
+                        "tool_call_id": 1,
+                        "path": source_path,
+                        "line_start": 600,
+                        "line_end": 710,
+                        "text": "source review lane window\n" * 40,
+                        "context_truncated": False,
+                    },
+                    {
+                        "tool_call_id": 2,
+                        "path": test_path,
+                        "line_start": 325,
+                        "line_end": 494,
+                        "text": "test review lane window\n" * 40,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "capabilities": {"allowed_write_roots": ["src/mew", "tests"]},
+            "guidance": "Draft nothing; do not change anything; inspect only.",
+        }
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertEqual(
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+            "Locate exact review helper and test insertion points",
+        )
+
     def test_tiny_write_ready_draft_context_and_prompt_are_minimal_contract(self):
         from mew.work_loop import (
             build_write_ready_tiny_draft_model_context,
@@ -19080,6 +19231,14 @@ class WorkSessionTests(unittest.TestCase):
                 failed_turn = session["model_turns"][-1]
                 replay_path = failed_turn.get("replay_bundle_path")
                 self.assertTrue(replay_path)
+                todo = session["active_work_todo"]
+                self.assertEqual(todo["status"], "blocked_on_patch")
+                executor_lifecycle = todo["executor_lifecycle"]
+                self.assertEqual(executor_lifecycle["state"], "yielded")
+                self.assertEqual(executor_lifecycle["model_turn_id"], failed_turn["id"])
+                self.assertEqual(executor_lifecycle["model_turn_status"], "failed")
+                self.assertEqual(executor_lifecycle["replay_bundle_path"], replay_path)
+                self.assertIn("schema mismatch", executor_lifecycle["reason"])
                 self.assertIn("todo-todo-1-1", replay_path)
                 bundle = json.loads(Path(replay_path).read_text(encoding="utf-8"))
                 self.assertEqual(bundle["failure"]["kind"], "generic")
@@ -26844,6 +27003,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("working_memory.target_paths", prompt)
         self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
         self.assertIn("prefer those paths before a broader project search", prompt)
+        self.assertIn("work_session.world_state.files marks a target_path as exists=false", prompt)
+        self.assertIn("do not read_file that missing path", prompt)
+        self.assertIn("write_file with create=true", prompt)
         self.assertIn("work_session.resume.target_path_cached_window_observations", prompt)
         self.assertIn("prefer refreshing that direct cached window before repeating same-surface search_text", prompt)
         self.assertIn("Drop a working_memory.target_paths entry once it is no longer needed for the next step", prompt)
@@ -30007,6 +30169,63 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(files[0]["source"], "workspace_snapshot")
                 self.assertTrue(any(item["path"] == "README.md" for item in files))
                 self.assertTrue(any(item["path"] == "sample" for item in files))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_world_state_surfaces_missing_scope_target_paths(self):
+        from mew.work_world import build_work_world_state
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("src/mew").mkdir(parents=True)
+                Path("tests").mkdir()
+                world = build_work_world_state(
+                    {
+                        "working_memory": {
+                            "target_paths": [
+                                "src/mew/memory_explore.py",
+                                "tests/test_memory_explore.py",
+                            ],
+                        }
+                    },
+                    ["."],
+                )
+
+                files = world["files"]
+                self.assertEqual([item["source"] for item in files], ["target_path", "target_path"])
+                self.assertEqual([item["path"] for item in files], ["src/mew/memory_explore.py", "tests/test_memory_explore.py"])
+                self.assertEqual([item["exists"] for item in files], [False, False])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_world_state_refuses_sensitive_target_paths(self):
+        from mew.work_world import build_work_world_state
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path(".mew/memory/private").mkdir(parents=True)
+                Path(".mew/memory/private/secret.md").write_text("secret\n", encoding="utf-8")
+                world = build_work_world_state(
+                    {
+                        "working_memory": {
+                            "target_paths": [
+                                ".mew/memory/private/secret.md",
+                                ".mew/memory/private/missing.md",
+                            ],
+                        }
+                    },
+                    ["."],
+                )
+
+                files = world["files"]
+                self.assertEqual([item["path"] for item in files], [".mew/memory/private/secret.md", ".mew/memory/private/missing.md"])
+                self.assertEqual([item["exists"] for item in files], [None, None])
+                self.assertTrue(all("refusing to inspect sensitive path" in item["error"] for item in files))
+                self.assertTrue(all("size" not in item and "mtime_ns" not in item for item in files))
             finally:
                 os.chdir(old_cwd)
 

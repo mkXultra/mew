@@ -244,6 +244,49 @@ def compile_patch_draft_previews(patch_draft, *, allowed_write_roots=None):
     return previews
 
 
+def review_patch_draft_previews(patch_draft, review, *, allowed_write_roots=None):
+    previews = compile_patch_draft_previews(
+        patch_draft,
+        allowed_write_roots=allowed_write_roots,
+    )
+    if isinstance(previews, dict) and previews.get("kind") == "patch_blocker":
+        return previews
+
+    patch_draft = patch_draft if isinstance(patch_draft, dict) else {}
+    todo_id = str(patch_draft.get("todo_id") or patch_draft.get("id") or "").strip()
+    review = review if isinstance(review, dict) else {}
+    status = str(review.get("status") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    summary = str(review.get("summary") or review.get("reason") or "").strip()
+    findings = _normalize_review_findings(review.get("findings"))
+
+    if not status:
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="review.status must be accepted or rejected",
+        )
+
+    if status in {"rejected", "reject", "request_changes", "changes_requested"}:
+        detail = summary or "patch draft review rejected"
+        blocker = build_patch_blocker(todo_id, "review_rejected", detail=detail)
+        blocker["patch_draft_id"] = str(patch_draft.get("id") or "").strip()
+        blocker["findings"] = findings
+        blocker["review"] = {
+            "status": status,
+            "summary": summary,
+        }
+        return blocker
+
+    if status and status not in {"accepted", "accept", "approved", "approve", "pass", "no_findings"}:
+        return build_patch_blocker(
+            todo_id,
+            "model_returned_non_schema",
+            detail="review.status must be accepted or rejected",
+        )
+
+    return previews
+
+
 def _normalize_todo(todo):
     todo = todo if isinstance(todo, dict) else {}
     source = todo.get("source") if isinstance(todo.get("source"), dict) else {}
@@ -257,6 +300,27 @@ def _normalize_todo(todo):
             ]
         },
     }
+
+
+def _normalize_review_findings(raw_findings):
+    if raw_findings is None:
+        return []
+    if not isinstance(raw_findings, list):
+        raw_findings = [raw_findings]
+    findings = []
+    for item in raw_findings:
+        if isinstance(item, dict):
+            normalized = {}
+            for key in ("path", "line", "severity", "message", "detail", "reason", "suggested_fix", "rule"):
+                if item.get(key) is not None:
+                    normalized[key] = item.get(key)
+            if normalized:
+                findings.append(normalized)
+            continue
+        text = str(item or "").strip()
+        if text:
+            findings.append({"message": text})
+    return findings
 
 
 def _normalize_proposal(proposal, *, todo_id):

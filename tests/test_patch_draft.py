@@ -6,6 +6,7 @@ from mew.patch_draft import (
     PATCH_BLOCKER_RECOVERY_ACTIONS,
     compile_patch_draft,
     compile_patch_draft_previews,
+    review_patch_draft_previews,
     sha256_text,
 )
 
@@ -147,6 +148,62 @@ class PatchDraftTranslatorFixtureTests(unittest.TestCase):
         self.assertTrue(preview[1]["dry_run"])
         self.assertFalse(preview[0]["apply"])
         self.assertFalse(preview[1]["apply"])
+
+    def test_review_patch_draft_previews_accepts_and_preserves_previews(self):
+        scenario, artifact, preview = _run_fixture_preview_case("paired_src_test_happy")
+
+        reviewed = review_patch_draft_previews(
+            artifact,
+            {"status": "accepted", "findings": []},
+            allowed_write_roots=scenario.get("allowed_write_roots", ALLOWED_WRITE_ROOTS),
+        )
+
+        self.assertEqual(reviewed, preview)
+
+    def test_review_patch_draft_previews_rejects_with_findings_blocker(self):
+        scenario, artifact = _run_fixture_case("paired_src_test_happy")
+        findings = [
+            {
+                "path": "src/mew/patch_draft.py",
+                "line": 42,
+                "severity": "high",
+                "message": "Preserve reviewer visibility before approval.",
+                "reason": "Review lane findings must survive until the revision pass.",
+                "suggested_fix": "Attach findings to the blocker payload.",
+            }
+        ]
+
+        reviewed = review_patch_draft_previews(
+            artifact,
+            {
+                "status": "request_changes",
+                "summary": "Reviewer found an approval-lane problem.",
+                "findings": findings,
+            },
+            allowed_write_roots=scenario.get("allowed_write_roots", ALLOWED_WRITE_ROOTS),
+        )
+
+        self.assertEqual(reviewed["kind"], "patch_blocker")
+        self.assertEqual(reviewed["code"], "review_rejected")
+        self.assertEqual(reviewed["recovery_action"], "revise_patch_from_review_findings")
+        self.assertEqual(reviewed["todo_id"], artifact["todo_id"])
+        self.assertEqual(reviewed["patch_draft_id"], artifact["id"])
+        self.assertEqual(reviewed["findings"], findings)
+        self.assertEqual(reviewed["review"]["status"], "request_changes")
+        self.assertIn("approval-lane problem", reviewed["detail"])
+
+    def test_review_patch_draft_previews_requires_review_status(self):
+        scenario, artifact = _run_fixture_case("paired_src_test_happy")
+
+        reviewed = review_patch_draft_previews(
+            artifact,
+            {},
+            allowed_write_roots=scenario.get("allowed_write_roots", ALLOWED_WRITE_ROOTS),
+        )
+
+        self.assertEqual(reviewed["kind"], "patch_blocker")
+        self.assertEqual(reviewed["code"], "model_returned_non_schema")
+        self.assertIn("review.status", reviewed["detail"])
 
     def test_compile_patch_draft_previews_blocker_passthrough(self):
         blocker = {

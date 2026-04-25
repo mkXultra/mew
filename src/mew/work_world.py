@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .read_tools import resolve_allowed_path
+from .read_tools import is_sensitive_path, resolve_allowed_path
 from .tasks import clip_output
 from .toolbox import run_git_tool
 
@@ -84,6 +84,64 @@ def _world_file_record(path, display_path, source):
     return record
 
 
+def _allowed_missing_path(path, allowed_read_roots):
+    requested = str(path or "").strip()
+    if not requested:
+        raise ValueError("path is required")
+    candidate = Path(requested).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    try:
+        resolved = candidate.resolve(strict=False)
+    except OSError as exc:
+        raise ValueError(str(exc)) from exc
+    if is_sensitive_path(resolved):
+        raise ValueError(f"refusing to inspect sensitive path: {requested}")
+    for root in allowed_read_roots or []:
+        try:
+            allowed_root = Path(root).expanduser()
+            if not allowed_root.is_absolute():
+                allowed_root = Path.cwd() / allowed_root
+            allowed_root = allowed_root.resolve(strict=False)
+        except OSError:
+            continue
+        if allowed_root.exists() and allowed_root.is_file():
+            allowed_root = allowed_root.parent
+        try:
+            resolved.relative_to(allowed_root)
+            return resolved
+        except ValueError:
+            continue
+    raise ValueError(f"path is not under an allowed read root: {requested}")
+
+
+def _resume_target_path_records(resume):
+    paths = []
+
+    def add_path(value):
+        path = str(value or "").strip()
+        if path and path not in paths:
+            paths.append(path)
+
+    working_memory = (resume or {}).get("working_memory")
+    if isinstance(working_memory, dict):
+        for path in working_memory.get("target_paths") or []:
+            add_path(path)
+    active_todo = (resume or {}).get("active_work_todo")
+    if isinstance(active_todo, dict):
+        source = active_todo.get("source") if isinstance(active_todo.get("source"), dict) else {}
+        for path in source.get("target_paths") or []:
+            add_path(path)
+    return [(path, "target_path") for path in paths]
+
+
+def _resume_world_path_records(resume):
+    touched = [(path, "touched") for path in (resume or {}).get("files_touched") or []]
+    if touched:
+        return touched
+    return _resume_target_path_records(resume)
+
+
 def _workspace_snapshot_records(allowed_read_roots, file_limit):
     records = []
     count = max(0, int(file_limit))
@@ -135,18 +193,27 @@ def build_work_world_state(resume, allowed_read_roots, file_limit=None):
     }
 
     snapshot_limit = DEFAULT_WORLD_STATE_FILE_LIMIT if file_limit is None else max(0, int(file_limit))
-    paths = list((resume or {}).get("files_touched") or [])
+    paths = _resume_world_path_records(resume)
     if file_limit is not None:
         paths = paths[:snapshot_limit]
-    for path in paths:
+    for path, source in paths:
         record = {"path": path}
         try:
             resolved = resolve_allowed_path(path, allowed_read_roots)
-            record.update(_world_file_record(resolved, path, "touched"))
+            if is_sensitive_path(resolved):
+                raise ValueError(f"refusing to inspect sensitive path: {path}")
+            record.update(_world_file_record(resolved, path, source))
         except OSError as exc:
             record.update({"exists": False, "error": str(exc)})
         except ValueError as exc:
-            record.update({"exists": None, "error": str(exc)})
+            if "path does not exist" in str(exc):
+                try:
+                    resolved = _allowed_missing_path(path, allowed_read_roots)
+                    record.update(_world_file_record(resolved, path, source))
+                except ValueError as missing_exc:
+                    record.update({"exists": None, "error": str(missing_exc)})
+            else:
+                record.update({"exists": None, "error": str(exc)})
         world["files"].append(record)
     if not world["files"]:
         world["files"] = _workspace_snapshot_records(allowed_read_roots, snapshot_limit)
