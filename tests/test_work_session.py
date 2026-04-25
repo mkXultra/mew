@@ -22328,6 +22328,213 @@ class WorkSessionTests(unittest.TestCase):
             tiny_context["active_work_todo"]["source"]["plan_item"],
         )
 
+    def test_work_resume_preserves_failed_patch_repair_after_duplicated_adjacent_context(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        task = {
+            "id": 619,
+            "title": "M6.9 phase2 comparator regression dogfood scenario",
+            "description": (
+                "Add deterministic dogfood scenario m6_9-phase2-regression with "
+                "budget_multiplier=1.0 and durable_recall_active=true."
+            ),
+            "scope": {"target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"]},
+        }
+        duplicate_error = (
+            "edit hunk #3 duplicated adjacent context: replacement repeats text already adjacent "
+            "before the old text; include the complete old block or narrow the insertion anchor"
+        )
+        session = {
+            "id": 609,
+            "task_id": 619,
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "updated_at": "now",
+            "active_work_todo": {
+                "id": "todo-609-1",
+                "status": "drafting",
+                "source": {
+                    "plan_item": "Apply the paired phase2 source/test edit if the dry-run preview is acceptable.",
+                    "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                },
+                "cached_window_refs": [
+                    {
+                        "path": "src/mew/dogfood.py",
+                        "tool_call_id": 1,
+                        "line_start": 1,
+                        "line_end": 200,
+                        "context_truncated": False,
+                    },
+                    {
+                        "path": "tests/test_dogfood.py",
+                        "tool_call_id": 2,
+                        "line_start": 1,
+                        "line_end": 200,
+                        "context_truncated": False,
+                    },
+                ],
+            },
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "line_start": 1, "line_count": 200},
+                    "result": {
+                        "path": "src/mew/dogfood.py",
+                        "line_start": 1,
+                        "line_end": 200,
+                        "line_count": 200,
+                        "text": "DOGFOOD_SCENARIOS = (\n    \"m6_9-phase1-regression\",\n)\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_dogfood.py", "line_start": 1, "line_count": 200},
+                    "result": {
+                        "path": "tests/test_dogfood.py",
+                        "line_start": 1,
+                        "line_end": 200,
+                        "line_count": 200,
+                        "text": "def test_run_dogfood_m6_9_phase1_regression_scenario():\n    pass\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "tests/test_dogfood.py",
+                        "old": "def test_run_dogfood_m6_11_all_subset_aggregate_reflects_full_coverage(self):\n",
+                        "new": (
+                            "def test_run_dogfood_m6_9_phase2_regression_scenario(self):\n"
+                            "    assert 'm6_9-phase2-regression'\n"
+                            "    assert budget_multiplier == 1.0\n"
+                        ),
+                        "paired_test_source_path": "src/mew/dogfood.py",
+                    },
+                    "result": {"path": "tests/test_dogfood.py", "dry_run": True, "changed": True},
+                    "approval_status": "invalidated",
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file_hunks",
+                    "status": "failed",
+                    "parameters": {
+                        "path": "src/mew/dogfood.py",
+                        "edits": [
+                            {
+                                "old": "    \"m6_9-phase1-regression\",\n",
+                                "new": (
+                                    "    \"m6_9-phase1-regression\",\n"
+                                    "    \"m6_9-phase2-regression\",\n"
+                                ),
+                            },
+                            {
+                                "old": "def run_interrupted_focus_scenario(workspace, env=None):\n",
+                                "new": (
+                                    "def run_m6_9_phase2_regression_scenario(workspace, env=None):\n"
+                                    "    return {'budget_multiplier': 1.0, 'durable_recall_active': True}\n\n"
+                                    "def run_interrupted_focus_scenario(workspace, env=None):\n"
+                                ),
+                            },
+                        ],
+                    },
+                    "error": duplicate_error,
+                    "summary": f"edit_file_hunks failed: {duplicate_error}",
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 3039,
+                    "status": "failed",
+                    "summary": f"model turn failed: {duplicate_error}",
+                    "tool_call_id": 3,
+                    "tool_call_ids": [3, 4],
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "Mirror phase1 with neutral phase2 comparator budget.",
+                            "next_step": "Repair the same paired source/test patch.",
+                            "plan_items": [
+                                "Apply the paired phase2 source/test edit if the dry-run preview is acceptable."
+                            ],
+                            "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                        }
+                    },
+                    "action_plan": {"summary": "Draft m6_9-phase2-regression source/test patch."},
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": "tests/test_dogfood.py",
+                                "new": (
+                                    "def test_run_dogfood_m6_9_phase2_regression_scenario(self):\n"
+                                    "    assert 'm6_9-phase2-regression'\n"
+                                    "    assert budget_multiplier == 1.0\n"
+                                ),
+                            },
+                            {
+                                "type": "edit_file_hunks",
+                                "path": "src/mew/dogfood.py",
+                                "edits": [
+                                    {
+                                        "new": (
+                                            "    \"m6_9-phase1-regression\",\n"
+                                            "    \"m6_9-phase2-regression\",\n"
+                                        ),
+                                    },
+                                    {
+                                        "new": (
+                                            "def run_m6_9_phase2_regression_scenario(workspace, env=None):\n"
+                                            "    return {'budget_multiplier': 1.0, 'durable_recall_active': True}\n"
+                                        ),
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session, task=task)
+
+        repair = resume["failed_patch_repair"]
+        self.assertEqual(repair["model_turn_id"], 3039)
+        self.assertEqual(repair["failed_tool_call_id"], 4)
+        self.assertEqual(repair["failed_path"], "src/mew/dogfood.py")
+        self.assertIn("duplicated adjacent context", repair["failure"])
+        self.assertEqual(repair["proposal_paths"], ["tests/test_dogfood.py", "src/mew/dogfood.py"])
+        self.assertIn("m6_9-phase2-regression", repair["must_preserve_terms"])
+        self.assertIn("budget_multiplier", json.dumps(repair["proposal_snippets"]))
+        self.assertIn("durable_recall_active", json.dumps(repair["proposal_snippets"]))
+
+        text = format_work_session_resume(resume)
+        self.assertIn("failed_patch_repair:", text)
+        self.assertIn("m6_9-phase2-regression", text)
+
+        tiny_context = build_write_ready_tiny_draft_model_context(
+            {
+                "task": task,
+                "capabilities": {"allowed_write_roots": ["."]},
+                "work_session": {
+                    "resume": resume,
+                    "tool_calls": session["tool_calls"],
+                    "model_turns": session["model_turns"],
+                },
+            }
+        )
+        self.assertIn("failed_patch_repair", tiny_context)
+        self.assertIn(
+            "Repair the same failed patch proposal",
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+        )
+
     def test_work_resume_drops_prior_read_window_after_intervening_write(self):
         from mew.work_session import build_work_session_resume
 

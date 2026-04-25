@@ -2508,6 +2508,24 @@ def _work_write_failure_is_old_text_mismatch(call):
     return "old text" in text and ("not found" in text or "mismatch" in text)
 
 
+def _work_write_failure_is_duplicated_adjacent_context(call):
+    if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+        return False
+    text = " ".join(
+        str(value or "")
+        for value in (
+            call.get("error"),
+            call.get("summary"),
+            ((call.get("result") or {}) if isinstance(call.get("result"), dict) else {}).get("error"),
+        )
+    ).casefold()
+    return "duplicated adjacent context" in text or "duplicated_adjacent_context" in text
+
+
+def _work_write_failure_needs_same_patch_repair(call):
+    return _work_write_failure_is_old_text_mismatch(call) or _work_write_failure_is_duplicated_adjacent_context(call)
+
+
 def _work_turn_for_tool_call(turns, tool_call_id):
     if tool_call_id is None:
         return {}
@@ -2583,7 +2601,7 @@ def build_failed_patch_repair(session, calls, turns, failures, task=None):
     )
     for failure in reversed(list(failures or [])):
         call = calls_by_id.get(failure.get("tool_call_id"))
-        if not _work_write_failure_is_old_text_mismatch(call):
+        if not _work_write_failure_needs_same_patch_repair(call):
             continue
         turn = _work_turn_for_tool_call(turns, call.get("id"))
         write_tools = _work_action_write_tools((turn or {}).get("action"))

@@ -3727,11 +3727,21 @@ Evidence:
   This is recorded as another `success_after_substrate_fix` / practical
   mew-first proof: product implementation stayed mew-authored, while Codex only
   repaired substrate and maintained status.
+- The next resumed M6.9 proof task `#619`
+  (`M6.9 phase2 comparator regression dogfood scenario`) exposed another
+  bounded substrate class in mew session `#609`: mew reached the correct
+  source/test phase2 patch, but normal dry-run `edit_file_hunks` failed twice
+  with `duplicated_adjacent_context`. Task `#626` repaired this by treating
+  duplicated-adjacent write failures as same-patch repair evidence, so
+  `failed_patch_repair` preserves the exact product proposal for the next
+  retry instead of drifting into broad redrafts. No supervisor product rescue
+  landed for `#619`.
 
 Validation:
 
 - `uv run pytest -q tests/test_work_session.py -k 'verified_blocked_active_work_todo or completed_active_work_todo or verified_active_work_todo or write_ready_fast_path_ignores_completed' --no-testmon`
 - `uv run pytest -q tests/test_work_session.py -k 'task_goal_terms or required_field_terms' --no-testmon`
+- `uv run pytest -q tests/test_work_session.py -k 'failed_patch_repair or suggested_safe_reobserve' --no-testmon`
 - `uv run pytest -q tests/test_work_session.py --no-testmon`
 - `uv run pytest -q tests/test_dogfood.py -k "m6_9_drift_canary or m6_9_novel_task or scenario_choices" --no-testmon`
 - `uv run pytest -q tests/test_dogfood.py --no-testmon`
