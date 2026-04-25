@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import textwrap
 import time
 from io import StringIO
 import tokenize
@@ -2466,8 +2467,33 @@ def _write_ready_window_has_unmatched_delimiters(text):
             return True
         return bool(delimiter_stack)
     except (IndentationError, SyntaxError):
+        dedented = textwrap.dedent(str(text or ""))
+        if dedented and dedented != str(text or ""):
+            return _write_ready_window_has_unmatched_delimiters(dedented)
         return True
     return bool(delimiter_stack)
+
+
+def _write_ready_indented_statement_fragment_is_allowed(significant_lines):
+    if not significant_lines:
+        return False
+    first_line = significant_lines[0]
+    if not first_line or not first_line[0].isspace():
+        return True
+    first_stripped = first_line.lstrip()
+    if first_stripped.startswith(("def ", "async def ", "@")):
+        return True
+    first_indent = len(first_line) - len(first_stripped)
+    for line in significant_lines:
+        stripped = line.lstrip()
+        if len(line) - len(stripped) < first_indent:
+            return False
+    if re.match(
+        r"[A-Za-z_][A-Za-z0-9_]*(?:\s*:\s*[^=]+)?\s*=",
+        first_stripped,
+    ) and re.search(r"=\s*[\[\{\(]", first_stripped):
+        return True
+    return False
 
 
 def _write_ready_window_text_is_structurally_complete(text):
@@ -2479,7 +2505,7 @@ def _write_ready_window_text_is_structurally_complete(text):
     first_line_stripped = first_line.lstrip()
     first_keyword = first_line_stripped.split()[0].rstrip(":") if first_line_stripped else ""
     if first_line and first_line[0].isspace():
-        if not first_line_stripped.startswith(("def ", "async def ", "@")):
+        if not _write_ready_indented_statement_fragment_is_allowed(significant_lines):
             return False
     if first_line_stripped.endswith(":") and first_keyword in {"else", "elif", "except", "finally"}:
         return False
