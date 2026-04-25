@@ -1,0 +1,4070 @@
+# Mew Roadmap Status
+
+Last updated: 2026-04-26
+
+This file is the operational roadmap dashboard. It should stay short enough to
+survive context compression and long-session reentry. Historical detail through
+M5 was archived losslessly in
+`docs/archive/ROADMAP_STATUS_through_M5_2026-04-20.md`.
+
+Status vocabulary: `pending` means meaningful implementation already exists,
+but the milestone is intentionally paused by the active milestone and should
+not be resumed until the recorded resume condition fires.
+
+## Summary
+
+| Milestone | Status | Short Assessment |
+|---|---|---|
+| 1. Native Hands | `done` | Native work sessions can inspect, edit, verify, resume, and expose an audit trail without delegating the whole loop. |
+| 2. Interactive Parity | `done` | Cockpit/live/follow controls, approvals, compact output, interruption handling, and fresh-restart comparative evidence reached parity for the documented gate. |
+| 3. Persistent Advantage | `done` | M3 close gate passed with strict reentry/comparator evidence plus half-hour, one-hour, four-hour, week-scale, and ten-day proof shapes. |
+| 4. True Recovery | `done` | Crashed/interrupted runtime and work-session effects can be classified, safely retried/requeued when deterministic, or surfaced for durable review. |
+| 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with verification, audit, recovery evidence, and explicit user approval to close M5. |
+| 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and enforceable safety hooks without moving the M5 gate. |
+| 6. Body: Daemon & Persistent Presence | `done` | Collected 4-hour daemon proof now passes strict summary with 7/7 checks; the close gate records the retained-artifact false-negative caveat honestly. |
+| 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
+| 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
+| 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
+| 6.8. Task Chaining: Supervised Self-Selection | `in_progress` | Active after M6.9 close; next target is supervised selector design/implementation for reviewer-approved chained bounded tasks. |
+| 6.8.5. Selector Intelligence and Curriculum Integration | `not_started` | Planned immediately after M6.8 core; this is the formal home for M6.9 Phase 4 curriculum, habit compilation, preference-store retrieval, and read-only M6.12 selector input. |
+| 6.9. Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`: repeated-task, durable-rule, failure-shield, index, drift, rehearsal, reasoning-trace, and comparator criteria are all backed by deterministic proof. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `done` | Closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: latest 10 attempts reached 7/10 clean-or-practical with classified failures and no rescue edits for counted successes. |
+| 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
+| 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
+| 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.8.5 selector intelligence or direct hard-blocker evidence shows lane infrastructure would shorten work. |
+| 6.14. Mew-First Failure Repair Gate | `done` | Repair ledger now covers wrong-target draft drift, stale closeout redraft, and required-field term loss; each affected M6.9 task retried without supervisor product rescue. |
+| 6.15. Verified Closeout Redraft Repair | `merged_into_6.14` | Historical closeout-redraft episode is now treated as an M6.14 repair episode, not a separate future milestone pattern. |
+| 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
+| 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
+| 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
+| 10. Multi-Agent Residence | `not_started` | Let multiple model families inhabit the same mew with durable notes, review, and disagreement artifacts. |
+| 11. Inner Life | `not_started` | Promote journal, dream, mood, and self-memory into a curated, auditable continuity of self. |
+
+## Active Milestone Decision
+
+Last assessed: 2026-04-26 01:23 JST.
+
+Active work: **M6.8 Task Chaining: Supervised Self-Selection**.
+
+M6.8.5 is now registered as the immediate post-M6.8 milestone. It exists to
+absorb the M6.9 Phase 4 work that was intentionally gated on task chaining:
+failure-clustered curriculum, habit compilation, preference-store retrieval,
+and read-only M6.12/M6.14 selector evidence. M6.8 core should create a safe
+reviewer-approved selector contract and optional signal fields, but it should
+not try to implement the intelligence policy before the chained approval loop
+itself is proven.
+
+M6.9 is now closed by `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`.
+The final gap was criterion 1: first-five repeated-task wall-time evidence.
+Task `#627` extended `m6_9-repeated-task-recall` to emit five repetitions
+for all 10 predeclared task shapes, per-shape first-five
+`wall_seconds` / `deliberation_step_count` evidence, true median improvement
+flags, and `reviewer_rescue_edits=0`. Validation covered the focused selector,
+full `tests/test_dogfood.py`, `dogfood --all`, targeted ruff, and
+`git diff --check`. M6.8 becomes active because M6.9 Phase 4 remains gated on
+task chaining and is now scheduled as M6.8.5, while the next resident
+capability gap is letting mew select the next bounded roadmap task under
+reviewer approval instead of requiring the human/Codex supervisor to choose
+each task.
+
+Historical M6.9/M6.14 close context:
+
+M6.14 is now closed. Task `#613` (`M6.9 drift-canary dogfood scenario v0`)
+first exposed reproducible mew-first drift by replacing the requested
+`m6_9-drift-canary` scenario with nearby/off-scope patches. The supervisor did
+not rescue the product patch. Instead, M6.14 updated the mew-first operating
+skill and landed two loop-substrate fixes: task-goal term preservation
+(`4ddc9d6`) and verified active-work-todo completion before redrafting
+(`b750860`). The same task then retried through mew session `#599`, produced
+the scoped source/test patch, rejected one later off-scope dry-run family, ran
+the full `tests/test_dogfood.py` verifier, and committed as `4e62c4b`.
+
+M6.9 is therefore resumed. Task `#615`
+(`M6.9 alignment-decay rehearsal dogfood scenario v0`) then landed as a
+mew-authored product patch in commit `4500e0d`. Its closeout exposed a smaller
+substrate blocker: after broad verifier green, stale write-ready memory tried
+to redraft against old cached windows and hit `old_text_not_found` instead of
+finishing. M6.14 closeout-repair episode task `#616` repaired that class, and
+the same session `#600` then finished. Task `#617`
+(`M6.9 novel-task injection exploration matrix v0`) then exposed another
+bounded substrate issue: required structured field names were dropped from tiny
+write-ready draft context, so mew proposed shallow alias/rename patches instead
+of the requested matrix. M6.14 repair task `#618` preserved milestone and
+structured field terms, and the same #617 task retried through session `#602`
+and landed as the mew-authored product patch `ebccb4a`. The next work should
+continue from the later #619/#626 boundary: task `#619`
+(`M6.9 phase2 comparator regression dogfood scenario`) first exposed
+duplicated-adjacent patch recovery loss, M6.14 repair task `#626` preserved
+same-patch repair hints for that class, and retried session `#610` landed the
+neutral Phase 2 comparator regression scenario as a mew-authored patch with no
+supervisor product rescue. Task `#627` then closed the remaining repeated-task
+proof gap. The historical M6.9+ rule remains: bounded roadmap/coding
+implementation is mew-owned by default. Direct Codex edits remain allowed for
+reviewer-owned roadmap/status/policy updates and loop-substrate fixes, not
+hidden product rescue.
+
+The M6.9 close-gate aggregation pass is recorded in
+`docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`. Recommendation: `CLOSE_READY`.
+
+The durable execution contract from this point forward is: M6.9+ bounded
+roadmap/coding implementation belongs to mew. If mew fails, classify the
+failure, pause the active product milestone, fix the substrate or task spec,
+and retry the same task. Do not silently convert mew-owned implementation into
+Codex-authored product rescue. Repair incidents should normally be appended as
+bounded episodes under M6.14 instead of creating a new milestone for each
+incident.
+
+M6.13 is registered as the later deliberation-lane milestone, but it stays
+inactive until M6.8.5 selector-intelligence evidence or a direct hard-blocker
+trace shows that a narrow high-effort lane would remove a measured blocker. M7
+remains deferred.
+
+Deferred architecture decision from 2026-04-25, updated after M6.9 close:
+
+- do not create issues or standalone milestones yet for concurrent executor,
+  memory explore agent, provider-specific prompt caching, or broader
+  MemoryExplore protocol work; these are sequencing decisions, not active
+  implementation tasks
+- the only loop-stabilization follow-up allowed to move ahead of active M6.8
+  core work is a small `MemoryExploreRequest/Result` v0 freeze plus replay
+  skeleton, and only if failures become ambiguous between durable-memory recall,
+  memory exploration, and drafting
+- provider-specific prompt caching and full concurrent executor work remain
+  deferred unless M6.8/M6.8.5 evidence shows direct measured pain that the
+  current Todo, structured rejection/frontier, and calibration surfaces cannot
+  classify or reduce
+- memory explore agent work stays deferred until selector intelligence is
+  stable; adding a second planner before that would make failures harder to
+  attribute
+
+## Post-Close Deferred Ledger
+
+This ledger records important work that is not included in the already-closed
+milestone gates. `done` means the recorded close gate passed, not that every
+design note has been implemented.
+
+| Origin | Deferred Item | Trigger / Timing | Recommended Home | Blocks Current? |
+|---|---|---|---|---|
+| M6.9 Phase 4 | Failure-clustered curriculum | After M6.8 core selector can propose, approve, reject, and continue a chain | M6.8.5 Phase 1 | Not M6.8 core; yes for intelligent chaining |
+| M6.9 Phase 4 | Preference-store retrieval from reviewer diffs | After selector traces can carry `preference_signal_refs` and draft preparation has a bounded injection point | M6.8.5 Phase 2 | No |
+| M6.9 Phase 4 | Habit compilation v0 | After repeated task-template evidence identifies stable candidates with low variance | M6.8.5 Phase 3 | No |
+| M6.10 | Explorer D1 / read-only exploration reducer | Only if M6.8 or M6.8.5 evidence shows read-only exploration churn is a measured blocker again | M6.10 follow-up or M6.8.5 helper slice | No |
+| M6.11 | Full concurrent / streaming executor | After selector/curriculum proof shows measured idle or concurrency pain while loop attribution is stable | Later execution milestone | No |
+| M6.11 | MemoryExplore protocol full freeze/replay and agentization | Keep read-only provider for now; full agentization waits until a second planner will not obscure loop failures | M10 or later memory/explorer milestone | No |
+| M6.11 | Provider-specific prompt caching | Only when provider telemetry shows cache/latency as a direct blocker | M6.13 or later acceleration slice | No |
+| M6.12 | Governance/evaluator/adversarial wiring | First use M6.12 as read-only selector input in M6.8.5; automatic governance wiring needs a later explicit safety milestone | M6.8.5 read-only, later governance milestone | No |
+
+Reasoning:
+
+- M1-M5 are closed. M5 closure was explicitly approved by the user on
+  2026-04-20 after M3 and M4 were already closed.
+- M5.1 closed as a bounded patch that makes future self-improvement safer
+  without retroactively changing the M5 done gate.
+- M6 is now closed. `docs/M6_CLOSE_GATE_2026-04-21.md` records the close gate,
+  and the collected enhanced 4-hour Docker proof passes
+  `./mew proof-summary ... --strict` with `ok=true`, `7/7` checks passed,
+  `processed_events=241`, and `passive_events=239` against an expected minimum
+  of `238`.
+- The raw detached container still exited `1` and the original `report.json`
+  still says `fail`, but that is now documented as a retention-based
+  false negative in the close-out harness rather than missing daemon behavior.
+- M6.5 is closed and M6.6 is now also closed: the bootstrap gate passed, all
+  three predeclared comparator tasks passed with `rescue_edits=0`, the frozen
+  detached Codex CLI comparator batch is recorded, and the first-edit blocker
+  closed via task #363.
+- M6.7 is now closed. First supervised iteration proof is recorded in
+  `docs/M6_7_FIRST_SUPERVISED_ITERATION_2026-04-21.md`: task `#364` /
+  session `#352` stayed within the declared `src/mew/work_session.py` +
+  `tests/test_work_session.py` scope, stopped for dry-run review, passed both
+  focused and broader verification, and closed without reviewer rescue edits.
+- The second supervised iteration is now also recorded in
+  `docs/M6_7_SECOND_SUPERVISED_ITERATION_2026-04-21.md`: task `#365` /
+  session `#353` landed a bounded `src/mew/commands.py` finish guard that
+  keeps the session open while approvals, broader verification, or
+  same-surface audit are incomplete, and it closed only after focused plus
+  paired-source verification and a narrow commands.py same-surface audit.
+- `docs/M6_7_SIXTH_SUPERVISED_ITERATION_2026-04-21.md` now records the fresh
+  clean post-fix M6.7 proof: task `#374` / session `#362` stayed inside the
+  declared `src/mew/brief.py` + `tests/test_brief.py` scope, ran the drift
+  canary first, produced a reviewer-visible dry-run diff, passed the focused
+  verifier plus `uv run python -m unittest tests.test_brief`, completed a
+  same-surface audit, and finished with no reviewer rescue edits.
+- M6.8 (Task Chaining) and M6.9 (Durable Coding Intelligence) are registered
+  as successors. During the last M6.7 close step, the user explicitly approved
+  a split execution mode: freeze the already-satisfied supervised M6.7 proof
+  window in a detached copy, then let mainline land bounded M6.9 Phase 1
+  slices while the remaining `>=4h` wall-clock condition accrued honestly in
+  the frozen copy.
+- The frozen M6.7 close-watch copy was
+  `/private/tmp/mew-m67-close-watch-20260422-023401` at `HEAD b89f35a` with
+  `.mew/` copied from mainline at 2026-04-22 02:31 JST. Once the watch reached
+  `2026-04-22 05:29 JST`, the remaining wall-clock condition was satisfied and
+  `docs/M6_7_CLOSE_GATE_2026-04-22.md` recorded the close gate.
+- This ordering preserved milestone honesty: M6.7 closed on the detached proof
+  window first, and only then does M6.9 become the active milestone.
+- Bounded M6.9 Phase 1 work is now underway on mainline: D1 typed
+  `memory_kind`, D7 list/show inventory, D6 reviewer veto stub, D2 write
+  gates for reviewer-steering/task-template/failure-shield/file-pair, D3
+  bounded file-pair revise(), D4 minimum file-pair durable index, and D5
+  landed reviewer-diff capture for approved `write_file` tools are all landed;
+  `reasoning-trace` remains schema-only and later recall-time observability
+  plus broader retrieval changes remain deferred.
+- M7 signal registry foundation exists, but deeper signal work should remain
+  deferred while M6.9 and M6.10 still dominate execution throughput.
+- `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` is now the canonical loop
+  rewrite plan, and `docs/REVIEW_2026-04-22_LOOP_STABILIZATION_DESIGN_REVIEW.md`
+  says the design is implementation-ready after the replay-bundle ordering,
+  state-model ownership, and deferred memory-provider issues were fixed.
+- The active milestone moved from M6.9 surface expansion to **M6.11 Loop
+  Stabilization** as an explicit freeze, not a rollback. M6.9 kept its landed
+  Phase 1 substrate while M6.11 stabilized the drafting loop so new memory work
+  would not hide loop failures.
+- M6.11 is now closed. `docs/M6_11_CLOSE_GATE_AUDIT_2026-04-25.md` records
+  the close-gate audit, `./mew dogfood --all --json` passed,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_11' --no-testmon` passed,
+  strict `mew proof-summary --m6_11-phase2-calibration --strict` returned
+  `ok=true`, and codex-ultra approved the corrected audit as close-ready.
+- M6.12 is now closed as a bounded read-only instrumentation milestone.
+  `docs/M6_12_CLOSE_GATE_AUDIT_2026-04-25.md` records the close-gate audit:
+  commits `ec0e0d4` and `c7b6dcd` added the classifier/report surface,
+  focused proof-summary tests passed, strict live M6.12 JSON returned
+  `ok=true` with `ledger_rows=127`, `referenced=30`, `resolved=30`,
+  `missing=0`, strict live text rendered the cockpit, and the existing
+  M6.11 strict calibration mode still returned `ok=true`.
+- M6.11 residual hardening is now also closed.
+  `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md` maps Phase 5 review,
+  Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache
+  boundary evidence to commits `f69b94b`, `2e27c9f`, `72dd8ba`, `d5513e8`,
+  and `df397ae`. Current validation stayed green:
+  `./mew dogfood --all --json` passed, the M6.11 dogfood pytest subset passed
+  with 6 tests, and strict M6.11 proof-summary returned `ok=true`.
+- The first pull-forward item from the M6.11 review is refusal separation in
+  `src/mew/codex_api.py`, because without it the
+  `model_returned_refusal` blocker code is unreachable.
+- `claude-ultra` closure review `5974be96-8111-4918-abf4-4818d34ca635` agreed
+  that M6.6 can be marked done honestly after the fresh B rerun and C
+  comparator completed.
+- Broad polish and general refactor remain non-goals. The next useful work is
+  to resume M6.9 durable-coding proof with the M6.11 residual surfaces
+  available for failure diagnosis: isolated review, executor lifecycle,
+  read-only memory exploration, and prompt/cache boundary observability.
+- The mew-first implementation loop is now a cross-cutting operating policy in
+  `ROADMAP.md` and an executable Codex skill at
+  `.codex/skills/mew-first-implementation-loop/SKILL.md`. It should govern
+  bounded roadmap/coding work after task selection: mew attempts first, Codex
+  reviews, failures are classified, one bounded substrate repair/retry is
+  allowed when justified, and supervisor rescue remains product progress rather
+  than autonomy credit.
+- On 2026-04-25, the user approved a roadmap-wide optimization: pause M6.9 at
+  the clean proof-slice boundary after `#574`/`#575`/`#576`, then finish the
+  M6.11 residual phases that make future mew-first loops easier to debug and
+  scale. That pause has now served its purpose and is closed by the residual
+  audit; resume M6.9 from the same clean proof-slice boundary.
+
+Current next action:
+
+1. Use this dashboard as the active decision after context compression.
+2. Treat M6.6 as a closed baseline. Reopen only if a future native coding loop
+   regresses on rescue-edits, verifier choice, approval surfaces, or
+   path-recall/anti-churn behavior.
+3. Treat the first, second, and sixth bounded M6.7 iterations as the current
+   supervised baseline: visible scope fence, proof-or-revert finish blocking,
+   and clean post-fix reviewer-gated brief/focus behavior.
+4. Treat task `#372` as strong bounded-loop evidence: the src/test diff itself
+   landed with no reviewer code rescue, but broader live verification only
+   closed after a direct verifier-runtime blocker patch outside the task scope.
+5. Treat task `#374` as the clean fresh post-fix bounded proof on the now-
+   stabilized live-verifier runtime.
+6. Treat the resumed `#388` / session `#378` interrupt-submit run as the real
+   context-reload reentry for the M6.7 hybrid gate. The run stayed in-scope,
+   preserved the same supervised session, and returned exact blocker outcomes
+   without proof-or-revert failure.
+7. The remaining M6.7 gate was only the `>=4h` wall-clock condition. The
+   detached frozen close-watch copy preserved the already-satisfied
+   `>=3` real roadmap items, reviewer decisions, real reentry, zero
+   proof-or-revert failures, and green drift canary conditions until the proof
+   window reached `2026-04-22 05:29 JST`.
+8. `docs/M6_7_CLOSE_GATE_2026-04-22.md` now records that reviewer-owned close
+   decision. The frozen close-watch copy remains historical evidence only.
+9. Treat M6.12 as a closed baseline. Reopen only if the M6.12 report stops
+   classifying the closed 127-row ledger, loses bundle provenance, mutates the
+   canonical M6.11 ledger, or regresses the existing proof-summary strict modes.
+10. Treat M6.11 core phases 0-4 and the residual hardening slices as closed
+   baselines. Reopen only if isolated review, executor lifecycle,
+   `MemoryExploreProvider` privacy/read-only behavior, or prompt/cache
+   boundary observability regresses.
+11. Calibration checkpoint evaluator for M6.11 phase2/3 is now implemented via
+   `mew proof-summary --m6_11-phase2-calibration`, scanning
+   `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure
+   bundles.
+12. Resume M6.9 from the landed active-recall, symbol-index, and repeated-task
+    proof slices by scaling the repeated-task matrix or runner/report
+    structure under mew-first implementation and codex-ultra review.
+13. Do not let mew self-author roadmap-status or milestone-close edits; those
+    remain reviewer-controlled until a later milestone explicitly moves that
+    boundary.
+14. Keep M5.1 as a closed safety baseline. Do not reopen it unless a future
+   self-improvement loop violates the documented safety hooks.
+15. Do not adopt `docs/PROPOSE_M6_7_UNSTICK_2026-04-21.md` into active M6.7 as
+   written. The reconsideration trigger fired on fresh bounded item `#389`,
+   but the exposed blocker was narrower than Explorer/Todo: write-ready diff
+   generation. `work_loop.py` now carries the blocker-specific fix set
+   instead: compact resume trimming, write-ready fast-path prompting with exact
+   cached text, path normalization for cached windows, same-file-hunk guidance,
+   and a write-ready timeout uplift. Those changes turned `#389` from repeated
+   timeout stalls into a reviewer-visible paired dry-run/apply/verify/finish
+   flow with no supervisor code rescue on the task itself. Keep Todo deferred
+   as M6.8/M6.9 input and Explorer deferred post-M6.7; reconsider the broader
+   proposal only if a new fresh bounded M6.7 item still stalls after these
+   write-ready fast-path fixes.
+16. Use `mew-first-implementation-loop` for bounded post-M6.7 roadmap/coding
+    implementation unless the task is governance, milestone-close,
+    roadmap-status, permission, safety, skill-policy, or explicit agent-loop
+    substrate surgery. Record mew-first failures instead of silently converting
+    them into supervisor-authored autonomy credit.
+17. From M6.9 onward, bounded roadmap/coding implementation is mew-owned by
+    default. If mew fails a task with reproducible structural evidence, pause
+    the active product milestone as `pending`, append or activate a bounded
+    M6.14 repair episode, fix the substrate, and retry the same task before
+    resuming product work.
+
+Human-role transition rule:
+
+- M5.1 dogfooded the first small slice with **mew as implementer** and Codex
+  acting as the human reviewer/approver. The rescue was recorded honestly, so
+  it did not count as autonomy credit.
+- From M6.7 onward, the default implementation mode is **mew first** for
+  bounded roadmap/coding work: mew is the implementer, Codex plays the
+  human-style reviewer/approver, and the loop stays reviewer-gated.
+- From M6.9 onward, treat this as stronger than a preference: bounded
+  roadmap/coding implementation is mew-owned. Codex may directly edit only
+  governance/status/policy, safety, permissions, and loop substrate repair
+  surfaces unless the user gives an explicit emergency override.
+- The M6.11 reviewer-implemented exception is closed with the residual
+  hardening audit. Count those residual changes as roadmap-wide platform
+  progress, not mew-first autonomy credit. Bounded roadmap/coding work now
+  returns to mew-first implementation with Codex acting as human-style
+  reviewer/approver unless the next task is reviewer-owned status/audit work
+  or another explicit substrate, safety, governance, or permission change.
+- Treat rescue edits by Codex as a signal that mew is not ready to own that
+  class of task yet. Record the blocker instead of silently fixing around it.
+- If rescue would be needed because mew drifted, stalled, or patched the wrong
+  surface, move the product milestone to `pending` and repair the mew-first
+  substrate before retrying the same task.
+- Low- and medium-risk implementation can now use mew as primary implementer
+  with Codex acting as human reviewer/approver. Rescue edits by Codex still
+  disqualify the loop from autonomy credit and should be recorded as blockers.
+- The durable execution protocol is the `mew-first-implementation-loop` skill:
+  classify every attempt as mew-first success, success after bounded substrate
+  fix, supervisor rescue/product progress, reproducible blocker, deferred
+  blocker, invalid task spec, or transient model failure.
+- Until M6.8 closes, keep **task selection** reviewer-owned even when mew is
+  the implementer. Do not let mew choose its own next roadmap task as part of
+  the M6.7 loop.
+- Keep roadmap-status edits, milestone-close decisions, and governance changes
+  reviewer-owned until the relevant milestone explicitly moves that boundary.
+- Direct Codex implementation during M6.7+ is reserved for:
+  - substrate blockers in the native loop
+  - safety / governance fixes
+  - urgent proof-preserving fixes when a mew-run cannot continue honestly
+  Count those as product progress, not supervised-loop autonomy credit.
+
+## Milestone Evidence
+
+### M1: Native Hands
+
+Status: `done`.
+
+Evidence:
+
+- `mew work --ai` can run native read/search/glob/edit/write/shell/test tools
+  inside a work session.
+- Tool calls are journaled and resumable enough for later audit.
+
+Closure caveat and historical blocker trail:
+
+- None for the documented M1 gate.
+
+### M2: Interactive Parity
+
+Status: `done`.
+
+Evidence:
+
+- Live/follow cockpit surfaces, streaming/compact model output, readable
+  action/result panes, approval controls, rollback, verification summaries,
+  interruption handling, and fresh-restart comparator artifacts were
+  implemented and dogfooded.
+- Final M2 comparative artifact recorded parity with mew continuity advantage
+  for the documented focused task gate.
+
+Closure caveat and historical blocker trail:
+
+- None for the documented M2 gate. Future cockpit feel work must map to M5.1
+  safety, M6 daemon operation, or later milestones.
+
+### M3: Persistent Advantage
+
+Status: `done`.
+
+Evidence:
+
+- `docs/M3_CLOSE_GATE_2026-04-20.md` records the close decision.
+- The final four-hour Docker resident-loop proof
+  `proof-artifacts/mew-proof-real-4h-20260420-1312` passed strict summary:
+  `processed=240`, `passive=239`, passive gaps within 60-61 seconds, and
+  `8/8` checks passed.
+- Reentry/comparator evidence includes fresh-restart, source/test reentry,
+  week-scale synthetic, and ten-day virtual-time proof shapes.
+
+Missing proof:
+
+- None for the documented M3 gate. Real multi-day evidence can strengthen M6
+  and later milestones but should not reopen M3.
+
+### M4: True Recovery
+
+Status: `done`.
+
+Evidence:
+
+- `docs/M4_CLOSE_GATE_2026-04-20.md` records the close decision.
+- Runtime and work-session recovery classify effects, re-check world state, and
+  choose resume/retry/abort/ask-user surfaces.
+- Opaque shell side-effect retry remains a deliberate non-goal.
+
+Missing proof:
+
+- None for the documented M4 gate.
+
+### M5: Self-Improving Mew
+
+Status: `done`.
+
+Evidence:
+
+- `docs/M5_CLOSE_REVIEW_2026-04-20.md` records `Status: passed`.
+- `./mew self-improve --audit-sequence 307 308 309 310 311` reported
+  `candidate_sequence_ready`, `verification=True`, `recovery=True`,
+  `no_rescue_review=True`, and `candidate_credit=True`.
+- The sequence includes a recovery event on task `#310`.
+- The user explicitly approved closing M5 on 2026-04-20.
+
+Missing proof:
+
+- None for the documented M5 gate. Do not move the gate retroactively.
+
+### M5.1: Trust & Safety Close-Out
+
+Status: `done`.
+
+Evidence:
+
+- `docs/M5_1_CLOSE_GATE_2026-04-20.md` records `Status: passed`.
+- Task `#319` / work session `#299` created
+  `.codex/skills/mew-adversarial-verifier/SKILL.md` through a mew-native
+  self-improvement loop. Codex acted as human reviewer/approver and did not
+  directly edit the file.
+- Verification passed with
+  `rg -n 'product-goal drift|safety boundaries|evidence quality|missing verification|hidden rescue|approve|reject|revise' .codex/skills/mew-adversarial-verifier/SKILL.md`.
+- This is useful M5.1 implementation evidence but not autonomy credit:
+  `./mew self-improve --audit 319` reports
+  `loop_credit_status: not_counted_due_to_rescue` because reviewer steer was
+  needed for a missing new-file read, missing `create=true`, and an invalid
+  shell-style verifier.
+- `mew self-improve --audit` now includes an audit-only `safety_boundaries`
+  report for permission-context drift, governance/policy-path edits, external
+  visible side-effect commands, budget-exhaustion policy, and ambiguous-recovery
+  policy. Current task `#319` surfaces `safety_boundaries: needs_review` because
+  it touched `.codex/skills` and changed its permission context.
+- Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`,
+  `uv run ruff check src/mew/self_improve_audit.py tests/test_self_improve.py`,
+  `git diff --check`, and `./mew self-improve --audit 319`.
+- `accept-edits` auto-approval now refuses to auto-apply self-improvement
+  governance/policy edits and leaves them as pending approvals requiring
+  explicit `mew work --approve-tool`. A regression test covers
+  `ROADMAP_STATUS.md`: auto-approval is `safety_blocked`, the file stays
+  unchanged, and explicit approval still applies the edit.
+- The `mew-adversarial-verifier` criteria were applied manually by Codex to
+  review the audit visibility and auto-approval escalation slices; decision:
+  approve. This proves the review shape is usable, but not yet as part of a
+  mew-native self-improvement loop.
+- Self-improvement `run_command` / `run_tests` actions now block known
+  external-visible side-effect commands before execution. A regression test
+  verifies a proposed `git push origin main` records `safety_blocked`, never
+  reaches tool execution, and leaves a work-session note.
+- `mew self-improve --audit` now includes safety-blocked work-session events as
+  `safety_boundaries.blocked_events`, so a blocked external side-effect attempt
+  is visible in the readable audit bundle.
+- Validation: the targeted accept-edits work-session tests passed with
+  `--no-testmon`.
+- Deterministic dogfood scenario `m5-safety-hooks` now exercises both hook
+  families through real `mew work --live` paths with mocked model output:
+  governance edits are held as pending approval under `accept-edits`, and
+  `git push origin main` is blocked before tool execution and surfaced in the
+  self-improve audit bundle.
+- Validation: `./mew dogfood --scenario m5-safety-hooks --json` passed, and
+  `uv run pytest -q tests/test_dogfood.py --no-testmon` passed.
+- `mew self-improve --audit` now surfaces budget-exhaustion notes and ambiguous
+  recovery states as safety-boundary findings. Budget events produce
+  `needs_review`; interrupted/unrecovered or indeterminate recovery states
+  produce `blocked`.
+- Validation: `uv run pytest -q tests/test_self_improve.py --no-testmon`
+  passed.
+- `claude-ultra` close-readiness review in ACM session
+  `0a0a8006-0753-471d-a1e3-a8f257089e1d` asked for combined verifier+hook
+  evidence, budget/recovery interpretation, and a close-gate document. Those
+  artifacts are now recorded in the close-gate doc.
+- The `mew-adversarial-verifier` criteria were applied to the
+  `/tmp/mew-m5-safety-hooks-proof` audit bundles for task `#1` and task `#2`;
+  decision: `approve`. The governance audit produced `needs_review`; the
+  external side-effect audit produced `blocked`.
+
+Missing proof:
+
+- None for the documented M5.1 gate. Future self-improvement loops should use
+  the verifier routinely, and later milestones can harden the command-risk
+  marker list and budget/recovery policy actions.
+
+Goal:
+
+- Raise post-M5 safety and review quality without turning M5.1 into an
+  open-ended polish milestone.
+
+Done when:
+
+- A `mew-adversarial-verifier` skill or equivalent verifier can review a
+  proposed self-improvement loop against product-goal drift, safety boundaries,
+  and evidence quality.
+- Hook-based safety boundaries enforce the M5 rules mechanically for governance
+  edits, permission/policy edits, external-visible side effects, budget
+  exhaustion, and ambiguous recovery.
+- The above work is dogfooded through at least one self-improvement loop or
+  equivalent scenario, with a readable audit bundle.
+- Any refactor is limited to the code paths needed by the verifier or safety
+  hooks.
+
+Historical next action trail before closure:
+
+- Move to M6 Body.
+
+### M6: Body - Daemon & Persistent Presence
+
+Status: `done`.
+
+Goal:
+
+- Turn mew from a summonable CLI into a durable resident process.
+
+Evidence:
+
+- `mew daemon status|start|stop|logs` now provides a daemon-shaped control
+  surface over the existing runtime.
+- `mew daemon status --json` reports runtime state, pid, uptime, lock state,
+  current cycle, last tick, watcher counts/items, safety/autonomy state, output
+  path, and repair/start/stop/log controls.
+- Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
+  `ruff`, `./mew daemon status --json`, `./mew help daemon status`,
+  `./mew daemon logs --lines 3`, and `git diff --check` passed.
+- `mew run --watch-path <path>` now scans file/directory snapshots inside the
+  runtime loop and queues `file_change` external events with provenance when a
+  watched path changes.
+- The watcher event uses the existing `external_event` runtime path, so the
+  same THINK/ACT and audit machinery handles it before waiting for the next
+  passive tick.
+- Validation: targeted watcher/runtime pytest, targeted `ruff`,
+  `./mew daemon status --json`, and `git diff --check` passed.
+- Dogfood scenario `m6-daemon-watch` now starts a background daemon with
+  `--watch-path`, observes active watcher status and uptime via
+  `mew daemon status --json`, modifies the watched file, verifies a processed
+  `file_change` event through the `external_event` runtime path, and stops the
+  daemon with watcher state returning to idle.
+- Validation: `m6-daemon-watch` dogfood passed in
+  `/tmp/mew-m6-daemon-watch-proof`, along with the focused dogfood pytest.
+- Dogfood scenario `m6-daemon-restart` now starts a daemon, baselines a watcher,
+  stops cleanly, changes the watched file while stopped, starts again, and
+  verifies the restarted daemon compares against the previous process snapshot
+  and processes the file change through `external_event`.
+- Validation: `m6-daemon-restart` dogfood passed in
+  `/tmp/mew-m6-daemon-restart-proof`, along with the focused dogfood pytest.
+- `mew daemon pause|resume|inspect|repair` now exposes daemon-specific control
+  verbs. Pause/resume update the same autonomy gate used by the runtime, inspect
+  reports the daemon status surface, and repair delegates to the existing repair
+  path under the daemon namespace.
+- Validation: `uv run pytest -q tests/test_daemon.py --no-testmon`, targeted
+  `ruff`, and `./mew daemon inspect` passed.
+- Dogfood scenario `m6-daemon-loop` now starts a background daemon, lets it run
+  repeated passive ticks, processes a real watched file change through
+  `external_event`, exercises `pause`, `inspect`, and `resume` against the
+  running daemon, stops cleanly, checks applied passive effects and daemon
+  output logs, and verifies `mew focus` can reenter the stopped daemon state.
+- Validation: `m6-daemon-loop` passed in `/tmp/mew-m6-daemon-loop-proof` with
+  `duration=6`, `interval=2`, `processed_events=4`, `passive_events=3`, and
+  passive gaps `[2.0, 2.0]`; the focused dogfood pytest also passed.
+- Docker proof tooling now supports `m6-daemon-loop` duration/interval args and
+  writes `/proof/artifacts/report.json`. `mew proof-summary` prefers that
+  report, surfaces the source path, and rejects weak long proofs whose passive
+  event count is far below the requested cadence.
+- Validation: `uv run pytest -q tests/test_proof_summary.py --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py::DogfoodTests::test_run_dogfood_m6_daemon_loop_scenario --no-testmon`,
+  targeted `ruff`, `bash -n scripts/run_proof_docker.sh`, `git diff --check`,
+  and short Docker smoke
+  `proof-artifacts/mew-proof-m6-daemon-loop-smoke-20260420-1913` all passed.
+- `docs/M6_CLOSE_GATE_2026-04-21.md` records the final close decision.
+- The collected enhanced multi-hour Docker proof
+  `proof-artifacts/mew-proof-m6-daemon-loop-enhanced-20260420-1910` now passes
+  `./mew proof-summary ... --json --strict` with `ok=true`, `7/7` checks
+  passed, `processed_events=241`, `passive_events=239`, `expected_min=238`,
+  and passive gaps held to `60-61s` across the 4-hour run.
+- The raw detached container exited `1` and the original `report.json` still
+  records `status=fail`, but the close gate documents this as a
+  retention-based false negative: the early watcher `external_event` aged out
+  of the last-100 runtime-effect journal even though the processed
+  `file_change` event remained present and auditable.
+
+Missing proof:
+
+- None for the documented M6 gate.
+
+Done when:
+
+- `mew daemon status` reports uptime, active watchers, last tick, last event,
+  current task, and safety state.
+- A real file or git event triggers a passive turn end to end without manual
+  polling.
+- A restart after terminal close, process stop, or reboot reattaches without
+  user rebrief.
+- A multi-hour resident proof runs through the daemon path, not only a direct
+  foreground loop.
+- The daemon can be paused, inspected, repaired, and resumed from CLI/chat.
+
+Historical next action trail before closure:
+
+- Move active focus to M6.7 supervised self-hosting.
+
+### M6.5: Self-Hosting Speed
+
+Status: `done`.
+
+Goal:
+
+- Make mew fast enough that a resident model can implement small mew changes
+  inside mew instead of falling back to a fresh external coding CLI.
+
+Evidence:
+
+- `ROADMAP.md` now defines M6.5 as the gate between a durable body and deeper
+  M7 feature expansion.
+- `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` diagnosed the current speed
+  blocker: prompt construction and persistent memory injection are too heavy
+  for small implementation loops.
+- The final committed default Codex reasoning effort is `high` in `84a2a99`,
+  after `xhigh` proved too slow for the self-hosting path.
+- The #320-class mew self-implementation attempt recorded the right failure:
+  no reviewable edit proposal, model turns repaired after interruption, and no
+  silent Codex rescue edits counted as autonomy.
+- `claude-ultra` session `f220b253-51d5-435e-ab24-520190e3f97e` agreed that
+  prompt pipeline speed work should precede further M7 collectors.
+- Work model turns now persist `model_metrics` with context size, injected
+  active-memory size/count, THINK prompt chars, THINK latency, ACT prompt chars,
+  ACT latency, and total model seconds.
+- `mew metrics` now prints and returns a `self_hosting` section with first
+  THINK latency, first dry-run edit proposal latency, context chars,
+  active-memory chars/count, prompt chars, and total model seconds.
+- Work turns now select and record a reasoning policy: read-only exploration
+  defaults to `low`, small implementation/verification to `medium`, and
+  roadmap/recovery/safety/daemon/auth/policy work to `high`, with
+  `MEW_CODEX_REASONING_EFFORT` as an explicit override.
+- Non-high-risk work turns now use a compact prompt context for active memory:
+  memory bodies are omitted from THINK/ACT prompts and replaced by
+  id/path/name/description pointers, while full resume output remains available
+  to humans.
+- Compact prompt context now also uses tighter tool-call, model-turn, task,
+  goal, and resume limits. On the active #320 session this reduced measured
+  context from about `95k` chars to about `28k` chars, and THINK prompt from
+  about `129k` chars to about `43k` chars before another real Codex rerun.
+- `mew metrics` now summarizes prompt context modes so self-hosting reports can
+  prove whether a task used full or compact resident memory injection.
+- `mew metrics` now breaks down self-hosting prompt size into work-session,
+  resume, tool-context, and model-turn context chars so future reruns can show
+  which part still dominates.
+- Running work model turns now save preflight prompt-size metrics before the
+  THINK API call completes, so interrupted or timed-out self-hosting attempts
+  can still report context size and chosen reasoning policy.
+- The reasoning-effort policy now ignores historical task-description sections
+  such as completed commits when matching high-risk terms, preventing a small
+  #320-class M7 implementation task from being escalated to `high` and full
+  prompt mode just because its history mentions M6/daemon work.
+- The #320 dogfood patch reached the normal work-session approval surface and
+  was applied through approvals #2120, #2121, and #2122, producing completed
+  write tool calls #2123, #2124, and #2125 without manual rescue edits to the
+  source/test files before approval. Focused verification passed:
+  `uv run pytest -q tests/test_signal_fetch.py tests/test_signals.py --no-testmon`.
+- The applied #320 slice added a minimal RSS/Atom feed parser and `rss`
+  source-config fetch helper in `src/mew/signals.py`, plus mocked-fetch tests
+  in `tests/test_signal_fetch.py`. CLI `signals fetch` wiring remained a
+  deferred M7 follow-up, not part of the M6.5 speed gate.
+- The initial #320 dogfood did not close M6.5: `mew metrics --kind coding
+  --limit 8` still recorded the completed #320 model turns as
+  `reasoning_efforts: high=2` and
+  `prompt_context_modes: full=2`, with first THINK latency `128.209s` and
+  first tool output for session #301 at `140.0s`.
+- The root cause of the unexpected `high`/`full` rerun was task notes: the
+  previous policy ignored historical sections in the task description but still
+  matched high-risk terms from historical dogfood notes. The policy now ignores
+  historical note prefixes such as `Dogfood note:`, `Long session checkpoint:`,
+  and `Context save ` when selecting reasoning effort. A live policy check for
+  task #320 now returns `medium` / `small_implementation`.
+- The policy also stopped treating milestone numbers such as `M6.5` as
+  inherently high risk. Real risk is now carried by terms such as daemon,
+  safety, recovery, policy, auth, and permission instead of numeric milestone
+  labels alone.
+- Work prompt guidance now says implementation tasks with write roots should
+  not finish merely because the next edit is clear; if exact old/new text or
+  file content is available, the model should propose a dry-run edit/write
+  action instead. This fixed the observed session #303 behavior where mew
+  stopped after planning the next edit.
+- Clean rerun session #306 closed the M6.5 gate. It used
+  `reasoning_effort=medium` and `prompt_context_mode=compact_memory` for all
+  three model turns. Metrics for the first turn were `context_chars=12182`,
+  `think.prompt_chars=24819`, `active_memory_chars=2693`, and
+  `think.elapsed_seconds=9.61`; first useful output arrived in 14.7s.
+- The edit-proposal turn in #306 had `context_chars=24051`,
+  `work_session_chars=22998`, `resume_chars=9540`, `tool_context_chars=7471`,
+  `active_memory_entries=3`, `think.prompt_chars=37412`, and
+  `think.elapsed_seconds=11.679`. It produced paired dry-run edits #2142/#2143
+  without manual file rescue, then approval applied #2144/#2145 and focused
+  verification passed.
+- Compared with the failed #320 baseline (`high`/`full`, first THINK
+  `128.209s`, `context_chars` about `104k`, THINK prompt about `138k`, first
+  tool output `140.0s`, and no fast edit proposal), #306 is a clear speed
+  improvement and reaches the normal reviewer approval surface.
+- Validation: `tests/test_work_session.py`, `tests/test_metrics.py`,
+  `tests/test_reasoning_policy.py`,
+  `tests/test_commands.py::CommandTests::test_metrics_command_prints_observation_metrics`,
+  targeted `ruff`, `uv run python -m py_compile`, and `git diff --check` passed.
+
+Closed proof:
+
+- A clean post-policy resident rerun populated `medium` / `compact_memory`
+  self-hosting metrics and reached a verified paired edit through the normal
+  work-session approval path.
+- Residual speed work remains, but it is no longer the active blocker. If
+  future resident loops regress, add Codex prompt caching or stronger
+  tool-choice guidance as a targeted follow-up.
+
+Done when:
+
+- A self-hosting dogfood report records first THINK latency, prompt/context
+  size, memory injection size, time to first tool, and time to first edit
+  proposal.
+- Small implementation and exploration work default to a lower reasoning effort
+  than safety, recovery, and roadmap work, with the chosen effort recorded.
+- A small implementation task reaches a reviewable edit proposal without human
+  rescue edits or repeated broad read-only exploration.
+- The same #320-class task that previously stalled can be rerun with a clear
+  improvement in first useful output and edit-proposal latency.
+- The reviewer can approve, reject, or steer the mew-generated change from the
+  normal work-session surfaces.
+
+Historical next action trail before closure:
+
+- Start M6.6 and treat the observed coding-loop naivete as the next blocker
+  before deeper M7 work.
+
+### M6.6: Coding Competence - Codex CLI Parity
+
+Status: `done`.
+
+Goal:
+
+- Make native coding tasks feel as capable as Codex CLI for small-to-medium
+  repo edits, while preserving mew's resident state and approval surfaces.
+
+Evidence:
+
+- M6.5 clean rerun proved that mew can reach a reviewable edit quickly enough
+  for self-hosting: session #306 used `medium` / `compact_memory`, produced
+  paired dry-run edits, and verified the applied patch.
+- The same dogfood sequence also exposed coding competence gaps that speed work
+  alone does not solve: path confusion in earlier attempts, repeated broad
+  search/read exploration, and a finish decision after the next edit was clear.
+- Current work-session prompts now discourage finishing merely because the next
+  edit is clear, and reasoning policy no longer escalates milestone numbers
+  alone to high-risk mode. These are useful guards, not a Codex CLI-level
+  coding architecture.
+- `docs/ADOPT_FROM_REFERENCES.md`,
+  `docs/REVIEW_2026-04-20_M2_BLOCKERS_FROM_REFERENCES.md`, and
+  `docs/REVIEW_2026-04-20_MEW_SPEED_LEVERAGE.md` remain the reference material
+  for adopting mature CLI patterns without losing mew's resident shape.
+- `claude-ultra` session `2923749a-f605-47fa-aa2a-ba01b38cfd0a` reviewed the
+  proposed M6.6 gate and returned "qualified yes": M6.6 should exist before M7,
+  but it must use a narrow first slice and measurable comparator evidence to
+  avoid becoming a grab-bag.
+- `docs/M6_6_CODEX_PARITY_COMPARE.md` now defines the M6.6 comparator template
+  and the three predeclared task shapes required for close-gate evidence.
+- The comparator now has a reference-grounded gate. M6.6 evidence must map each
+  implementation slice back to `docs/ADOPT_FROM_REFERENCES.md`,
+  `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, and concrete
+  `references/fresh-cli/{claude-code,codex}` files such as TodoWriteTool,
+  exploreAgent, verificationAgent, StreamingToolExecutor, agentMemorySnapshot,
+  and Codex patch/review prompts.
+- `claude-ultra` session `2a605115-1a2f-4114-9a41-2062ddbcc4e2` reviewed the
+  new gates and agreed they are conceptually correct. It recommended making the
+  bootstrap a prerequisite, treating any Codex rescue edit as a failed
+  bootstrap blocker, and adding a dedicated bootstrap record section.
+- Bootstrap task #322 / session #307 ran with mew as implementer and Codex only
+  steering/reviewing. It did not produce edits and exposed the exact
+  `read_file` old-string retention blocker. Retry #323 after `ca9ba94` then
+  succeeded for one small coding-loop slice: mew authored dry-run edits for
+  `src/mew/work_loop.py` (#2182) and `tests/test_work_session.py` (#2183),
+  Codex only reviewed/approved/applied them (#2184/#2185), focused pytest
+  passed with 2 tests, and `rescue_edits=0`. Reviewer steering and one
+  read-root permission repair were still needed. This is recorded in
+  `docs/M6_6_CODEX_PARITY_COMPARE.md` as bootstrap evidence for a small slice,
+  not full M6.6 closure.
+- M6.6-B mew-side comparator task #324 / session #310 passed as a bugfix with
+  regression test: mew authored dry-run edits #2207/#2208, Codex
+  reviewed/approved/applied them as #2209/#2210, focused pytest passed, and
+  `rescue_edits=0`.
+- M6.6-A mew-side comparator task #325 / session #311 passed as a
+  behavior-preserving refactor: after narrow source/test reads and one reviewer
+  steer to stop source rereads, mew produced a paired dry-run batch
+  (#2221/#2222), Codex approved/applied it as #2223/#2224, focused pytest
+  passed on apply, reviewer same-surface audit found the literal only in
+  `src/mew/work_loop.py` and `tests/test_work_session.py`, and broader
+  `uv run python -m unittest tests.test_work_session` passed. `rescue_edits=0`.
+- The matching Codex CLI comparator for M6.6-A ran in
+  `/tmp/mew-m66a-codex-20260420-2316` against commit `3ea02ea`, converged on
+  the same source refactor with a slightly smaller test delta, and passed the
+  preferred focused verifier
+  `uv run pytest -q tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch --no-testmon`
+  with `1 passed in 0.47s`. The run used one narrow search, four narrow reads,
+  and `rescue_edits=0`; `uv` created a local `.venv` in the detached worktree,
+  so this comparator completed without the environment caveat seen in M6.6-B.
+- The matching Codex CLI comparator ran in
+  `/tmp/mew-m66b-codex-20260420-2218` against commit `ac8b7d6`, produced a
+  comparable source/test patch, and passed the focused regression via an
+  existing pytest environment. Normal `uv run` verification hit sandbox/cache
+  dependency limits, so the comparator is recorded with an environment caveat.
+- Budget-based work-context compaction now preserves `recent_read_file_windows`
+  in full prompt mode, so high-effort or large-session turns still retain exact
+  recent line-window reads for edit preparation instead of dropping that
+  surface when the recent tool/model window is reduced. Focused and broader
+  context tests passed after the change.
+- M6.6-C task #326 tested a small-feature comparator slice for suggested
+  verifier fallback, but sessions #312 and #313 did not reach a dry-run edit.
+  The runs repeated targeted read/search recovery and one live planning turn
+  hung before edit proposal, so this attempt is recorded as blocker evidence
+  only and does not count toward M6.6 closure.
+- A direct supervisor patch then added the fallback: when `run_tests` is chosen
+  without an explicit command and no configured `verify_command` exists, the
+  loop now prefers
+  `work_session.resume.suggested_verify_command.command`. Focused and broader
+  validation passed, but this patch is not comparator evidence because mew did
+  not author a reviewable dry-run edit in #326.
+- M6.6-C task #327 / session #314 then replaced the blocked #326 evidence path
+  with a fresh mew-side run: after a few repeated narrow searches and two
+  reviewer steers, mew used one exact src window read, proposed a paired
+  dry-run edit batch, focused pytest passed on apply, and reviewer broader
+  `uv run python -m unittest tests.test_work_session` passed. The resulting
+  patch in `src/mew/work_loop.py` and `tests/test_work_session.py` tells the
+  model to reuse an exact `recent_read_file_windows` entry instead of issuing
+  another same-span `read_file` during edit preparation. `rescue_edits=0`.
+- M6.6 task #328 / session #315 advanced built-in verifier discovery: mew
+  added prompt guidance telling THINK to prefer `run_tests` with the broader
+  `suggested_verify_command` before finish when
+  `verification_confidence.status` is `narrow` after source edits, then
+  validated the paired change with both the focused selector and the broader
+  inferred module verifier. The mew-side run proposed a reviewable dry-run
+  batch, applied it, ran the narrow verifier, chose the broader verifier on the
+  next turn, and only then finished. `rescue_edits=0`.
+- M6.6 task #329 / session #316 advanced repair-loop behavior: mew added
+  prompt guidance telling THINK to prefer one narrow repair step using failing
+  output or `suggested_safe_reobserve` after the latest verification or
+  write/apply failure when the failure is not obviously
+  permission/environment-related. The mew-side run proposed a paired dry-run
+  batch, applied it, ran the focused verifier, then chose the broader
+  suggested verifier before finish. `rescue_edits=0`.
+- M6.6 task #330 / session #317 advanced same-surface self-review behavior:
+  after two reviewer steers corrected repeated search churn and one bad
+  line-window guess, mew read exact source/test windows, proposed a reviewable
+  paired dry-run batch, applied it, and passed broad `uv run pytest -q`
+  verification. On the next turn, mew obeyed the new prompt rule by performing
+  one narrow same-surface audit read on the nearby `ACT`/control surface in
+  `src/mew/work_loop.py` before finishing, then recorded why that sibling
+  surface was covered/out of scope for the THINK-only reminder. `rescue_edits=0`.
+- M6.6 task #331 / session #318 targeted durable path recall, but the mew-side
+  run stalled in an exact-old-string reread loop after narrow source/test
+  reads; bundle pressure rose to `high` before any dry-run edit was proposed.
+  A direct supervisor patch then added machine-readable
+  `working_memory.target_paths`, surfaced it in the resume/text bundle, and
+  taught `build_work_think_prompt` to prefer `working_memory.target_paths`
+  before broader project search. Focused working-memory/prompt tests, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is product progress, not
+  mew-side comparator evidence.
+- M6.6 task #332 / session #319 then turned that `working_memory.target_paths`
+  surface into fresh mew-side anti-churn evidence: after one steer away from a
+  repeated same-symbol `search_text`, mew stayed on the known src/test paths,
+  proposed a paired dry-run edit batch (#2345/#2346), Codex only
+  approved/applied it as #2347/#2348, chose
+  `uv run python -m unittest tests.test_work_session` as the focused verifier,
+  passed it with `396 tests`, performed one narrow same-surface audit read, and
+  finished cleanly. The resulting prompt change in `src/mew/work_loop.py` and
+  `tests/test_work_session.py` tells THINK to issue a direct `read_file` on a
+  known `working_memory.target_paths` entry before repeating same-surface
+  `search_text`. `rescue_edits=0`.
+- M6.6 task #333 / session #320 attempted to widen durable plan state with a
+  three-file `plan_items` checklist slice, but under high context pressure the
+  native loop could not safely reconstruct the full
+  `work_session.py`/`work_loop.py`/test batch after one old-text mismatch in
+  `src/mew/work_session.py`. The task was recorded as blocked evidence for
+  multi-file exact-old-text retention, not as a passed mew-side slice.
+- M6.6 task #334 / session #321 then retried the narrower persistence half in
+  `src/mew/work_session.py` and `tests/test_work_session.py`. Mew reached a
+  partial dry-run, but the accepted patch landed directly afterward for product
+  progress rather than autonomy credit: `working_memory.plan_items` now seeds in
+  startup memory, normalizes and caps to 3 items, surfaces in resume text, and
+  appears in model context. Focused `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress, not no-rescue mew-side evidence.
+- M6.6 task #335 / session #322 then attempted the next narrower checklist
+  evidence slice: surface `working_memory.plan_items` in `recent_decisions` and
+  `compressed_prior_think` summaries inside `src/mew/work_session.py` with a
+  paired test update. Even after multiple reviewer steers to stop redundant
+  search and pin exact spans, the native loop repeatedly reread the same exact
+  builder/formatter windows, exhausted the step budget at `pressure=high`, and
+  finished without proposing a dry-run edit. The feature then landed directly
+  as product progress: `recent_decisions` and `compressed_prior_think` now both
+  carry clipped `plan_items`, and `format_work_session_resume()` renders those
+  items in the Recent decisions / Compressed prior think blocks. Focused `uv
+  run python -m unittest tests.test_work_session`, `ruff`, `py_compile`, and
+  `git diff --check` passed. This is blocker evidence plus product progress,
+  not no-rescue mew-side evidence.
+- M6.6 task #336 / session #323 then attacked that measured blocker directly in
+  `src/mew/work_loop.py` and `tests/test_work_session.py`: after two narrow
+  reviewer steers, mew searched the existing `recent_read_file_windows`
+  surfaces, read one exact source window and one nearby test window, proposed a
+  paired dry-run edit batch, applied it, passed `uv run python -m unittest
+  tests.test_work_session`, performed one narrow same-surface audit read, and
+  finished cleanly. The resulting patch now exposes
+  `work_session.recent_read_file_windows` in normal/full work-session context,
+  not only after compaction, while leaving `context_compaction` itself gated to
+  compacted modes. `rescue_edits=0`.
+- M6.6 task #337 / session #324 then retried a fresh same-file multi-span
+  `src/mew/work_session.py` slice using the landed #336 surface: add
+  `working_memory.target_paths` to `recent_decisions` and
+  `compressed_prior_think` summaries with paired test updates. The native loop
+  read the exact src/test windows but still repeated the same `work_session.py`
+  exact-span rereads instead of reaching a dry-run edit batch. The feature then
+  landed directly as product progress: `recent_decisions` and
+  `compressed_prior_think` now both carry `target_paths`, and
+  `format_work_session_resume()` renders them in the summary blocks. Focused
+  `uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`,
+  and `git diff --check` passed. This is blocker evidence plus product
+  progress, not no-rescue mew-side evidence.
+- A direct supervisor patch then widened
+  `WORK_RECENT_READ_FILE_WINDOW_LIMIT` from `2` to `5` in
+  `src/mew/work_loop.py`, with a focused regression in
+  `tests/test_work_session.py` proving that five recent exact read windows
+  survive in full context for same-file multi-span edit preparation. Focused
+  `uv run python -m unittest tests.test_work_session`, `ruff`, `py_compile`,
+  and `git diff --check` passed. This is product progress aimed at the #337
+  blocker, not mew-side evidence.
+- M6.6 task #338 / session #325 then retried the next fresh
+  `src/mew/work_session.py` same-file multi-span slice for
+  `working_memory.open_questions`. The native loop reached a paired dry-run
+  edit proposal, but that batch covered only the `recent_decisions` path and
+  missed the matching `compressed_prior_think` changes, so it was correctly
+  rejected. The follow-up turns then kept rereading overlapping and adjacent
+  `src/mew/work_session.py` exact spans instead of reusing already-known
+  context, which showed that the remaining blocker was not only window count:
+  same-path overlapping/adjacent recent read windows were displacing each
+  other. This is blocker evidence, not no-rescue mew-side evidence.
+- A direct supervisor patch then changed `build_recent_read_file_windows()` to
+  merge same-path overlapping or adjacent line windows instead of spending
+  separate slots on each repair reread, with a focused regression in
+  `tests/test_work_session.py` proving that the merged windows retain the full
+  `4350-4417` and `3859-3881` exact spans while still preserving the paired
+  test windows and the older `3217-3248` source window under the five-window
+  cap. Focused `uv run python -m unittest tests.test_work_session`, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is product progress aimed
+  at the #338 blocker, not mew-side evidence.
+- M6.6 task #339 / session #326 then retried the fresh
+  `working_memory.open_questions` summary-recall slice after the merged-window
+  patch. This time the native loop no longer fell into the same-file reread
+  churn seen in #337/#338: it reached the intended narrow pattern of
+  `search_text -> exact read_file windows -> paired dry-run edit batch`.
+  However, the first dry-run batch still missed one required source surface,
+  and the repair attempt then failed with `old text was not found` on the
+  final source edit. That shifts the remaining blocker from recent-window
+  eviction to stable multi-edit batch assembly and exact old-text matching
+  under medium context pressure. The feature then landed directly as product
+  progress: `recent_decisions` now carries `open_questions`, and
+  `format_work_session_resume()` renders `open_questions` in both the Recent
+  decisions and Compressed prior think blocks, with paired test coverage.
+  Focused assertions plus `uv run python -m unittest tests.test_work_session`,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is blocker
+  evidence plus product progress, not no-rescue mew-side evidence.
+- A direct supervisor patch then tightened write-batch normalization for M6.6:
+  if a code write batch would exceed the five-tool limit, mew now returns
+  `wait` instead of truncating the batch and silently dropping required sibling
+  edits. The THINK prompt now also says not to propose a partial batch when the
+  full required write set exceeds five tools, and the tests cover both the
+  prompt text and the new refusal behavior. `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #339 blocker, not mew-side
+  evidence.
+- A direct supervisor patch then tightened batch-failure cleanup for M6.6:
+  when a write batch hits a later sibling-tool failure after earlier dry-run
+  edits have already been previewed, mew now marks those earlier dry-run
+  approvals `indeterminate` and removes them from `resume.pending_approvals`
+  instead of leaving a misleading partial-approval surface behind. The tests
+  now cover the failing batch case directly, and `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #339 blocker, not mew-side
+  evidence.
+- A direct supervisor patch then tightened same-file write-batch planning for
+  M6.6: code write batches may now contain at most one write/edit per file
+  path, and the THINK prompt now tells mew to collapse multiple hunks for the
+  same file into one `edit_file` or `write_file` against the most recent exact
+  window for that path. Focused prompt/normalization tests plus `uv run python
+  -m unittest tests.test_work_session`, `ruff`, `py_compile`, and `git diff
+  --check` passed. This is product progress aimed at the #339 blocker, not
+  mew-side evidence.
+- M6.6 task #340 / session #327 then tested that same-path rule with a fresh
+  `src/mew/work_session.py` paired source/test slice. The native loop obeyed
+  the rule: it moved from batched narrow searches to exact line-window reads,
+  realized the source change needed one consolidated `src/mew/work_session.py`
+  edit rather than duplicate same-file writes, and after one interrupt steer
+  chose a no-change finish instead of proposing an unsafe batch. That is
+  blocker evidence, not no-rescue credit: the bridging source window
+  `3862-4414` spans about 27.9k chars, so with the current 12k `read_file`
+  default and 12k/6k full-prompt/recent-window context caps the exact old text
+  remained prompt-truncated even after the correct single-file plan was found.
+- A direct supervisor patch then targeted that new #340 blocker: explicit
+  `read_file` line-window requests now auto-scale `max_chars` from `line_count`
+  when the model does not provide one, and full-prompt work context now keeps
+  the larger line-window result visible in `tool_calls` instead of clipping it
+  back to the old 12k display cap. The THINK prompt now tells mew that
+  line-window reads auto-scale `max_chars` for edit preparation. Focused
+  read-parameter/context tests plus `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #340 blocker, not mew-side
+  evidence.
+- M6.6 task #341 / session #328 then retried the same `last_verified_state`
+  slice after commit `ad55c17`. The native loop improved further: it moved
+  from batched searches to one bridged source read (`tool_call #2503` with
+  `max_chars=50000`, `result.truncated=False`, `result_text_len=26421`) plus a
+  cached paired test window, and it no longer claimed the bridge was missing at
+  the tool layer. But the run still closed as blocker evidence, not no-rescue
+  credit: after one interrupt steer, mew said the exact bridged old text was
+  present in `tool_calls[#2503]` yet still not reusable because
+  `recent_read_file_windows` kept only a truncated cache for that same span, so
+  it treated the single-file edit boundary as unresolved and chose a no-change
+  finish.
+- A direct supervisor patch then aligned the cache with that #341 evidence:
+  `build_recent_read_file_windows()` now preserves full text for explicit
+  line-window reads when the source result is untruncated and the effective
+  `max_chars` ceiling allows it, while keeping the older 6k cap for normal
+  offset reads and oversized results. The THINK prompt now explicitly says that
+  if `recent_read_file_windows` is truncated, mew may fall back to the matching
+  `tool_calls[*].result.text` before declaring old text unrecoverable. Focused
+  recent-window/context tests plus `ruff`, `py_compile`, and broader
+  `uv run python -m unittest tests.test_work_session` passed. This is product
+  progress aimed at the #341 blocker, not mew-side evidence.
+- A direct supervisor patch then refined that same-file retention policy for
+  large overlapping explicit line-window reads: when
+  `build_recent_read_file_windows()` merges adjacent or overlapping same-path
+  windows, it now uses the larger effective text budget from those explicit
+  line-window reads instead of refusing the merge once one window exceeds the
+  default 6k cap. Focused prompt-window regressions, `ruff`, `py_compile`, and
+  `git diff --check` passed. This is product progress aimed at the #343
+  blocker, not mew-side evidence.
+- M6.6 task #343 / session #331 then turned that direct patch into fresh
+  mew-side same-file multi-span evidence on the long-blocked
+  `last_verified_state` slice. The native loop recovered the formatter anchor,
+  read the exact formatter and builder windows, proposed one paired dry-run
+  batch with `edit_file` for `tests/test_work_session.py` and
+  `edit_file_hunks` for `src/mew/work_session.py`, auto-applied both writes,
+  passed `uv run python -m unittest tests.test_work_session` with `407 tests`,
+  completed the required same-surface audit inside `src/mew/work_session.py`,
+  and finished cleanly with `rescue_edits=0`. The landed feature now carries
+  `working_memory.last_verified_state` through `recent_decisions` and renders
+  that field in the Recent decisions block. This is implementation evidence
+  for the frozen M6.6 set, not an extra comparator slot.
+- M6.6 task #344 / session #332 then targeted the first-slice durable plan
+  state gap in `src/mew/work_loop.py` and `tests/test_work_session.py`: make
+  THINK explicitly expose `working_memory.plan_items` in the schema text and
+  instruct the model to keep up to 3 short checklist items when more than one
+  concrete step remains. The native loop did eventually land and verify the
+  paired patch with `edit_file_hunks` on both files, but only after repeated
+  explicit steers, three zero-match test searches, a temporary wait/replan, and
+  a mid-task stop request. Validation passed (`uv run python -m unittest
+  tests.test_work_session`, focused pytest, `ruff`, `py_compile`, and
+  `git diff --check`), but this should be carried as product progress rather
+  than no-rescue mew-side evidence.
+- A direct supervisor prompt patch then addressed the fresh #344 drift:
+  `build_work_think_prompt()` now says that when guidance, recent windows, or a
+  recent failure already identify an exact `line_start`/`line_count` window,
+  THINK should refresh that same targeted window instead of falling back to an
+  offset `read_file` from the top of the file. Focused prompt tests, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is product progress aimed
+  at the #344 targeted-context blocker, not mew-side evidence.
+- M6.6 task #345 / session #333 then tested the next prompt-hygiene slice in
+  `src/mew/work_loop.py` and `tests/test_work_session.py`: add one THINK prompt
+  sentence telling mew to keep `working_memory.open_questions` limited to
+  unanswered items and drop resolved questions once answered. The native loop
+  eventually proposed the paired dry-run `edit_file` batch, auto-applied it,
+  passed `uv run python -m unittest tests.test_work_session` with `407 tests`,
+  and finished cleanly. But it still needed one exact-window
+  `interrupt_submit` steer to stop drifting off the prompt/test surfaces and
+  pin the correct line windows first, so carry #345 as product progress rather
+  than fresh no-rescue mew-side evidence.
+- M6.6 task #346 / session #334 then retried the same prompt surface with a
+  fresh no-steer `target_paths` hygiene slice. The native loop found the
+  correct `build_work_think_prompt` test block and eventually read the exact
+  `src/mew/work_loop.py` target-path guidance window without supervisor hints,
+  but it still repeated the same `search_text src/mew/work_loop.py
+  query=target_paths` once before first edit, so the run does not count as
+  no-rescue evidence. A direct supervisor prompt patch then taught
+  `build_work_think_prompt()` not to rerun the same `search_text` when the
+  latest result already provides the needed line anchor, and to switch to a
+  narrow `read_file` instead. Focused pytest, `ruff`, `py_compile`, and
+  `git diff --check` passed. This is blocker evidence plus product progress,
+  not mew-side evidence.
+- M6.6 task #347 / session #335 then reran the prompt surface immediately
+  after that patch with a fresh `target_paths` stale-path pruning slice. The
+  native loop improved again: it found the correct `build_work_think_prompt`
+  function anchor in `src/mew/work_loop.py`, found the correct
+  `build_work_think_prompt` test block in `tests/test_work_session.py`, and
+  refreshed the exact test window without supervisor hints. But before first
+  edit it still repeated the same anchored `search_text
+  src/mew/work_loop.py query=build_work_think_prompt`, so the no-steer proof is
+  still not complete. A direct supervisor patch then added structured
+  `redundant_search_observations` to `src/mew/work_session.py` resume data,
+  rendered those observations in the formatted resume, and taught
+  `build_work_think_prompt()` to use the signal's concrete `read_file`
+  replacement instead of rerunning the same successful search. Focused pytest,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is blocker evidence
+  plus product progress, not mew-side evidence.
+- M6.6 task #348 / session #336 then turned that direct patch into fresh
+  no-steer mew-side evidence on the same prompt surface. The native loop did
+  not rerun the same anchored search again: it used the anchored result to move
+  into narrow `read_file` observations on `src/mew/work_loop.py` and
+  `tests/test_work_session.py`, proposed a paired dry-run edit batch, auto-
+  applied it, passed `uv run python -m unittest tests.test_work_session` with
+  `408 tests`, and finished cleanly with same-surface audit covered.
+  `rescue_edits=0`. The landed feature now tells THINK to drop stale
+  `working_memory.target_paths` entries once they are no longer needed, and the
+  new `redundant_search_observations` signal proved strong enough to convert
+  repeated anchored search into the intended read-before-edit behavior. This is
+  implementation evidence for the frozen M6.6 set, not an extra comparator
+  slot.
+- M6.6 task #349 / session #337 then returned to the broader
+  `src/mew/work_session.py` continuity surface: `memory_ok` now counts
+  `plan_items`, `target_paths`, and `open_questions` as durable working-memory
+  evidence, and the paired test now asserts that broader continuity reason. The
+  native loop found the correct src/test surfaces without supervisor hints,
+  eventually proposed a paired dry-run edit, auto-applied it, and passed `uv
+  run python -m unittest tests.test_work_session` with `409 tests`. But it
+  used a long adjacent-window reread chain before first edit, and same-surface
+  audit then found one stale continuity-axis reason string that needed a direct
+  paired follow-up patch. Focused continuity pytest, the full unittest,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is blocker
+  evidence plus product progress, not fresh no-rescue mew-side evidence.
+- A direct supervisor patch then added `adjacent_read_observations` to
+  `src/mew/work_session.py`, rendered that signal in the formatted resume, and
+  taught `build_work_think_prompt()` to use the signal's merged `read_file`
+  suggestion instead of inching through overlapping or near-adjacent
+  same-path windows. Focused pytest, `ruff`, `py_compile`, and `git diff
+  --check` passed. A follow-up rerun task (#350) showed the new signal did
+  change behavior, but that attempted rerun overlapped with the already-landed
+  continuity diff in the working tree, so it does not count as fresh evidence.
+- M6.6 task #351 / session #339 then retried a fresh broader
+  `src/mew/work_session.py` continuity slice, but the native loop's first
+  search used an invalid `pattern`, got zero matches, and immediately fell back
+  to `read_file path=src/mew/work_session.py offset=0`, which disqualified the
+  run before any edit attempt. The task was stopped and recorded as blocker
+  evidence instead of spending more turns on a now-invalid proof attempt.
+- A direct supervisor patch then added a code-level
+  `broad_read_after_search_miss_guard` in `src/mew/work_session.py`, wired it
+  into both work execution loops in `src/mew/commands.py`, and exposed the
+  guard in model-visible tool-call context via `src/mew/work_loop.py`. The
+  guard blocks `read_file` when the path is already a known target path, the
+  latest same-path `search_text` returned zero matches, and the model tries to
+  restart from the top of the file instead of reusing a targeted window or
+  reformulating the search. Focused unit/integration pytest, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is blocker reduction and
+  product progress; it still needs a fresh mew-side rerun on a broader
+  `work_session.py` slice to count as no-rescue evidence.
+- M6.6 task #352 / session #340 then turned that blocker reduction into a
+  fresh broader no-rescue mew-side pass on `src/mew/work_session.py` and
+  `tests/test_work_session.py`: mew found the exact continuity-repair and test
+  surfaces, proposed a paired dry-run src/test edit batch, auto-applied both
+  edits, passed `uv run python -m unittest tests.test_work_session`, completed
+  the required same-surface audit natively, and finished the task without
+  supervisor steer or rescue edits. There was still some small targeted churn:
+  one repeated `working_memory_survived` search before the dry-run edit, and
+  one zero-match same-surface search that then recovered to a narrow read of
+  the known continuity window. Because the run stayed narrow and still closed
+  natively, this counts as fresh mew-side implementation evidence for the
+  frozen M6.6 set, not as a comparator slot.
+- Decision 2026-04-21: stop running Codex CLI comparators on every M6.6 slice.
+  Finish the mew-side M6.6 implementation set first, freeze a commit, then run
+  the remaining comparator tasks in parallel detached worktrees as gate
+  evidence. Comparator work is evidence collection, not the implementation
+  critical path.
+- On 2026-04-20, a proposed split to add `M6.5.2` as a separate
+  "mew can implement mew sanely enough" milestone was considered and rejected.
+  The current roadmap already assigns that role transition to the M6.6 first
+  slice and bootstrap gate, so splitting it out would blur the closed M6.5
+  speed gate and weaken the M6.6 evidence path.
+
+Missing proof:
+
+- Plan state and path recall: the #323 retry shows one small bootstrap slice,
+  #332 proves one normal-case anti-churn/path-recall behavior for
+  `working_memory.target_paths`, and #336 proves one blocker-reduction slice
+  for exact recent window reuse in normal/full context. `working_memory.plan_items`
+  and `working_memory.target_paths` now both exist as product behavior for
+  persistence/surfacing across working memory, recent decisions, and compressed
+  prior-think summaries, but broader durable checklist/path-recall behavior is
+  still not proven by a no-rescue mew-side task across multi-file normal coding
+  work or resume after context compression.
+- Coding loop: built-in verifier discovery, prompt-level repair-loop guidance,
+  and prompt-level same-surface self-review are now improved, but there is
+  still no broader work-session self-review phase beyond the `src/mew`
+  same-surface audit path.
+- Comparator: M6.6-A and M6.6-B have checked-in side-by-side evidence, and
+  M6.6-C now has a mew-side run, but the frozen-commit parallel comparator
+  batch for the final M6.6 implementation set has not been run yet.
+- M6.6-B comparator: side-by-side evidence exists with a Codex CLI environment
+  caveat.
+- Robustness: the successful retries still needed reviewer steering, one
+  read-root permission repair, in #330 one incorrect line-window guess, in
+  #331 an exact-old-string reread loop under high context pressure, and in
+  #332 one steer to stop repeated same-symbol search before the exact read. The
+  blocked #333, direct-patch #334, and blocked/direct-patch #335 follow-ups
+  show where exact old-text retention failed before #336. The #336 blocker
+  reduction improves same-session exact window reuse, but #337 and blocked
+  #338 showed that same-file multi-span exact-old-text reuse inside
+  `src/mew/work_session.py` still was not proven under medium context pressure:
+  overlapping/adjacent same-path repairs displaced each other even after the
+  five-window limit patch. #339 then showed the merged-window patch did remove
+  the earlier reread churn and let the native loop reach a paired dry-run edit
+  batch, but the next failure mode is still unresolved: stable multi-edit
+  assembly and exact old-text matching across the full same-file source/test
+  surface. The partial-write-batch refusal patch should reduce one source of
+  that failure by stopping incomplete dry-run batches before approval, and the
+  batch-failure cleanup patch now prevents stale pending approvals from hiding
+  the real recovery path after a sibling-tool failure. A further direct patch
+  now rejects duplicate same-path writes inside a code batch and tells THINK to
+  collapse same-file hunks into one file-level edit, which should reduce the
+  `old text was not found` failure mode observed in #339. #340 then showed the
+  next blocker more precisely: once mew obeyed the one-file rule, it still
+  could not form the consolidated src edit because the needed bridging
+  line-window text was clipped by the 12k default read budget and prompt
+  display cap. A direct follow-up patch now auto-scales explicit line-window
+  reads and preserves those larger windows in full prompt context. #341 then
+  showed one more contradiction: the full bridged text was visible in
+  `tool_calls[#2503]`, but `recent_read_file_windows` still stored only a
+  truncated cache for the overlapping formatter repair window under the five
+  slot cap. The follow-up merge-budget patch fixed that retention policy for
+  large explicit line windows, and #343 / session #331 converted it into a
+  no-rescue mew-side pass for the same-file multi-hunk `edit_file_hunks`
+  feature slice. That removes this exact retention blocker for
+  `last_verified_state`, but broader normal-case autonomy is still not proven:
+  #343 still used some exploratory search/read steps before the final batch,
+  and durable plan/path recall across broader multi-file coding work remains
+  open. #345 showed the landed targeted-reread guidance can be converted into a
+  successful paired edit/verify/finish run once the exact source/test windows
+  are pinned, but normal-case exact-surface selection for prompt/test slices is
+  still not proven without supervisor hints. #346 improved that diagnosis:
+  exact prompt/test surface discovery now works without steer, but search
+  results are still not always converted into the anchored `read_file` step on
+  the first try. #347 confirmed the remaining gap more precisely: even after a
+  prompt-level warning, the native loop can still repeat the same successful
+  anchor search before first edit. #348 then converted the structured
+  `redundant_search_observations` signal into a fresh no-steer pass on the
+  prompt surface, so that exact search-to-read conversion blocker is now
+  reduced. The remaining missing proof is broader durable plan/path recall and
+  multi-file normal-case autonomy, not this prompt-surface search loop. #349
+  sharpened that remaining gap: on a broader `work_session.py` slice, mew can
+  reach paired edit/verify, but adjacent source rereads before first edit and a
+  same-surface audit follow-up still block no-rescue credit. The new
+  `adjacent_read_observations` signal should reduce that reread creep, but it
+  still needs a fresh unsatisfied rerun task to prove it. #351 then exposed one
+  more broader-work_session failure mode: after a same-path search miss on a
+  known target path, the native loop could discard that failure and restart
+  with a top-of-file `read_file offset=0`. The new
+  `broad_read_after_search_miss_guard` should reduce that fallback, but it
+  still needed a fresh broader mew-side rerun to prove the native loop now
+  reforms the search or reuses a targeted window instead of broad-reading.
+  Task #352 provided that proof: after a same-surface search miss, the native
+  loop recovered to a narrow `read_file` on the known continuity window and
+  then finished the verified task natively. The remaining M6.6 missing proof is
+  no longer this broad-read fallback. Task #353 then tightened the follow-up
+  observation path on the same surface: when `search_text` matches are stored in
+  string form, `redundant_search_observations` now extracts the concrete anchor
+  line instead of degrading `suggested_next` to `line_start=None`. That
+  blocker-reduction patch landed through a fresh no-steer mew-side paired
+  src/test edit with native verification and same-surface audit. Task #354 then
+  converted one broader durable path-recall carry-forward decision into a fresh
+  no-rescue mew-side pass: `build_work_session_resume()` now surfaces
+  `target_path_cached_window_observations` by pairing
+  `working_memory.target_paths` with matching completed `read_file` windows, the
+  paired tests prove that cached window survives through resume/context, and
+  the native run closed with `uv run python -m unittest tests.test_work_session`
+  plus a same-surface audit on `format_work_session_resume()`. Task #355 /
+  session #343 then consumed that carried-forward signal in the next multi-file
+  slice: `build_work_think_prompt()` now tells THINK to refresh a cached target
+  path window from `target_path_cached_window_observations` before repeating
+  same-surface `search_text` rediscovery, and the paired prompt-guidance test
+  coverage now lives on the correct surface in `tests/test_work_session.py`.
+  The native run passed `uv run python -m unittest tests.test_work_session
+  tests.test_step_loop` and closed same-surface audit on
+  `src/mew/work_loop.py`, but it needed one narrow steer to stop wasting time
+  on the wrong test file (`tests/test_step_loop.py`) and switch to the real
+  prompt-guidance surface. Count #355 as fresh multi-file implementation
+  evidence for the frozen M6.6 set, but not as a clean no-steer proof. The
+  remaining M6.6 missing proof is now narrower: broader multi-file normal-case
+  autonomy and durable plan/path recall without supervisor steer, especially on
+  slices that need correct paired source/test surfacing from the start. Task
+  #356 then targeted exactly that missing surface-selection gap. Native mew
+  work reached a reviewable paired dry-run batch, auto-applied it, and exposed
+  the intended product patch, but the run drifted on the paired test anchor:
+  it first inserted the new test before the existing `finally` block, then
+  spent multiple repair turns rereading the same stale-test surface under high
+  context pressure. The applied batch failed `uv run python -m unittest
+  tests.test_work_session`, rolled back, and was stopped for supervisor
+  takeover. A direct patch then landed the intended product change anyway:
+  `_annotate_working_memory_with_latest_tool()` now carries a
+  discovered-or-inferred `tests/**` partner when a stale latest-tool path
+  points at `src/mew/**` and no test target is already present, and a focused
+  resume test proves that stale src-path recall now keeps both the source and
+  its paired test path. Count #356 as product progress plus a concrete blocker
+  trace for repair-loop/test-anchor drift, not as no-rescue evidence.
+- A direct supervisor patch then turned that #356 blocker into an explicit
+  resume/prompt surface: `build_work_session_resume()` now emits
+  `repair_anchor_observations`, a deduplicated list of source/test `read_file`
+  anchors built from the latest failed write plus any still-relevant
+  `working_memory.target_paths`, and `build_work_think_prompt()` now tells
+  native mew to prefer those anchors before new same-surface `search_text` or
+  broader rereads. Focused regressions, broader `uv run python -m unittest
+  tests.test_work_session`, `ruff`, `py_compile`, and `git diff --check`
+  passed. This is product progress aimed at the #356 repair-loop/test-anchor
+  blocker, not yet fresh no-rescue evidence.
+- M6.6 task #357 / session #345 then turned that landed
+  `repair_anchor_observations` surface into fresh no-steer mew-side evidence.
+  Native mew reused the cached repair anchors to recover the exact
+  `src/mew/commands.py` and `tests/test_work_session.py` windows, proposed a
+  paired dry-run src/test batch, auto-applied it, passed
+  `uv run python -m unittest tests.test_work_session`, then chose and passed
+  the broader inferred verifier `uv run python -m unittest tests.test_commands`
+  before finish. The same session completed the required same-surface audit in
+  `src/mew/commands.py` and closed with `rescue_edits=0`. The landed patch now
+  makes `work --follow-status` prefer the first resume
+  `repair_anchor_observations` entry for dead/stale snapshots and emit
+  `recovery_path`, `recovery_line_start`, and `recovery_line_count` in text
+  output while preserving the no-anchor `inspect_resume` fallback. This is
+  implementation evidence for the frozen M6.6 set, not an extra comparator
+  slot. The remaining M6.6 missing proof is no longer repair-anchor reuse
+  after failure recovery; it stays broader multi-file normal-case autonomy and
+  durable plan/path recall on slices that need the right paired surfaces from
+  the start.
+- M6.6 task #358 / session #346 then turned that broader durable-plan target
+  into a fresh multi-file no-steer mew-side pass. Native mew stayed on the
+  intended `src/mew/work_session.py`, `src/mew/work_loop.py`, and
+  `tests/test_work_session.py` surfaces from the start, recovered the exact
+  windows needed for all three files, noticed the same-file write-batch
+  constraint and returned `wait` once instead of emitting an unsafe partial
+  batch, then proposed and auto-applied a paired `edit_file_hunks` +
+  `edit_file` src/test batch. It passed `uv run python -m unittest
+  tests.test_work_session`, preserved a concise `remember` replan when the
+  step budget exhausted, completed the required same-surface audit on the two
+  touched `src/mew` surfaces, and finished with `rescue_edits=0`. The landed
+  patch now makes `build_work_session_resume()` emit
+  `plan_item_observations`, extends the paired resume/context assertions in
+  `tests/test_work_session.py`, and teaches `build_work_think_prompt()` to
+  prefer `work_session.resume.plan_item_observations` before broader
+  rediscovery while pruning completed `working_memory.plan_items`. Count this
+  as fresh implementation evidence for the frozen M6.6 set, not an extra
+  comparator slot. The remaining M6.6 missing proof is now narrower: broader
+  multi-file normal-case autonomy still shows adjacent same-file reread creep
+  before first edit under medium/high context pressure, even when the correct
+  paired surfaces are chosen from the start.
+- M6.6 task #359 / session #347 then targeted that narrower first-edit
+  efficiency gap directly: make the first `plan_item_observations` entry carry
+  multi-path `cached_windows`, emit `edit_ready` only when every paired target
+  path is cached and untruncated, and demote same-path adjacent reread signals
+  once the batch is edit-ready. The native loop recovered the correct
+  source/test repair anchors after one old-text mismatch, but it exhausted the
+  remaining step budget on `remember` before it reached a fresh dry-run edit
+  batch. The landed direct patch now makes
+  `build_work_session_resume()` attach `cached_windows` and `edit_ready` to
+  the first `plan_item_observations` entry, moves same-path
+  `adjacent_read_observations` into a demoted bucket when that batch is ready,
+  and teaches `build_work_think_prompt()` to prefer one paired dry-run edit
+  over another same-path reread when `edit_ready` is true. Focused targeted
+  pytest, module-level `uv run python -m unittest tests.test_work_session`,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is product
+  progress aimed at the remaining first-edit-efficiency blocker, not fresh
+  no-rescue mew-side evidence.
+- M6.6 task #360 / session #348 then used that new `edit_ready` surface on a
+  fresh `format_work_session_resume()` audit slice. Native mew reached
+  `edit_ready=true` with paired cached source/test windows, but it still spent
+  more turns on source rediscovery and never produced the reviewable paired
+  dry-run edit batch. Inspecting the product surface showed the missing link:
+  the human-facing formatter text still did not render
+  `plan_item_observations`, `target_path_cached_window_observations`, or
+  `demoted_adjacent_read_observations`, so the edit-ready audit signal was not
+  visible in the rendered resume body. The direct blocker-reduction patch now
+  makes `format_work_session_resume()` print those sections with exact cached
+  window lines, `edit_ready` state, and demoted reread hints, and the focused
+  formatter/prompt regression tests passed with `ruff`, `py_compile`, and
+  `git diff --check`. This is product progress for the same first-edit
+  efficiency blocker, not fresh no-rescue evidence.
+- M6.6 task #361 / session #349 then retried the same first-edit-efficiency
+  slice after that rendered-resume patch. Native mew stayed on the correct
+  `src/mew/work_session.py` and `tests/test_work_session.py` surfaces from the
+  start and reached `edit_ready=true`, but it still issued another chain of
+  adjacent test-file rereads instead of proposing the paired dry-run edit
+  batch. That narrowed the blocker again: the cached-window recall path was
+  still exposing only the latest narrow same-path `read_file` window instead
+  of the already available merged adjacent span. The direct blocker-reduction
+  patch now propagates `context_truncated` through
+  `build_adjacent_read_observations()`, reuses that merged same-path span when
+  populating `cached_window_by_path`, and therefore widens
+  `target_path_cached_window_observations`, `plan_item_observations.cached_window`,
+  and `cached_windows` from the shared source of truth. Focused targeted
+  pytest, module-level `uv run python -m unittest tests.test_work_session`,
+  `ruff`, `py_compile`, and `git diff --check` passed. This is product
+  progress for the same first-edit-efficiency blocker, not fresh no-rescue
+  evidence.
+- M6.6 task #362 / session #350 then retried the fresh proof on top of
+  `a74ee69`, but it failed immediately for a different reason: the model tried
+  to `read_file` a `.mew/memory/private/...` decision file surfaced through
+  active memory and hit the tool's sensitive-path guard before it ever touched
+  the src/test slice. That is not the milestone blocker itself, but it is
+  avoidable friction in the coding loop. The direct blocker-reduction patch
+  now tells `build_work_think_prompt()` not to call `read_file` on
+  `.mew/memory/private` paths surfaced in active memory because the relevant
+  excerpt is already present in prompt context. Focused prompt tests,
+  module-level `uv run python -m unittest tests.test_work_session`, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is prompt hygiene for the
+  same M6.6 first-edit proof path, not fresh no-rescue evidence.
+- M6.6 task #363 / session #351 then provided the fresh no-rescue proof that
+  the first-edit-efficiency blocker is closed. Native mew did one initial
+  source/test anchor search, one redundant source search that was then
+  converted into the suggested narrow `read_file`, and after `edit_ready=true`
+  it went straight to a paired dry-run src/test edit without another same-path
+  reread before the edit batch. It applied the paired source/test change,
+  passed `uv run python -m unittest tests.test_work_session`, performed the
+  required same-surface audit on the adjacent `edit_ready` / cached-window /
+  adjacent-read-demotion branch, and finished with the proof summary recorded
+  in task #363. The concrete wording-only src/test diff from that run was not
+  kept, because it merely restated the proof condition in user-visible text;
+  the run itself is the evidence. This is fresh mew-side implementation
+  evidence for the frozen M6.6 set.
+- The frozen detached comparator batch then completed on 2026-04-21. M6.6-B
+  was rerun cleanly in `/tmp/mew-m66b-codex-rerun-20260421-1223`, removing the
+  earlier environment caveat, and M6.6-C passed in
+  `/tmp/mew-m66c-codex-20260421-1223` with both focused and broader verifier
+  passes. `docs/M6_6_CODEX_PARITY_COMPARE.md` now records side-by-side
+  evidence for all three predeclared comparator slots.
+
+Done when:
+
+- The #323 bootstrap retry remains documented as the no-rescue baseline, and
+  mew completes three predeclared representative coding tasks without Codex
+  rescue edits: one behavior-preserving refactor, one bug fix with a regression
+  test, and one small feature with paired source/test changes.
+- The final frozen M6.6 implementation set is compared against Codex CLI in a
+  checked-in comparator artifact that records first-edit latency, model turns,
+  search/read calls before first edit, changed files, verifier commands,
+  repair cycles, and review outcome.
+- Every comparator task has `rescue_edits=0`, no obvious path hallucination, no
+  repeated identical broad search/read loop, and a focused verifier command
+  chosen by mew.
+- Resident state improves the second and third coding task by reducing at least
+  one of prompt size, repeated file discovery, or search/read count instead of
+  merely increasing context.
+- A coding task can plan, edit, verify, repair, self-review, and summarize with
+  clear approval surfaces.
+- Path recall and targeted context prevent obvious file/path hallucinations and
+  repeated read-only churn in the normal case.
+
+Next action:
+
+- Keep M6.6 active; do not introduce `M6.5.2`.
+- Carry the landed suggested-verifier fallback as product progress, but do not
+  count task #326 as comparator evidence; use task #327 as the M6.6-C mew-side
+  replacement run.
+- Record task #332 / session #319 as fresh mew-side path-recall/anti-churn
+  proof for the frozen M6.6 implementation set, but not as one of the three
+  comparator slots.
+- Carry the landed `plan_items` persistence half from #334 as product progress,
+  but do not count it as no-rescue evidence.
+- Carry the landed #335 summary surfacing patch as product progress, but do not
+  count it as no-rescue evidence.
+- Record task #336 / session #323 as fresh blocker-reduction evidence for
+  `recent_read_file_windows` reuse in full context.
+- Carry the landed #337 target-path summary patch as product progress, but do
+  not count it as no-rescue evidence.
+- Carry the landed recent-read-window limit expansion as product progress, but
+  do not count it as no-rescue evidence.
+- Carry the landed #345 `open_questions` hygiene patch as product progress, but
+  do not count it as no-rescue evidence because the run needed an exact-window
+  interrupt steer.
+- Record task #354 / session #342 as fresh mew-side durable path-recall
+  evidence for the frozen M6.6 implementation set: cached exact `read_file`
+  windows can now be paired back to `working_memory.target_paths` without
+  supervisor hints, native verification passed, and same-surface audit closed.
+- Record task #355 / session #343 as fresh multi-file implementation evidence
+  for the frozen M6.6 set: mew carried `target_path_cached_window_observations`
+  from resume into `build_work_think_prompt()` and landed the paired
+  `src/mew/work_loop.py` + `tests/test_work_session.py` change with native
+  verification and same-surface audit, but the run still needed one narrow
+  steer to abandon the wrong test surface before the edit.
+- Carry the landed #356 paired-test-path recall patch as product progress, but
+  do not count it as no-rescue evidence: native mew reached a reviewable
+  paired dry-run/apply attempt, but repeated test-anchor drift on
+  `tests/test_work_session.py` forced supervisor takeover before the final
+  passing patch was landed.
+- Record task #357 / session #345 as fresh mew-side repair-anchor recovery
+  evidence for the frozen M6.6 set: native mew reused
+  `repair_anchor_observations` to return to the correct paired source/test
+  surfaces, landed the `work --follow-status` recovery patch, passed both
+  `tests.test_work_session` and the inferred broader verifier
+  `tests.test_commands`, and closed same-surface audit with `rescue_edits=0`.
+- Record task #358 / session #346 as fresh multi-file durable-plan evidence
+  for the frozen M6.6 set: native mew surfaced `plan_item_observations` in
+  `build_work_session_resume()`, wired the matching prompt rule in
+  `build_work_think_prompt()`, passed `tests.test_work_session`, and closed the
+  required same-surface audit with `rescue_edits=0`.
+- Carry the landed #359 `edit_ready` / multi-path cached-window patch as
+  product progress, but do not count it as no-rescue evidence: native mew
+  recovered the right repair anchors and left a correct reentry note, yet the
+  session exhausted its step budget before it reached the fresh paired dry-run
+  edit batch.
+- Carry the landed #360 resume-text audit patch as product progress, but do
+  not count it as no-rescue evidence: native mew proved the remaining blocker
+  by reaching `edit_ready=true` and then still failing to produce a paired
+  dry-run edit; the landed formatter patch now makes that audit state visible
+  in the rendered resume body for the next fresh proof task.
+- Carry the landed #361 merged-cached-window patch as product progress, but do
+  not count it as no-rescue evidence: native mew reached the correct paired
+  surfaces and `edit_ready=true`, yet still kept rereading because cached
+  window recall was anchored to the last narrow same-path span instead of the
+  merged adjacent span.
+- Carry the landed #362 active-memory private-path guard as product progress,
+  but do not count it as no-rescue evidence: the fresh proof task failed
+  before touching src/test because it tried to inspect a sensitive
+  `.mew/memory/private` path already represented in active memory.
+- Record task #363 / session #351 as fresh mew-side first-edit-efficiency
+  proof for the frozen M6.6 set: after the recent blocker-reduction patches,
+  native mew reached a paired dry-run src/test edit once `edit_ready=true`,
+  passed the configured unittest verifier, and closed same-surface audit
+  without rescue edits.
+- Keep M6.6 on the mew-side critical path. The next task should move from
+  blocker reduction to milestone closure work: freeze the current M6.6
+  implementation set and run the deferred Codex CLI comparator batch in
+  parallel detached worktrees, or surface any remaining honest gap that still
+  prevents that freeze.
+- Defer the remaining/final Codex CLI comparator runs until the M6.6
+  implementation set is frozen, then run them in parallel detached worktrees.
+- Continue to treat read-window / prompt-truncation fixes and other
+  mew-as-implementer readiness work as M6.6 first-slice sub-tasks, then
+  continue with the next M6.6 coding-loop slice instead of per-slice
+  comparator work.
+
+Next action after closure:
+
+- Keep M6.6 closed. Use it as the resident coding baseline, not as the active
+  milestone.
+- Reopen M6.6 only if a future native coding loop regresses on rescue-edits,
+  verifier choice, reviewable approval surfaces, or path-recall/anti-churn
+  behavior.
+- Shift active focus to M6 close-out: collect the running enhanced Docker proof
+  and write the M6 close gate if the proof passes.
+- After M6 closes, start M6.7 with a reviewer-gated bounded loop rather than
+  any unattended multi-hour self-hosting run.
+- Keep deeper M7 signal work deferred until M6 is closed or a specific M7 task
+  is explicitly chosen.
+
+### M6.7: Supervised Self-Hosting Loop
+
+Status: `done`.
+
+Goal:
+
+- Let mew implement roadmap work in bounded reviewer-gated iterations before
+  any attempt at unattended multi-hour autonomy.
+
+Evidence:
+
+- M6.6 now provides the closed coding baseline needed for supervised
+  self-hosting: bootstrap passed, three comparator slots passed with
+  `rescue_edits=0`, and the frozen Codex CLI comparator batch is recorded.
+- `claude-ultra` session `9b90d99e-3bb5-4b65-aafd-5f5985bcd952` recommended
+  a short bounded loop as the first honest shape: one roadmap item per
+  iteration, proof artifact required, reviewer decision after each run, no
+  chained tasks, and no auto-merge.
+- The guardrails are now explicit in `ROADMAP.md`: proof-or-revert, scope
+  fencing, and a drift canary before each iteration.
+- `docs/M6_7_FIRST_SUPERVISED_ITERATION_2026-04-21.md` records the first
+  bounded supervised iteration. Task `#364` / session `#352` used a reviewer
+  scope limited to `src/mew/work_session.py` and `tests/test_work_session.py`,
+  stopped on a paired dry-run diff, required explicit reviewer approval,
+  passed the focused verifier
+  `uv run pytest -q tests/test_work_session.py -k 'declared_write_scope' --no-testmon`,
+  then passed the broader verifier
+  `uv run python -m unittest tests.test_work_session`, completed same-surface
+  audit, and finished with no reviewer rescue edits.
+- `docs/M6_7_SECOND_SUPERVISED_ITERATION_2026-04-21.md` records the second
+  bounded supervised iteration. Task `#365` / session `#353` stayed inside the
+  declared `src/mew/commands.py` + `src/mew/work_session.py` +
+  `tests/test_work_session.py` scope, stopped on paired dry-run diffs, then
+  required both the focused verifier
+  `uv run pytest -q tests/test_work_session.py -k 'finish_block' --no-testmon`
+  and the paired-source verifier
+  `uv run python -m unittest tests.test_commands` before finish. The landed
+  `src/mew/commands.py` guard keeps the session open while pending approvals,
+  non-finish-ready verification, or same-surface audit still block proof, and
+  the iteration closed after a narrow same-surface commands.py audit with no
+  reviewer rescue edits.
+- Task `#366` / session `#354` targeted the remaining dedicated scope-fence
+  gap: block `approve-all` when the pending dry-run batch contains a
+  governance/policy edit such as `ROADMAP_STATUS.md`. The native run reached a
+  correct bounded 3-file dry-run batch, but after the bad first regression
+  shape was repaired it closed itself under high pressure instead of preserving
+  a reviewable approval surface. The product patch then landed directly in
+  `src/mew/work_session.py`, `src/mew/commands.py`, and
+  `tests/test_work_session.py`: resume now prints
+  `approve all blocked: approve-all is blocked for pending governance/policy dry-run edits ...`,
+  `work --approve-all` returns an error for pending governance/policy dry-run
+  edits, and the new regression proves both behaviors. Focused
+  `uv run pytest -q tests/test_work_session.py -k 'approve_all or governance_edit' --no-testmon`,
+  broader `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
+- Task `#367` / session `#355` then targeted the next secondary-surface gap:
+  reply-file / CLI approval surfaces still treated governance-blocked
+  `approve-all` like the older hidden-unpaired-source case, so they could emit
+  the wrong wording and the reply-file path could bypass the new governance
+  block entirely. The native run found the right bounded source/test surfaces
+  and refreshed the exact windows, but two codex model turns stalled in
+  planning before they surfaced a reviewable dry-run diff. The product patch
+  then landed directly in `src/mew/commands.py` and
+  `tests/test_work_session.py`: CLI approval controls now distinguish
+  hidden-unpaired-source blocks from governance blocks, reply-file guidance now
+  tells the reviewer to inspect resume and approve per-tool for
+  governance/policy edits, and `work --reply-file` now rejects `approve_all`
+  when the pending batch contains governance/policy dry-run edits instead of
+  bypassing the block. Focused
+  `uv run pytest -q tests/test_work_session.py -k 'reply_file and approve_all or governance_blocks_approve_all' --no-testmon`,
+  broader `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
+- Task `#368` / session `#356` then targeted the last contextual reply
+  secondary-surface gap in the same fence family: `build_work_reply_schema()`
+  still advertised the generic `approve_all` action in
+  `schema["supported_actions"]` even when hidden-unpaired-source or
+  governance/policy blockers meant the reviewer should steer or approve
+  per-tool instead. The native run anchored the correct
+  `_work_reply_supported_actions()` / `build_work_reply_schema()` source
+  surfaces and the reply-template regressions, but again spent its bounded
+  steps in planning without surfacing a reviewable dry-run diff. The product
+  patch then landed directly in `src/mew/commands.py` and
+  `tests/test_work_session.py`: `build_work_reply_schema(session, resume=...)`
+  now passes `resume` into `_work_reply_supported_actions()`, and the generic
+  `approve_all` action is omitted from `schema["supported_actions"]` whenever
+  `approve_all_blocked_reason` is present. The hidden-unpaired-source and
+  governance reply-template regressions now assert that omission directly.
+  Focused named pytest coverage, broader
+  `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
+- Task `#369` / session `#357` then targeted the next bounded proof slice on
+  the same surface: expose machine-readable blocked `approve_all` context from
+  the existing resume fields, so external reviewers do not have to infer the
+  blocked reason only from `reply_template` text or the omitted
+  `supported_actions` entry. The native run recovered from one transient Codex
+  transport failure, then stayed inside the declared `src/mew/commands.py` +
+  `tests/test_work_session.py` scope, searched exact anchors, read exact
+  source/test windows, and advanced to a bounded batch decision that would
+  reuse the existing blocked-context fields. The producer then died before the
+  dry-run diff surfaced, so the same minimal patch landed directly in
+  `src/mew/commands.py` and `tests/test_work_session.py` instead:
+  `build_work_reply_schema()` now returns `approve_all_blocked_reason`,
+  `blocked_approve_all_hint`, and `override_approve_all_hint`, and the hidden-
+  unpaired-source plus governance blocked tests assert those schema fields
+  directly against the resume state. Focused named pytest coverage, broader
+  `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed in the same update
+  session. This is product progress, not a no-rescue supervised-iteration
+  proof.
+- Task `#370` / session `#358` then shifted M6.7 from adjacent reply-surface
+  scope-fence hardening into blocker reduction. The native loop had already
+  searched exact anchors, read exact src/test windows, and reached a bounded
+  batch decision for `src/mew/work_session.py` +
+  `tests/test_work_session.py`, but the formatted resume still lost the
+  proposed write when the producer stopped before the dry-run tool call
+  finished. The minimal direct patch landed in those same two files instead:
+  `format_work_action(batch)` now appends an indented `Diff preview` block for
+  dry-run `write_file`, `edit_file`, and `edit_file_hunks` subtools using a
+  minimal planned unified diff built from tool parameters, and a new
+  batch-formatting regression proves the preview is visible before execution.
+  Focused pytest on batch formatting + diff preview, broader
+  `uv run python -m unittest tests.test_work_session tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed. This is blocker
+  reduction plus product progress, not a no-rescue supervised-iteration proof.
+- Task `#371` / session `#359` then used that hardened paired src/test review
+  surface for the next fresh bounded proof attempt in the same two files. The
+  native loop stayed inside scope without reviewer code rescue: it ran the
+  drift canary, searched exact anchors, read exact windows, proposed a paired
+  dry-run diff, and stopped on reviewer-visible approvals for
+  `src/mew/work_session.py` + `tests/test_work_session.py`. The landed change
+  adds truncated-batch visibility to `format_work_action(batch)`: when
+  `truncated_tools > 0`, the `tools:` line now renders `(+N truncated)`, and
+  the nearby batch-format regression asserts that output directly. Focused
+  batch-formatting pytest, `ruff`, `py_compile`, and `git diff --check`
+  passed. But the iteration still does not count as fresh no-rescue proof:
+  after approval the native loop chose the correct broader verifier target
+  (`uv run python -m unittest tests.test_work_session`), yet the live
+  `run_tests` path timed out twice under session capture even though the same
+  unittest module passed directly outside the live loop (`Ran 421 tests in
+  23.681s`). Carry #371 as blocker evidence plus product progress, not as
+  supervised-iteration credit.
+- A direct blocker-reduction patch then targeted the root cause exposed by
+  #371: `run_command_record_streaming()` in `src/mew/toolbox.py` now drains
+  `stdout`/`stderr` with fixed-size `read()` chunks instead of newline-bound
+  `readline()`, so commands that emit long progress streams without trailing
+  newlines cannot fill the pipe and stall the live verifier path. The new
+  `tests/test_toolbox.py` regression drives `200000` newline-free `stderr`
+  characters through the streaming helper and asserts the command completes
+  without timing out while `on_output` still receives streamed data. Focused
+  `pytest`, `uv run python -m unittest tests.test_toolbox`, `ruff`,
+  `py_compile`, and `git diff --check` passed. This is blocker reduction plus
+  product progress; a fresh bounded M6.7 proof rerun is still required.
+- A second direct blocker-reduction patch then fixed the remaining broader
+  live-verifier hang exposed while rerunning task `#372`: tool subprocesses in
+  `src/mew/toolbox.py` now launch with `stdin=subprocess.DEVNULL`, and the new
+  `tests/test_toolbox.py` regression asserts that the streaming helper passes
+  `DEVNULL` stdin into `subprocess.Popen`. This prevents verifier subprocesses
+  from inheriting reviewer stdin and stalling on approval-prompt tests that
+  expect EOF in non-interactive runs. Focused `pytest`, `ruff`, `py_compile`,
+  and `git diff --check` passed. This is blocker reduction plus product
+  progress.
+- Task `#372` / session `#360` then reran the fresh bounded
+  `src/mew/work_session.py` + `tests/test_work_session.py` review-surface
+  slice. The native loop ran the drift canary, searched exact anchors, read
+  exact src/test windows, proposed a paired dry-run diff, stopped for explicit
+  reviewer approval, passed the focused verifier, then resumed to pass the
+  broader verifier `uv run python -m unittest tests.test_work_session`,
+  completed the required same-surface audit, and finished cleanly. The landed
+  change makes single dry-run `write_file` / `edit_file` /
+  `edit_file_hunks` actions surface the planned diff preview instead of only
+  size counts, with direct regression coverage in
+  `tests/test_work_session.py`. Count this as strong supervised-loop evidence
+  plus product progress, but not yet as the clean post-fix milestone-closing
+  proof because the live-verifier runtime changed mid-iteration.
+- Task `#373` / session `#361` then tried to turn the now-saved M6.7 context
+  checkpoint into a better coding reentry fallback for `mew focus` /
+  `mew brief`: prefer `./mew context --load --limit 1` over native
+  self-improve only while the user is actively waiting for agent work. The
+  bounded source/test intent was sound, but the run needed multiple reviewer
+  steers and eventually a direct reviewer takeover after verification noise, so
+  it does not count as supervised-loop proof. The landed direct patch stays
+  inside the same scope: `src/mew/brief.py` now prefers checkpoint recovery
+  only when `user_status.mode == waiting_for_agent` and the latest checkpoint
+  `created_at` is same-day, while `tests/test_brief.py` now covers both the
+  waiting/current-checkpoint path and the stale-checkpoint fallback, and fixes
+  brittle self-improve/continuity expectations so the suite is deterministic
+  again. Focused `uv run pytest -q tests/test_brief.py -k "next_move or focus
+  or brief" --no-testmon`, broader `uv run python -m unittest tests.test_brief`,
+  `ruff`, `py_compile`, and `git diff --check` all passed. This is product
+  progress, not a fresh no-rescue supervised-iteration proof.
+- `docs/M6_7_SIXTH_SUPERVISED_ITERATION_2026-04-21.md` now records the fresh
+  clean post-fix bounded proof that the earlier M6.7 section still lacked.
+  Task `#374` / session `#362` stayed inside the declared `src/mew/brief.py`
+  + `tests/test_brief.py` scope, ran the drift canary first, anchored exact
+  `build_focus_data()` / `build_brief_data()` and nearby brief regressions,
+  surfaced a paired dry-run diff, stopped for explicit reviewer approval,
+  passed the focused verifier
+  `uv run pytest -q tests/test_brief.py -k "focus or brief or active_work_session" --no-testmon`,
+  then passed the broader verifier
+  `uv run python -m unittest tests.test_brief`, completed a same-surface audit,
+  and finished with no reviewer rescue edits. The landed change makes
+  `active_work_session_items()` skip non-actionable tasks, and the new
+  regression proves `mew focus --kind coding` no longer treats a stale blocked
+  work session as active work that should suppress the next useful move.
+- The refreshed close-gate proof queue has now been exercised further. Task `#380`
+  / sessions `#368` and `#369` soft-stopped Candidate N-A after the focused
+  verifier shape was repaired: the run stayed inside
+  `src/mew/proof_summary.py` + `tests/test_proof_summary.py`, but two fresh
+  attempts stalled before a reviewable paired dry-run diff surfaced. Carry
+  this as non-converging proof evidence, not closure credit.
+- Task `#381` / session `#370` soft-stopped Candidate N-B. The initial work
+  drifted toward focus-only `active_work_session_items()` edits, while the real
+  target is `brief` / `next` / JSON output. Keep the stored repair guidance in
+  task notes, but do not count this as M6.7 proof credit.
+- Task `#382` / session `#371` closed Candidate N-C as reviewer no-change.
+  Existing `active_work_session_items()` gates already filter non-actionable
+  work through `session.status != active`, missing-task, `task.status == done`,
+  and blocked-task checks, and the existing `tests/test_brief.py` coverage for
+  stale blocked and done-task branches already pins that behavior. No product
+  patch landed.
+- Task `#383` / session `#372` then targeted Candidate N-E. mew anchored the
+  correct `src/mew/toolbox.py` + `tests/test_toolbox.py` scope and read both
+  files, but the edit-planning model turns stalled twice. The direct supervisor
+  patch then landed additive structured timeout diagnostics in
+  `src/mew/toolbox.py` (`kill_status`, `stdout_tail`, `stderr_tail`,
+  `timeout_seconds`) plus a focused timeout regression in
+  `tests/test_toolbox.py`. Focused
+  `uv run pytest -q tests/test_toolbox.py -k 'timeout or streaming_kill' --no-testmon`,
+  broader `uv run python -m unittest tests.test_toolbox`, `ruff`,
+  `py_compile`, and `git diff --check` all passed. This is product progress,
+  not supervised-proof credit.
+- Task `#384` / session `#373` then targeted Candidate N-H. mew anchored the
+  correct `src/mew/mood.py` + `tests/test_mood.py` scope and read the exact
+  formatter/test windows, but repeated live retries stalled in edit planning
+  before a reviewable paired dry-run diff surfaced. The direct supervisor patch
+  then landed the bounded text-surface gap: `format_mood_view()` in
+  `src/mew/mood.py` now appends a `signals:` section that renders
+  `view_model["signals"]` or an explicit no-signals line, and
+  `tests/test_mood.py` now asserts the plain-text formatter carries the same
+  signal content as the existing markdown/JSON surface. Focused
+  `uv run pytest -q tests/test_mood.py -k 'mood_command or format_mood or signals' --no-testmon`,
+  broader `uv run python -m unittest tests.test_mood`, `ruff`, `py_compile`,
+  and `git diff --check` all passed. This is product progress, not
+  supervised-proof credit.
+- A direct M6.7 substrate patch then addressed the newly explicit soft-stop
+  blocker itself: `--compact-live` now forces the live THINK prompt to use
+  `compact_memory` context even for high-risk tasks, instead of only compacting
+  CLI rendering while the model still received a full prompt. The fix landed in
+  `src/mew/work_loop.py` and `src/mew/commands.py`, and
+  `tests/test_work_session.py` now proves both that
+  `work_prompt_context_mode(..., compact_live=True)` returns
+  `compact_memory` and that a high-risk `work --ai --compact-live` turn records
+  `prompt_context_mode=compact_memory` in model metrics. Focused named pytest,
+  broader `uv run python -m unittest tests.test_work_session`, `ruff`,
+  `py_compile`, and `git diff --check` all passed. Treat this as blocker
+  reduction plus product progress; the next honest step is a fresh proof rerun,
+  not another direct candidate patch.
+- Task `#385` / session `#374` then reopened Candidate N-F after the
+  compact-live substrate fix. mew surfaced the intended `src/mew/sweep.py` +
+  `tests/test_sweep.py` JSON-report patch, but the broader verifier
+  `uv run python -m unittest tests.test_commands` exposed a real product
+  blocker: `cmd_agent_sweep()` used `args.json` while the `agent sweep` CLI
+  parser did not define `--json`. The live rerun stayed bounded and re-anchored
+  the exact `src/mew/cli.py`, `src/mew/commands.py`, and
+  `tests/test_commands.py` windows, but still stopped before a new
+  reviewer-visible dry-run diff surfaced. The direct supervisor blocker fix
+  then landed: `src/mew/cli.py` now defines `agent sweep --json`,
+  `src/mew/commands.py` uses `getattr(args, "json", False)` defensively, and
+  `tests/test_commands.py` covers the JSON path while preserving timeout
+  passthrough. Focused
+  `uv run pytest -q tests/test_sweep.py tests/test_commands.py -k 'agent_sweep or sweep_report_json' --no-testmon`,
+  broader `uv run python -m unittest tests.test_sweep tests.test_commands`,
+  `ruff`, `py_compile`, and `git diff --check` all passed. Treat this as
+  blocker reduction plus product progress, not M6.7 supervised-proof credit.
+- Task `#386` / session `#375` then converted Candidate N-G into real
+  supervised-proof evidence. mew stayed within
+  `src/mew/commands.py` + `tests/test_journal.py`, surfaced reviewer-visible
+  dry-run diffs, applied the approved changes, repaired two stale exact test
+  expectations through same-surface repair turns without supervisor code
+  edits, reran the targeted journal pytest, passed broader
+  `uv run python -m unittest tests.test_journal`, then selected and passed the
+  paired commands verifier `uv run python -m unittest tests.test_commands`
+  before closing with same-surface audit reasoning. Focused
+  `uv run pytest -q tests/test_journal.py -k 'journal_command or json' --no-testmon`,
+  broader journal/commands unittests, `ruff`, and `py_compile` all passed.
+  Count this as M6.7 supervised-proof credit.
+- Task `#387` / session `#376` then converted Candidate N-I into additional
+  supervised-proof evidence. mew stayed within
+  `src/mew/signals.py` + `tests/test_signals.py`, surfaced reviewer-visible
+  dry-run diffs, applied the approved source/test edits, passed focused
+  `uv run pytest -q tests/test_signals.py -k 'cli or journal or reason_for_use' --no-testmon`,
+  passed broader `uv run python -m unittest tests.test_signals`, and closed
+  with same-surface audit reasoning that only `format_signal_journal()` text
+  output changed while JSON behavior remained unchanged. `ruff`,
+  `py_compile`, and `git diff --check` all passed. Count this as M6.7
+  supervised-proof credit.
+- Task `#389` / session `#380` then converted Candidate N-J into additional
+  supervised-proof evidence after the narrow write-ready blocker fix set
+  landed in `src/mew/work_loop.py` and `tests/test_work_session.py`. mew first
+  exposed exact blockers instead of timing out: cached src tail missing,
+  missing model-turn schema, then same-file-hunk batch shaping. After the
+  write-ready fast-path prompt, exact cached text injection, path
+  normalization, same-file-hunk guidance, and write-ready timeout uplift
+  landed, mew stayed within `src/mew/commands.py` +
+  `tests/test_work_session.py`, surfaced reviewer-visible paired dry-run
+  diffs with `edit_file_hunks`, applied the approved source/test edits with no
+  supervisor code rescue on the task itself, passed `uv run python -m unittest
+  tests.test_commands` on apply, passed focused `uv run python -m unittest
+  tests.test_work_session.WorkSessionTests.test_work_follow_status_marks_planning_producer_overdue_after_model_timeout`,
+  completed a same-surface audit on `src/mew/commands.py`, and finished with a
+  summary tied to the new `latest_model_failure` JSON field. Focused pytest
+  for the touched substrate tests, broader `unittest` on
+  `tests.test_commands` plus the edited follow-status case, `ruff`,
+  `py_compile`, and `git diff --check` all passed. Count this as M6.7
+  supervised-proof credit.
+
+Missing proof:
+
+- None for the documented M6.7 gate. `docs/M6_7_CLOSE_GATE_2026-04-22.md`
+  records the close decision, including the detached frozen close-watch caveat
+  for the final `>=4h` wall-clock condition.
+
+Done when:
+
+- mew can run one bounded roadmap iteration end to end, stop for review, and
+  attach a usable proof artifact without hidden reviewer rescue edits
+- proof-or-revert is enforced when proof is missing or failing
+- scope fence blocks out-of-scope edits and self-authored roadmap/milestone
+  closure changes without human approval
+- a supervised session spanning `>=4h` wall-clock completes `>=3` real roadmap
+  items end to end with reviewer decisions recorded on each iteration,
+  includes `>=1` real reentry or pause/resume across a context reload, and
+  sustains zero proof-or-revert failures plus a green drift canary throughout
+
+Next action:
+
+- Keep M6.7 closed and reviewer-owned. Reopen only if future self-hosting
+  regressions break proof-or-revert, scope fence, drift canary discipline, or
+  the bounded reviewer-gated iteration shape.
+- Continue bounded M6.9 work on mainline; do not spend new effort on M6.7
+  proof items unless a regression demands it.
+
+### M6.8: Task Chaining - Supervised Self-Selection
+
+Status: `in_progress`.
+
+Goal:
+
+- remove the per-iteration human-dispatch latency from the M6.7 loop while
+  preserving reviewer gating and the scope fence
+
+Entry gate:
+
+- M6.7 must be closed, including its supervised hybrid close-gate proof
+- reviewer approval must be logged before the first chained run begins
+
+Missing proof:
+
+- no chained supervised run exists yet
+- selector governance, rejection recovery, and chained drift-canary behavior
+  have not been exercised
+
+Next action:
+
+- start with a bounded design/implementation slice for supervised task
+  selection: mew proposes the next roadmap task at iteration close, the
+  reviewer approves/edits/rejects it before execution, selector output records
+  `previous_task_id` and `selector_reason`, optional future signal refs are
+  preserved for M6.8.5, and scope-fence rules prevent roadmap-status,
+  milestone-close, or governance edits from selector-owned output.
+
+### M6.8.5: Selector Intelligence and Curriculum Integration
+
+Status: `not_started`.
+
+Goal:
+
+- turn the M6.8 safe supervised selector into an evidence-aware selector by
+  integrating the M6.9 Phase 4 curriculum/habit/preference work after M6.8
+  core proves chained approval
+
+Entry gate:
+
+- M6.8 core must be closed, including reviewer-approved chained task proposals,
+  selector rejection recovery, scope fence, and drift canary proof
+- M6.12 and M6.14 remain read-only evidence inputs; they must not mutate
+  roadmap status, milestone close, or approval policy automatically
+
+Planned scope:
+
+- failure-clustered curriculum from M6.9 Phase 4 becomes selector weighting
+  using failure-science and repair-ledger evidence
+- preference-store retrieval from M6.9 reviewer-diff triples becomes bounded
+  draft-time conditioning with visible provenance
+- habit compilation v0 promotes stable task-template patterns into
+  deterministic runner candidates with model-backed fallback
+- selector traces record the evidence that affected task choice, so a reviewer
+  can explain why the next task was proposed without reading raw memory files
+
+Missing proof:
+
+- no M6.8 selector contract exists yet
+- no failure-clustered selector run exists yet
+- no preference-store pair has been retrieved during draft preparation
+- no habit-compilation candidate has been produced or verified
+
+Next action:
+
+- wait until M6.8 core closes. During M6.8 implementation, reserve optional
+  selector fields such as `memory_signal_refs`, `failure_cluster_reason`, and
+  `preference_signal_refs`, but keep selector intelligence policy out of the
+  M6.8 close gate.
+
+### M6.9: Durable Coding Intelligence
+
+Status: `done`.
+
+Goal:
+
+- turn persistent state into a coding advantage so repeated work in the same
+  repository becomes measurably smarter over time
+
+Entry gate:
+
+- M6.7 must be closed
+- the delta/spec work derived from
+  `docs/REVIEW_2026-04-21_DURABLE_CODING_INTELLIGENCE.md` must be approved
+  before any `src/mew` implementation lands
+- M6.9 Phase 4 is now scheduled as M6.8.5 after M6.8 core closes; it should
+  not reopen the closed M6.9 gate unless a later selector proof exposes a real
+  durable-memory regression
+
+Progress / remaining proof:
+
+- D1 first slice is landed: typed project memory now supports optional
+  `memory_kind` for `mew memory --add/--search`, with guarded direct writes and
+  focused tests
+- D7 first slice is landed: `mew memory --list` and `mew memory --show <id>`
+  now expose typed-memory inventory/read-only detail with stable JSON and human
+  output
+- D6 first slice is landed: `mew memory --veto <id> --reason ...` appends a
+  standalone JSONL veto log, default list output suppresses vetoed entries, and
+  `mew memory --show <id>` surfaces veto status/reason while leaving the
+  original memory file unchanged
+- D2 bounded slices are landed for reviewer-steering, task-template,
+  failure-shield, and file-pair: reviewer-steering now requires explicit
+  approval plus `why` and `how_to_apply`; task-template requires explicit
+  approval plus `rationale`; failure-shield requires explicit approval plus
+  `symptom`, `root_cause`, `fix`, and `stop_rule`; file-pair now requires
+  `source_path`, `test_path`, `structural_evidence`, and
+  `focused_test_green`. Missing evidence rejects cleanly at the write gate and
+  persists the accepted evidence in typed-memory frontmatter and show/list
+  surfaces
+- D3 first slice is landed for `file-pair` recall reuse: active recall now
+  keeps valid file-pair entries with `revise_status=kept`, drops entries whose
+  source/test paths are missing with `drop_reason=precondition_miss`, and
+  surfaces those drops in `active_memory.dropped_items`; focused
+  `tests/test_memory.py` coverage now exercises both kept and dropped paths
+- D4 minimum symbol/pair index is landed: new `src/mew/symbol_index.py`
+  rebuilds `.mew/durable/symbol_index.json` from typed-memory `file-pair`
+  entries only, writes `schema_version=1` atomically, and resolves a
+  `source_path` back to its paired `test_path` and `memory_ids`; focused
+  `tests/test_symbol_index.py` covers rebuild/save/resolve on a known pair
+- D5 first slice is landed: approving a dry-run `write_file` now appends a
+  durable `.mew/durable/reviewer_diffs.jsonl` record that captures the landed
+  triple `(ai_draft, reviewer_approved, ai_final)` for that write only;
+  focused `tests/test_work_session.py` coverage proves one approve+land cycle
+  writes exactly one record, while edit-file approval stays out of scope
+- The first bounded post-Phase-1 reverse-query surfaces are landed as product
+  progress with mew-first implementation loops. `mew memory
+  --resolve-source-path <source_path>` now resolves a durable file-pair source
+  path through `src/mew/symbol_index.py`, returning the paired `test_path` and
+  `memory_ids` in both JSON and human output. Task `#395` / session `#386`
+  required reviewer rejection-and-redraft cycles to tighten the active
+  conflict guard, output contract, import/test coverage, and same-surface
+  audit, then finished with broader `uv run python -m unittest tests.test_memory
+  tests.test_symbol_index tests.test_commands` green
+- The mirrored reverse lookup is now landed as product progress too: `mew memory
+  --resolve-test-path <tests/...>` resolves a durable file-pair test path back
+  to its `source_path` and `memory_ids`, with matching CLI/command/index/test
+  coverage across `src/mew/cli.py`, `src/mew/commands.py`,
+  `src/mew/symbol_index.py`, `tests/test_memory.py`, and
+  `tests/test_symbol_index.py`. Task `#396` finished after two direct substrate
+  blocker fixes (`41e068b` paired-test target retention and `6a4ee02`
+  negated-scope reasoning policy), reviewer-side broader verification
+  (`uv run python -m unittest tests.test_commands` and
+  `uv run python -m unittest tests.test_symbol_index`), and a fresh
+  same-surface finish session. Count this as product progress, not autonomy
+  credit
+- Durable file-pair writes now auto-refresh `.mew/durable/symbol_index.json`:
+  after a successful `mew memory --add --type project --kind file-pair ...`,
+  `src/mew/commands.py` rebuilds the symbol index before formatting output so
+  `mew memory --resolve-source-path` and `--resolve-test-path` see the new pair
+  immediately with no out-of-band rebuild. `tests/test_memory.py` now proves
+  the existing file-pair CLI add flow can resolve both directions right away.
+  Task `#398` stalled twice in mew session `#390` despite exact cached windows,
+  so `claude-ultra` chose a direct patch as product progress rather than
+  autonomy credit
+- The follow-up `#399` blocker is closed: patch-draft validation no longer
+  hard-requires the conventional `tests/test_commands.py` pair when the active
+  WorkTodo explicitly targets another test surface such as
+  `src/mew/commands.py` + `tests/test_memory.py`. The first validator fix was
+  supervisor rescue/product progress, then gpt-5.5/high mew-first session
+  `#558` retried from cached windows, produced reviewer-visible dry-run edits,
+  applied the paired `mew memory --reviewer-diffs` human empty-state patch, ran
+  the configured verifier plus `tests.test_commands`, and closed with finish.
+  Count the post-repair draft/apply/verify/finish as mew-first evidence
+- D7 read-only reviewer-diff observability is landed as product progress:
+  `mew memory --reviewer-diffs` now dumps `.mew/durable/reviewer_diffs.jsonl`
+  in both human and JSON form, with empty-log no-op behavior and collision
+  checks that match the existing memory read-surface matrix. `tests/test_memory.py`
+  now covers empty output, one-record output, JSON shape, and flag-collision
+  rejection. Task `#400` timed out in mew session `#391` after exact cached
+  windows but before drafting the paired edit, so the landed patch is product
+  progress and the failure was preserved separately as blocker task `#401`
+- D7 read-only veto-log observability is landed as product progress:
+  `mew memory --veto-log` now dumps `.mew/durable/vetoes.jsonl` as human
+  `entry_id`/`reason`/`created_at` rows and JSON `{records: [...]}`, with
+  empty-log no-op behavior and flag-collision checks matching the memory
+  read-surface matrix. Task `#402` gathered useful mew-first inspection
+  evidence in sessions `#392` and `#556`, but write-ready preflight still
+  detoured before drafting, so the shipped patch is supervisor rescue/product
+  progress and the failure remains input for bounded M6.9 loop hardening rather
+  than autonomy credit
+- M6.9 loop hardening for the `#401` timeout/detour class is landed as product
+  progress: write-ready structural narrowing now trims both leading and
+  trailing partial fragments from broad refreshed cached windows, so a source
+  window plus multiple test windows can become an active tiny-draft context
+  instead of ending as `cached_window_incomplete` after exact-window refresh.
+  The original `#557` replay now evaluates as write-ready active locally, and
+  focused validation covered the exact work-loop/replay/session write-ready
+  matrix plus the full `tests/test_work_session.py` suite. This is still
+  supervisor rescue/product progress, not autonomy credit
+- The deterministic `m6_9-memory-taxonomy` dogfood scenario is landed as
+  supervisor/product progress for task `#573`. It registers a reusable M6.9
+  proof surface that writes the four currently writable coding memory kinds
+  (`reviewer-steering`, `task-template`, `failure-shield`, and `file-pair`),
+  proves the reviewer-steering missing-`--why` gate and direct
+  `reasoning-trace` schema-only rejection, and checks typed-memory list/search
+  plus source/test file-pair resolution. The mew-first attempts `#559` and
+  `#560` did not implement the scenario, so this closes the product gap but is
+  not autonomy credit. Validation covered
+  `./mew dogfood --scenario m6_9-memory-taxonomy --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_memory_taxonomy or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, and ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`
+- The `#574` mew-first retry exposed a second write-ready refresh recovery
+  issue: after manual targeted refresh reads, tiny-draft recovery still
+  preferred stale broad cached refs from `plan_item_observations`, so it
+  stopped again with `cached_window_incomplete`. The substrate now prefers
+  newer complete read windows when an active `blocked_on_patch` WorkTodo is
+  explicitly recovering a `refresh_cached_window` blocker, while leaving normal
+  smaller-window ranking unchanged. The follow-up `#574` retry then proved the
+  next failure mode: after the refresh blocker was cleared, the recovered
+  WorkTodo still carried the local "refresh cached windows" plan instead of the
+  task goal and only prompted the latest source/test pair, so the model drafted
+  an unrelated dogfood cleanup fallback. The substrate now treats refresh-plan
+  drafting state as recovered task-goal drafting, re-injects the task goal, and
+  keeps all structurally complete non-overlapping source/test refresh windows
+  in the tiny-draft prompt. Focused validation covered both regressions plus
+  the neighboring refresh-blocker tests; the full
+  `uv run pytest -q tests/test_work_session.py --no-testmon` run had one
+  unrelated hard-timeout threshold miss that passed on immediate focused rerun,
+  and ruff stayed green for `src/mew/work_loop.py` plus
+  `tests/test_work_session.py`. This is loop substrate hardening for the next
+  #574 retry, not autonomy credit
+- The follow-up `#574` retry is now landed as bounded mew-first implementation
+  evidence on `gpt-5.5/high`: session `#563` produced an on-scope paired
+  dry-run patch for `m6_9-active-memory-recall` after the failed-patch repair
+  substrate fix, the supervisor approved the paired source/test tools, and
+  commit `a1e18ef` adds a deterministic dogfood scenario proving active
+  typed-memory recall keeps a relevant file-pair memory while dropping a stale
+  file-pair memory with `precondition_miss`. Validation covered
+  `./mew dogfood --scenario m6_9-active-memory-recall --json`,
+  focused `uv run pytest -q tests/test_dogfood.py -k 'm6_9_active_memory_recall or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+  Count this as bounded mew-first evidence with human approval/review, not as
+  unattended auto-merge or enough evidence to close M6.9
+- The follow-up `#575` slice is now landed as bounded mew-first implementation
+  evidence on `gpt-5.5/high`: session `#564` produced an on-scope paired
+  dry-run patch for `m6_9-symbol-index-hit`, the supervisor approved the
+  paired source/test tools, and the scenario proves a deterministic
+  first-read/source lookup is served by the durable symbol/file-pair index with
+  `index_hit=true`, `fresh_search_performed=false`, and the expected
+  `src/mew/dogfood.py` -> `tests/test_dogfood.py` pair. Validation covered
+  `./mew dogfood --scenario m6_9-symbol-index-hit --json`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_symbol_index_hit or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+  Count this as bounded mew-first evidence with human approval/review, not as
+  unattended auto-merge or enough evidence to close M6.9
+- The follow-up `#576` slice is now landed as bounded mew-first implementation
+  evidence on `gpt-5.5/high`: session `#565` produced an on-scope paired
+  dry-run patch for `m6_9-repeated-task-recall`, the supervisor approved the
+  paired source/test tools, and the scenario proves the first deterministic
+  repeated-task proof shape. Repetition 1 starts without durable repeated-task
+  file-pair memory and records four fresh discovery/search steps; repetition 1
+  then writes typed file-pair memory; repetition 2 uses durable active
+  recall/index evidence, records two deliberation/search steps, resolves the
+  same `src/mew/dogfood.py` -> `tests/test_dogfood.py` pair, and keeps
+  `reviewer_rescue_edits=0`. Validation covered
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+  Count this as one proof-shape slice toward the repeated-task criterion, not
+  the full predeclared 10-shape gate
+- The follow-up `#584` slice is now landed as supervisor-rescue product
+  progress, not mew-first autonomy credit. Session `#572` exposed two bounded
+  substrate issues while trying to extend `m6_9-repeated-task-recall`: tiny
+  draft repair context should be suppressed when a failed patch has no
+  reconstructable proposal snippet, and explicit read-only refresh spans should
+  run before the tiny draft model even when the fast path is otherwise active.
+  Both substrate fixes are covered in `tests/test_work_session.py`. The
+  repeated-task dogfood scenario now covers two deterministic task shapes,
+  `bounded_source_test_pair` and `bounded_symbol_index_pair`; each shape starts
+  without durable file-pair memory, writes typed memory in repetition 1, then
+  uses durable recall/index evidence in repetition 2 with fewer
+  deliberation/search steps and `reviewer_rescue_edits=0`. Validation covered
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, focused
+  failed-patch/refresh work-session tests, targeted ruff, and
+  `git diff --check`.
+- The follow-up `#586` slice is now landed as bounded mew-first implementation
+  evidence with minor supervisor approval/verification recovery but no rescue
+  edits. Session `#573` produced the scoped source/test patch that adds
+  `per_shape_recalled_file_pair_counts` to the
+  `m6_9-repeated-task-recall` artifacts, making the repeated-task proof matrix
+  inspectable per deterministic shape while preserving the existing aggregate
+  fields. The first approval used an invalid `&&` verifier command, then the
+  supervisor re-approved with split verification and recorded the error as
+  operator recovery rather than mew failure. Validation covered
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run python -m unittest tests.test_dogfood`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  targeted ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
+  `git diff --check`. This improved the reporting substrate for the 10-shape
+  gate; by itself it did not increase the then-current shape count beyond 2/10.
+- The follow-up `#587` slice is now landed as mixed mew-first implementation
+  evidence. Session `#574` initially stopped on `cached_window_incomplete`
+  after broad refresh, then the supervisor supplied exact narrow cached windows
+  and a precise bounded steer. Mew produced the paired source/test dry-run
+  patch, the supervisor approved it, and no supervisor file edits or rescue
+  edits were needed. The repeated-task proof matrix now adds the
+  `bounded_commands_pair` shape, raising the live shape count to 3/10 while
+  keeping `reviewer_rescue_edits=0` and preserving the existing aggregate plus
+  per-shape artifacts. Count this as product progress with partial autonomy
+  credit, not unattended autonomy; a tiny supervisor cleanup renamed the stale
+  `covers_two_task_shapes` check to `covers_multiple_task_shapes` after the
+  third shape landed. Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run python -m unittest tests.test_dogfood`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  targeted ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
+  `git diff --check`.
+- The attempted `#588` fourth-shape slice reproduced the
+  `cached_window_incomplete` loop blocker before any patch landed: after exact
+  source/test anchor reads, the refresh path consumed broad structural windows
+  that missed the intended shape-list hunk or ended mid-block. The bounded
+  substrate repair `#589` is supervisor-owned product progress: write-ready
+  refresh recovery can now use ordinary model `search_text` anchors, not only
+  explicitly tagged refresh searches, to schedule exact `read_file` windows
+  after a structural refresh misses the edit surface. Focused validation covered
+  the new model-search-anchor regression plus nearby refresh-search tests,
+  targeted ruff for `src/mew/work_loop.py` and `tests/test_work_session.py`,
+  and `git diff --check`. Retry `#588` from a clean work session after this
+  repair; do not count the failed pre-repair attempt as shape proof.
+- The `#588` retry after `#589` is now landed as mixed mew-first/product
+  progress. Fresh session `#576` still initially read the wrong source area,
+  then the supervisor supplied exact cached windows and a precise bounded
+  steer. Mew produced and applied the paired source/test dry-run patch adding
+  `bounded_memory_explore_pair`, raising the repeated-task matrix to 4/10
+  deterministic shapes while preserving aggregate/per-shape artifacts and
+  `reviewer_rescue_edits=0`. Count this as product progress with partial
+  autonomy credit because detailed supervisor steer was still required.
+  Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run python -m unittest tests.test_dogfood`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  targeted ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
+  `git diff --check`.
+- Task `#590` added the fifth repeated-task proof shape,
+  `bounded_context_checkpoint_pair`, as supervisor-rescue product progress.
+  Work session `#577` reproduced the post-`#589` weakness: mew could locate
+  and partially draft the change, but after rejection/steer it still hit
+  `cached_window_incomplete` and then proposed an unrelated test-only
+  assertion. The supervisor rejected the incorrect draft and made the bounded
+  source/test edit directly. Count this as product progress, not mew-first
+  autonomy credit. Validation covered
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  targeted ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
+  `git diff --check`.
+- Task `#591` landed a bounded M6.9 substrate repair for the failure class
+  exposed by `#590`: write-ready structural completeness now accepts complete
+  indented assignment/list fragments and multi-line call fragments, such as
+  an in-function `shapes = [...]` block or `_scenario_check(...)`, while
+  preserving blockers for orphaned indented body fragments, single-line call
+  fragments, clause tails, unmatched parentheses, and mid-fragment starts. This
+  should reduce false `cached_window_incomplete` stops when a long function
+  contains the exact local edit surface. Validation covered focused
+  work-session tests for the new indented-assignment/call paths plus the
+  existing negative structural fragment cases, targeted ruff for
+  `src/mew/work_loop.py` and `tests/test_work_session.py`, and
+  `git diff --check`.
+- Task `#592` landed the sixth repeated-task proof shape,
+  `bounded_work_loop_pair`, after the `#591` write-ready repair. The first
+  pre-repair attempt drifted into an unrelated runtime-focus summary and hit an
+  unpaired-source-edit blocker. After the repair and exact local source
+  windows, mew retried the same paired dry-run patch, hit one ambiguous hunk,
+  then corrected it with broader unique test context. Count this as mixed
+  mew-first/product progress: mew produced the final paired source/test patch
+  and verification passed, but the supervisor supplied exact local cached
+  windows and one retry steer. The repeated-task matrix is now 6/10
+  deterministic shapes. Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#594` landed a second bounded M6.9 write-ready refresh repair after
+  the `#593` seventh-shape attempt read only the later
+  `covers_multiple_task_shapes` gate and missed the earlier shape-list edit
+  surface. Refresh search ranking now prefers same-path read windows that cover
+  multiple search anchors, so a `bounded_work_loop_pair`/shape-list anchor can
+  win over a later gate-only anchor when one 520-line read covers both. This
+  should make the next repeated-shape attempt less dependent on exact
+  supervisor line windows. Validation covered focused work-session tests for
+  refresh-search anchor ranking, nearby write-ready fast-path/preflight cases,
+  targeted ruff for `src/mew/work_loop.py` and `tests/test_work_session.py`,
+  and `git diff --check`.
+- Task `#593` landed the seventh repeated-task proof shape,
+  `bounded_memory_pair`, after a fresh mew-first session replaced the stale
+  pre-`#594` session context. The stale session repeatedly reported
+  `missing_exact_cached_window_texts` despite refreshed windows; the fresh
+  session read its own exact source/test windows, drafted the paired
+  source/test patch, and the supervisor approved without rescue edits. Count
+  this as mew-first product progress with a stale-session restart note, not a
+  hidden supervisor rescue. The repeated-task matrix is now 7/10 deterministic
+  shapes. Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#595` landed the eighth repeated-task proof shape,
+  `bounded_tasks_pair`, for `src/mew/tasks.py` paired with
+  `tests/test_tasks.py`. The fresh mew-first session read exact source/test
+  windows, drafted the paired source/test patch, and the supervisor approved
+  without rescue edits. The repeated-task matrix is now 8/10 deterministic
+  shapes. Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#596` landed the ninth repeated-task proof shape,
+  `bounded_runtime_pair`, for `src/mew/runtime.py` paired with
+  `tests/test_runtime.py`. The fresh mew-first session read exact source/test
+  windows, drafted the paired source/test patch, and the supervisor approved
+  without rescue edits. The repeated-task matrix is now 9/10 deterministic
+  shapes. Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#597` landed the tenth repeated-task proof shape,
+  `bounded_snapshot_pair`, for `src/mew/snapshot.py` paired with
+  `tests/test_snapshot.py`. The first session hit a transient empty model
+  response and then drifted into an unrelated runtime-focus summary; the
+  restarted mew-first session stayed on scope, read exact source/test windows,
+  drafted the paired source/test patch, and the supervisor approved without
+  rescue edits. The repeated-task matrix is now 10/10 deterministic shapes.
+  Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#598` added the deterministic `m6_9-phase1-regression` comparator
+  scenario. The first mew-first session drifted into an M6.11-only artifact
+  tweak after a transient empty model response, so the supervisor rescued the
+  product slice: the new M6.9 scenario reuses the frozen M6.6 comparator
+  fixture, marks `durable_recall_active=true`, applies the Phase 1 budget
+  ceiling `B0.iter_wall * 1.15`, preserves exact M6.6 case
+  mapping/provenance/timings, and registers the scenario in CLI choices and
+  dispatch. Count this as product progress, not autonomy credit. Validation
+  covered `./mew dogfood --scenario m6_9-phase1-regression --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_phase1_regression or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#599` added the deterministic `m6_9-reviewer-steering-reuse` durable
+  rule scenario. The mew-first session drifted into a rejected
+  `m6_9-symbol-index-hit` artifact tweak instead of adding the requested new
+  reviewer-steering proof, so the supervisor rescued the bounded product
+  slice. The new scenario writes approved `reviewer-steering` memory, recalls
+  it through a later coding task, fires it as a durable rule, blocks an
+  existing-scenario artifact tweak before implementation, and records
+  `simulated_rescue_edit_prevented=true` in a deterministic trace. Count this
+  as the first reviewer-correction durable-rule proof toward the M6.9
+  correction-fire criterion, but as product progress rather than mew-first
+  autonomy credit. Validation covered
+  `./mew dogfood --scenario m6_9-reviewer-steering-reuse --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_reviewer_steering or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#600` added the deterministic `m6_9-failure-shield-reuse` durable
+  block scenario. The mew-first session drifted into a rejected generic
+  dogfood cleanup/default patch instead of adding the requested failure-shield
+  proof, so the supervisor rescued the bounded product slice. The new scenario
+  writes two approved `failure-shield` memories, recalls them through a later
+  coding task, and blocks two previously reverted approaches before
+  implementation: a repeated stale cached-window retry and a generic cleanup
+  substitution for a durable-memory proof task. Count this as satisfying the
+  deterministic two-case failure-shield proof slice, but as product progress
+  rather than mew-first autonomy credit. Validation covered
+  `./mew dogfood --scenario m6_9-failure-shield-reuse --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_failure_shield or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#601` is supervisor-owned product progress that enabled the minimal
+  `reasoning-trace` typed-memory write gate and added deterministic
+  `m6_9-reasoning-trace-recall` proof. Reasoning-trace
+  writes now require explicit approval plus `--situation`, `--reasoning`,
+  `--verdict`, and `--abstraction-level shallow|deep`, and typed-memory
+  read/search/show surfaces preserve those fields. The dogfood scenario writes
+  one shallow mechanical trace and one deep abstract trace, recalls both in
+  later task iterations, records reviewer-confirmed shortened deliberation for
+  both, and proves at least one abstract-task recall. Validation covered
+  focused `tests/test_memory.py` reasoning-trace tests,
+  `./mew dogfood --scenario m6_9-reasoning-trace-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_reasoning_trace or m6_9_memory_taxonomy or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_memory tests.test_dogfood`, targeted
+  ruff for the edited memory/command/dogfood/test files, and `git diff --check`.
+- Task `#602` extended `m6_9-reviewer-steering-reuse` from one durable
+  reviewer-correction rule to a three-rule matrix. The scenario now writes and
+  later recalls rules for existing-scenario artifact tweaks, unpaired source
+  edits, and missing focused verifiers, then blocks all three before
+  implementation and records `simulated_rescue_edit_prevented_count=3`.
+  Validation covered `./mew dogfood --scenario m6_9-reviewer-steering-reuse --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_reviewer_steering or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_memory tests.test_dogfood`, targeted
+  ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
+  `git diff --check`.
+- Task `#613` landed the deterministic `m6_9-drift-canary` dogfood scenario as
+  a mew-first retry after M6.14 fixes. The initial session exposed real
+  wrong-target drift; the supervisor rejected the off-scope drafts instead of
+  rescuing the product patch, fixed the loop substrate, then retried the same
+  task. Session `#599` produced the on-scope paired source/test patch, the
+  supervisor approved it, one later M2 comparative dry-run family was rejected
+  as off-scope, and the session finished with task_done=true. Count this as
+  practical mew-first implementation evidence without rescue edits; reviewer
+  steer was needed only to reject the off-scope follow-up and finish after the
+  broad verifier. Validation covered
+  `./mew dogfood --scenario m6_9-drift-canary --json`,
+  `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#615` landed the deterministic
+  `m6_9-alignment-decay-rehearsal` dogfood scenario as a mew-first
+  implementation slice on `gpt-5.5/high`. Session `#600` produced the scoped
+  paired source/test patch and commit `4500e0d` added artifacts proving
+  `simulated_gap_or_decay=true`, `rehearsal_pass_ran=true`,
+  `recovered_within_iterations=1`, `reviewer_steering_required=false`, and
+  `prior_convention_reused=true`. The finish step exposed a post-verifier
+  stale-redraft substrate issue rather than a product failure: write-ready
+  memory tried to reapply stale cached windows and hit `old_text_not_found`.
+  Task `#616` / M6.14 closeout-repair episode repaired that class, and the
+  same session then finished. Count this as practical mew-first implementation
+  evidence without rescue edits; reviewer steer was needed only for loop
+  closeout repair, with no supervisor product rescue. Validation covered
+  `./mew dogfood --scenario m6_9-alignment-decay-rehearsal --json`,
+  `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, focused M6.14
+  closeout-repair work-session tests, and `git diff --check`.
+- Task `#617` strengthened the deterministic `m6_9-drift-canary` proof with a
+  novel-task exploration decision matrix as a mew-first retry after M6.14
+  repair task `#618`. Initial session `#601` exposed shallow alias/rename
+  patch-selection drift after explicit matrix requirements; the supervisor
+  rejected those drafts and did not land product rescue. Task `#618` then
+  fixed write-ready task-goal term extraction so milestone terms and structured
+  field terms survive into tiny draft context. Retried session `#602` landed
+  the scoped source/test patch in commit `ebccb4a`, adding
+  `unknown_memory_match`, `forced_source_read`, `forced_test_read`,
+  `no_silent_memory_reliance`, `reviewer_visible_exploration_reason`, and
+  `exploration_decision_matrix` to `novel_task_injection`. Count this as
+  `success_after_substrate_fix` / practical mew-first evidence without rescue
+  edits; reviewer steer was needed only to reject the wrong-target adjacent
+  alias/rename patches and retry after the bounded loop fix.
+  `rescue_edits=0`. Validation covered focused
+  `uv run pytest -q tests/test_dogfood.py -k "m6_9_drift_canary or m6_9_novel_task or scenario_choices" --no-testmon`,
+  broader `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff
+  for `src/mew/dogfood.py` plus `tests/test_dogfood.py`,
+  `./mew dogfood --scenario m6_9-drift-canary --json`, and `git diff --check`.
+- Task `#619` added the deterministic `m6_9-phase2-regression` comparator
+  scenario as a mew-first retry after M6.14 repair task `#626`. Initial
+  session `#609` reached the correct paired source/test Phase 2 patch but
+  failed normal dry-run writes twice with `duplicated_adjacent_context`.
+  The supervisor did not land the product patch; task `#626` repaired
+  same-patch repair hint preservation for duplicated-adjacent failures, then
+  retried session `#610` applied the scoped source/test patch and finished.
+  The scenario reuses the frozen M6.6 comparator fixture, marks
+  `phase=phase2`, `comparator_source=m6_6`,
+  `durable_recall_active=true`, and `budget_multiplier=1.0`, and proves the
+  stricter neutral budget `median_wall_seconds <= B0.comparator`. Count this
+  as `success_after_substrate_fix` / practical mew-first evidence without
+  rescue edits. Validation covered
+  `./mew dogfood --scenario m6_9-phase2-regression --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_phase2_regression or scenario_choices' --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- M6.9 resumed on 2026-04-25 after the clean pause boundary served its
+  purpose. Phase 1 substrate and fourteen post-M6.12 proof/report/substrate slices
+  have landed, and the repeated-task proof matrix has 10/10 deterministic shapes
+  plus per-shape reporting. The Phase 1 and neutral Phase 2 comparator
+  regression scenarios now pass against the frozen M6.6 comparator fixture,
+  and three reviewer-steering durable rules now fire in a later simulated
+  iteration. A
+  two-case failure-shield proof now blocks reverted approaches before
+  implementation. Reasoning-trace recall now has two later-iteration recalls
+  with reviewer-confirmed shortened deliberation, including one abstract task.
+  The drift canary now carries an explicit novel-task exploration matrix that
+  records source/test reads, unknown-memory handling, and reviewer-visible
+  reasoning instead of silently relying on memory similarity. The now-closed
+  M6.11 residual review, executor lifecycle, memory exploration, and
+  prompt/cache boundaries should be used to classify the next mew-first proof
+  slices.
+- M6.12 is now closed and can be used as read-only operator input for future
+  selector-intelligence work in M6.8.5
+- Phase 1 comparator regression exists as deterministic fixture-backed evidence;
+  no live fresh-CLI comparator rerun has been attempted for the post-split M6.9
+  slices
+- later observability and broader retrieval changes remain unstarted
+- deferred architecture decision from 2026-04-25, superseded by the
+  post-close deferred ledger: keep provider-specific prompt caching, full
+  concurrent executor work, and memory explore agentization out of M6.8 core
+  unless M6.8/M6.8.5 evidence directly triggers them.
+
+Resume condition:
+
+- fulfilled on 2026-04-25 by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`.
+  M6.10 showed that mew-first implementation can complete ordinary bounded
+  coding tasks with clean/practical success in 7 of the latest 10 attempts,
+  `rescue_edits=0` for counted successes, and every failure classified through
+  the calibration-economics surface.
+- fulfilled again on 2026-04-25 by the M6.14 close loop: task `#613` exposed
+  the wrong-target drift class, M6.14 fixed the loop policy/substrate, and the
+  same task landed as a verified mew-owned retry in commit `4e62c4b`.
+- fulfilled again on 2026-04-25 by the M6.14 closeout-repair episode: task
+  `#615` landed the alignment-decay proof as mew-authored code, task `#616`
+  fixed the stale-redraft finish blocker, and the same session finished.
+- fulfilled again on 2026-04-25 by the M6.14 required-field repair episode:
+  task `#617` first exposed shallow alias/rename drift, task `#618` preserved
+  structured field terms in write-ready draft context, and task `#617` then
+  landed the novel-task exploration matrix as mew-authored code in commit
+  `ebccb4a`.
+- fulfilled again on 2026-04-25 by the M6.14 duplicated-adjacent repair
+  episode: task `#619` first exposed same-patch repair loss after
+  duplicated-adjacent write failures, task `#626` preserved failed patch repair
+  hints for that class, and task `#619` then landed the neutral Phase 2
+  comparator regression scenario as mew-authored code.
+- next M6.9 work should continue from the #619/M6.14 duplicated-adjacent
+  repair boundary. The next highest-value criterion is close-gate aggregation
+  of durable-recall evidence and any remaining measurable comparator proof,
+  unless a fresh M6.9 failure requires another bounded M6.14 repair episode
+  first.
+- `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md` now records the close-gate
+  aggregation result as `CLOSE_READY`. Task `#627`
+  (`M6.9 repeated-task five-repetition close-gate proof`) closed criterion 1
+  by extending repeated-task proof to five repetitions with per-shape wall-time
+  / deliberation evidence and `reviewer_rescue_edits=0`.
+
+Close decision:
+
+- M6.9 is closed. Preserve the audit caveats: some wall-time and comparator
+  evidence is deterministic fixture evidence rather than a fresh external CLI
+  rerun, and earlier proof slices include supervisor-owned product progress.
+  Later M6.9 slices, especially #613/#615/#617/#619/#627 after M6.14 repair
+  episodes, provide the practical mew-first proof without hidden product
+  rescue.
+
+### M6.10: Execution Accelerators and Mew-First Reliability
+
+Status: `done`.
+
+Goal:
+
+- make mew-first implementation economical enough to use in place of Codex CLI
+  for ordinary bounded coding tasks by reducing drift, rescue edits, and
+  repeated read-only churn through short-horizon Todo, structured rejection,
+  bounded exploration when justified, and M6.12-style calibration economics
+
+Entry gate:
+
+- M6.7 must be closed
+- M6.9 must have enough Phase 1 substrate to keep Todo and Explorer clearly
+  separate from durable coding memory, especially D2/D3/D6 decisions
+- M6.12 failure-science instrumentation must be closed so M6.10 can consume
+  existing attempt/failure evidence instead of inventing a new ledger
+- Todo and structured rejection/frontier controls land before Explorer;
+  Explorer is not a substitute for M6.8 task selection or M10 multi-agent
+  execution
+
+Progress:
+
+- entry gates are now satisfied: M6.7, M6.9 Phase 1 substrate, M6.11 residual
+  loop stabilization, and M6.12 failure-science instrumentation are closed
+  enough to support this pivot
+- active pivot was made on 2026-04-25 because the latest mew-first evidence
+  shows repeated-task shapes can succeed, but abstract implementation proof
+  slices still drift into existing-surface polish or generic cleanup without a
+  stronger short-horizon frontier and economics loop
+- Calibration D0 landed as `mew metrics --mew-first`: the current
+  ROADMAP_STATUS-backed report classifies the latest 10 M6.9 implementation
+  slices as 2 clean, 2 practical, 1 partial, 3 supervisor-rescue, 1
+  supervisor-owned, and 1 supervisor-owned-or-unknown. The M6.10 reliability
+  gate is not met yet: 4/10 clean-or-practical versus the 7/10 threshold.
+  Validation covered `uv run pytest -q tests/test_mew_first_calibration.py
+  tests/test_metrics.py --no-testmon`, `./mew metrics --mew-first --json`,
+  `./mew metrics --mew-first`, targeted ruff, and `git diff --check`.
+- Calibration D1 landed by widening `mew metrics --mew-first` from the original
+  M6.9 attempt section to the ordered M6.9 + M6.10 attempt sections. This lets
+  post-D1/D2 M6.10 mew-first attempts move the reliability gate instead of
+  remaining invisible behind the older M6.9 baseline. Validation covered
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon` and
+  targeted ruff.
+- Todo D1 landed as session-scoped `mew work <task-id> --todo-add`,
+  `--todo-update`, and `--todo-list` controls backed by per-session
+  `work_todos`, explicit statuses, duplicate-open-item guards, and a
+  single-`in_progress` guard. It was used in real task #603 / work session
+  #588 to track the Todo D1 implementation smoke. Validation covered
+  `uv run pytest -q tests/test_work_todos.py --no-testmon`, targeted ruff,
+  command smoke for `--todo-add`/`--todo-update`/`--todo-list`, and work-session
+  resume JSON showing the session Todo list.
+- Structured rejection/frontier D1 landed by turning `mew work --reject-tool`
+  and reply-file reject actions into a per-session `active_rejection_frontier`
+  plus retained `rejection_frontiers` entries. Each frontier records the
+  rejected tool, path, reason, drift class, rejected patch family, stop rule,
+  and same-task next action. The first real smoke was task #604 / work session
+  #589, which rejected a generic cleanup substitution dry-run before apply and
+  surfaced the next action in `mew work 604 --session --resume`.
+- Todo D2 landed by surfacing open session `work_todos` on the reviewer-facing
+  `mew focus` active-work-session surface while keeping done items out of the
+  compact view. The real smoke was task #605 / work session #590, where
+  `mew focus --kind coding` showed `work_todos: work-todo-590-1
+  [in_progress] Confirm focus renders open work todos`. Validation covered
+  `uv run pytest -q tests/test_brief.py --no-testmon`, targeted ruff, and
+  `git diff --check`.
+- Task `#606` landed the first post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by exposing `included_attempt_sections` in the
+  mew-first calibration JSON/report so reviewers can confirm M6.9 + M6.10 are
+  both in the scoring window. The initial mew-first session spent four
+  read/search steps before a reviewer steer narrowed it to one paired patch;
+  mew then drafted the source/test dry-run patch, the supervisor approved it
+  without rescue edits, and verification passed. Count this as practical
+  mew-first autonomy credit, not clean, because the reviewer steer was needed
+  to stop read-only churn. Validation covered `uv run pytest -q
+  tests/test_mew_first_calibration.py --no-testmon`, targeted ruff,
+  `git diff --check`, and `./mew metrics --mew-first`.
+- Task `#607` landed the second post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by exposing `success_gap` in the mew-first
+  calibration gate/report so reviewers can see how many more practical/clean
+  successes are needed. The first reviewer-rejected patch had the wrong target
+  and only formatted the existing `success_rate`; after the reviewer steer,
+  mew drafted the correct paired source/test dry-run patch, the supervisor
+  approved it without rescue edits, and verification passed. Count this as
+  practical mew-first autonomy credit, not clean, because the reviewer steer
+  was needed after the wrong-target patch. Validation covered `uv run pytest -q
+  tests/test_mew_first_calibration.py tests/test_metrics.py --no-testmon`,
+  targeted ruff, `git diff --check`, and `./mew metrics --mew-first`.
+- Task `#608` landed the third post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by making `included_attempt_sections` reflect the
+  default attempt headings actually found in the source text, in document order,
+  instead of always reporting every default heading. The fresh mew-first session
+  read the scoped source/test files, drafted the paired source/test dry-run
+  patch, and the supervisor approved it without rescue edits. Count this as
+  clean mew-first autonomy credit. Validation covered `uv run pytest -q
+  tests/test_mew_first_calibration.py tests/test_metrics.py --no-testmon`,
+  targeted ruff, `git diff --check`, and `./mew metrics --mew-first`.
+- Task `#609` landed the fourth post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by exposing `attempt_window_task_ids` in the
+  calibration summary and `attempt_window: #...` in the text report so the
+  moving scoring window is reviewer-visible. The first reviewer-rejected patch
+  had the wrong target and only formatted the existing `success_rate`; after the
+  explicit same-task steer, mew drafted the correct paired source/test dry-run
+  patch and the supervisor approved it without rescue edits. Count this as
+  practical mew-first autonomy credit, not clean, because reviewer steering was
+  required after the wrong-target patch. Validation covered `uv run pytest -q
+  tests/test_mew_first_calibration.py tests/test_metrics.py --no-testmon`,
+  targeted ruff, `git diff --check`, and `./mew metrics --mew-first`.
+- Task `#610` landed the fifth post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by exposing `gate_blocking_task_ids` under the
+  calibration gate and `gate_blockers: #...` in the text report so reviewers can
+  see which current-window attempts keep the 7/10 gate from passing. The fresh
+  mew-first session read the scoped source/test files, drafted one paired
+  source/test dry-run patch, and the supervisor approved it without rescue
+  edits or reviewer intervention. Count this as clean mew-first autonomy
+  credit. Validation covered `uv run pytest -q tests/test_mew_first_calibration.py
+  tests/test_metrics.py --no-testmon`, targeted ruff, `git diff --check`, and
+  `./mew metrics --mew-first`.
+- Task `#611` landed the sixth post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by exposing `gate_success_task_ids` under the
+  calibration gate and `gate_successes: #...` in the text report so reviewers
+  can see which current-window attempts count toward the clean/practical gate.
+  The mew-first session eventually drafted the correct paired source/test
+  dry-run patch and the supervisor approved it without rescue edits. Count this
+  as clean mew-first autonomy credit because no reviewer correction or rescue
+  edit was needed; the multiple read/search and cached-window refresh steps are
+  still M6.10 friction to watch separately.
+  Validation covered `uv run pytest -q tests/test_mew_first_calibration.py
+  tests/test_metrics.py --no-testmon`, targeted ruff, `git diff --check`, and
+  `./mew metrics --mew-first`.
+- Task `#612` landed the seventh post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by exposing `gate_blocker_result_class_counts` under
+  the calibration gate and `gate_blocker_classes: ...` in the text report so
+  reviewers can see the class breakdown of current gate blockers. The
+  mew-first session read the scoped source/test files, drafted the correct
+  paired source/test dry-run patch, and the supervisor approved it without
+  rescue edits or reviewer intervention. Count this as clean mew-first autonomy
+  credit. Validation covered `uv run pytest -q
+  tests/test_mew_first_calibration.py tests/test_metrics.py --no-testmon`,
+  targeted ruff, `git diff --check`, and `./mew metrics --mew-first`.
+
+Close decision:
+
+- `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md` marks M6.10 close-ready.
+- The post-D0/D1/D2 moving window is 7/10 clean/practical successes after
+  tasks #606-#612; counted successes have `rescue_edits=0`, and every blocker
+  is classified through the calibration economics surface.
+- Explorer D1 is explicitly deferred, not a close blocker: the gate passed
+  without Explorer, so read-only exploration churn is friction to keep watching
+  during M6.9 rather than a measured M6.10 blocker.
+
+Next action:
+
+- resume M6.9 at the recorded drift-canary / novel-task and simulated
+  alignment-decay proof boundary.
+
+### M6.11: Loop Stabilization
+
+Status: `done`.
+
+Goal:
+
+- make the drafting path between `edit_ready` and reviewer-visible dry-run
+  preview contract-driven, replayable, and recoverable
+- finish the residual review/executor/memory-explore boundaries so future
+  mew-first implementation attempts fail in classifiable, recoverable ways
+  instead of mixing review, executor state, memory exploration, and task-spec
+  causes
+
+Entry gate:
+
+- M6.7 must be closed
+- `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md` must exist
+- `docs/REVIEW_2026-04-22_LOOP_STABILIZATION_DESIGN_REVIEW.md` must call the
+  design implementation-ready
+- active M6.9 surface expansion must be frozen
+
+Closed proof:
+
+- `docs/M6_11_CLOSE_GATE_AUDIT_2026-04-25.md` records the accepted close-gate
+  audit. It marks the M6.11 Done-when checklist close-ready, separates replay
+  calibration from canonical ledger evidence, and documents the 20-slice
+  `#399/#401` incidence reduction from the M6.7 fallback baseline to the
+  post-M6.11 ledger batch.
+- Validation for the close audit:
+  `./mew dogfood --all --json` passed,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_11' --no-testmon` passed with
+  6 tests, and
+  `./mew proof-summary .mew/replays/work-loop --m6_11-phase2-calibration --strict --json`
+  returned `ok=true`.
+- The final codex-ultra close review approved the corrected audit:
+  close-ready, no findings, and no further bounded calibration task required
+  before close.
+
+Residual closed scope:
+
+- Phase 5 isolated review lane: `done` in `f69b94b`. Validated patch
+  artifacts can pass through `review_patch_draft_previews()` before
+  approval/apply; accepted reviews preserve previews, while rejected reviews
+  return `review_rejected` with `revise_patch_from_review_findings`,
+  `patch_draft_id`, review metadata, and preserved findings. Task `#577` is
+  intentionally recorded as `product_progress_supervisor_rescue` because the
+  mew-first attempt still timed out after the bounded substrate repair.
+- Phase 6 executor lifecycle tightening: `done` through task `#583`.
+  `active_work_todo.executor_lifecycle` is now an overlay rather than the
+  canonical draft state: the recorder accepts `queued`, `executing`,
+  `completed`, `cancelled`, and `yielded`, while producer paths record
+  executing/completed/yielded/cancelled across non-batch tools, batch tools,
+  model/tool failure replay, explicit stops, user interrupts, and `mew repair`
+  stale-running-work recovery. The draft-domain `WorkTodo.status` and blocker
+  fields remain unchanged by lifecycle updates.
+- Provisional read-only `MemoryExploreProvider` v0: `done` in task `#580`.
+  Memory-assisted exploration now feeds the same explore handoff keys as
+  filesystem exploration (`target_paths`, `cached_window_refs`,
+  `candidate_edit_paths`, `exact_blockers`, `memory_refs`) without adding a
+  second autonomous planner, new CLI/tool surface, writes, or prompt rewrites.
+  The privacy boundary rejects traversal, tilde, drive-letter absolute, NUL,
+  and private memory paths from path-bearing fields and omits free-text fields
+  from `memory_refs`.
+- Prompt/cache boundary observability: `done` in task `#582`. Work-session
+  resume now exposes a compact `prompt_cache_boundary` derived from the
+  existing draft prompt contract/runtime/static/dynamic/retry metrics while
+  preserving the flat resume fields.
+- Residual close audit: `done` in
+  `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The audit maps each
+  residual slice to reviewed commits, records current dogfood/proof-summary
+  validation, and returns active focus to M6.9.
+
+Evidence:
+
+- four analysis/review docs now converge on the same diagnosis:
+  mew is strong through exact cached windows but weak at the drafting layer
+  between `edit_ready` and dry-run patch generation
+- the canonical design now fixes the previously blocking review issues:
+  replay bundles moved into Phase 2 and `WorkTodo.status` is the canonical
+  source of truth with session phase derived from it; the formerly deferred
+  `MemoryExploreProvider` protocol is now part of the residual active scope
+- the final `claude-ultra` review explicitly says the design is
+  implementation-ready and that only refusal separation is worth pulling
+  forward before implementation
+- open loop failure buckets remain concrete and named:
+  `#399` exact cached windows but no safe dry-run patch,
+  `#401` exact cached windows reached but timeout before drafting
+- residual Phase 5 evidence: task `#577` exposed a repeated tiny-draft timeout
+  in mew-first mode; bounded substrate repair `#578` landed in `c5db6b4`, and
+  the Phase 5 review-lane product slice landed as a supervisor rescue in
+  `f69b94b`. Validation: `uv run pytest -q tests/test_work_session.py
+  --no-testmon` passed with 605 tests for the substrate repair,
+  `uv run pytest -q tests/test_patch_draft.py --no-testmon` passed with 38
+  tests for Phase 5, ruff passed for touched files, `git diff --check` was
+  clean, and codex-ultra approved both slices.
+- residual Phase 6 evidence: task `#579` exposed the same
+  `drafting_timeout_after_complete_cached_refs_no_artifact` mew-first blocker
+  in session `#568`; the executor-lifecycle product slice landed as a
+  supervisor rescue. Validation: `uv run python -m pytest -q
+  tests/test_work_session.py -k "executor_yield or draft_failure_bundle"
+  --no-testmon` passed, full `uv run pytest -q tests/test_work_session.py
+  --no-testmon` passed with 605 tests and 24 subtests, ruff passed for touched
+  files, `git diff --check` was clean, and codex-ultra approved review session
+  `019dc24c-11db-7951-a51a-63595df08087`.
+- residual Phase 6 expansion evidence: task `#583` completed the remaining
+  executor lifecycle overlays as a reviewed supervisor rescue after two
+  mew-first attempts timed out before a patch. Validation: `uv run pytest -q
+  tests/test_work_session.py -k 'executor_lifecycle or draft_failure_bundle'
+  --no-testmon` passed with 7 tests, full `uv run pytest -q
+  tests/test_work_session.py --no-testmon` passed with 613 tests and 24
+  subtests, `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
+  with 24 tests and 4 subtests, ruff passed for touched files, `git diff
+  --check` was clean, and codex-ultra approved review session
+  `019dc2b2-22d9-7cb0-b915-4d9f2b89df2b`.
+- residual MemoryExploreProvider evidence: task `#580` first exposed a narrow
+  mew-first missing-target substrate blocker, fixed by `97433f0`; after retry,
+  mew implemented the provider and repaired two codex-ultra privacy review
+  findings. This is counted as `success_after_substrate_fix`: the implementation
+  patch owner is mew, with Codex acting as reviewer/approver. Validation:
+  `uv run pytest -q tests/test_memory_explore.py tests/test_work_session.py -k
+  'memory_explore or active_memory' --no-testmon` passed with 5 tests, `uv run
+  pytest -q tests/test_memory_explore.py --no-testmon` passed with 3 tests,
+  ruff passed for touched files, `git diff --check --cached` was clean, and
+  codex-ultra approved final static review session
+  `019dc287-8591-7610-a0c7-135d5a52cc98`.
+- residual prompt/cache evidence: task `#582` exposed one non-counted mew-first
+  drift patch that codex-ultra rejected, then the supervisor reworked the slice
+  to the intended resume boundary. This is recorded as `supervisor_rescue`, not
+  mew-first autonomy credit. Validation: `uv run pytest -q
+  tests/test_work_session.py -k 'prompt_cache_boundary or draft_prompt'
+  --no-testmon` passed with 1 test, full `uv run pytest -q
+  tests/test_work_session.py --no-testmon` passed with 607 tests and 24
+  subtests, `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
+  with 24 tests and 4 subtests, ruff passed for touched files, `git diff
+  --check` was clean, and codex-ultra approved review session
+  `019dc29c-2015-7432-b44e-06eca6f517a5`.
+
+Historical proof trail before core close:
+- refusal separation is landed in `src/mew/codex_api.py`, but the later
+  drafting path still needs to consume `model_returned_refusal` through the
+  new blocker/recovery contract
+- `WorkTodo` now exists as a bounded session-state frontier skeleton, and the
+  first offline `PatchDraftCompiler` scaffold now exists in
+  `src/mew/patch_draft.py`; the first offline `PatchDraft` -> dry-run preview
+  translator also now exists there, and the first shadow-only live bridge in
+  `src/mew/work_loop.py` now records validated/blocker/exception compiler
+  observations plus replay paths without changing outer action semantics; the
+  write-ready path now also attempts a dedicated tiny `patch_proposal |
+  patch_blocker` lane first and consumes validated previews or blockers
+  authoritatively on success, but broader recovery/follow-status integration
+  and live calibration proof still remain open
+- the write-ready prompt envelope is now reduced and versioned as `v2`, and
+  live shadow collection on task `#402` cut write-ready `think.prompt_chars`
+  from roughly `41k-42k` to about `20k`, but the collected bundles remain
+  `work-loop-model-failure.request_timed_out` with `compiler_bundles=0`, so
+  prompt reduction landed as bounded progress rather than a complete fix
+- the first fixture lane under `tests/fixtures/work_loop/patch_draft/` now
+  exists for happy-path, ambiguous-old-text, and stale-cache offline compiler
+  scenarios, and compiler replay bundles now persist canonical compiler
+  inputs (`todo`, `proposal`, `cached_windows`, `live_files`,
+  `allowed_write_roots`) plus `validator_result` under
+  `.mew/replays/work-loop/...`, but the broader recovery/follow-status
+  harnesses and rollout calibration gate is now implemented; this section will
+  measure whether off-schema/refusal incidence stays within M6.11 calibration
+  gate thresholds
+- draft-related model failures and offline compiler captures now share the same
+  replay root, and the Phase 2/3 calibration checker for off-schema/refusal
+  incidence from those bundles now exists; the live replay root is now
+  populated, but the current sample is still `100% request_timed_out`, so the
+  calibration gate is failing on concentration before any compiler bundles are
+  produced
+- Strengthen-Iter-B is now landed: both replay bundle families stamp additive
+  cohort fields (`git_head`, honest `bucket_tag`, `blocker_code`), and
+  `mew proof-summary --m6_11-phase2-calibration` now reports additive
+  `current_head` / `legacy` / `unknown` cohort summaries without changing the
+  top-level threshold math. The existing mixed session-392 root stays honestly
+  red at the top level and currently lands under `cohort[unknown]`, which means
+  the measurement gap is now narrowed to collecting fresh current-HEAD bundles
+  rather than guessing from stale mixed-history calibration.
+- Fresh current-HEAD live evidence now exists beyond `#402`. Two bounded
+  canary slices on historical session `#392` (`#402`) emitted concrete
+  compiler blockers instead of `request_timed_out`
+  (`unpaired_source_edit_blocked`, `insufficient_cached_test_context`), and
+  one fresh non-`#402` bounded slice on session `#393` (`#403`) emitted two
+  additional compiler blockers
+  (`missing_exact_cached_window_texts`, `insufficient_cached_context`) on a
+  clean paired `src/mew/dogfood.py` + `tests/test_dogfood.py` surface. The
+  current-head cohort is therefore no longer empty and no longer timeout-only,
+  but the coarse calibration bundle taxonomy still reports
+  `patch_draft_compiler.other=4` and fails concentration.
+- Blocker-code visibility is now landed in `src/mew/proof_summary.py` and
+  `tests/test_proof_summary.py`. `mew proof-summary --m6_11-phase2-calibration`
+  now renders additive `blocker_code_breakdown` lines at top level and per
+  cohort without changing threshold math, dominant bundle-type math, or cohort
+  classification. This makes the current-head shift visible to the operator:
+  current-head blocker codes are now
+  `missing_exact_cached_window_texts=1`,
+  `insufficient_cached_context=1`,
+  `unpaired_source_edit_blocked=1`,
+  `insufficient_cached_test_context=1`, while current-head timeout incidence is
+  zero.
+- draft-time recovery still collapses to generic `replan`
+- A first counted mew-first reviewer-visible implementation slice has now
+  landed: task `#454` / session `#438` produced a paired
+  `src/mew/patch_draft.py` + `tests/test_patch_draft.py` dry-run preview,
+  approval/apply/verify completed without supervisor code rescue, codex-ultra
+  reviewed it as `STATUS: PASS` / `COUNTEDNESS: counted`, and commit
+  `857c6a1` recorded the change plus calibration ledger row. This satisfies
+  the reviewer-visible implementation-slice progress signal, while the
+  stricter replay-bundle / tiny-compiler calibration gate remains open because
+  the slice did not emit a current-head replay bundle.
+- `docs/PROPOSE_M6_11_CLOSE_GATE_STRENGTHEN_2026-04-22.md` is now adopted:
+  M6.11 close additionally requires dogfood scenario registration, a 20-slice
+  `#399/#401` incidence gate, and a Phase 2/3 replay-bundle calibration
+  checkpoint. These strengthen close verification but do not widen the
+  implementation scope beyond Phases 0-4
+- Phase 4 follow-status parity is now landed. `work --follow-status` overlays
+  fresher or equal-timestamp-but-richer live session resume state over stale
+  follow snapshots, surfaces `resume_source`, `active_work_todo`,
+  `blocker_code`, and canonical `next_recovery_action`, and keeps
+  `pending_approval_count` aligned to the effective resume source. Live `#402`
+  now reports `resume_source=session_overlay`, `phase=blocked_on_patch`,
+  `blocker_code=insufficient_cached_context`,
+  `next_recovery_action=refresh_cached_window`, and a populated
+  `suggested_recovery` command while preserving snapshot-owned metadata. Final
+  codex-ultra and claude-ultra reviews approved this bounded slice.
+- The first four close-gate evidence slices are now landed in `src/mew/dogfood.py`:
+  five `m6_11-*` scenarios are registered; `m6_11-compiler-replay` passes as
+  deterministic offline `#399` evidence using the patch-draft fixtures,
+  `m6_11-drafting-recovery` passes as deterministic offline
+  blocked-on-patch follow-status/resume parity evidence, and
+  `m6_11-draft-timeout` now passes as deterministic offline `#401` timeout
+  recovery evidence. The drafting-recovery slice now:
+  - evaluates the direct `build_work_session_resume(...)` call under the same
+    dogfood workspace root as the CLI follow-status command,
+  - uses the equal-timestamp-but-richer overlay path rather than the easier
+    `session_state_newer` path,
+  - asserts parity for the full `active_work_todo` payload, blocker detail,
+    canonical `next_recovery_action`, `next_action`, suggested-recovery
+    reason/shape, and `status=stale`,
+  The timeout slice now:
+  - narrows timeout detection so numeric `think.timeout_seconds` alone does
+    not trigger timeout recovery,
+  - keeps the fixture blocker realistic
+    (`refresh_cached_window`) while resume/follow-status derive
+    `resume_draft_from_cached_windows` from the recovery plan,
+  - restores the aggregate `m6_11-*` subset so `m6_11-draft-timeout` is
+    asserted as `pass`.
+  The refusal-separation slice now:
+  - promotes tiny-draft refusal exceptions into the same
+    `blocked_on_patch` blocker contract as validator-derived blockers,
+  - emits `model_returned_refusal` with `inspect_refusal` through resume and
+    `work --follow-status`,
+  - strips fixture-provided `active_work_todo` before the dogfood run so
+    resume/follow must reconstruct the refusal blocker from the persisted
+    refusal turn itself rather than replaying pre-seeded todo state.
+  The phase4-regression slice now:
+  - loads a pinned `B0.iter_wall` fixture plus the frozen M6.6-A/B/C
+    comparator cases,
+  - enforces the exact `(case_id, shape)` mapping rather than only the id set,
+  - preserves per-case `source_reference` provenance in emitted artifacts,
+  - proves the Phase 4 regression budget by checking median comparator wall
+    time against the pinned `B0.iter_wall × 1.10` ceiling.
+  All five `m6_11-*` dogfood scenarios now pass, and the aggregate
+  `m6_11-*` subset is honestly `5 pass`.
+  Final codex-ultra and claude-ultra reviews both approved the
+  `m6_11-phase4-regression` slice after a small follow-up fix pass.
+- Fresh post-`395f9b4` current-head measurement now exists again on the
+  `patch_draft` pair. Task `#466` / session `#456` reached exact
+  non-truncated paired cached windows at
+  `src/mew/patch_draft.py:416-451` and
+  `tests/test_patch_draft.py:576-603`, then emitted a counted
+  `work-loop-model-failure.request_timed_out` replay bundle at
+  `.mew/replays/work-loop/2026-04-23/session-456/todo-no-todo-456/turn-2173/attempt-1/report.json`.
+  `mew proof-summary --m6_11-phase2-calibration` now reports
+  `cohort[current_head]: total=1` with
+  `bundles=work-loop-model-failure.request_timed_out=1`. This is honest
+  current-head evidence after the guidance-aware finish-gate fix, but it also
+  means timeout incidence on the active head is no longer zero.
+- Fresh post-`e9a13f9` measurement has now started, and the first replay on
+  that head is reviewer-rejected rather than counted. Task `#468` / session
+  `#458` reached exact paired cached windows on the `patch_draft` pair and
+  emitted a `patch_draft_compiler` replay bundle, but the proposed dry-run
+  patch invented absolute-path cached-window fallback behavior and even
+  asserted the wrong artifact kind in the paired test. The replay metadata is
+  therefore backfilled to `calibration_counted=false`, and
+  `mew proof-summary --m6_11-phase2-calibration` now reports
+  `cohort[current_head]: total=0` plus
+  `cohort[current_head]_non_counted: total=1` on `e9a13f9`.
+- Task `#469` / session `#459` then validated the generalized finish gate on
+  the `work_loop` guidance surface (`src/mew/work_loop.py:1750-1809` +
+  `tests/test_work_session.py:9913-10252`). The focused verifier passed, the
+  model attempted `finish`, and the gate correctly converted that into `wait`
+  because there was still no same-session replay artifact or paired dry-run
+  patch evidence. This is useful non-counted no-artifact validation, not
+  replay incidence, so it is tracked in the calibration ledger rather than in
+  `proof-summary`.
+- A first valid counted bundle on `e9a13f9` now exists again through task
+  `#470` / session `#460`. Attempt 1 on the exact `patch_draft` pair emitted a
+  replay bundle but auto-marked itself non-counted because proposal and
+  validator shared the same model-authored non-native `patch_blocker` code
+  `insufficient_cached_window_context`. Attempt 2 broadened the same paired
+  windows to `src/mew/patch_draft.py:416-519` and
+  `tests/test_patch_draft.py:576-639`, then model turn `#2193` emitted a
+  counted `work-loop-model-failure.request_timed_out` report at
+  `.mew/replays/work-loop/2026-04-23/session-460/todo-no-todo-460/turn-2193/attempt-1/report.json`.
+  `mew proof-summary --m6_11-phase2-calibration` now reports
+  `cohort[current_head]: total=1`,
+  `bundles=work-loop-model-failure.request_timed_out=1`, and
+  `cohort[current_head]_non_counted: total=2` on `e9a13f9`.
+- Commit `ca9e52b` only records roadmap/ledger/review evidence; it does not
+  change the runtime surface. However, `mew proof-summary` cohorts are keyed
+  to the literal current git HEAD, so after `ca9e52b` those `e9a13f9` replay
+  bundles move under `cohort[legacy]` and literal
+  `cohort[current_head]: total=0` again. Treat `e9a13f9` as the last runtime
+  measurement head, but do not claim current-head coverage on `ca9e52b`
+  without a fresh replay/model-failure bundle or an explicit future
+  measurement-head override.
+- Later M6.11 runtime-head evidence moved through the same pattern and is now
+  recorded in the canonical calibration ledger. Runtime head `b650319`
+  fixed Codex stream read timeouts and task `#498` / session `#481` emitted a
+  reviewer-approved counted native `no_material_change` replay on the
+  `codex_api` pair. Commit `3faed1c` only recorded that ledger evidence, so
+  literal `current_head` reset while
+  `mew proof-summary --m6_11-phase2-calibration --measurement-head b650319...`
+  preserves the runtime-head view (`measurement_head: total=1,
+  patch_draft_compiler.no_material_change=1`). This establishes the rule for
+  evidence-only commits: use `--measurement-head` for runtime-head accounting,
+  but do not use it for fresh live proof selection.
+- Two subsequent literal-head `work_session` slices produced non-counted
+  fix-first infrastructure evidence rather than replay incidence. Task `#499`
+  on `3faed1c` showed that an unnumbered cue-only refresh steer was consumed
+  as terminal wait; `1c018f7` fixed that by emitting bounded
+  explicit-refresh `search_text` actions. Task `#500` on `1c018f7` then
+  showed the next gap: after successful explicit-refresh search results,
+  preflight returned wait instead of reading widened windows around the found
+  anchors. The current patch fixes that search-result-to-read recovery and
+  refuses to fall back to stale older search anchors; codex-ultra approved the
+  patch after focused and full `tests/test_work_session.py` validation.
+- Task `#501` on `777e5f7` then verified the search-result-to-read path far
+  enough to read a widened target window, but exposed two more non-counted
+  recovery defects: target paths could narrow to only one side of the
+  source/test pair, and a search result could prefer a self-test/query fixture
+  line over the actual definition anchor. The current follow-up patch augments
+  target paths from completed explicit-refresh search calls and prefers
+  `def` / `class` / `def test_` snippets over query fixture lines while
+  preserving stale-search protection. Codex-ultra approved the patch after
+  focused and full `tests/test_work_session.py` validation.
+- Task `#502` on `d2f5e32` then showed the paired-anchor fix still depended
+  on the compact recent-tool window: the source/test explicit refresh searches
+  were both successful, but preflight recovered only the test-side widened read
+  because the source-side search could fall out of the compact context used by
+  the deterministic preflight. The current patch adds a bounded
+  `explicit_refresh_search_tool_calls` context lane containing only completed
+  explicit-refresh searches and makes preflight consult it before ordinary
+  recent tool calls. Codex-ultra approved the patch after a requested
+  completed-only filter fix and full `tests/test_work_session.py` rerun.
+- Task `#503` on `2523622` then validated that recovery path live: after one
+  setup broad-read guard, the session moved from explicit-refresh
+  `search_text` to paired widened `read_file` windows for
+  `src/mew/work_session.py` and `tests/test_work_session.py`, passed the
+  scoped verifier, and finished with no material change. Codex-ultra approved
+  the classification as useful non-counted preflight validation, not M6.11
+  incidence, because the session emitted no replay bundle, no compiler
+  artifact, no reviewer-visible dry-run patch, and no source/test diff.
+- Task `#504` on `c099e4c` exposed the next non-counted fix-first gap on the
+  `proof_summary` pair: resume marked paired source/test cached windows as
+  edit-ready, but write-ready preflight still returned
+  `insufficient_cached_window_context`; after a first recovery patch, the live
+  continuation could emit widened reads but recursively adopted those reads as
+  new cached refs and widened again. The current patch makes write-ready choose
+  structurally complete covering windows over exact incomplete fragments,
+  emits bounded widened reads for incomplete paired refs, honors explicit
+  no-widening guidance, skips impossible oversized refs, and stops recursively
+  widening cached refs produced by the structural-refresh recovery itself.
+  Codex-ultra approved the final patch after full `tests/test_work_session.py`
+  validation.
+- Task `#505` on `e1c4e2f` verified that the structural-refresh recovery
+  patch removed the recursive widening path, but exposed a smaller non-counted
+  fix-first gap: explicit refresh search extraction could choose the scoped
+  test filename stem `test_proof_summary` as the query, produce zero matches on
+  both files, and then repeat the same zero-match search instead of falling
+  through to cached-window widening or an artifact. The current patch excludes
+  path/basename-derived tokens from explicit refresh query extraction and
+  suppresses repeated zero-match explicit refresh searches so deterministic
+  preflight can fall back to widened cached-window reads. Codex-ultra approved
+  the plan, and the focused write-ready suite plus full
+  `tests/test_work_session.py` validation passed locally.
+- Task `#506` on `2cff876` then reached a same-session patch-draft compiler
+  replay on the `proof_summary` pair, but the bundle was non-counted because
+  the model-authored blocker code `cached_window_incomplete` was still outside
+  the native patch-draft vocabulary. This is a narrower fix-first vocabulary
+  gap rather than a replay-emission failure: the bundle exists, but
+  `proof-summary` properly excluded it as non-native. The current patch
+  promotes `cached_window_incomplete` to native `refresh_cached_window`
+  recovery vocabulary, documents that code in tiny write-ready guidance, and
+  proves proof-summary taxonomy plus work-loop replay counting behavior with
+  focused tests. Codex-ultra approved this plan; the pre-fix `#506` replay
+  remains non-counted and must not be retroactively counted.
+- Task `#507` on `ed2e27d` exercised the post-vocabulary proof-summary slice
+  and exposed the next non-counted fix-first infrastructure gap: deterministic
+  write-ready preflight kept refreshing/searching after paired cached windows
+  were already structurally refreshed, and even explicit "do not refresh"
+  guidance still produced refresh searches instead of a replay, paired patch,
+  verifier, or concrete artifact. The current patch makes no-refresh guidance
+  suppress all preflight refresh recovery, treats one structural refresh per
+  paired path as exhausted, and emits a native `cached_window_incomplete`
+  patch-draft compiler replay when paired windows remain structurally
+  insufficient after refresh is forbidden or exhausted. Codex-ultra approved
+  the plan; the pre-fix `#507` session remains non-counted.
+- Task `#508` on `90dc28e` showed the follow-up compact-context gap: the
+  previous fix could detect refresh exhaustion only from the prompt's recent
+  `tool_calls`, so once the paired structural refresh reads aged partly out of
+  that compact recent window, deterministic preflight still ended in a plain
+  wait with no replay bundle, paired patch/diff, or verifier artifact. The
+  current patch mirrors the explicit-refresh search history pattern by carrying
+  a bounded durable `structural_refresh_read_tool_calls` list in the work
+  context and using it for structural-refresh exhaustion. Codex-ultra approved
+  the metadata-only durable history fix; the pre-fix `#508` session remains
+  non-counted.
+- Task `#509` on `3b38ec7` is the first post-fix literal-head counted bundle
+  for this micro-surface: session `#492` emitted a native
+  `patch_draft_compiler.cached_window_incomplete` replay with
+  `calibration_counted=true`, `off_schema_rate=0`, `refusal_rate=0`, and no
+  malformed relevant bundles. Codex-ultra approved the classification as valid
+  counted M6.11 current-head incidence evidence. M6.11 remains open because the
+  current-head cohort has only one counted bundle and therefore
+  `failure_mode_concentration=1.0`.
+- Task `#510` on the same `3b38ec7` head broadened the current-head cohort on
+  the `patch_draft` surface: session `#493` emitted a
+  `work-loop-model-failure.request_timed_out` bundle with
+  `calibration_counted=true` after reaching `write_ready_fast_path=true` with
+  paired cached windows and timing out in the tiny draft lane. Codex-ultra
+  approved this as counted incidence evidence rather than a fix-first
+  exclusion. The current-head cohort now has two counted bundles, no
+  off-schema/refusal/malformed evidence, and `failure_mode_concentration=0.5`,
+  so M6.11 remains open until more diverse slices reduce concentration below
+  the close gate.
+- Task `#511` on the same `3b38ec7` head sampled the large `dogfood` surface:
+  session `#494` emitted another native
+  `patch_draft_compiler.cached_window_incomplete` replay with
+  `calibration_counted=true` after paired structural refresh was already
+  attempted. Codex-ultra approved counting it even though it worsens
+  concentration, because duplicate counted evidence is still real incidence
+  evidence. The current-head cohort now has three counted bundles and no
+  off-schema/refusal/malformed evidence, but `failure_mode_concentration`
+  worsened to `0.666...`; next slices should avoid large or mid-file surfaces
+  and target small complete source/test pairs such as `report_io`.
+- Task `#512` on the same `3b38ec7` head sampled the small `report_io`
+  surface and exposed a non-counted fix-first accounting gap: session `#495`
+  timed out during ordinary planning before `active_work_todo` was seeded, with
+  fully read tiny source/test files and prompt/resume metrics visible, but no
+  replay bundle was written. Codex-ultra classified this as a fix-first
+  infrastructure blocker, not retryable incidence, because no artifact means it
+  cannot advance M6.11. The current patch adds a narrow pre-active-todo
+  current-head incidence replay path for compact-memory planning timeouts while
+  preserving ordinary non-calibration failures as non-replay. Codex-ultra
+  approved the code and accounting fix; the pre-fix `#512` session remains
+  non-counted.
+- Task `#513` on literal head `06167a9` reran the small `report_io` surface
+  after the pre-active-todo replay-accounting fix. Session `#496` read the
+  complete source/test pair, then timed out on the next planning turn before an
+  edit-ready draft, and the new accounting path wrote a counted
+  `work-loop-model-failure.request_timed_out` replay at
+  `.mew/replays/work-loop/2026-04-24/session-496/todo-no-todo-496/turn-2394/attempt-1/report.json`.
+  Codex-ultra approved this as valid current-head incidence evidence. The
+  `proof-summary` current-head cohort now has one counted bundle on `06167a9`
+  with no off-schema/refusal/malformed evidence, but
+  `failure_mode_concentration=1.0`; M6.11 is still not close-ready.
+- Task `#514` on the same literal head `06167a9` sampled the small
+  `timeutil` surface. Session `#497` read the complete source/test pair, began
+  drafting a paired dry-run fix, then timed out before an edit-ready draft; the
+  replay-accounting path wrote a second counted
+  `work-loop-model-failure.request_timed_out` bundle at
+  `.mew/replays/work-loop/2026-04-24/session-497/todo-no-todo-497/turn-2396/attempt-1/report.json`.
+  Codex-ultra approved `#514` as valid current-head incidence evidence and
+  classified the repeated tiny-pair pre-draft timeout pattern as the next
+  fix-first target. The current-head cohort now has two counted bundles, both
+  `request_timed_out`, so schema health is clean but concentration remains
+  `1.0`.
+- Commit `54b657a` implemented the first fix-first patch by preserving
+  field boundaries in high-risk matching and suppressing bookkeeping lines such
+  as `Keep ROADMAP_STATUS.md and proof-artifacts dirty` or
+  `Do not edit ROADMAP_STATUS.md`. Codex-ultra approved the patch after a
+  regression test proved that genuine `Update roadmap recovery gate` titles
+  remain high-risk.
+- Task `#515` on literal head `54b657a` reran a small `plan_schema` slice with
+  the same bookkeeping references. Session `#498` read the complete source/test
+  pair, then timed out again before draft. The replay was counted and showed
+  the remaining high-risk trigger was `policy`, coming from the local component
+  phrase `reasoning-policy`, not from governance/safety policy work.
+  Codex-ultra approved `#515` as current-head incidence evidence and selected a
+  second fix-first patch: ignore `reasoning-policy`, `reasoning_policy`, and
+  `reasoning policy` as local component phrases while preserving genuine
+  policy/governance/approval matches.
+- Commit `2a30480` implemented the second fix-first patch by normalizing local
+  `reasoning-policy`, `reasoning_policy`, and `reasoning policy` component
+  phrases before high-risk matching. Codex-ultra approved the patch after tests
+  proved those bounded phrases select medium while `Update approval policy
+  flow` remains high-risk.
+- Task `#516` on literal head `2a30480` validated the two reasoning-policy
+  fixes with the same bookkeeping and local component phrase references.
+  Session `#499` selected `medium/small_implementation` for both planning
+  turns, completed without the pre-draft timeout, and produced a
+  reviewer-visible paired dry-run patch on `src/mew/timeutil.py` plus
+  `tests/test_timeutil.py`. Codex-ultra approved applying it. Approvals
+  `#3998/#3999` wrote the patch and `uv run pytest -q tests/test_timeutil.py
+  --no-testmon` passed with `5 passed`.
+- Commit `517a3b7` recorded the `#516` paired `timeutil` patch. Task `#517`
+  then reran the previously failing small `plan_schema` surface on literal
+  head `517a3b7`, again with bookkeeping references to `ROADMAP_STATUS.md` /
+  proof artifacts and the local `reasoning-policy` phrase. This proved the
+  reasoning-policy fix generalized for classification: the failing turn
+  selected `medium/small_implementation`, not high-risk. It still timed out
+  after full paired reads and before any dry-run patch, no-change verifier
+  artifact, or patch blocker. The counted replay at
+  `.mew/replays/work-loop/2026-04-24/session-500/todo-no-todo-500/turn-2403/attempt-1/report.json`
+  records `think.prompt_chars=51712`, `recent_read_window_count=2`,
+  `write_ready_fast_path=false`, and
+  `write_ready_fast_path_reason=first_plan_item_not_edit_ready`.
+  Codex-ultra approved this as counted current-head incidence with blocker
+  code
+  `medium_small_impl_predraft_timeout_after_full_pair_read_no_artifact`, and
+  selected a fix-first structural target around write-ready fast path /
+  draft-step compaction after complete paired reads.
+- Commit `f4413b0` implemented that structural patch by promoting queued
+  complete paired source/test reads into the active draft frontier only when
+  the read/inspect/review plan item is tied to the paired target paths, while
+  rejecting stale complete reads after later applied or non-dry-run writes.
+  Task `#519` on literal head `f4413b0` then reran the same small
+  `plan_schema` surface. It partially validated the fix: the session reached
+  `active_work_todo.status=drafting` with exact paired cached refs for
+  `src/mew/plan_schema.py` and `tests/test_plan_schema.py`, moving past the
+  `#517` `first_plan_item_not_edit_ready` blocker. However, the initial run
+  failed with `response did not contain assistant text`, and a one-step
+  continuation timed out; neither attempt emitted a replay bundle,
+  reviewer-visible paired patch/diff, verifier artifact, or native blocker.
+  The latest failure still reported `write_ready_fast_path=false` with
+  `write_ready_fast_path_reason=missing_exact_cached_window_texts` despite the
+  paired `active_work_todo.cached_window_refs`. Codex-ultra classified this as
+  current-head non-counted evidence with blocker code
+  `cached_window_refs_not_hydrated_to_exact_window_texts`.
+- Commit `f37eb12` implemented the cached-ref hydration fix by recovering exact
+  write-ready text from `active_work_todo.cached_window_refs` and their
+  matching completed, non-truncated `read_file` tool calls. It also rejects
+  cached refs after later applied or non-dry-run writes and prevents
+  active-todo cached refs from falling back to generic recent target-path
+  windows. Codex-ultra reviewed the implementation as `PASS`.
+- Task `#521` on literal head `f37eb12` reran the same small `plan_schema`
+  surface. Session `#502` read both scoped files completely, then reached
+  `write_ready_fast_path=true` with
+  `write_ready_fast_path_reason=paired_cached_windows_edit_ready`,
+  `cached_window_ref_count=2`, and the tiny write-ready draft lane emitted a
+  native `patch_draft` replay at
+  `.mew/replays/work-loop/2026-04-24/session-502/todo-todo-502-1/attempt-1/replay_metadata.json`.
+  Codex-ultra reviewed the paired dry-run patch as `PASS` and approved
+  applying it. Approvals `#4010/#4011` wrote the paired source/test patch, and
+  `uv run pytest -q tests/test_plan_schema.py --no-testmon` passed with
+  `6 passed`. This is positive current-head proof that the cached-ref
+  hydration/write-ready path now reaches reviewer-visible paired patch output
+  on the previously failing surface. The inherited outer policy still matched
+  `policy` / `roadmap`, but codex-ultra classified this as no separate
+  fix-first task because the actual tiny draft used the low-effort write-ready
+  override and produced the intended artifact.
+- Commit `5694e46` recorded that cached-ref hydration proof. Task `#522` on
+  literal head `5694e46` then exercised a different small paired surface,
+  `src/mew/cli_command.py` plus `tests/test_cli_command.py`. Session `#503`
+  read both files completely, found no justified small paired improvement, ran
+  `uv run pytest -q tests/test_cli_command.py --no-testmon`, and finished with
+  verifier-backed no-change evidence after `4 passed`. Codex-ultra classified
+  this as `current_head_positive_verifier_backed_no_change`. The stale
+  `latest_verifier_closeout.write_ready_fast_path=false /
+  missing_exact_cached_window_texts` metadata is not a blocker for this slice
+  because #522 intentionally took the verifier-backed no-change route rather
+  than the patch-draft route.
+- Commit `3de265b` recorded the `cli_command` proof. Task `#523` on literal
+  head `3de265b` then exercised the `src/mew/model_trace.py` plus
+  `tests/test_model_trace.py` pair. Session `#504` read both files completely,
+  found no justified small paired improvement, ran
+  `uv run pytest -q tests/test_model_trace.py --no-testmon`, and finished with
+  verifier-backed no-change evidence after `3 passed`. Codex-ultra classified
+  this as another `current_head_positive_verifier_backed_no_change` sample and
+  again treated the stale `latest_verifier_closeout.write_ready_fast_path=false
+  / missing_exact_cached_window_texts` metadata as irrelevant because no
+  patch-draft lane was attempted. This closes the immediate cached-ref
+  hydration/write-ready proof thread: the previously failing surface now
+  reaches reviewer-visible patch output, and two other small paired surfaces
+  finish cleanly through verifier-backed no-change.
+
+Next action:
+
+- keep the Phase 2/3 calibration checkpoint active and stop spending cycles on
+  the now-cleared cached-ref hydration proof thread unless a fresh patch-draft
+  route reproduces it. The next concrete action is a close-gate audit, not
+  another ad hoc slice: run the M6.11 dogfood subset and proof-summary
+  calibration commands, then compare the result against the M6.11 Done-when
+  checklist in `ROADMAP.md`. If the 20-slice incidence batch is still
+  materially incomplete, record the gap and either continue a planned batch or
+  get a reviewer-signed documented reason for a smaller reduction; do not
+  silently declare M6.11 closed from the cached-ref subgate alone.
+- 2026-04-24 reviewer-signed close-gate audit is in
+  `docs/M6_11_CLOSE_GATE_GAP_RATIONALE_2026-04-24.md`; M6.11 remains
+  **not close-ready**. The audit passed all immediate checks but retained gap
+  risk and did not run a literal 20-slice batch.
+- The documented 20-slice bounded calibration batch has started on literal
+  HEAD `ff05830`: `#524` and `#525` are counted verifier-backed no-change
+  slices, and `#526` is a counted paired patch/verifier slice. `#527` then
+  landed as a counted paired patch/verifier slice on HEAD `4bdec4a`. `#528`
+  then landed as a counted verifier-backed no-change slice on HEAD `29744bd`.
+  `#529` then landed as a counted verifier-backed no-change slice on HEAD
+  `0276f3b`. `#530` then landed as a counted verifier-backed no-change slice
+  on HEAD `be91d3b`. `#531` then landed as a counted paired patch/verifier
+  slice on HEAD `84eaf8c`. `#532` then hit a counted fix-first blocker on
+  HEAD `b9ab32d`: project_snapshot refreshed paired windows but write-ready
+  preflight ended on `cached_window_incomplete` before emitting a patch,
+  verifier-backed no-change artifact, or native replay path. Pause the batch
+  and fix that cached-window preflight/recovery path before taking more
+  calibration slices. The blocker fix landed on HEAD `63dfe6f`; `#533` then
+  reran the same project_snapshot source/test pair and closed as counted
+  verifier-backed no-change after the scoped verifier passed with 8 tests,
+  validating that the cached-window preflight/recovery path is no longer
+  blocking that surface. `#534` then landed as a counted paired
+  patch/verifier slice on HEAD `77eaeaf`: reasoning_policy note filtering now
+  drops only historical note lines while preserving later current note lines;
+  the first source draft failed verifier and was corrected after reviewer
+  feedback, then the scoped verifier passed with 15 tests and ruff passed.
+  `#535` then landed as a counted paired patch/verifier slice on HEAD
+  `270b9b6`: passive_bundle now ignores leading blank lines before stripping a
+  report H1; the first test edit failed due duplicate fixture text, mew
+  recovered with narrower context, and the scoped verifier passed with 11
+  tests and ruff passed. `#536` then landed as a counted paired
+  patch/verifier slice on HEAD `a474781`: self_memory now centralizes task
+  normalization for learning/title/continuity paths and sanitizes state before
+  desk continuity collection; the slice exposed one timeout and one stale test
+  expectation before codex-ultra re-review approved the final fix, with 4
+  scoped tests and ruff passing. `#537` then closed as a counted
+  verifier-backed no-change slice on HEAD `bf4c321`: write_tools and its paired
+  tests were freshly read, the focused verifier passed with 16 tests, and
+  codex-ultra classified the recovered timeout as no-blocker context rather
+  than a fix-first incidence. `#538` then closed as another counted
+  verifier-backed no-change slice on HEAD `131570b`: tasks and its paired tests
+  were freshly read, load/status/guidance/test anchors were checked with scoped
+  searches, the focused verifier passed with 12 tests, and codex-ultra
+  accepted the non-blocking objc warning because the verifier exit was clean.
+  `#539` then closed as a counted verifier-backed no-change slice on HEAD
+  `87e7028`: toolbox and its paired tests were freshly read, the focused
+  verifier passed with 4 tests, and codex-ultra accepted the same non-blocking
+  objc warning pattern because the command/session exit was successful. `#540`
+  then hit a counted fix-first blocker on HEAD `aa839e8`: patch_draft and its
+  paired tests were refreshed through targeted non-truncated windows, but the
+  write-ready tiny lane still stopped on `missing_exact_cached_window_texts`.
+  Calibration slices were paused for fix-first remediation. The follow-up patch
+  lets write-ready cached refs hydrate from later non-truncated `read_file`
+  windows that cover the cached path/span even when the original cached
+  `tool_call_id` did not carry exact text, while preserving later-write stale
+  protection. Focused `write_ready_fast_path` tests, ruff, `git diff --check`,
+  and codex-ultra review passed. The fresh post-fix rerun `#541` / session
+  `#522` on HEAD `d9ca46f` cleared the blocker: mew reached a drafting-ready
+  lane on the same `patch_draft` pair, added a focused non-truncated
+  cached-window success regression in `tests/test_patch_draft.py`, and the
+  scoped verifier passed with 33 tests. Codex-ultra classified it as counted
+  `positive_test_only_patch_verifier` evidence. The next unrelated fresh
+  surface `#542` / session `#523` on HEAD `f636c09` then closed as counted
+  `positive_verifier_backed_no_change`: signals source/test files were read
+  completely, `uv run pytest -q tests/test_signals.py --no-testmon` passed 2
+  tests, and codex-ultra accepted the no-change closeout. `#543` / session
+  `#524` then closed the next fresh surface as counted
+  `positive_verifier_backed_no_change`: action_application source/test files
+  were read completely, `uv run pytest -q tests/test_action_application.py
+  --no-testmon` passed 6 tests, and codex-ultra accepted the no-change
+  closeout. `#544` / session `#525` then closed as counted
+  `positive_verifier_backed_no_change`: model_backends source/test files were
+  read completely, `uv run pytest -q tests/test_model_backends.py --no-testmon`
+  passed 13 tests, and codex-ultra accepted the no-change closeout. `#545` /
+  session `#526` then landed as counted `positive_paired_patch_verifier` on
+  HEAD `2ef003e`: daemon status now downgrades persisted `running` state with a
+  pid to `stale` when no active lock backs it, the paired regression covers the
+  unlocked-running case, focused daemon pytest passed with 5 tests, ruff
+  passed, and codex-ultra approved the diff. `#546` / session `#527` then
+  landed as counted `positive_paired_patch_verifier` on HEAD `5dc06a7`:
+  watchers now prune unrequested file watcher items while preserving requested
+  file watchers and non-file items, the paired regression covers rebinding from
+  one watched file to another, focused watcher pytest passed with 2 tests, ruff
+  passed, and codex-ultra approved the diff. `#547` / session `#528` then
+  produced a non-counted incomplete/guardrail-blocked `codex_api` attempt on
+  HEAD `57f7f66`: after source/test reads it first stopped on
+  `cached_window_incomplete`, then a continuation stopped on
+  `unpaired_source_edit_blocked` before any edit or verifier. Codex-ultra
+  classified this as non-counted and not yet fix-first; next action is to
+  continue or rerun `#547` with explicit steer to either produce a paired
+  source+test dry-run for the deadline-timeout issue or close verifier-backed
+  no-change. The reviewer-steered retry repeated `cached_window_incomplete` as
+  the terminal outcome on HEAD `1aac5d5`: the cached test window ended at
+  `captured = {}` inside
+  `test_call_codex_web_api_uses_remaining_request_timeout_for_stream_reads`,
+  but the write-ready path still treated the paired cached windows as draftable
+  instead of structurally refreshing before the tiny draft lane. Codex-ultra
+  classified the retry as counted `counted_fix_first_blocker` with blocker code
+  `cached_window_incomplete_after_mid_block_test_window`, so the batch paused
+  for structural remediation. The fix removes trailing-fragment draft-window
+  narrowing for write-ready cached windows and adds a late-minimal-block guard,
+  so a cached window that reaches a new sibling block but ends after only one
+  body line now triggers deterministic refresh instead of tiny draft. Focused
+  preflight tests, the full `tests/test_work_session.py` file, paired
+  replay/patch-draft tests, ruff, `jq`, and `git diff --check` passed, and
+  codex-ultra approved the diff. The fresh post-fix rerun `#548` / session
+  `#529` on HEAD `30ac12a` then cleared the blocker: mew read
+  `src/mew/codex_api.py` and `tests/test_codex_api.py` completely, ran
+  `uv run pytest -q tests/test_codex_api.py --no-testmon` with 14 passed, and
+  closed as counted `positive_verifier_backed_no_change`. Codex-ultra
+  classified it PASS/COUNTED, accepted the non-blocking objc warning because
+  the verifier exit was clean and the session closed, and approved marking task
+  `#548` done. `#549` / session `#530` then landed as counted
+  `positive_paired_patch_verifier` on HEAD `08f4f0f`: anthropic_json now emits
+  the returned assistant text through `on_text_delta` before JSON parsing, the
+  paired test asserts that callback behavior, focused anthropic pytest passed
+  with 5 tests, ruff passed, and codex-ultra approved the diff and marking task
+  `#549` done. `#550` / session `#531` then exposed a non-counted fix-first
+  blocker on HEAD `843da37`: mew read `src/mew/perception.py` and
+  `tests/test_perception.py` completely, reached complete paired cached refs
+  with `edit_ready=true`, then repeated `request_timed_out` before patch,
+  blocker, verifier, or replay artifact. Codex-ultra classified this as
+  `non_counted_no_replay_repeated_drafting_timeout` with blocker code
+  `drafting_timeout_after_complete_cached_refs_no_artifact` and directed a
+  fix-first remediation before rerunning perception. The remediation converts
+  tiny write-ready and broad write-ready no-artifact timeouts into an explicit
+  non-counted patch blocker tied to the active todo, and regression coverage
+  now verifies the zero-attempt cached-ref timeout and broad-timeout fallback
+  cases. The fresh post-fix perception rerun `#551` / session `#532` on HEAD
+  `594d427` then cleared the blocker: mew read `src/mew/perception.py` and
+  `tests/test_perception.py` completely, refreshed the source tail, found no
+  justified paired change, ran
+  `uv run pytest -q tests/test_perception.py --no-testmon` with 7 passed, and
+  closed as counted `positive_verifier_backed_no_change`. Codex-ultra
+  classified it PASS/COUNTED, accepted the non-blocking objc warning because
+  the verifier exit was clean and the session closed, and approved marking task
+  `#551` done. `#552` / session `#533` on HEAD `b42567b` then exposed a
+  non-counted fix-first blocker on the sweep source/test pair: mew read
+  `src/mew/sweep.py` and `tests/test_sweep.py` completely, recovered from one
+  request timeout, ran `uv run pytest -q tests/test_sweep.py --no-testmon` with
+  6 passed, but then let the write-ready tiny draft lane override the green
+  verifier-backed no-change route with `overlapping_hunks` and ended
+  `blocked_on_patch`. Codex-ultra classified this as
+  `non_counted_fix_first` with blocker code
+  `verifier_green_no_change_overridden_by_overlapping_hunks` and directed a
+  fix-first remediation before more calibration slices. The remediation now
+  recognizes conditional green no-change closeout plan items such as
+  "Finish no-change if green; otherwise repair..." as verifier closeout after a
+  matching focused verifier, so the tiny draft lane is skipped before it can
+  manufacture a later patch blocker. The focused regression group passed 12
+  tests, the broader write-ready/no-change subset passed 32 tests with 5
+  subtests, ruff passed, `git diff --check` passed, and codex-ultra returned
+  PASS/no findings. The fresh post-fix sweep rerun `#553` / session `#534` on
+  HEAD `743035c` then cleared the blocker: mew read `src/mew/sweep.py` and
+  `tests/test_sweep.py` completely, found no justified paired change, ran
+  `uv run pytest -q tests/test_sweep.py --no-testmon` with 6 passed, and
+  closed as counted `positive_verifier_backed_no_change`. Codex-ultra
+  classified it PASS/COUNTED, accepted the non-blocking objc warning because
+  the verifier exit was clean and the session closed, and approved marking task
+  `#553` done. The next bounded surface `#554` / session `#535` on HEAD
+  `fec2029` then exercised the dream source/test pair: mew read
+  `src/mew/dream.py` and `tests/test_dream.py`, initially surfaced a focused
+  verifier failure caused by a stale expected continuity repair string, judged
+  the current source behavior intended, updated only `tests/test_dream.py`, and
+  reran `uv run pytest -q tests/test_dream.py --no-testmon` with 3 passed.
+  `uv run ruff check src/mew/dream.py tests/test_dream.py` also passed.
+  Codex-ultra classified the slice PASS/COUNTED as
+  `positive_test_only_patch_verifier` and recommended `src/mew/journal.py` plus
+  `tests/test_journal.py` as the next bounded surface. `#555` / session `#536`
+  on HEAD `2a9374b` then exercised that journal pair: after one drafting
+  timeout, a narrow steer produced a paired source/test patch so Morning >
+  Yesterday renders completed work plus runtime effects rather than hiding
+  effects when completed tasks exist. `uv run pytest -q tests/test_journal.py
+  --no-testmon` passed 7 tests, `uv run ruff check src/mew/journal.py
+  tests/test_journal.py` passed, and codex-ultra classified the slice
+  PASS/COUNTED as `positive_paired_patch_verifier`; the objc fork warning after
+  the mew verifier was non-blocking because verifier exit and session close
+  were successful. `#556` / session `#537` on HEAD `4aa7e77` then exercised
+  the mood source/test pair: mew read `src/mew/mood.py` and
+  `tests/test_mood.py` completely, found no immediately justified paired
+  change, ran `uv run pytest -q tests/test_mood.py --no-testmon` with 7
+  passed, and closed as counted `positive_verifier_backed_no_change`.
+  Codex-ultra classified it PASS/COUNTED and accepted the non-blocking objc
+  warning because verifier exit and session close were successful. `#557` /
+  session `#538` on HEAD `ccd94b0` then exercised the morning_paper source/test
+  pair: mew read `src/mew/morning_paper.py` and
+  `tests/test_morning_paper.py` completely, found no immediately justified
+  paired change, ran `uv run pytest -q tests/test_morning_paper.py
+  --no-testmon` with 9 passed, and closed as counted
+  `positive_verifier_backed_no_change`. Codex-ultra classified it PASS/COUNTED
+  and accepted the non-blocking objc warning because verifier exit and session
+  close were successful. `#558` / session `#539` on HEAD `f19d83a` then
+  exercised the memory source/test pair: mew fully read `src/mew/memory.py`,
+  refreshed contiguous non-truncated windows for `tests/test_memory.py` through
+  line 1102 after the initial read truncated, found no immediately justified
+  paired change, ran `uv run pytest -q tests/test_memory.py --no-testmon` with
+  26 passed, and closed as counted `positive_verifier_backed_no_change`.
+  Codex-ultra classified it PASS/COUNTED. `#559` / session `#540` on HEAD
+  `1eeed71` then exercised the step_loop source/test pair and produced counted
+  fix-first blocker evidence: attempts 1-2 reported `cached_window_incomplete`,
+  attempt 3 had full non-truncated cached windows for `src/mew/step_loop.py`
+  and `tests/test_step_loop.py`, but stale refresh-state/todo wording still
+  caused `missing_exact_cached_window_texts`. The focused verifier was green
+  with 25 tests, but the session remained `blocked_on_patch`. Codex-ultra
+  classified this as `counted_fix_first_blocker` and directed pausing the
+  calibration batch for fix-first remediation in `src/mew/work_loop.py` plus
+  `tests/test_work_session.py`, then rerunning the same step_loop slice. The
+  remediation landed in `b403dbd`: write-ready now clears stale refresh-blocker
+  state after complete paired cached reads and replaces the refresh-only plan
+  item with a draft/no-change item before tiny draft context is built. Focused
+  `tests/test_work_session.py` subsets, full
+  `uv run pytest tests/test_work_session.py -q --no-testmon` with 591 passed,
+  ruff, diff-check, and codex-ultra review passed. `#560` / session `#541`
+  then reran the step_loop surface on HEAD `b403dbd`, reread the scoped
+  source/test pair, ran `uv run pytest -q tests/test_step_loop.py --no-testmon`
+  with 25 passed, closed verifier-backed no-change, and left no active blocker.
+  Codex-ultra classified it PASS/COUNTED as
+  `positive_verifier_backed_no_change`, validating the fix enough to resume
+  calibration. `#561` / session `#542` on HEAD `ce9688d` then exercised the
+  bounded `work_replay` source/test surface: mew fully read
+  `src/mew/work_replay.py` and `tests/test_work_replay.py`, made no edits, ran
+  `uv run pytest -q tests/test_work_replay.py --no-testmon` with 24 tests and
+  4 subtests passed, and ruff passed. Codex-ultra classified it PASS/COUNTED
+  as `positive_verifier_backed_no_change`. `#562` / session `#543` then
+  exercised the bounded `proof_summary` source/test surface: the first stop hit
+  recoverable `cached_window_incomplete`, same-session recovery refreshed
+  non-truncated source/test windows, made no edits, ran
+  `uv run pytest -q tests/test_proof_summary.py --no-testmon` with 32 passed,
+  and stopped verifier-backed no-change. Codex-ultra classified it PASS/COUNTED
+  as `positive_verifier_backed_no_change`; the stale `blocked_on_patch`
+  `active_work_todo` after recovery is logged as follow-up defect
+  `stale_blocked_active_work_todo_after_verifier_backed_no_change_recovery`,
+  not a counting blocker unless it recurs or blocks the next slice. `#563` /
+  session `#544` then exercised the bounded `desk` source/test surface and
+  produced a valid test-only expectation update in `tests/test_desk.py` so the
+  ready self-improve focus expectation uses
+  `coding_self_improve_focus_from_friction`, matching current
+  `src/mew/desk.py` behavior. `uv run pytest -q tests/test_desk.py
+  --no-testmon` passed with 21 tests, ruff passed, and diff-check passed, but
+  codex-ultra classified it `non_counted_external_patch_due_session_accounting_gap`
+  because session `#544` stayed idle/queued and did not record reads,
+  files_touched, command history, approvals, or verifier history. Next step:
+  rerun the bounded `desk` surface as a fresh mew-recorded slice before moving
+  to another surface. The post-accounting-gap rerun on HEAD `57e47e3` reused
+  task `#563` / session `#544` but is now mew-recorded: it captured complete
+  non-truncated reads for `src/mew/desk.py` and `tests/test_desk.py`, ran
+  `uv run pytest -q tests/test_desk.py --no-testmon` with 21 passed, closed
+  cleanly as verifier-backed no-change, and made no edits after the committed
+  test alignment. Codex-ultra classified the rerun PASS/COUNTED as
+  `positive_verifier_backed_no_change`; the non-blocking objc warning is
+  ignored because `run_tests` exit code was 0. `#564` / session `#545` then
+  exercised the bounded `metrics` source/test surface on HEAD `d0e4c08`: it
+  recovered from repeat-action guard `#4249` by recording split source
+  coverage through tail read `#4250`, used complete `tests/test_metrics.py`
+  read `#4246`, ran `uv run pytest -q tests/test_metrics.py --no-testmon`
+  with 10 passed, closed verifier-backed no-change, and made no edits.
+  Codex-ultra classified it PASS/COUNTED as
+  `positive_verifier_backed_no_change`; stale `unresolved_failure` after the
+  recovered read guard and split offset read coverage not reflected in
+  `target_path_cached_window_observations` are follow-up defects, not counting
+  blockers. Next step: continue with the bounded `programmer` source/test
+  surface. `#565` / session `#546` then exposed a non-counted fix-first
+  infrastructure crash before verifier: the write-ready fast-path structural
+  window check let `tokenize.generate_tokens` propagate `IndentationError` on
+  an indented partial `tests/test_programmer.py` window. The remediation treats
+  tokenizer `IndentationError` / `SyntaxError` as structurally incomplete
+  windows instead of crashing, preserves the existing `TokenError` stack
+  semantics, and adds a regression test. Codex-ultra approved the fix-first
+  patch after `uv run pytest -q tests/test_work_session.py -k 'write_ready'
+  --no-testmon` passed 78 tests plus 5 subtests, ruff passed, and
+  `git diff --check` passed. The first `#566` rerun / session `#547` on HEAD
+  `089f84c` was non-counted because it read only `tests/test_programmer.py`
+  lines 1-1000 before verifier-backed no-change. The recovered `#566` session
+  `#548` then read `src/mew/programmer.py` through EOF and covered
+  `tests/test_programmer.py` lines 1-1350 through adjacent reads, reran
+  `uv run pytest -q tests/test_programmer.py --no-testmon` with 53 passed, and
+  closed verifier-backed no-change. Codex-ultra classified the recovery
+  PASS/COUNTED as `positive_verifier_backed_no_change`. `#567` / session
+  `#549` then exercised the bounded `self_improve` source/test surface on HEAD
+  `ac62952`: it read `src/mew/self_improve.py` through EOF and covered
+  `tests/test_self_improve.py` lines 1-1329 through adjacent reads, ran
+  `uv run pytest -q tests/test_self_improve.py --no-testmon` with 33 passed
+  plus 8 subtests, closed verifier-backed no-change, and made no edits.
+  Codex-ultra classified it PASS/COUNTED as
+  `positive_verifier_backed_no_change`. The first bounded `runtime` run
+  `#568` / session `#550` on HEAD `e09a4fc` exposed another non-counted
+  fix-first loop defect: after reading `src/mew/runtime.py` and
+  `tests/test_runtime.py` lines 1-1000, write-ready preflight repeatedly
+  returned `wait` with `paired cached windows are not structurally complete`
+  instead of scheduling adjacent tail reads. The remediation makes top/broad
+  incomplete cached windows with `next_line` schedule forward `read_file`
+  windows before falling back to `cached_window_incomplete`, and adds
+  `test_write_ready_preflight_block_uses_adjacent_reads_for_top_broad_incomplete_cache`.
+  Focused `write_ready` tests now pass 79 tests plus 5 subtests, ruff passed,
+  `git diff --check` passed, and codex-ultra approved the fix-first patch.
+  The first rerun after that fix, `#569` / session `#551` on HEAD
+  `3bc939b`, proved the fix incomplete: `build_recent_read_file_windows`
+  dropped `next_line` / `has_more_lines`, so real work-loop context still
+  could not trigger adjacent tail reads. The follow-up remediation preserves
+  those read-file tail metadata fields in recent windows and strengthens the
+  regression to build the preflight context through `build_recent_read_file_windows`
+  instead of hand-injected `next_line`. Focused
+  `write_ready or recent_read_file_windows` tests pass 81 tests plus
+  5 subtests, ruff passed, `git diff --check` passed, and codex-ultra approved.
+  The fresh runtime rerun `#570` / session `#552` on HEAD `d7e9986` then
+  cleared the blocker: mew read `src/mew/runtime.py` through EOF, covered
+  `tests/test_runtime.py` through line 2569 via adjacent reads, ran
+  `uv run pytest -q tests/test_runtime.py --no-testmon` with 47 passed, and
+  closed verifier-backed no-change with no edits. Codex-ultra classified it
+  APPROVE/countable as `positive_verifier_backed_no_change`; the earlier
+  cached-window wait was recovered by tail reads and is not a counting blocker.
+  The close gate now qualifies and has passed; do not continue the bounded
+  M6.11 calibration batch by default.
+  Do not count or resume `#505`, `#506`, `#507`, `#508`, or `#512` as
+  current-head incidence because they are blocked pre-fix sessions;
+  #509/#510/#511 remain valid counted evidence for HEAD `3b38ec7`,
+  #513/#514 remain valid counted evidence for HEAD `06167a9`, #515 remains
+  valid counted evidence for HEAD `54b657a`, #517 remains valid counted
+  evidence for HEAD `517a3b7`, #519 remains valid non-counted
+  positive/frontier blocker evidence for HEAD `f4413b0`, #521 is positive
+  proof for HEAD `f37eb12`, #522 is positive verifier-backed no-change proof
+  for HEAD `5694e46`, and #523 is positive verifier-backed no-change proof
+  for HEAD `3de265b`. After the #523 recording commit, treat all prior
+  literal-head evidence as prior-head during any fresh live slice.
+- The canonical calibration ledger at
+  `proof-artifacts/m6_11_calibration_ledger.jsonl` is now close evidence and
+  M6.12/M6.9 input, not an instruction to keep collecting M6.11 samples.
+  Future loop regressions should create a fresh reopen/follow-up task with a
+  concrete blocker instead of silently extending the closed M6.11 batch.
+
+Closed residual proof:
+
+- residual Phase 5 isolated review lane proof exists in `f69b94b`
+- residual Phase 6 executor lifecycle proof exists in `2e27c9f` and `72dd8ba`
+- read-only `MemoryExploreProvider` proof exists in `d5513e8`
+- prompt/cache boundary proof exists in `df397ae`
+- post-residual M6.9 proof is the next active work, using these closed
+  boundaries to classify review, executor lifecycle, memory explore, and
+  task-spec causes
+
+Next action:
+
+- keep M6.11 closed. Use the residual surfaces as diagnostic inputs for M6.8
+  and M6.8.5 work; do not extend the closed M6.11 calibration batch unless a
+  fresh loop regression creates a concrete reopen task.
+
+### M6.12: Failure-Science Instrumentation
+
+Status: `done`.
+
+Goal:
+
+- turn the closed M6.11 calibration ledger and replay bundles into a compact
+  operator-facing failure-science surface before broad M6.9 durable-memory work
+  resumes
+
+Entry gate:
+
+- M6.11 must be closed
+- the M6.12 design must be refreshed for the post-M6.11 127-row ledger
+- external failure-science input must be checked in as a design input, not as a
+  commitment to copy external architecture
+
+Evidence:
+
+- `docs/DESIGN_2026-04-24_M6_12_FAILURE_SCIENCE_INSTRUMENTATION.md` is
+  refreshed for the post-M6.11 closeout state and names the v0 MVP:
+  read-only ledger parser, derived classifier, `proof-summary --m6_12-report`,
+  bundle provenance, strict missing-bundle behavior, reserved drift axes, and
+  focused tests.
+- `docs/REVIEW_2026-04-23_M6_12_CALIBRATION_INPUT_FROM_EXTERNALS.md` is now
+  checked in and provides external-prior input from Hermes, OpenClaw, Codex,
+  and Vellum Assistant without making their architecture canonical for mew.
+- The canonical M6.11 ledger exists at
+  `proof-artifacts/m6_11_calibration_ledger.jsonl` and is treated as read-only
+  M6.12 input.
+- Commits `ec0e0d4` and `c7b6dcd` added the read-only calibration ledger
+  classifier and `mew proof-summary --m6_12-report` report surface.
+- `docs/M6_12_CLOSE_GATE_AUDIT_2026-04-25.md` records the close decision and
+  proof: focused proof-summary tests passed, targeted ruff passed, command
+  tests passed, strict live M6.12 JSON reported `ok=true` with
+  `ledger_rows=127`, `referenced=30`, `resolved=30`, `missing=0`, strict text
+  output rendered the cockpit, and strict M6.11 calibration behavior stayed
+  green.
+
+Closure caveat:
+
+- The closeout export tree and governance wiring are explicitly deferred by
+  the M6.12 design and are not v0 blockers.
+- Task `#572` began mew-first but required direct supervisor rescue after
+  reviewer rejections. Count the shipped M6.12 report as product progress and
+  close-gate evidence, not clean autonomy credit.
+
+Next action:
+
+- Use the M6.12 report as operator input while resuming bounded M6.9 durable
+  coding work. Do not wire M6.12 JSON into `mew-product-evaluator`, roadmap
+  governance, or adversarial verification without a later explicit milestone.
+
+### M6.13: High-Effort Deliberation Lane
+
+Status: `not_started`.
+
+Goal:
+
+- add a bounded escalation lane for hard supervised work-loop blockers, with
+  explicit model binding, budget controls, fallback to tiny, and durable
+  internalization through M6.9 reasoning traces
+
+Entry gate:
+
+- M6.11 loop contracts must remain closed and stable
+- M6.12 may be used as a reading surface for lane-aware evidence, but M6.13
+  must not reopen the M6.12 close gate
+- M6.9 ranked recall and reasoning-trace write gates are required before
+  M6.13 can close Phase 3
+- a narrow Phase 1 lane-framework slice may move earlier only if active M6.9
+  evidence shows lane identity, shadow bundles, or escalation provenance would
+  directly remove a measured blocker
+
+Evidence:
+
+- `docs/DESIGN_2026-04-25_M6_13_DELIBERATION_LANE.md` defines the three-phase
+  scope: Phase 1 lane framework, Phase 2 bounded deliberation lane, and Phase
+  3 memory internalization proof.
+- The design explicitly keeps M6.9, M6.11, and M6.12 close gates unchanged and
+  treats `M6.13` as one milestone rather than splitting lane framework,
+  deliberation, and memory internalization into separate milestones.
+
+Missing proof:
+
+- no `WorkTodo.lane` implementation exists yet
+- no mirror lane or lane-scoped replay bundle exists yet
+- no deliberation model binding, budget telemetry, blocker escalation table, or
+  tiny fallback path has been implemented
+- no reviewer-approved `source_lane=deliberation` reasoning trace exists
+- no later same-shape task has reused a deliberation-derived reasoning trace
+  through M6.9 ranked recall
+
+Next action:
+
+- keep M6.13 inactive while M6.8 and M6.8.5 are active. Revisit after selector
+  intelligence has evidence that a high-effort lane would shorten hard tasks,
+  or after a repeated hard blocker shows that a small Phase 1 lane-framework
+  slice would produce clearer proof faster than continuing the selector path.
+
+### M6.14: Mew-First Failure Repair Ledger
+
+Status: `done`.
+
+Goal:
+
+- make M6.9+ bounded roadmap/coding implementation genuinely mew-owned by
+  repairing mew-first substrate failures immediately instead of letting Codex
+  rescue product patches
+
+Entry gate:
+
+- M6.10 must be closed enough that ordinary mew-first success/failure
+  accounting exists
+- a real M6.9+ mew-first implementation task must expose reproducible
+  structural failure evidence
+
+Evidence:
+
+- Task `#613` (`M6.9 drift-canary dogfood scenario v0`) started as a
+  gpt-5.5/high mew-first implementation. It was scoped to
+  `src/mew/dogfood.py` and `tests/test_dogfood.py` and asked for a new
+  `m6_9-drift-canary` scenario.
+- The first dry-run patch edited `m6_9-phase1-regression` instead of adding
+  `m6_9-drift-canary`; the reviewer rejected it as wrong-target drift.
+- After targeted read-only recovery, the next dry-run patch edited
+  `queued_message_event_id` and its test, again outside task `#613`.
+- The supervisor intentionally did not land a product rescue patch. This is
+  recorded as a mew-first substrate blocker requiring repair before M6.9
+  resumes.
+- Task `#614` now tracks the active M6.14 substrate repair:
+  `M6.14 repair #613 wrong-target draft drift`.
+- `.codex/skills/mew-first-implementation-loop/SKILL.md` now states the
+  M6.9+ rule: bounded implementation is mew-owned; reproducible structural
+  failures pause the product milestone, activate repair, and retry the same
+  task.
+- Commit `4ddc9d6` added task-goal term preservation to write-ready
+  patch-draft compilation, blocking proposals that omit required terms from the
+  active task/guidance/plan.
+- The #613 retry exposed a second close-out issue after the correct patch and
+  verifier passed: the session could remain in `drafting` and propose another
+  off-scope patch. The supervisor rejected tools `#5133` and `#5134`; commit
+  `b750860` now completes active work todos when their paired writes are
+  applied and a broad verifier reaches high confidence, preventing redrafting
+  after verified work.
+- The same task `#613` then retried successfully through mew session `#599`:
+  the on-scope `m6_9-drift-canary` source/test patch landed in commit
+  `4e62c4b`, full `tests/test_dogfood.py` passed, and the task was marked done.
+  This is recorded as `success_after_substrate_fix` / practical mew-first
+  evidence, not supervisor product rescue.
+- Task `#615` added `m6_9-alignment-decay-rehearsal` through mew session
+  `#600`, scoped to `src/mew/dogfood.py` and `tests/test_dogfood.py`.
+- The product patch was committed separately as `4500e0d` after scenario JSON,
+  full `tests/test_dogfood.py`, ruff, and `git diff --check` passed.
+- The finish attempt then exposed a substrate issue: stale cached windows and
+  an already-completed active todo could still activate write-ready redraft.
+- Task `#616` tracked the M6.14 closeout-repair episode. The substrate now
+  prevents completed active work todos from activating write-ready fast path,
+  and verified
+  `blocked_on_patch` todos with applied paired writes recover to `completed`
+  and clear their blockers.
+- The same session `#600` then finished with a `finish` action after the repair,
+  preserving the M6.14 rule: product implementation stayed mew-authored, while
+  Codex only repaired substrate.
+- Task `#617` opened the next M6.14 repair episode after two rejected
+  shallow alias/rename drafts for
+  `M6.9 novel-task injection exploration matrix v0`. The intended product
+  patch required concrete matrix fields such as `unknown_memory_match`,
+  `forced_source_read`, `forced_test_read`, `no_silent_memory_reliance`, and
+  `reviewer_visible_exploration_reason`, but tiny write-ready context only
+  preserved milestone-shaped terms and let those structured requirements fall
+  out of the prompt. The supervisor again rejected the product drafts instead
+  of landing a rescue.
+- Task `#618` repaired that substrate class by preserving milestone terms plus
+  structured field terms in `_write_ready_task_goal_required_terms()`. The
+  repair landed in commit `f7c1bed` with focused and full
+  `tests/test_work_session.py` coverage.
+- The same task `#617` retried through mew session `#602` and landed the
+  intended `novel_task_injection` exploration matrix in commit `ebccb4a`.
+  This is recorded as another `success_after_substrate_fix` / practical
+  mew-first proof: product implementation stayed mew-authored, while Codex only
+  repaired substrate and maintained status.
+- The next resumed M6.9 proof task `#619`
+  (`M6.9 phase2 comparator regression dogfood scenario`) exposed another
+  bounded substrate class in mew session `#609`: mew reached the correct
+  source/test phase2 patch, but normal dry-run `edit_file_hunks` failed twice
+  with `duplicated_adjacent_context`. Task `#626` repaired this by treating
+  duplicated-adjacent write failures as same-patch repair evidence, so
+  `failed_patch_repair` preserves the exact product proposal for retry instead
+  of drifting into broad redrafts. Retried session `#610` then landed #619 as a
+  mew-authored source/test patch with no supervisor product rescue, adding the
+  neutral Phase 2 comparator dogfood proof and validating it with the focused
+  selector, full `tests/test_dogfood.py`, the dogfood scenario itself, targeted
+  ruff, and `git diff --check`.
+
+Validation:
+
+- `uv run pytest -q tests/test_work_session.py -k 'verified_blocked_active_work_todo or completed_active_work_todo or verified_active_work_todo or write_ready_fast_path_ignores_completed' --no-testmon`
+- `uv run pytest -q tests/test_work_session.py -k 'task_goal_terms or required_field_terms' --no-testmon`
+- `uv run pytest -q tests/test_work_session.py -k 'failed_patch_repair or suggested_safe_reobserve' --no-testmon`
+- `uv run pytest -q tests/test_work_session.py --no-testmon`
+- `uv run pytest -q tests/test_dogfood.py -k "m6_9_drift_canary or m6_9_novel_task or scenario_choices" --no-testmon`
+- `uv run pytest -q tests/test_dogfood.py -k "m6_9_phase2_regression or scenario_choices" --no-testmon`
+- `uv run pytest -q tests/test_dogfood.py --no-testmon`
+- `./mew dogfood --scenario m6_9-drift-canary --json`
+- `./mew dogfood --scenario m6_9-phase2-regression --json`
+- `uv run ruff check src/mew/work_loop.py src/mew/work_session.py tests/test_work_session.py`
+- `uv run ruff check src/mew/dogfood.py tests/test_dogfood.py`
+- `git diff --check`
+
+Missing proof:
+
+- none for the current M6.14 gate. Future M6.8+ mew-first work may still open
+  bounded repair episodes if it exposes reproducible loop/substrate failures.
+  New milestones are reserved for genuinely new product or architecture axes
+  that do not fit the M6.14 repair ledger.
+
+Next action:
+
+- keep M6.14 closed. If M6.8 or later mew-owned implementation exposes another
+  structural failure, append or activate a bounded repair episode under M6.14,
+  pause the active product milestone while repairing it, and retry the same
+  task.
+
+### M7: Senses - Inbound Signals
+
+Status: `foundation`.
+
+Goal:
+
+- Give the resident audited read-only signals from the user's working world.
+
+Evidence:
+
+- `mew signals enable|disable|sources|record|journal` now provides an explicit
+  gate and journal for inbound signal sources. A source has a kind, reason,
+  daily budget, enabled/disabled state, config, and durable journal entries.
+- `mew signals record` refuses unknown, disabled, or budget-exhausted sources.
+  Successful observations can queue a `signal_observed` runtime event with
+  provenance, while `--no-queue` records without waking the runtime.
+- `src/mew/signals.py` now has minimal RSS/Atom parsing and a gated feed-fetch
+  helper, with mocked tests in `tests/test_signal_fetch.py`.
+- Atom source-kind fetch support was dogfooded in the M6.5 clean rerun and
+  verified with focused signal tests.
+- Validation: `uv run pytest -q tests/test_signals.py --no-testmon`,
+  targeted `ruff`, `./mew help signals record`, and `git diff --check` passed.
+
+Missing proof:
+
+- No CLI or daemon path fetches an enabled source on a resident schedule yet.
+- No real-day unsolicited observation has been collected from signal evidence.
+- Further M7 collector work is paused until M6.6 makes self-hosted coding work
+  closer to Codex CLI level.
+
+Done when:
+
+- At least one non-file-system source can be enabled behind an explicit gate.
+- Signals are journaled with provenance, budget, and suppression logic.
+- Over a real day, mew produces at least one useful unsolicited observation
+  without fabrication or spam.
+
+### M8: Identity - Cross-Project Self
+
+Status: `not_started`.
+
+Goal:
+
+- Add a user-scope identity across projects while preserving project-local
+  facts.
+
+Done when:
+
+- A preference learned in one project is recalled in another without rebrief.
+- Project facts do not leak into unrelated repos unless explicitly promoted.
+- A comparator shows project switching is faster than briefing a fresh CLI.
+
+### M9: Legibility - Human-Readable Companion
+
+Status: `not_started`.
+
+Goal:
+
+- Make mew understandable as a resident to humans, not only as internal state.
+
+Done when:
+
+- A 30-60 second recorded demo is self-explanatory to a non-mew user without
+  narration.
+- `mew introduce`, `mew next`, focus/brief/resume summaries, actionable
+  errors, and state diff surfaces have narrative defaults with `--json` or
+  `--raw` escape hatches.
+- Narrative output refuses to invent missing facts.
+
+### M10: Multi-Agent Residence
+
+Status: `not_started`.
+
+Goal:
+
+- Let multiple model families work inside the same mew without losing each
+  other's notes, approvals, or disagreements.
+
+Done when:
+
+- Two different resident models complete a review-and-fix loop with durable
+  cross-agent notes.
+- Each resident can restart once and still recover the shared state.
+- Disagreements become first-class auditable artifacts, not chat residue.
+
+### M11: Inner Life
+
+Status: `not_started`.
+
+Goal:
+
+- Give the resident a curated, auditable continuity of self across time.
+
+Done when:
+
+- After 30 days of real uptime, journal, dream, mood, and self-memory produce
+  a resident-owned self-description that changes over time.
+- The changes are auditable, reversible, and clearly separated from user-authored
+  instructions.
+
+## Current Roadmap Focus
+
+Active focus: **M6.8 Task Chaining: Supervised Self-Selection**.
+
+The next long session should not drift into broad polish, open-ended
+infrastructure, or unattended autonomy. The acceptable near-term work is:
+
+- start M6.8 from the now-closed M6.9/M6.14 baseline. The next target is a
+  bounded supervised selector slice: mew proposes the next roadmap task at
+  iteration close, reviewer approval is required before execution, and the
+  selection records `previous_task_id` plus `selector_reason`; reserve optional
+  signal refs for M6.8.5, but do not implement curriculum/habit/preference
+  selector policy in the M6.8 core gate;
+- keep M6.9 closed. Reopen only if the M6.8 selector or later chained proof
+  exposes a durable-memory regression against
+  `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`;
+- keep applying the M6.14 repair-ledger rule: if a mew-owned M6.9+
+  implementation fails structurally, pause the active product milestone,
+  append or activate a bounded M6.14 repair episode, fix the loop substrate or
+  task spec, and retry the same task;
+- use the closed M6.10 calibration economics as the active autonomy-accounting
+  baseline, but do not let the 7/10 close gate justify supervisor product
+  rescue for M6.9+ implementation;
+- use Todo D1/D2 and structured rejection/frontier D1 during repairs, but do
+  not turn them into more M6.10 polish unless replay evidence directly shows a
+  missing accelerator;
+- keep M6.12 closed as the read-only failure-science baseline unless a fresh
+  regression appears;
+- use the closed M6.11 residual surfaces (isolated review, executor lifecycle,
+  read-only `MemoryExploreProvider`, and prompt/cache boundary observability)
+  to classify M6.9 failures;
+- roadmap registration and status maintenance for later milestones only when it
+  clarifies post-close deferred work without changing the active M6.8 core
+  milestone;
+- keeping the M6.11 core and residual close audits as historical proof;
+- keeping M6.6 as a closed regression baseline for resident coding work;
+- keeping M6 and M6.7 close artifacts as closed baseline evidence;
+- reviewer-owned roadmap/status updates and checkpointing around milestone
+  transitions;
+- `mew-first-implementation-loop` as the default implementation protocol for
+  ordinary bounded roadmap/coding tasks after the active milestone criterion is
+  chosen, while direct Codex implementation remains acceptable only for
+  reviewer-owned status/audit work or explicit substrate, safety, governance,
+  skill-policy, or permission changes;
+- roadmap/status maintenance that preserves the active decision across context
+  compression.
+
+Keep M5.1, M6, M6.6, M6.7, M6.9, M6.10, M6.11 core plus residual hardening,
+M6.12, and M6.14 as closed baselines while M6.8 proves supervised task
+chaining. M6.8.5 is the next scheduled home for M6.9 Phase 4
+selector-intelligence work. Deeper M7 signal work, provider-specific prompt
+caching, full concurrent executor work, memory explore agentization, and
+unattended self-hosting remain deferred until they map to M6.8.5, M6.13, or a
+later explicit milestone.
+
+## Maintenance Rule
+
+Keep this file as a dashboard, not a changelog.
+
+- Archive detailed milestone evidence at each milestone close.
+- Keep `ROADMAP_STATUS.md` around 200-300 lines.
+- Put long dogfood narratives in `docs/` or `docs/archive/`.
+- If a long-session decision changes, update the Active Milestone Decision
+  immediately and save a mew context checkpoint.

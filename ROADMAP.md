@@ -468,6 +468,10 @@ Target:
   iteration begins; rejection returns control to the human
 - chained iteration identity: each iteration records `previous_task_id` and
   `selector_reason` so drift across chains is auditable
+- selector proposal records are structured so later selector-intelligence
+  signals can be attached without changing the M6.8 approval contract:
+  `memory_signal_refs`, `failure_cluster_reason`, and
+  `preference_signal_refs` start as optional, reviewer-visible fields
 - scope fence extended to the selector: selector output cannot touch
   roadmap-status, milestone-close, or governance files
 - cap on consecutive automatic selections before a hard human checkpoint
@@ -496,6 +500,53 @@ Why it matters:
   This is the operational bridge from reviewer-gated single-shot execution to
   reviewer-gated supervised operation. Unattended autonomy remains explicitly
   out of scope.
+
+## Milestone 6.8.5: Selector Intelligence and Curriculum Integration
+
+Turn the M6.8 supervised selector from a safe task handoff mechanism into an
+evidence-aware task chooser. This milestone absorbs the M6.9 Phase 4 work that
+was intentionally gated on task chaining.
+
+Target:
+
+- failure-clustered curriculum: the selector can weight candidate tasks toward
+  recent verified failure clusters, using M6.12 failure-science evidence and
+  M6.14 repair episodes as read-only inputs
+- preference-store retrieval: reviewer-diff triples from M6.9 are indexed as
+  `(context, dispreferred, preferred)` pairs and injected into draft-time
+  context under a small token budget
+- habit compilation v0: task-template entries that repeatedly pass with stable
+  shape and low variance can be promoted into deterministic runner candidates,
+  with model-backed fallback on mismatch
+- selector traceability: every task proposal records the signals that affected
+  it, including failure cluster ids, durable-memory refs, preference refs, and
+  whether any compiled habit candidate was considered
+- no automatic governance: M6.12 and M6.14 evidence may influence selector
+  proposals, but they do not directly change roadmap status, milestone close,
+  or approval policy
+
+Done when:
+
+- after M6.8 core closes, a chained supervised run uses at least one
+  failure-clustered selector signal to propose a next task, and the reviewer can
+  approve or reject it from the recorded evidence
+- at least one preference-store pair is retrieved during draft preparation with
+  bounded token cost and reviewer-visible provenance
+- at least one stable task-template is compiled into a deterministic runner
+  candidate, and both compiled-path success and fallback-on-mismatch are
+  verified without hiding model work
+- selector traces make it possible to explain why a task was chosen without
+  reading raw memory files or replay bundles
+- M6.8 scope fence and reviewer-approval rules still hold when the new signals
+  are present
+
+Why it matters:
+
+- M6.8 proves mew can choose the next task safely. M6.8.5 proves it can choose
+  the next task intelligently, using the durable memory and failure evidence
+  that reactive CLIs do not have. This is the natural home for M6.9 Phase 4:
+  curriculum, habit compilation, and preference conditioning only become useful
+  once task chaining exists.
 
 ## Milestone 6.9: Durable Coding Intelligence
 
