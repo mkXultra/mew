@@ -3546,26 +3546,30 @@ def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
         r"(?P<start>\d{1,7})\s*(?:-|\.{2}|:|to)\s*(?P<end>\d{1,7})",
         re.IGNORECASE,
     )
+    line_start_count_pattern = re.compile(
+        rf"(?P<path>{path_pattern})"
+        r"(?P<body>.{0,160}?)"
+        r"\b(?:line[_ -]?start|start[_ -]?line)\s*(?:=|:)?\s*(?P<start>\d{1,7})"
+        r"(?P<middle>.{0,160}?)"
+        r"\b(?:line[_ -]?count|count)\s*(?:=|:)?\s*(?P<count>\d{1,5})",
+        re.IGNORECASE | re.DOTALL,
+    )
     actions = []
     seen = set()
-    for match in span_pattern.finditer(text):
-        raw_path = match.group("path").strip().strip("`'\"")
+    def add_action(raw_path, line_start, line_count):
         path = next((item for item in allowed_paths if _work_paths_match(raw_path, item)), "")
         if not path:
-            continue
+            return
         try:
-            line_start = int(match.group("start"))
-            line_end = int(match.group("end"))
+            line_start = int(line_start)
+            line_count = int(line_count)
         except (TypeError, ValueError):
-            continue
-        if line_start <= 0 or line_end < line_start:
-            continue
-        line_count = line_end - line_start + 1
-        if line_count > 1000:
-            continue
+            return
+        if line_start <= 0 or line_count <= 0 or line_count > 1000:
+            return
         key = (path, line_start, line_count)
         if key in seen:
-            continue
+            return
         seen.add(key)
         actions.append(
             {
@@ -3576,8 +3580,28 @@ def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
                 "reason": "refresh explicitly requested write-ready cached window",
             }
         )
+
+    for match in line_start_count_pattern.finditer(text):
+        add_action(
+            match.group("path").strip().strip("`'\""),
+            match.group("start"),
+            match.group("count"),
+        )
         if len(actions) >= 5:
             break
+    for match in span_pattern.finditer(text):
+        if len(actions) >= 5:
+            break
+        raw_path = match.group("path").strip().strip("`'\"")
+        try:
+            line_start = int(match.group("start"))
+            line_end = int(match.group("end"))
+        except (TypeError, ValueError):
+            continue
+        if line_start <= 0 or line_end < line_start:
+            continue
+        line_count = line_end - line_start + 1
+        add_action(raw_path, line_start, line_count)
     if actions:
         return actions
     return _work_write_ready_explicit_refresh_search_actions(text, allowed_paths, work_session)
