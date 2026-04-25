@@ -96,6 +96,25 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
     assert "#599 supervisor_rescue" in text
 
 
+def test_summarize_mew_first_calibration_reports_only_found_attempt_sections(tmp_path: Path) -> None:
+    source = tmp_path / "ROADMAP_STATUS.md"
+    source.write_text(
+        """
+### M6.10: Execution Accelerators
+
+- Task `#606` landed a post-D1/D2 M6.10 mew-first implementation slice.
+  The fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+""",
+        encoding="utf-8",
+    )
+
+    summary = summarize_mew_first_calibration(source_path=source, limit=10)
+
+    assert summary["included_attempt_sections"] == ["### M6.10:"]
+    assert [attempt["task_id"] for attempt in summary["attempts"]] == [606]
+
+
 def test_extract_mew_first_attempts_includes_m6_10_attempts_after_m6_9() -> None:
     text = (
         M6_9_FIXTURE

@@ -245,7 +245,14 @@ def summarize_mew_first_calibration(
     drift_counts = Counter(attempt.drift_class for attempt in attempts)
     rejected_counts = Counter(attempt.rejected_patch_family for attempt in attempts)
     clean_or_practical = sum(1 for attempt in attempts if attempt.result_class in SUCCESS_CLASSES)
-    section_headings = list(DEFAULT_ATTEMPT_SECTION_HEADINGS)
+    section_headings = [
+        heading
+        for _, heading in sorted(
+            (text.find(heading), heading)
+            for heading in DEFAULT_ATTEMPT_SECTION_HEADINGS
+            if text.find(heading) >= 0
+        )
+    ]
     total = len(attempts)
     return {
         "kind": "mew_first_calibration",
