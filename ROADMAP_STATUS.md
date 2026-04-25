@@ -27,7 +27,7 @@ not be resumed until the recorded resume condition fires.
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Paused at a clean proof boundary: Phase 1 substrate, 10 repeated-task shapes, comparator regression, reviewer-steering/failure-shield, and reasoning-trace recall exist, but drift/rehearsal proof should wait until mew-first implementation reliability improves. |
-| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Active focus: use Todo, structured rejection/frontier, and M6.12-style calibration economics to make mew-first implementation economical enough to resume M6.9 with cleaner autonomy evidence. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0 now reports recent mew-first economics as 4/10 clean-or-practical against the 7/10 gate; next focus is Todo plus structured rejection/frontier. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
@@ -2374,12 +2374,17 @@ Progress:
   shows repeated-task shapes can succeed, but abstract implementation proof
   slices still drift into existing-surface polish or generic cleanup without a
   stronger short-horizon frontier and economics loop
+- Calibration D0 landed as `mew metrics --mew-first`: the current
+  ROADMAP_STATUS-backed report classifies the latest 10 M6.9 implementation
+  slices as 2 clean, 2 practical, 1 partial, 3 supervisor-rescue, 1
+  supervisor-owned, and 1 supervisor-owned-or-unknown. The M6.10 reliability
+  gate is not met yet: 4/10 clean-or-practical versus the 7/10 threshold.
+  Validation covered `uv run pytest -q tests/test_mew_first_calibration.py
+  tests/test_metrics.py --no-testmon`, `./mew metrics --mew-first --json`,
+  `./mew metrics --mew-first`, targeted ruff, and `git diff --check`.
 
 Missing proof:
 
-- no Calibration D0 report exists yet for the latest 10 mew-first attempts
-  with clean/practical/partial/supervisor-rescue counts, drift classes, rescue
-  edits, rejected patch families, and verifier/proof status
 - no Todo tool exists yet for session-scoped write/update/list
 - no reviewer/operator surface currently exposes a session Todo list with
   duplicate-state guards
@@ -2395,11 +2400,9 @@ Missing proof:
 
 Next action:
 
-- implement Calibration D0 first as a lightweight report/command over existing
-  M6.12 and roadmap evidence; it should not create a new instrumentation
-  framework
-- then take Todo D1 and structured rejection/frontier D1 before considering
-  Explorer
+- take Todo D1 and structured rejection/frontier D1 before considering
+  Explorer; use `mew metrics --mew-first` as the economics baseline for
+  post-D1 attempts
 
 ### M6.11: Loop Stabilization
 
@@ -3553,9 +3556,8 @@ Active focus: **M6.10 Execution Accelerators and Mew-First Reliability**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- Calibration D0: summarize the latest 10 mew-first implementation attempts
-  with clean/practical/partial/supervisor-rescue counts, drift classes, rescue
-  edits, rejected patch families, and verifier/proof status;
+- use Calibration D0 (`mew metrics --mew-first`) as the current economics
+  baseline: 4/10 clean-or-practical against the 7/10 M6.10 reliability gate;
 - Todo D1/D2 for session-scoped short-horizon work decomposition and
   reviewer/operator visibility;
 - structured rejection/frontier D1 so reject/redirect decisions become durable

@@ -681,6 +681,16 @@ def build_parser():
         default=3,
         help="maximum recent diagnostic samples to show for each bottleneck",
     )
+    metrics_parser.add_argument(
+        "--mew-first",
+        action="store_true",
+        help="summarize M6.10 mew-first calibration economics from roadmap evidence",
+    )
+    metrics_parser.add_argument(
+        "--source-file",
+        default="ROADMAP_STATUS.md",
+        help="source markdown for --mew-first; defaults to ROADMAP_STATUS.md",
+    )
     metrics_parser.add_argument("--json", action="store_true", help="print structured JSON")
     metrics_parser.set_defaults(func=cmd_metrics)
 

@@ -71,6 +71,10 @@ from .journal import (
 )
 from .memory import add_deep_memory, compact_memory, recall_memory
 from .metrics import build_observation_metrics, format_observation_metrics
+from .mew_first_calibration import (
+    format_mew_first_calibration_report,
+    summarize_mew_first_calibration,
+)
 from .model_backends import (
     load_model_auth,
     model_backend_default_base_url,
@@ -10130,6 +10134,16 @@ def cmd_focus(args):
 
 
 def cmd_metrics(args):
+    if getattr(args, "mew_first", False):
+        data = summarize_mew_first_calibration(
+            source_path=getattr(args, "source_file", None) or "ROADMAP_STATUS.md",
+            limit=getattr(args, "limit", None) or 10,
+        )
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+            return 0
+        print(format_mew_first_calibration_report(data))
+        return 0
     state = load_state()
     data = build_observation_metrics(
         state,
