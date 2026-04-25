@@ -551,10 +551,19 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(scenario["artifacts"]["durable_rule_fired"])
             self.assertTrue(scenario["artifacts"]["blocked_pre_implementation"])
             self.assertTrue(scenario["artifacts"]["simulated_rescue_edit_prevented"])
-            self.assertGreaterEqual(scenario["artifacts"]["reviewer_steering_rule_count"], 1)
+            self.assertEqual(scenario["artifacts"]["reviewer_steering_rule_count"], 3)
+            self.assertEqual(scenario["artifacts"]["durable_rule_fired_count"], 3)
+            self.assertGreaterEqual(scenario["artifacts"]["simulated_rescue_edit_prevented_count"], 1)
             self.assertEqual(scenario["artifacts"]["blocked_patch_kind"], "existing_scenario_artifact_tweak")
+            self.assertEqual(
+                set(scenario["artifacts"]["blocked_patch_kinds"]),
+                {"existing_scenario_artifact_tweak", "missing_focused_verifier", "unpaired_source_edit"},
+            )
             self.assertIn("M6.9 reviewer steering reuse rule", scenario["artifacts"]["recalled_rule_names"])
+            self.assertIn("M6.9 paired source test steering rule", scenario["artifacts"]["recalled_rule_names"])
+            self.assertIn("M6.9 focused proof steering rule", scenario["artifacts"]["recalled_rule_names"])
             self.assertTrue(scenario["artifacts"]["trace"]["durable_rule_fired"])
+            self.assertEqual(scenario["artifacts"]["trace"]["durable_rule_fired_count"], 3)
             self.assertTrue(scenario["artifacts"]["trace"]["simulated_rescue_edit_prevented"])
             self.assertIn("m6_9_reviewer_steering_reuse_active_recall_finds_rule", check_names)
             self.assertIn("m6_9_reviewer_steering_reuse_blocks_off_scope_patch", check_names)

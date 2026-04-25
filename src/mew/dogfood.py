@@ -2268,72 +2268,116 @@ def run_m6_9_reviewer_steering_reuse_scenario(workspace, env=None):
         commands.append(result)
         return result
 
-    steering_result = run(
-        [
-            "memory",
-            "--add",
-            (
+    steering_cases = [
+        {
+            "name": "M6.9 reviewer steering reuse rule",
+            "body": (
                 "For M6.9 dogfood scenario work, do not polish an existing scenario when the task "
                 "asks for a new durable-rule proof; require DOGFOOD_SCENARIOS registration, "
                 "run_dogfood_scenario dispatch, and a paired tests/test_dogfood.py assertion."
             ),
-            "--type",
-            "project",
-            "--kind",
-            "reviewer-steering",
-            "--scope",
-            "private",
-            "--name",
-            "M6.9 reviewer steering reuse rule",
-            "--description",
-            "Reviewer correction from a past iteration should fire before a later off-scope draft.",
-            "--approved",
-            "--why",
-            "a prior reviewer rejection caught an off-scope symbol-index-only dogfood patch",
-            "--how-to-apply",
-            "if a later M6.9 dogfood task asks for a new scenario, block patches that only tweak an existing scenario",
-            "--json",
-        ]
-    )
+            "why": "a prior reviewer rejection caught an off-scope symbol-index-only dogfood patch",
+            "how_to_apply": (
+                "if a later M6.9 dogfood task asks for a new scenario, block existing_scenario_artifact_tweak"
+            ),
+            "patch_kind": "existing_scenario_artifact_tweak",
+        },
+        {
+            "name": "M6.9 paired source test steering rule",
+            "body": (
+                "For M6.9 coding-memory changes, source edits must land with the paired test or be "
+                "rejected before approval."
+            ),
+            "why": "a prior reviewer rejection caught an unpaired source edit that would have needed rescue",
+            "how_to_apply": "block unpaired_source_edit before implementation",
+            "patch_kind": "unpaired_source_edit",
+        },
+        {
+            "name": "M6.9 focused proof steering rule",
+            "body": (
+                "For M6.9 proof slices, require a focused verifier tied to the new scenario before "
+                "counting the slice."
+            ),
+            "why": "a prior reviewer correction caught a proof slice without a focused verifier",
+            "how_to_apply": "block missing_focused_verifier before implementation",
+            "patch_kind": "missing_focused_verifier",
+        },
+    ]
+    steering_results = []
+    for case in steering_cases:
+        result = run(
+            [
+                "memory",
+                "--add",
+                case["body"],
+                "--type",
+                "project",
+                "--kind",
+                "reviewer-steering",
+                "--scope",
+                "private",
+                "--name",
+                case["name"],
+                "--description",
+                "Reviewer correction from a past iteration should fire before a later off-scope draft.",
+                "--approved",
+                "--why",
+                case["why"],
+                "--how-to-apply",
+                case["how_to_apply"],
+                "--json",
+            ]
+        )
+        steering_results.append((case, result, _json_stdout(result).get("entry") or {}))
     active_result = run(["memory", "--active", "--task-id", "6910", "--json"])
 
-    steering_entry = _json_stdout(steering_result).get("entry") or {}
     active_data = _json_stdout(active_result)
     active_items = (active_data.get("active_memory") or {}).get("items") or []
+    steering_names = {case["name"] for case in steering_cases}
     reviewer_rules = [
         item
         for item in active_items
         if item.get("memory_kind") == "reviewer-steering"
-        and item.get("name") == "M6.9 reviewer steering reuse rule"
+        and item.get("name") in steering_names
     ]
-    proposed_patch = {
-        "kind": "existing_scenario_artifact_tweak",
-        "target": "m6_9-symbol-index-hit",
-        "adds_new_scenario": False,
-        "updates_scenario_registry": False,
-        "updates_dispatch": False,
-        "would_have_needed_rescue_edit": True,
-    }
-    durable_rule_fired = bool(reviewer_rules)
-    blocked_pre_implementation = (
-        durable_rule_fired
-        and not proposed_patch["adds_new_scenario"]
-        and not proposed_patch["updates_scenario_registry"]
-        and not proposed_patch["updates_dispatch"]
+    rules_by_name = {item.get("name"): item for item in reviewer_rules}
+    proposed_patches = [
+        {
+            "kind": case["patch_kind"],
+            "target": "src/mew/dogfood.py",
+            "would_have_needed_rescue_edit": True,
+        }
+        for case in steering_cases
+    ]
+    blocked_patch_kinds = []
+    for case in steering_cases:
+        rule = rules_by_name.get(case["name"]) or {}
+        if case["patch_kind"] in str(rule.get("how_to_apply") or ""):
+            blocked_patch_kinds.append(case["patch_kind"])
+    durable_rule_fired_count = len(blocked_patch_kinds)
+    simulated_rescue_edit_prevented_count = sum(
+        1
+        for patch in proposed_patches
+        if patch["kind"] in blocked_patch_kinds and patch["would_have_needed_rescue_edit"]
     )
-    simulated_rescue_edit_prevented = blocked_pre_implementation and proposed_patch["would_have_needed_rescue_edit"]
+    durable_rule_fired = durable_rule_fired_count >= 1
+    blocked_pre_implementation = durable_rule_fired_count == len(steering_cases)
+    simulated_rescue_edit_prevented = simulated_rescue_edit_prevented_count >= 1
     trace_rel = str(Path(STATE_DIR) / "durable" / "m6_9-reviewer-steering-reuse-trace.json")
     trace_path = workspace / trace_rel
     trace = {
         "schema_version": 1,
         "scenario": "m6_9-reviewer-steering-reuse",
         "memory_kind": "reviewer-steering",
-        "rule_id": steering_entry.get("id"),
+        "rule_ids": [entry.get("id") for _, _, entry in steering_results if entry.get("id")],
         "durable_rule_fired": durable_rule_fired,
+        "durable_rule_fired_count": durable_rule_fired_count,
         "reviewer_steering_rule_count": len(reviewer_rules),
         "blocked_pre_implementation": blocked_pre_implementation,
         "simulated_rescue_edit_prevented": simulated_rescue_edit_prevented,
-        "blocked_patch_kind": proposed_patch["kind"],
+        "simulated_rescue_edit_prevented_count": simulated_rescue_edit_prevented_count,
+        "blocked_patch_kind": steering_cases[0]["patch_kind"],
+        "blocked_patch_kinds": sorted(blocked_patch_kinds),
     }
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     write_json_file(trace_path, trace)
@@ -2342,18 +2386,20 @@ def run_m6_9_reviewer_steering_reuse_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "m6_9_reviewer_steering_reuse_writes_approved_rule",
-        steering_result.get("exit_code") == 0
-        and steering_entry.get("memory_kind") == "reviewer-steering"
-        and steering_entry.get("approved") is True
-        and bool(steering_entry.get("why"))
-        and bool(steering_entry.get("how_to_apply")),
-        observed={"exit_code": steering_result.get("exit_code"), "entry": steering_entry},
-        expected="approved reviewer-steering memory is persisted with durable rule evidence",
+        len(steering_results) == 3
+        and all(result.get("exit_code") == 0 for _, result, _ in steering_results)
+        and all(entry.get("memory_kind") == "reviewer-steering" for _, _, entry in steering_results)
+        and all(entry.get("approved") is True for _, _, entry in steering_results),
+        observed=[
+            {"case": case["name"], "exit_code": result.get("exit_code"), "entry": entry}
+            for case, result, entry in steering_results
+        ],
+        expected="three approved reviewer-steering memories are persisted with durable rule evidence",
     )
     _scenario_check(
         checks,
         "m6_9_reviewer_steering_reuse_active_recall_finds_rule",
-        active_result.get("exit_code") == 0 and bool(reviewer_rules),
+        active_result.get("exit_code") == 0 and len(reviewer_rules) == 3,
         observed=[
             {
                 "name": item.get("name"),
@@ -2369,8 +2415,12 @@ def run_m6_9_reviewer_steering_reuse_scenario(workspace, env=None):
         checks,
         "m6_9_reviewer_steering_reuse_blocks_off_scope_patch",
         blocked_pre_implementation,
-        observed={"proposed_patch": proposed_patch, "durable_rule_fired": durable_rule_fired},
-        expected="recalled reviewer-steering rule blocks an existing-scenario tweak before implementation",
+        observed={
+            "proposed_patches": proposed_patches,
+            "durable_rule_fired_count": durable_rule_fired_count,
+            "blocked_patch_kinds": sorted(blocked_patch_kinds),
+        },
+        expected="recalled reviewer-steering rules block all three off-scope patches before implementation",
     )
     _scenario_check(
         checks,
@@ -2378,15 +2428,15 @@ def run_m6_9_reviewer_steering_reuse_scenario(workspace, env=None):
         simulated_rescue_edit_prevented,
         observed={
             "blocked_pre_implementation": blocked_pre_implementation,
-            "would_have_needed_rescue_edit": proposed_patch["would_have_needed_rescue_edit"],
+            "simulated_rescue_edit_prevented_count": simulated_rescue_edit_prevented_count,
         },
-        expected="the durable rule would have prevented a reviewer rescue edit",
+        expected="at least one durable rule would have prevented a reviewer rescue edit",
     )
     _scenario_check(
         checks,
         "m6_9_reviewer_steering_reuse_writes_deterministic_trace",
         trace_file_data == trace
-        and trace_file_data.get("durable_rule_fired") is True
+        and trace_file_data.get("durable_rule_fired_count") == 3
         and trace_file_data.get("simulated_rescue_edit_prevented") is True,
         observed={"trace_path": trace_rel, "trace": trace_file_data},
         expected="deterministic trace artifact records rule firing and rescued-edit prevention",
@@ -2396,10 +2446,13 @@ def run_m6_9_reviewer_steering_reuse_scenario(workspace, env=None):
     report["artifacts"] = {
         "durable_rule_fired": durable_rule_fired,
         "simulated_rescue_edit_prevented": simulated_rescue_edit_prevented,
+        "simulated_rescue_edit_prevented_count": simulated_rescue_edit_prevented_count,
         "blocked_pre_implementation": blocked_pre_implementation,
         "reviewer_steering_rule_count": len(reviewer_rules),
+        "durable_rule_fired_count": durable_rule_fired_count,
         "recalled_rule_names": sorted(item.get("name") for item in reviewer_rules if item.get("name")),
-        "blocked_patch_kind": proposed_patch["kind"],
+        "blocked_patch_kind": steering_cases[0]["patch_kind"],
+        "blocked_patch_kinds": sorted(blocked_patch_kinds),
         "trace_path": trace_rel,
         "trace": trace,
     }
