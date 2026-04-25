@@ -6826,6 +6826,35 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("m6_9-drift-canary", tiny_context["task_goal"]["required_terms"])
 
+    def test_tiny_write_ready_draft_context_keeps_milestone_and_required_field_terms(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="DOGFOOD_SCENARIOS = (\n    'm6_9-phase1-regression',\n)\n",
+            test_text="def test_dogfood():\n    assert True\n",
+        )
+        context["task"]["title"] = "M6.9 novel-task injection exploration matrix v0"
+        context["task"]["description"] = (
+            "Extend m6_9-drift-canary so novel-task injection records an "
+            "exploration_decision_matrix with unknown_memory_match."
+        )
+        context["guidance"] = (
+            "Draft the paired source/test patch. Add forced_source_read, "
+            "forced_test_read, no_silent_memory_reliance, and "
+            "reviewer_visible_exploration_reason."
+        )
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        required_terms = tiny_context["task_goal"]["required_terms"]
+
+        self.assertIn("m6_9-drift-canary", required_terms)
+        self.assertIn("exploration_decision_matrix", required_terms)
+        self.assertIn("unknown_memory_match", required_terms)
+        self.assertIn("forced_source_read", required_terms)
+        self.assertIn("forced_test_read", required_terms)
+        self.assertIn("no_silent_memory_reliance", required_terms)
+        self.assertIn("reviewer_visible_exploration_reason", required_terms)
+
     def test_tiny_write_ready_draft_context_prefers_first_actionable_plan_item_surface(self):
         from mew.work_loop import (
             build_write_ready_tiny_draft_model_context,

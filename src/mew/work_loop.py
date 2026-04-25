@@ -99,6 +99,8 @@ WORK_TASK_GOAL_TERM_STOPWORDS = {
     "dry-run",
     "write-ready",
 }
+WORK_TASK_GOAL_REQUIRED_TERMS_LIMIT = 10
+WORK_TASK_GOAL_MILESTONE_TERMS_LIMIT = 4
 WORK_TASK_GOAL_PATH_FRAGMENT_RE = re.compile(r"\b(?:src|tests)/[A-Za-z0-9_./-]+")
 
 
@@ -2647,7 +2649,34 @@ def _write_ready_task_goal_required_terms(context, resume=None):
 
     milestone_terms = [term for term in terms if term.casefold().startswith("m6_")]
     if milestone_terms:
-        return milestone_terms[:4]
+        milestone_keys = {term.casefold() for term in milestone_terms}
+        structured_terms = [
+            term
+            for term in terms
+            if "_" in term and term.casefold() not in milestone_keys
+        ]
+        structured_keys = {term.casefold() for term in structured_terms}
+        other_terms = [
+            term
+            for term in terms
+            if term.casefold() not in milestone_keys and term.casefold() not in structured_keys
+        ]
+        selected = []
+        selected_keys = set()
+        for group in (
+            milestone_terms[:WORK_TASK_GOAL_MILESTONE_TERMS_LIMIT],
+            structured_terms,
+            other_terms,
+        ):
+            for term in group:
+                key = term.casefold()
+                if key in selected_keys:
+                    continue
+                selected.append(term)
+                selected_keys.add(key)
+                if len(selected) >= WORK_TASK_GOAL_REQUIRED_TERMS_LIMIT:
+                    return selected
+        return selected
     return terms[:4]
 
 
