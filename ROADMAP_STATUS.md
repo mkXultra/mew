@@ -2147,9 +2147,14 @@ Residual active scope:
   turn status, reason, and replay bundle path while preserving the canonical
   draft-domain `WorkTodo.status`. Remaining lifecycle expansion, if needed,
   should add other terminal overlays without replacing `WorkTodo.status`.
-- Provisional read-only `MemoryExploreProvider` v0: memory-assisted
-  exploration should feed the same explore handoff shape as filesystem
-  exploration, without adding a second autonomous planner.
+- Provisional read-only `MemoryExploreProvider` v0: `done` in task `#580`.
+  Memory-assisted exploration now feeds the same explore handoff keys as
+  filesystem exploration (`target_paths`, `cached_window_refs`,
+  `candidate_edit_paths`, `exact_blockers`, `memory_refs`) without adding a
+  second autonomous planner, new CLI/tool surface, writes, or prompt rewrites.
+  The privacy boundary rejects traversal, tilde, drive-letter absolute, NUL,
+  and private memory paths from path-bearing fields and omits free-text fields
+  from `memory_refs`.
 - Prompt/cache boundary observability: the drafting contract should expose
   stable-prefix and dynamic-payload measurements so future prompt-cache
   behavior is deliberate.
@@ -2186,6 +2191,17 @@ Evidence:
   --no-testmon` passed with 605 tests and 24 subtests, ruff passed for touched
   files, `git diff --check` was clean, and codex-ultra approved review session
   `019dc24c-11db-7951-a51a-63595df08087`.
+- residual MemoryExploreProvider evidence: task `#580` first exposed a narrow
+  mew-first missing-target substrate blocker, fixed by `97433f0`; after retry,
+  mew implemented the provider and repaired two codex-ultra privacy review
+  findings. This is counted as `success_after_substrate_fix`: the implementation
+  patch owner is mew, with Codex acting as reviewer/approver. Validation:
+  `uv run pytest -q tests/test_memory_explore.py tests/test_work_session.py -k
+  'memory_explore or active_memory' --no-testmon` passed with 5 tests, `uv run
+  pytest -q tests/test_memory_explore.py --no-testmon` passed with 3 tests,
+  ruff passed for touched files, `git diff --check --cached` was clean, and
+  codex-ultra approved final static review session
+  `019dc287-8591-7610-a0c7-135d5a52cc98`.
 
 Historical proof trail before core close:
 - refusal separation is landed in `src/mew/codex_api.py`, but the later
@@ -2984,7 +3000,6 @@ Missing proof:
 
 - no residual Phase 5 isolated review lane proof exists yet
 - no residual Phase 6 executor lifecycle proof exists yet
-- no read-only `MemoryExploreProvider` v0 proof exists yet
 - no post-residual mew-first M6.9 slice has shown clearer classification
   across review, executor lifecycle, memory explore, and task-spec causes
 
@@ -3156,9 +3171,10 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
 
 - bounded M6.11 residual hardening from
   `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md`;
-- Phase 5 isolated review lane, Phase 6 executor lifecycle tightening,
-  provisional read-only `MemoryExploreProvider` v0, and prompt/cache boundary
-  observability;
+- Phase 5 isolated review lane, Phase 6 executor lifecycle tightening, and
+  provisional read-only `MemoryExploreProvider` v0 are done; the remaining
+  active residual boundary is prompt/cache observability unless a fresh review
+  finding reopens an earlier residual slice;
 - keeping M6.9 pending at the current proof-slice boundary until residual
   hardening closes, then resuming the repeated-task proof matrix or its
   runner/report structure;
