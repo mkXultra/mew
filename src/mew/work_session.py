@@ -59,6 +59,7 @@ WORK_TODO_STATUSES = {
     "completed",
 }
 WORK_TODO_PHASE_STATUSES = {"drafting", "blocked_on_patch"}
+WORK_ACTIVE_TODO_CACHED_WINDOWS_PER_TARGET_PATH = 3
 _TINY_WRITE_READY_DRAFT_BLOCKER_UNKNOWN_RECOVERY_ACTION = "refresh_cached_window"
 _TINY_WRITE_READY_DRAFT_BLOCKER_REASON_PREFIX = "write-ready tiny draft blocker:"
 _RESUME_DRAFT_FROM_CACHED_WINDOWS_ACTION = "resume_draft_from_cached_windows"
@@ -5494,6 +5495,34 @@ def _cached_window_ref_from_observation(window):
     return cached_window_ref
 
 
+def _cached_window_line_ranges_overlap(left, right):
+    try:
+        left_start = int((left or {}).get("line_start") or 0)
+        left_end = int((left or {}).get("line_end") or 0)
+        right_start = int((right or {}).get("line_start") or 0)
+        right_end = int((right or {}).get("line_end") or 0)
+    except (TypeError, ValueError):
+        return False
+    if left_start <= 0 or right_start <= 0 or left_end < left_start or right_end < right_start:
+        return False
+    return left_start <= right_end and right_start <= left_end
+
+
+def _cached_window_path_matches(path, target_path):
+    path = _normalized_work_path_text(path)
+    target_path = _normalized_work_path_text(target_path)
+    if not path or not target_path:
+        return False
+    return path == target_path or path.endswith(f"/{target_path}") or target_path.endswith(f"/{path}")
+
+
+def _cached_window_refs_cover_target_paths(cached_window_refs, target_paths):
+    for target_path in target_paths or []:
+        if not any(_cached_window_path_matches((item or {}).get("path"), target_path) for item in cached_window_refs or []):
+            return False
+    return bool(target_paths)
+
+
 def _next_active_work_todo_id(session):
     ordinal = int(session.get("last_work_todo_ordinal") or 0) + 1
     session["last_work_todo_ordinal"] = ordinal
@@ -5507,6 +5536,7 @@ def _build_active_work_todo_candidate(
     *,
     target_paths,
     cached_window_by_path,
+    cached_windows_by_path=None,
     first_observation,
     verify_command,
     model_turns,
@@ -5518,10 +5548,20 @@ def _build_active_work_todo_candidate(
     relevant_target_paths = _relevant_resume_target_paths(target_paths)
     cached_window_refs = []
     for target_path in relevant_target_paths:
-        cached_window_ref = _cached_window_ref_from_observation(cached_window_by_path.get(target_path) or {})
-        if cached_window_ref:
-            cached_window_refs.append(cached_window_ref)
-    if not relevant_target_paths or len(cached_window_refs) != len(relevant_target_paths):
+        windows = []
+        if isinstance(cached_windows_by_path, dict):
+            windows = [
+                item
+                for item in cached_windows_by_path.get(target_path) or []
+                if isinstance(item, dict)
+            ]
+        if not windows:
+            windows = [cached_window_by_path.get(target_path) or {}]
+        for window in windows:
+            cached_window_ref = _cached_window_ref_from_observation(window)
+            if cached_window_ref:
+                cached_window_refs.append(cached_window_ref)
+    if not relevant_target_paths or not _cached_window_refs_cover_target_paths(cached_window_refs, relevant_target_paths):
         return {}
 
     draft_attempts, _latest_metrics = _write_ready_draft_metrics(model_turns)
@@ -5548,6 +5588,7 @@ def _observe_active_work_todo(
     plan_item_observations,
     target_paths,
     cached_window_by_path,
+    cached_windows_by_path=None,
     verify_command,
     model_turns,
     current_time=None,
@@ -5558,6 +5599,7 @@ def _observe_active_work_todo(
     candidate = _build_active_work_todo_candidate(
         target_paths=target_paths,
         cached_window_by_path=cached_window_by_path,
+        cached_windows_by_path=cached_windows_by_path,
         first_observation=first_observation,
         verify_command=verify_command,
         model_turns=model_turns,
@@ -6193,6 +6235,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     }
     target_path_cached_window_observations = []
     cached_window_by_path = {}
+    cached_windows_by_path = {}
     adjacent_read_observations = build_adjacent_read_observations(calls, limit=3)
     target_paths = _coerce_working_memory_target_paths((working_memory or {}).get("target_paths") or [])
     for item in complete_frontier_windows:
@@ -6210,7 +6253,10 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 }
                 target_path_cached_window_observations.append(observation)
                 cached_window_by_path[target_path] = dict(complete_window)
+                cached_windows_by_path[target_path] = [dict(complete_window)]
                 continue
+            target_observations = []
+            target_cached_windows = []
             for call in reversed(calls):
                 if call.get("tool") != "read_file" or call.get("status") != "completed":
                     continue
@@ -6250,12 +6296,26 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                         f"merged adjacent read_file windows already covered {target_path}:{merged_line_start}-{merged_line_end}"
                     )
                     break
-                target_path_cached_window_observations.append(observation)
-                cached_window_by_path[target_path] = {
+                if any(_cached_window_line_ranges_overlap(observation, existing) for existing in target_observations):
+                    continue
+                cached_window = {
                     **observation,
                     "text": result.get("text") or "",
                 }
-                break
+                target_observations.append(observation)
+                target_cached_windows.append(cached_window)
+                if len(target_observations) >= WORK_ACTIVE_TODO_CACHED_WINDOWS_PER_TARGET_PATH:
+                    break
+            if target_observations:
+                ordered_pairs = sorted(
+                    zip(target_observations, target_cached_windows),
+                    key=lambda pair: int(pair[0].get("line_start") or 0),
+                )
+                for observation, _cached_window in ordered_pairs:
+                    target_path_cached_window_observations.append(observation)
+                ordered_cached_windows = [cached_window for _observation, cached_window in ordered_pairs]
+                cached_windows_by_path[target_path] = ordered_cached_windows
+                cached_window_by_path[target_path] = ordered_cached_windows[0]
     demoted_adjacent_read_observations = []
     plan_item_observations = []
     plan_items = _coerce_working_memory_plan_items((working_memory or {}).get("plan_items") or [])
@@ -6297,25 +6357,31 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                 )
             cached_windows = []
             for target_path in relevant_target_paths:
-                cached_window = cached_window_by_path.get(target_path)
-                if not cached_window:
-                    continue
-                cached_windows.append(
-                    {
-                        "path": target_path,
-                        "tool_call_id": cached_window.get("tool_call_id"),
-                        "line_start": cached_window.get("line_start"),
-                        "line_end": cached_window.get("line_end"),
-                        "context_truncated": cached_window.get("context_truncated"),
-                    }
-                )
+                for cached_window in cached_windows_by_path.get(target_path) or []:
+                    cached_windows.append(
+                        {
+                            "path": target_path,
+                            "tool_call_id": cached_window.get("tool_call_id"),
+                            "line_start": cached_window.get("line_start"),
+                            "line_end": cached_window.get("line_end"),
+                            "context_truncated": cached_window.get("context_truncated"),
+                        }
+                    )
             if cached_windows:
                 plan_item_observation["cached_windows"] = cached_windows
             is_verifier_success_branch = _looks_like_verifier_success_branch_plan_item(actionable_plan_item)
+            cached_window_paths = {
+                str(item.get("path") or "")
+                for item in cached_windows
+                if str(item.get("path") or "").strip()
+            }
             edit_ready = (
                 not is_verifier_success_branch
                 and bool(relevant_target_paths)
-                and len(cached_windows) == len(relevant_target_paths)
+                and all(
+                    any(_cached_window_path_matches(path, target_path) for path in cached_window_paths)
+                    for target_path in relevant_target_paths
+                )
                 and all(not item.get("context_truncated") for item in cached_windows)
             )
             if edit_ready and requested_window:
@@ -6358,6 +6424,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         plan_item_observations=plan_item_observations,
         target_paths=target_paths,
         cached_window_by_path=cached_window_by_path,
+        cached_windows_by_path=cached_windows_by_path,
         verify_command=verify_command,
         model_turns=turns,
         current_time=current_time,

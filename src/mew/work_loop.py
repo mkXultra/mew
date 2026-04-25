@@ -2184,7 +2184,7 @@ def _write_ready_cached_refs_from_active_work_todo(resume):
     if not target_paths:
         return []
 
-    refs_by_path = {}
+    refs_by_path = {path: [] for path in target_paths}
     for ref in active_work_todo.get("cached_window_refs") or []:
         if not isinstance(ref, dict) or bool(ref.get("context_truncated")):
             continue
@@ -2198,15 +2198,25 @@ def _write_ready_cached_refs_from_active_work_todo(resume):
                 break
         if not matching_path:
             continue
-        refs_by_path[matching_path] = {
-            **ref,
-            "path": matching_path,
-            "line_start": bounds[0],
-            "line_end": bounds[1],
-        }
-    if set(refs_by_path) != set(target_paths):
+        refs_by_path.setdefault(matching_path, []).append(
+            {
+                **ref,
+                "path": matching_path,
+                "line_start": bounds[0],
+                "line_end": bounds[1],
+            }
+        )
+    if any(not refs_by_path.get(path) for path in target_paths):
         return []
-    return [refs_by_path[path] for path in target_paths]
+    refs = []
+    for path in target_paths:
+        refs.extend(
+            sorted(
+                refs_by_path.get(path) or [],
+                key=lambda item: int(item.get("line_start") or 0),
+            )
+        )
+    return refs
 
 
 def _write_ready_read_call_window_for_cached_ref(call, cached):
@@ -2510,6 +2520,48 @@ def _write_ready_indented_statement_fragment_is_allowed(significant_lines):
         return True
     if first_stripped.rstrip().endswith("(") and re.match(r"[A-Za-z_][A-Za-z0-9_.]*\s*\(", first_stripped):
         return True
+    if _write_ready_literal_sequence_fragment_is_allowed(significant_lines, first_indent):
+        return True
+    return False
+
+
+def _write_ready_literal_sequence_fragment_is_allowed(significant_lines, base_indent):
+    if not significant_lines:
+        return False
+    for line in significant_lines:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if indent != base_indent:
+            return False
+        if not stripped.startswith(("\"", "'")):
+            return False
+        if not stripped.rstrip().endswith((",", ")", "]", "}")):
+            return False
+    return True
+
+
+def _write_ready_control_flow_fragment_is_allowed(significant_lines):
+    if not significant_lines:
+        return False
+    first_line = significant_lines[0]
+    first_stripped = first_line.lstrip()
+    first_indent = len(first_line) - len(first_stripped)
+    if not first_stripped.endswith(":"):
+        return False
+    first_keyword = first_stripped.split()[0].rstrip(":") if first_stripped else ""
+    if first_keyword not in {"else", "elif", "except", "finally"}:
+        return False
+    saw_body = False
+    for line in significant_lines[1:]:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if indent > first_indent:
+            saw_body = True
+            continue
+        if saw_body and indent == first_indent and stripped.startswith(("elif ", "else:", "except ", "finally:")):
+            return True
+        if saw_body and indent < first_indent:
+            return True
     return False
 
 
@@ -2521,11 +2573,11 @@ def _write_ready_window_text_is_structurally_complete(text):
     first_line = significant_lines[0]
     first_line_stripped = first_line.lstrip()
     first_keyword = first_line_stripped.split()[0].rstrip(":") if first_line_stripped else ""
+    if first_line_stripped.endswith(":") and first_keyword in {"else", "elif", "except", "finally"}:
+        return _write_ready_control_flow_fragment_is_allowed(significant_lines)
     if first_line and first_line[0].isspace():
         if not _write_ready_indented_statement_fragment_is_allowed(significant_lines):
             return False
-    if first_line_stripped.endswith(":") and first_keyword in {"else", "elif", "except", "finally"}:
-        return False
     last_line = significant_lines[-1].lstrip()
     if last_line.endswith(":") or last_line.startswith(("def ", "class ", "async def ", "@")):
         return False

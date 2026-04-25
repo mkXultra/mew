@@ -16604,6 +16604,23 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertFalse(_write_ready_window_text_is_structurally_complete(partial_window))
 
+    def test_write_ready_structural_allows_literal_and_branch_fragments(self):
+        from mew.work_loop import _write_ready_window_text_is_structurally_complete
+
+        scenario_tuple_fragment = (
+            '    "m6_9-phase1-regression",\n'
+            '    "m6_9-symbol-index-hit",\n'
+        )
+        dispatch_branch_fragment = (
+            '        elif name == "m6_9-phase1-regression":\n'
+            "            reports.append(run_m6_9_phase1_regression_scenario(scenario_workspace, env=env))\n"
+            '        elif name == "m6_9-symbol-index-hit":\n'
+            "            reports.append(run_m6_9_symbol_index_hit_scenario(scenario_workspace, env=env))\n"
+        )
+
+        self.assertTrue(_write_ready_window_text_is_structurally_complete(scenario_tuple_fragment))
+        self.assertTrue(_write_ready_window_text_is_structurally_complete(dispatch_branch_fragment))
+
     def test_build_work_session_resume_surfaces_draft_placeholders_and_prompt_cache_boundary(self):
         session = {
             "id": 1,
@@ -18064,6 +18081,130 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(
             [item["path"] for item in resume["plan_item_observations"][0]["cached_windows"]],
             ["src/mew/plan_schema.py", "tests/test_plan_schema.py"],
+        )
+
+    def test_build_work_session_resume_keeps_multiple_same_path_cached_windows_for_write_ready(self):
+        source_path = "src/mew/dogfood.py"
+        test_path = "tests/test_dogfood.py"
+        session = {
+            "id": 605,
+            "task_id": 619,
+            "status": "active",
+            "title": "Multi-window write-ready frontier",
+            "goal": "Keep multiple source anchors for a single paired task.",
+            "created_at": "2026-04-25T13:38:00Z",
+            "updated_at": "2026-04-25T13:38:00Z",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": source_path, "line_start": 80, "line_count": 16},
+                    "result": {
+                        "path": source_path,
+                        "line_start": 80,
+                        "line_end": 95,
+                        "text": '    "m6_9-phase1-regression",\n    "m6_9-symbol-index-hit",\n',
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": source_path, "line_start": 1640, "line_count": 90},
+                    "result": {
+                        "path": source_path,
+                        "line_start": 1640,
+                        "line_end": 1729,
+                        "text": (
+                            "def run_m6_9_phase1_regression_scenario(workspace, env=None):\n"
+                            "    report = {}\n"
+                            "    return report\n"
+                        ),
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": source_path, "line_start": 13545, "line_count": 25},
+                    "result": {
+                        "path": source_path,
+                        "line_start": 13545,
+                        "line_end": 13569,
+                        "text": (
+                            '        elif name == "m6_9-phase1-regression":\n'
+                            "            reports.append(run_m6_9_phase1_regression_scenario(scenario_workspace, env=env))\n"
+                            '        elif name == "m6_9-symbol-index-hit":\n'
+                            "            reports.append(run_m6_9_symbol_index_hit_scenario(scenario_workspace, env=env))\n"
+                        ),
+                        "context_truncated": False,
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": test_path, "line_start": 956, "line_count": 520},
+                    "result": {
+                        "path": test_path,
+                        "line_start": 956,
+                        "line_end": 1475,
+                        "text": (
+                            "def test_run_dogfood_m6_9_phase1_regression_scenario(self):\n"
+                            "    assert True\n"
+                        ),
+                        "context_truncated": False,
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "plan_items": ["Retry the paired dry-run draft after exact anchors."],
+                            "target_paths": [source_path, test_path],
+                        }
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        todo = resume["active_work_todo"]
+        refs = todo["cached_window_refs"]
+
+        self.assertEqual(todo["status"], "drafting")
+        self.assertEqual(
+            [(item["path"], item["line_start"], item["line_end"]) for item in refs],
+            [
+                (source_path, 80, 95),
+                (source_path, 1640, 1729),
+                (source_path, 13545, 13569),
+                (test_path, 956, 1475),
+            ],
+        )
+        first_observation = resume["plan_item_observations"][0]
+        self.assertTrue(first_observation["edit_ready"])
+        self.assertEqual(len(first_observation["cached_windows"]), 4)
+
+        from mew.work_loop import _write_ready_cached_refs_from_active_work_todo
+
+        cached_refs = _write_ready_cached_refs_from_active_work_todo(
+            {"active_work_todo": todo}
+        )
+        self.assertEqual(
+            [(item["path"], item["line_start"], item["line_end"]) for item in cached_refs],
+            [
+                (source_path, 80, 95),
+                (source_path, 1640, 1729),
+                (source_path, 13545, 13569),
+                (test_path, 956, 1475),
+            ],
         )
 
     def test_build_work_session_resume_does_not_promote_complete_reads_stale_after_applied_write(self):
