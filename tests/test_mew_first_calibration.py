@@ -111,6 +111,22 @@ def test_extract_mew_first_attempts_includes_m6_10_attempts_after_m6_9() -> None
     assert attempts[-1].patch_owner == "mew"
 
 
+def test_reviewer_steered_mew_first_attempt_is_practical_not_clean() -> None:
+    text = """
+### M6.10: Execution Accelerators
+
+- Task `#606` landed a bounded mew-first implementation evidence slice. The
+  reviewer steer was needed to stop read-only churn, then the fresh mew-first
+  session drafted the paired source/test patch and the supervisor approved
+  without rescue edits. Validation covered focused tests.
+"""
+
+    attempts = extract_mew_first_attempts(text, limit=10)
+
+    assert attempts[-1].result_class == "practical_mew_first"
+    assert attempts[-1].autonomy_credit == "practical"
+
+
 def test_metrics_parser_accepts_mew_first_calibration_flags() -> None:
     args = build_parser().parse_args(["metrics", "--mew-first", "--source-file", "status.md", "--json"])
 

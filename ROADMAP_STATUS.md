@@ -27,7 +27,7 @@ not be resumed until the recorded resume condition fires.
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Paused at a clean proof boundary: Phase 1 substrate, 10 repeated-task shapes, comparator regression, reviewer-steering/failure-shield, and reasoning-trace recall exist, but drift/rehearsal proof should wait until mew-first implementation reliability improves. |
-| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0/D1, Todo D1/D2, and structured rejection/frontier D1 are landed; current baseline remains 4/10 clean-or-practical against the 7/10 gate, and next focus is post-D1/D2 proof attempts. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0/D1, Todo D1/D2, and structured rejection/frontier D1 are landed; current baseline is now 5/10 clean-or-practical against the 7/10 gate after post-D1/D2 attempt #606. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
@@ -2410,20 +2410,30 @@ Progress:
   [in_progress] Confirm focus renders open work todos`. Validation covered
   `uv run pytest -q tests/test_brief.py --no-testmon`, targeted ruff, and
   `git diff --check`.
+- Task `#606` landed the first post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by exposing `included_attempt_sections` in the
+  mew-first calibration JSON/report so reviewers can confirm M6.9 + M6.10 are
+  both in the scoring window. The initial mew-first session spent four
+  read/search steps before a reviewer steer narrowed it to one paired patch;
+  mew then drafted the source/test dry-run patch, the supervisor approved it
+  without rescue edits, and verification passed. Count this as practical
+  mew-first autonomy credit, not clean, because the reviewer steer was needed
+  to stop read-only churn. Validation covered `uv run pytest -q
+  tests/test_mew_first_calibration.py --no-testmon`, targeted ruff,
+  `git diff --check`, and `./mew metrics --mew-first`.
 
 Missing proof:
 
 - no bounded read-only Explorer helper exists yet
-- no post-D0/D1/D2 window of 10 bounded mew-first implementation attempts has
-  reached 7 clean/practical successes with `rescue_edits=0` for counted
-  successes
+- the post-D0/D1/D2 window is now 5/10 clean/practical successes after task
+  #606; it has not reached 7/10 with `rescue_edits=0` for counted successes
 - no measurement yet justifies pulling provider-specific prompt caching, full
   concurrent executor work, or write-capable/multi-agent Explorer ahead of the
   M6.10 reliability gate
 
 Next action:
 
-- start a post-D1/D2 mew-first attempt window and classify results with
+- continue the post-D1/D2 mew-first attempt window and classify results with
   `mew metrics --mew-first`; do not consider Explorer until that evidence shows
   read-only exploration churn remains a measured blocker
 
@@ -3580,7 +3590,7 @@ The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
 - use Calibration D0 (`mew metrics --mew-first`) as the current economics
-  baseline: 4/10 clean-or-practical against the 7/10 M6.10 reliability gate,
+  baseline: 5/10 clean-or-practical against the 7/10 M6.10 reliability gate,
   with Calibration D1 now allowing M6.10 attempts to update that window;
 - Todo D1/D2 are landed: session Todo is now editable with `mew work` and
   visible in `mew focus` for active work sessions;

@@ -115,7 +115,13 @@ def _result_class(block: str) -> str:
     if "not mew-first" in lowered or "not autonomy credit" in lowered:
         return "supervisor_rescue"
     if "mew-first" in lowered and "without rescue edits" in lowered:
-        if "stale-session" in lowered or "restarted" in lowered or "restart" in lowered:
+        if (
+            "reviewer steer" in lowered
+            or "steer was needed" in lowered
+            or "stale-session" in lowered
+            or "restarted" in lowered
+            or "restart" in lowered
+        ):
             return "practical_mew_first"
         return "clean_mew_first"
     if "bounded mew-first implementation evidence" in lowered:
