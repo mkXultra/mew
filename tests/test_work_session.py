@@ -19231,6 +19231,14 @@ class WorkSessionTests(unittest.TestCase):
                 failed_turn = session["model_turns"][-1]
                 replay_path = failed_turn.get("replay_bundle_path")
                 self.assertTrue(replay_path)
+                todo = session["active_work_todo"]
+                self.assertEqual(todo["status"], "blocked_on_patch")
+                executor_lifecycle = todo["executor_lifecycle"]
+                self.assertEqual(executor_lifecycle["state"], "yielded")
+                self.assertEqual(executor_lifecycle["model_turn_id"], failed_turn["id"])
+                self.assertEqual(executor_lifecycle["model_turn_status"], "failed")
+                self.assertEqual(executor_lifecycle["replay_bundle_path"], replay_path)
+                self.assertIn("schema mismatch", executor_lifecycle["reason"])
                 self.assertIn("todo-todo-1-1", replay_path)
                 bundle = json.loads(Path(replay_path).read_text(encoding="utf-8"))
                 self.assertEqual(bundle["failure"]["kind"], "generic")

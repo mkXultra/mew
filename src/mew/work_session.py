@@ -44,6 +44,7 @@ from .write_tools import (
 WORK_SESSION_STATUSES = {"active", "closed"}
 WORK_TOOL_STATUSES = {"running", "completed", "failed", "interrupted"}
 WORK_MODEL_TURN_STATUSES = {"running", "completed", "failed", "interrupted"}
+WORK_EXECUTOR_LIFECYCLE_STATES = {"queued", "executing", "completed", "cancelled", "yielded"}
 WORK_TODO_STATUSES = {
     "queued",
     "drafting",
@@ -5021,6 +5022,28 @@ def _write_ready_draft_metrics(model_turns):
     return draft_attempts, latest_draft_metrics
 
 
+def _normalize_active_work_todo_executor_lifecycle(lifecycle):
+    if not isinstance(lifecycle, dict):
+        return {}
+    state = str(lifecycle.get("state") or "").strip()
+    if state not in WORK_EXECUTOR_LIFECYCLE_STATES:
+        return {}
+    normalized = {
+        "state": state,
+        "reason": clip_output(str(lifecycle.get("reason") or "").strip(), 1000),
+        "recorded_at": str(lifecycle.get("recorded_at") or lifecycle.get("updated_at") or "").strip(),
+    }
+    for key in ("model_turn_id", "tool_call_id"):
+        value = lifecycle.get(key)
+        if value is not None:
+            normalized[key] = value
+    for key in ("model_turn_status", "replay_bundle_path"):
+        value = str(lifecycle.get(key) or "").strip()
+        if value:
+            normalized[key] = value
+    return normalized
+
+
 def _normalize_active_work_todo(todo):
     if not isinstance(todo, dict):
         return {}
@@ -5069,9 +5092,45 @@ def _normalize_active_work_todo(todo):
         "created_at": str(todo.get("created_at") or "").strip(),
         "updated_at": str(todo.get("updated_at") or "").strip(),
     }
+    executor_lifecycle = _normalize_active_work_todo_executor_lifecycle(todo.get("executor_lifecycle"))
+    if executor_lifecycle:
+        normalized["executor_lifecycle"] = executor_lifecycle
     if not normalized["id"] and not normalized["status"] and not normalized["source"]["plan_item"]:
         return {}
     return normalized
+
+
+def record_active_work_todo_executor_yield(
+    state,
+    session_id,
+    *,
+    model_turn=None,
+    reason="",
+    replay_bundle_path="",
+    current_time=None,
+):
+    session = find_work_session(state, session_id)
+    if not session:
+        return {}
+    todo = _normalize_active_work_todo(session.get("active_work_todo") or {})
+    if not todo:
+        return {}
+    model_turn = model_turn if isinstance(model_turn, dict) else {}
+    current_time = current_time or now_iso()
+    lifecycle = {
+        "state": "yielded",
+        "reason": reason or model_turn.get("error") or model_turn.get("summary") or "work model turn yielded",
+        "recorded_at": current_time,
+        "model_turn_id": model_turn.get("id"),
+        "tool_call_id": model_turn.get("tool_call_id"),
+        "model_turn_status": model_turn.get("status") or "",
+        "replay_bundle_path": replay_bundle_path or model_turn.get("replay_bundle_path") or "",
+    }
+    todo["executor_lifecycle"] = _normalize_active_work_todo_executor_lifecycle(lifecycle)
+    todo["updated_at"] = current_time
+    session["active_work_todo"] = _normalize_active_work_todo(todo)
+    session["updated_at"] = current_time
+    return session["active_work_todo"]
 
 
 def _active_work_todo_frontier_key(todo):

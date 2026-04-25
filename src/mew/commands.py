@@ -248,6 +248,7 @@ from .work_session import (
     latest_work_verify_command,
     mark_running_work_interrupted,
     mark_work_tool_call_interrupted,
+    record_active_work_todo_executor_yield,
     APPROVAL_STATUS_INDETERMINATE,
     clip_tail,
     request_work_session_stop,
@@ -4153,6 +4154,7 @@ def cmd_work_ai(args):
                 )
                 turn = finish_work_model_turn(state, session_id, planning_turn_id, error=error)
                 if turn:
+                    replay_bundle_path = ""
                     try:
                         replay_bundle_path = write_work_model_failure_replay(
                             session=session,
@@ -4164,6 +4166,13 @@ def cmd_work_ai(args):
                             turn["replay_bundle_path"] = replay_bundle_path
                     except Exception:
                         pass
+                    record_active_work_todo_executor_yield(
+                        state,
+                        session_id,
+                        model_turn=turn,
+                        reason=error,
+                        replay_bundle_path=replay_bundle_path,
+                    )
                 save_state(state)
             report["steps"].append(
                 {

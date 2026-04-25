@@ -2141,9 +2141,12 @@ Residual active scope:
   `patch_draft_id`, review metadata, and preserved findings. Task `#577` is
   intentionally recorded as `product_progress_supervisor_rescue` because the
   mew-first attempt still timed out after the bounded substrate repair.
-- Phase 6 executor lifecycle tightening: executor state should distinguish
-  `queued`, `executing`, `completed`, `cancelled`, and `yielded`, with terminal
-  records on interruption/fallback.
+- Phase 6 executor lifecycle tightening: `done` for the first terminal
+  yielded overlay. Failed model turns with an active `WorkTodo` now persist
+  `active_work_todo.executor_lifecycle.state=yielded` with the failed turn id,
+  turn status, reason, and replay bundle path while preserving the canonical
+  draft-domain `WorkTodo.status`. Remaining lifecycle expansion, if needed,
+  should add other terminal overlays without replacing `WorkTodo.status`.
 - Provisional read-only `MemoryExploreProvider` v0: memory-assisted
   exploration should feed the same explore handoff shape as filesystem
   exploration, without adding a second autonomous planner.
@@ -2174,6 +2177,15 @@ Evidence:
   `uv run pytest -q tests/test_patch_draft.py --no-testmon` passed with 38
   tests for Phase 5, ruff passed for touched files, `git diff --check` was
   clean, and codex-ultra approved both slices.
+- residual Phase 6 evidence: task `#579` exposed the same
+  `drafting_timeout_after_complete_cached_refs_no_artifact` mew-first blocker
+  in session `#568`; the executor-lifecycle product slice landed as a
+  supervisor rescue. Validation: `uv run python -m pytest -q
+  tests/test_work_session.py -k "executor_yield or draft_failure_bundle"
+  --no-testmon` passed, full `uv run pytest -q tests/test_work_session.py
+  --no-testmon` passed with 605 tests and 24 subtests, ruff passed for touched
+  files, `git diff --check` was clean, and codex-ultra approved review session
+  `019dc24c-11db-7951-a51a-63595df08087`.
 
 Historical proof trail before core close:
 - refusal separation is landed in `src/mew/codex_api.py`, but the later
