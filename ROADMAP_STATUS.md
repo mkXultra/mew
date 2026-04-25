@@ -26,12 +26,12 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `pending` | Paused again after task #613 exposed a reproducible mew-first implementation drift; resume after M6.14 repairs the substrate and retries the same task. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Resumed after M6.14 fixed the #613 mew-first drift class and the same task landed as a verified mew-owned retry. |
 | 6.10. Execution Accelerators and Mew-First Reliability | `done` | Closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: latest 10 attempts reached 7/10 clean-or-practical with classified failures and no rescue edits for counted successes. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
-| 6.14. Mew-First Failure Repair Gate | `in_progress` | Active substrate repair milestone: M6.9+ bounded implementation must stay mew-owned; reproducible mew-first failures pause the product milestone until repaired and retried. |
+| 6.14. Mew-First Failure Repair Gate | `done` | Closed after #613 exposed a real drift, #614 fixed the loop policy/substrate, and #613 retried successfully without supervisor product rescue. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -40,22 +40,24 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 19:38 JST.
+Last assessed: 2026-04-25 20:09 JST.
 
-Active work: **M6.14 Mew-First Failure Repair Gate**.
-M6.10 is still closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`, but the
-first resumed M6.9 task exposed a stricter operating problem: task `#613`
-(`M6.9 drift-canary dogfood scenario v0`) drifted twice after reviewer
-correction. It first proposed edits for `m6_9-phase1-regression`, then after
-targeted read-only rescue proposed an unrelated `queued_message_event_id`
-patch. That is a reproducible mew-first substrate blocker, not a product gap
-for Codex to fill by hand.
+Active work: **M6.9 Durable Coding Intelligence**.
+M6.14 is now closed. Task `#613` (`M6.9 drift-canary dogfood scenario v0`)
+first exposed reproducible mew-first drift by replacing the requested
+`m6_9-drift-canary` scenario with nearby/off-scope patches. The supervisor did
+not rescue the product patch. Instead, M6.14 updated the mew-first operating
+skill and landed two loop-substrate fixes: task-goal term preservation
+(`4ddc9d6`) and verified active-work-todo completion before redrafting
+(`b750860`). The same task then retried through mew session `#599`, produced
+the scoped source/test patch, rejected one later off-scope dry-run family, ran
+the full `tests/test_dogfood.py` verifier, and committed as `4e62c4b`.
 
-M6.9 is therefore paused as `pending` again. Resume M6.9 only after M6.14
-repairs this class of mew-first implementation drift and retries task `#613`
-as mew-owned work. Direct Codex edits during M6.14 are allowed only for the
-skill/status policy update and the loop-substrate repair itself; they do not
-count as mew-first autonomy credit.
+M6.9 is therefore resumed. The next work should continue the drift-canary /
+novel-task and simulated alignment-decay proof sequence, still using the
+M6.9+ rule that bounded roadmap/coding implementation is mew-owned by default.
+Direct Codex edits remain allowed for reviewer-owned roadmap/status/policy
+updates and loop-substrate fixes, not hidden product rescue.
 
 The durable execution contract from this point forward is: M6.9+ bounded
 roadmap/coding implementation belongs to mew. If mew fails, classify the
@@ -1897,7 +1899,7 @@ Next action:
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `pending`.
+Status: `in_progress`.
 
 Goal:
 
@@ -2322,6 +2324,19 @@ Progress / remaining proof:
   `uv run python -m unittest tests.test_memory tests.test_dogfood`, targeted
   ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
   `git diff --check`.
+- Task `#613` landed the deterministic `m6_9-drift-canary` dogfood scenario as
+  a mew-first retry after M6.14 fixes. The initial session exposed real
+  wrong-target drift; the supervisor rejected the off-scope drafts instead of
+  rescuing the product patch, fixed the loop substrate, then retried the same
+  task. Session `#599` produced the on-scope paired source/test patch, the
+  supervisor approved it, one later M2 comparative dry-run family was rejected
+  as off-scope, and the session finished with task_done=true. Count this as
+  practical mew-first implementation evidence without rescue edits; reviewer
+  steer was needed only to reject the off-scope follow-up and finish after the
+  broad verifier. Validation covered
+  `./mew dogfood --scenario m6_9-drift-canary --json`,
+  `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
   purpose. Phase 1 substrate and twelve post-M6.12 proof/report/substrate slices
   have landed, and the repeated-task proof matrix has 10/10 deterministic shapes
@@ -2356,12 +2371,11 @@ Resume condition:
   coding tasks with clean/practical success in 7 of the latest 10 attempts,
   `rescue_edits=0` for counted successes, and every failure classified through
   the calibration-economics surface.
-- superseded on 2026-04-25 by the task `#613` failure: the first resumed M6.9
-  drift-canary task produced two reviewer-rejected off-scope drafts after
-  correction and targeted read-only recovery. M6.9 is paused until M6.14 fixes
-  that mew-first substrate failure and retries task `#613`.
-- next M6.9 work should resume the drift-canary / novel-task and simulated
-  alignment-decay proof only after the M6.14 retry gate passes.
+- fulfilled again on 2026-04-25 by the M6.14 close loop: task `#613` exposed
+  the wrong-target drift class, M6.14 fixed the loop policy/substrate, and the
+  same task landed as a verified mew-owned retry in commit `4e62c4b`.
+- next M6.9 work should continue the drift-canary / novel-task and simulated
+  alignment-decay proof sequence from this clean retry boundary.
 
 ### M6.10: Execution Accelerators and Mew-First Reliability
 
@@ -3567,7 +3581,7 @@ Next action:
 
 ### M6.14: Mew-First Failure Repair Gate
 
-Status: `in_progress`.
+Status: `done`.
 
 Goal:
 
@@ -3601,20 +3615,30 @@ Evidence:
   M6.9+ rule: bounded implementation is mew-owned; reproducible structural
   failures pause the product milestone, activate repair, and retry the same
   task.
+- Commit `4ddc9d6` added task-goal term preservation to write-ready
+  patch-draft compilation, blocking proposals that omit required terms from the
+  active task/guidance/plan.
+- The #613 retry exposed a second close-out issue after the correct patch and
+  verifier passed: the session could remain in `drafting` and propose another
+  off-scope patch. The supervisor rejected tools `#5133` and `#5134`; commit
+  `b750860` now completes active work todos when their paired writes are
+  applied and a broad verifier reaches high confidence, preventing redrafting
+  after verified work.
+- The same task `#613` then retried successfully through mew session `#599`:
+  the on-scope `m6_9-drift-canary` source/test patch landed in commit
+  `4e62c4b`, full `tests/test_dogfood.py` passed, and the task was marked done.
+  This is recorded as `success_after_substrate_fix` / practical mew-first
+  evidence, not supervisor product rescue.
 
 Missing proof:
 
-- no substrate fix has landed yet for the `#613` wrong-target/off-scope patch
-  drift class
-- task `#613` has not yet been retried mew-first after the repair
-- no `success_after_substrate_fix` evidence exists yet for this class
+- none for the M6.14 gate. Longer-run M6.9 proof will continue to determine
+  whether more failure classes need new repair milestones.
 
 Next action:
 
-- execute task `#614`: identify the smallest loop-substrate fix that prevents
-  a write-ready session from replacing the task goal with a nearby
-  cached-window or unrelated helper patch after reviewer correction, add
-  focused tests/replay evidence, then retry task `#613` mew-first.
+- resume M6.9 from the clean #613 retry boundary and continue the durable
+  drift-canary / novel-task proof sequence under the M6.9+ mew-first rule.
 
 ### M7: Senses - Inbound Signals
 
@@ -3718,16 +3742,16 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.14 Mew-First Failure Repair Gate**.
+Active focus: **M6.9 Durable Coding Intelligence**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- execute task `#614` to repair the reproducible task `#613` mew-first drift
-  where the implementation twice replaced `m6_9-drift-canary` with a nearby
-  or unrelated patch;
-- keep M6.9 pending until that substrate repair lands and the same task is
-  retried mew-first;
+- continue M6.9 from the verified #613 retry boundary, focusing on
+  drift-canary / novel-task and simulated alignment-decay durable-memory proof;
+- keep applying the M6.14 rule: if a mew-owned M6.9+ implementation fails
+  structurally, pause the active product milestone, create/activate a repair
+  milestone, fix the loop substrate or task spec, and retry the same task;
 - use the closed M6.10 calibration economics as the active autonomy-accounting
   baseline, but do not let the 7/10 close gate justify supervisor product
   rescue for M6.9+ implementation;
