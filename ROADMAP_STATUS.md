@@ -27,7 +27,7 @@ not be resumed until the recorded resume condition fires.
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Paused at a clean proof boundary: Phase 1 substrate, 10 repeated-task shapes, comparator regression, reviewer-steering/failure-shield, and reasoning-trace recall exist, but drift/rehearsal proof should wait until mew-first implementation reliability improves. |
-| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0/D1, Todo D1/D2, and structured rejection/frontier D1 are landed; current baseline remains 5/10 clean-or-practical against the 7/10 gate after post-D1/D2 attempts #606-#607. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0/D1, Todo D1/D2, and structured rejection/frontier D1 are landed; current baseline remains 5/10 clean-or-practical against the 7/10 gate after post-D1/D2 attempts #606-#608. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
@@ -2432,12 +2432,21 @@ Progress:
   was needed after the wrong-target patch. Validation covered `uv run pytest -q
   tests/test_mew_first_calibration.py tests/test_metrics.py --no-testmon`,
   targeted ruff, `git diff --check`, and `./mew metrics --mew-first`.
+- Task `#608` landed the third post-D1/D2 M6.10 bounded mew-first
+  implementation evidence by making `included_attempt_sections` reflect the
+  default attempt headings actually found in the source text, in document order,
+  instead of always reporting every default heading. The fresh mew-first session
+  read the scoped source/test files, drafted the paired source/test dry-run
+  patch, and the supervisor approved it without rescue edits. Count this as
+  clean mew-first autonomy credit. Validation covered `uv run pytest -q
+  tests/test_mew_first_calibration.py tests/test_metrics.py --no-testmon`,
+  targeted ruff, `git diff --check`, and `./mew metrics --mew-first`.
 
 Missing proof:
 
 - no bounded read-only Explorer helper exists yet
 - the post-D0/D1/D2 moving window remains 5/10 clean/practical successes
-  after tasks #606-#607 because one older practical success rotated out; it
+  after tasks #606-#608 because older clean/practical successes rotated out; it
   has not reached 7/10 with `rescue_edits=0` for counted successes
 - no measurement yet justifies pulling provider-specific prompt caching, full
   concurrent executor work, or write-capable/multi-agent Explorer ahead of the
