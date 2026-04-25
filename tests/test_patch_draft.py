@@ -698,6 +698,99 @@ class PatchDraftTests(unittest.TestCase):
         self.assertEqual(artifact["code"], "ambiguous_old_text_match")
         self.assertIn("matched 2 times", artifact["detail"])
 
+    def test_compile_patch_draft_blocks_duplicate_adjacent_suffix(self):
+        path = "src/mew/dogfood.py"
+        before_text = (
+            '    report["artifacts"] = {\n'
+            '        "phase": "phase1",\n'
+            '        "comparator_source": "m6_6",\n'
+            '        "durable_recall_active": True,\n'
+            '        "b0_comparator_wall_seconds": b0_comparator_wall_seconds,\n'
+            '        "budget_wall_seconds": budget_wall_seconds,\n'
+            "    }\n"
+            "    return report\n"
+            "\n"
+            "\n"
+            "def run_next_scenario(workspace):\n"
+            "    return None\n"
+        )
+        old = (
+            '        "phase": "phase1",\n'
+            '        "comparator_source": "m6_6",\n'
+            '        "durable_recall_active": True,\n'
+        )
+        proposal = {
+            "kind": "patch_proposal",
+            "files": [
+                {
+                    "path": path,
+                    "edits": [
+                        {
+                            "old": old,
+                            "new": (
+                                old
+                                + '        "b0_comparator_wall_seconds": b0_comparator_wall_seconds,\n'
+                                + '        "budget_wall_seconds": budget_wall_seconds,\n'
+                                + "    }\n"
+                                + "    return report\n"
+                                + "\n"
+                                + "\n"
+                                + "def run_m6_9_phase2_regression_scenario(workspace):\n"
+                                + "    return None\n"
+                            ),
+                        }
+                    ],
+                },
+                {
+                    "path": "tests/test_dogfood.py",
+                    "edits": [{"old": "class DogfoodTests:\n", "new": "class DogfoodTests:\n    pass\n"}],
+                },
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo=_todo(path, "tests/test_dogfood.py"),
+            proposal=proposal,
+            cached_windows={
+                path: _window(path, before_text),
+                "tests/test_dogfood.py": _window("tests/test_dogfood.py", "class DogfoodTests:\n"),
+            },
+            live_files={
+                path: _live_file(before_text),
+                "tests/test_dogfood.py": _live_file("class DogfoodTests:\n"),
+            },
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_blocker")
+        self.assertEqual(artifact["code"], "duplicated_adjacent_context")
+        self.assertEqual(artifact["path"], path)
+        self.assertEqual(artifact["recovery_action"], "narrow_old_text")
+
+    def test_compile_patch_draft_allows_non_duplicate_insertion_after_old_text(self):
+        path = "tests/test_patch_draft.py"
+        before_text = "alpha\nomega\n"
+        proposal = {
+            "kind": "patch_proposal",
+            "files": [
+                {
+                    "path": path,
+                    "edits": [{"old": "alpha\n", "new": "alpha\nbeta\n"}],
+                }
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo=_todo(path),
+            proposal=proposal,
+            cached_windows={path: _window(path, before_text)},
+            live_files={path: _live_file(before_text)},
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_draft")
+        self.assertIn("+beta", artifact["unified_diff"])
+
     def test_compile_patch_draft_blocks_missing_exact_cached_window_texts(self):
         path = "tests/test_patch_draft.py"
         proposal = {
@@ -1075,6 +1168,8 @@ class PatchDraftTests(unittest.TestCase):
                 "model_returned_non_schema": "retry_with_schema",
                 "model_returned_refusal": "inspect_refusal",
                 "review_rejected": "revise_patch_from_review_findings",
+                "task_goal_term_missing": "revise_patch_scope",
+                "duplicated_adjacent_context": "narrow_old_text",
             },
         )
 

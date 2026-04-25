@@ -23,6 +23,7 @@ PATCH_BLOCKER_RECOVERY_ACTIONS = {
     "model_returned_refusal": "inspect_refusal",
     "review_rejected": "revise_patch_from_review_findings",
     "task_goal_term_missing": "revise_patch_scope",
+    "duplicated_adjacent_context": "narrow_old_text",
 }
 
 
@@ -632,6 +633,18 @@ def _compile_file(*, todo, proposal_file, cached_windows, live_files):
                 "end": start + len(edit["old"]),
             }
         )
+        duplicate_blocker = _duplicated_adjacent_context_blocker(
+            todo_id=todo.get("id") or "",
+            path=path,
+            before_text=before_text,
+            old=edit["old"],
+            new=edit["new"],
+            start=start,
+            end=start + len(edit["old"]),
+            index=index,
+        )
+        if duplicate_blocker:
+            return duplicate_blocker
 
     placements.sort(key=lambda item: (item["start"], item["end"], item["index"]))
     for previous, current in zip(placements, placements[1:]):
@@ -661,6 +674,61 @@ def _compile_file(*, todo, proposal_file, cached_windows, live_files):
         "post_file_sha256": sha256_text(after_text),
         "_unified_diff": _unified_diff_text(path, before_text, after_text),
     }
+
+
+def _duplicated_adjacent_context_blocker(*, todo_id, path, before_text, old, new, start, end, index):
+    if new.startswith(old):
+        inserted = new[len(old) :]
+        following = before_text[end:]
+        prefix = _meaningful_edge_text(inserted, from_start=True)
+        if prefix and following.startswith(prefix):
+            return build_patch_blocker(
+                todo_id,
+                "duplicated_adjacent_context",
+                path=path,
+                detail=(
+                    f"edit hunk #{index} repeats text already adjacent after the old text; "
+                    "include the complete old block or narrow the insertion anchor"
+                ),
+            )
+    if new.endswith(old):
+        inserted = new[: -len(old)]
+        preceding = before_text[:start]
+        suffix = _meaningful_edge_text(inserted, from_start=False)
+        if suffix and preceding.endswith(suffix):
+            return build_patch_blocker(
+                todo_id,
+                "duplicated_adjacent_context",
+                path=path,
+                detail=(
+                    f"edit hunk #{index} repeats text already adjacent before the old text; "
+                    "include the complete old block or narrow the insertion anchor"
+                ),
+            )
+    return {}
+
+
+def _meaningful_edge_text(text, *, from_start):
+    lines = text.splitlines(keepends=True)
+    if not from_start:
+        lines = list(reversed(lines))
+    selected = []
+    non_blank = 0
+    char_count = 0
+    for line in lines:
+        if not selected and not line.strip():
+            continue
+        selected.append(line)
+        char_count += len(line)
+        if line.strip():
+            non_blank += 1
+        if non_blank >= 2 or char_count >= 160:
+            break
+    if not selected or non_blank == 0:
+        return ""
+    if not from_start:
+        selected = list(reversed(selected))
+    return "".join(selected)
 
 
 def _normalize_cached_window_bundle(cached_windows, path):
