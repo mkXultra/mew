@@ -1467,6 +1467,97 @@ def _write_ready_refreshed_draft_plan_item(resume, active_work_todo, first_obser
     )
 
 
+def _write_ready_locator_only_plan_item(plan_item):
+    text = str(plan_item or "").strip()
+    if not text:
+        return False
+    lowered = text.casefold()
+    if any(
+        marker in lowered
+        for marker in (
+            "draft",
+            "implement",
+            "fix",
+            "repair",
+            "update",
+            "write",
+            "emit",
+            "patch",
+            "change",
+            "modify",
+            "apply",
+            "add ",
+        )
+    ):
+        return False
+    return bool(
+        re.search(r"\b(locate|find|read|inspect|search|open|identify)\b", lowered)
+        or "insertion point" in lowered
+        or "source anchor" in lowered
+    )
+
+
+def _write_ready_task_goal_draft_plan_item(context, steer_text=""):
+    task = (context or {}).get("task") if isinstance((context or {}).get("task"), dict) else {}
+    title = str(task.get("title") or "").strip()
+    description = str(task.get("description") or "").strip()
+    guidance = clip_output(str(steer_text or "").strip(), 500)
+    pieces = []
+    if title or description:
+        goal_parts = []
+        if title:
+            goal_parts.append(title)
+        if description:
+            goal_parts.append(description)
+        pieces.append("Task goal: " + " - ".join(goal_parts))
+    if guidance:
+        pieces.append("Current guidance: " + guidance)
+    pieces.append(
+        "Complete cached source/test windows are available; draft only the patch that implements this task goal."
+    )
+    return "\n".join(pieces)
+
+
+def _write_ready_locator_replacement_requests_write(context, steer_text=""):
+    text_parts = [str(steer_text or "").strip()]
+    task = (context or {}).get("task") if isinstance((context or {}).get("task"), dict) else {}
+    text_parts.extend(
+        str(task.get(key) or "").strip()
+        for key in ("title", "description")
+    )
+    combined = "\n".join(part for part in text_parts if part).casefold()
+    if not combined:
+        return True
+    if any(
+        marker in combined
+        for marker in (
+            "do not change",
+            "don't change",
+            "no-change",
+            "no change",
+            "no_material_change",
+            "inspect only",
+            "read-only",
+            "read only",
+        )
+    ):
+        return False
+    return _write_ready_fast_path_steer_requests_write(steer_text) or any(
+        re.search(pattern, combined)
+        for pattern in (
+            r"\bimplement\b",
+            r"\bimplementation\b",
+            r"\bedit\b",
+            r"\badd\b",
+            r"\bfix\b",
+            r"\bpatch\b",
+            r"\bupdate\b",
+            r"\bchange\b",
+            r"\bwrite\b",
+        )
+    )
+
+
 def _write_ready_completed_read_frontier_plan_item(plan_item, target_paths):
     text = str(plan_item or "").strip()
     lowered = text.casefold()
@@ -4835,6 +4926,12 @@ def build_write_ready_tiny_draft_model_context(context):
         active_todo_plan_item = actionable_plan_item
     else:
         active_todo_plan_item = str((active_work_todo.get("source") or {}).get("plan_item") or "").strip()
+    steer_text = str(fast_path.get("steer_text") or _write_ready_fast_path_steer_text(context, resume) or "").strip()
+    if (
+        _write_ready_locator_replacement_requests_write(context, steer_text)
+        and _write_ready_locator_only_plan_item(active_todo_plan_item)
+    ):
+        active_todo_plan_item = _write_ready_task_goal_draft_plan_item(context, steer_text)
     if actionable_target_paths:
         active_todo_target_paths = actionable_target_paths
         cached_window_texts = [
