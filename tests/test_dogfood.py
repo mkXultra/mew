@@ -764,6 +764,52 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_symbol_index_hit_resolves_expected_source_test_pair", check_names)
             self.assertIn("m6_9_symbol_index_hit_writes_deterministic_trace", check_names)
 
+    def test_run_dogfood_m6_9_drift_canary_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-drift-canary",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+            novel_task = artifacts["novel_task_injection"]
+            trace = artifacts["trace"]
+            trace_json = json.loads(Path(artifacts["trace_path"]).read_text(encoding="utf-8"))
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-drift-canary")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-drift-canary: pass", text)
+            self.assertIn("m6_9_drift_canary_runs_five_green_iterations", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(artifacts["iterations_total"], 5)
+            self.assertEqual(artifacts["drift_canary_green_count"], 5)
+            self.assertTrue(artifacts["memory_accumulated"])
+            self.assertTrue(novel_task["forced_exploration"])
+            self.assertFalse(novel_task["silent_memory_reliance"])
+            self.assertEqual(novel_task["known_memory_matches"], [])
+            self.assertEqual(trace["iterations_total"], 5)
+            self.assertEqual(trace["drift_canary_green_count"], 5)
+            self.assertTrue(trace["memory_accumulated"])
+            self.assertEqual(trace_json["iterations_total"], 5)
+            self.assertEqual(trace_json["drift_canary_green_count"], 5)
+            self.assertTrue(trace_json["memory_accumulated"])
+            self.assertTrue(trace_json["novel_task_injection"]["forced_exploration"])
+            self.assertFalse(trace_json["novel_task_injection"]["silent_memory_reliance"])
+            self.assertEqual(
+                [item["memory_item_count"] for item in trace_json["iterations"]],
+                [1, 2, 3, 4, 5],
+            )
+            self.assertIn("m6_9_drift_canary_runs_five_green_iterations", check_names)
+            self.assertIn("m6_9_drift_canary_accumulates_memory", check_names)
+            self.assertIn("m6_9_drift_canary_novel_task_forces_exploration", check_names)
+            self.assertIn("m6_9_drift_canary_writes_deterministic_trace", check_names)
+
     def test_run_dogfood_m6_11_compiler_replay_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

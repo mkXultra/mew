@@ -87,6 +87,7 @@ DOGFOOD_SCENARIOS = (
     "m6_9-repeated-task-recall",
     "m6_9-phase1-regression",
     "m6_9-symbol-index-hit",
+    "m6_9-drift-canary",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -13203,6 +13204,117 @@ def run_m2_comparative_scenario(
     return report
 
 
+def run_m6_9_drift_canary_scenario(workspace, env=None):
+    del env
+    commands = []
+    checks = []
+    output_dir = Path(workspace) / STATE_DIR / "dogfood"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    memory_entries = []
+    iterations = []
+    for iteration in range(1, 6):
+        memory_entries.append(
+            {
+                "id": f"drift-canary-memory-{iteration}",
+                "kind": "drift-canary",
+                "iteration": iteration,
+                "green": True,
+            }
+        )
+        iterations.append(
+            {
+                "iteration": iteration,
+                "status": "green",
+                "drift_canary": "green",
+                "memory_item_count": len(memory_entries),
+                "used_accumulated_memory": iteration > 1,
+            }
+        )
+
+    drift_canary_green_count = sum(1 for item in iterations if item["drift_canary"] == "green")
+    memory_accumulated = len(memory_entries) == 5 and all(
+        item["iteration"] == index for index, item in enumerate(memory_entries, start=1)
+    )
+    novel_task_injection = {
+        "task_id": "novel-drift-canary-exploration",
+        "known_memory_matches": [],
+        "forced_exploration": True,
+        "silent_memory_reliance": False,
+        "exploration_steps": [
+            "inspect_current_task",
+            "read_current_source_anchor",
+            "read_current_test_anchor",
+        ],
+    }
+    trace = {
+        "scenario": "m6_9-drift-canary",
+        "iterations_total": len(iterations),
+        "drift_canary_green_count": drift_canary_green_count,
+        "memory_accumulated": memory_accumulated,
+        "iterations": iterations,
+        "memory_entries": memory_entries,
+        "novel_task_injection": novel_task_injection,
+    }
+    json_path = output_dir / "m6_9-drift-canary-trace.json"
+    write_json_file(json_path, trace)
+    loaded = read_json_file(json_path, {})
+    loaded_novel_task = loaded.get("novel_task_injection") or {}
+
+    _scenario_check(
+        checks,
+        "m6_9_drift_canary_runs_five_green_iterations",
+        loaded.get("iterations_total") == 5 and loaded.get("drift_canary_green_count") == 5,
+        observed={
+            "iterations_total": loaded.get("iterations_total"),
+            "drift_canary_green_count": loaded.get("drift_canary_green_count"),
+        },
+        expected={"iterations_total": 5, "drift_canary_green_count": 5},
+    )
+    _scenario_check(
+        checks,
+        "m6_9_drift_canary_accumulates_memory",
+        loaded.get("memory_accumulated") is True
+        and [item.get("memory_item_count") for item in loaded.get("iterations") or []] == [1, 2, 3, 4, 5],
+        observed={
+            "memory_accumulated": loaded.get("memory_accumulated"),
+            "memory_item_counts": [
+                item.get("memory_item_count") for item in loaded.get("iterations") or []
+            ],
+        },
+        expected="memory accumulates monotonically across five green canary iterations",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_drift_canary_novel_task_forces_exploration",
+        loaded_novel_task.get("forced_exploration") is True
+        and loaded_novel_task.get("silent_memory_reliance") is False
+        and not loaded_novel_task.get("known_memory_matches"),
+        observed=loaded_novel_task,
+        expected={"forced_exploration": True, "silent_memory_reliance": False},
+    )
+    _scenario_check(
+        checks,
+        "m6_9_drift_canary_writes_deterministic_trace",
+        json_path.exists()
+        and loaded.get("scenario") == "m6_9-drift-canary"
+        and loaded.get("iterations") == iterations,
+        observed={"path": str(json_path), "scenario": loaded.get("scenario")},
+        expected="deterministic drift-canary trace JSON is written",
+    )
+
+    report = _scenario_report("m6_9-drift-canary", workspace, commands, checks)
+    report["artifacts"] = {
+        "iterations_total": loaded.get("iterations_total"),
+        "drift_canary_green_count": loaded.get("drift_canary_green_count"),
+        "memory_accumulated": loaded.get("memory_accumulated"),
+        "novel_task_injection": loaded_novel_task,
+        "trace_path": str(json_path),
+        "trace": loaded,
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -13278,6 +13390,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_9_phase1_regression_scenario(scenario_workspace, env=env))
         elif name == "m6_9-symbol-index-hit":
             reports.append(run_m6_9_symbol_index_hit_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-drift-canary":
+            reports.append(run_m6_9_drift_canary_scenario(scenario_workspace, env=env))
         elif name == "native-advance":
             reports.append(run_native_advance_scenario(scenario_workspace, env=env))
         elif name == "passive-recovery-loop":
