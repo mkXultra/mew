@@ -4218,6 +4218,158 @@ def _work_write_ready_explicit_refresh_before_tiny_draft(context, write_ready_fa
     }
 
 
+def _work_rejection_frontier_active_reviewer_rejection(context):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = (work_session or {}).get("resume") if isinstance((work_session or {}).get("resume"), dict) else {}
+    frontier = (
+        resume.get("active_rejection_frontier")
+        if isinstance(resume.get("active_rejection_frontier"), dict)
+        else {}
+    )
+    if str(frontier.get("status") or "active") != "active":
+        return {}
+    if str(frontier.get("drift_class") or "") != "reviewer_rejected_patch":
+        return {}
+    return frontier
+
+
+def _work_rejection_frontier_call_id(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _work_rejection_frontier_has_recovery_read_after(context, frontier):
+    source_call_id = _work_rejection_frontier_call_id((frontier or {}).get("source_tool_call_id"))
+    if source_call_id is None:
+        return False
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    for call in (work_session or {}).get("tool_calls") or []:
+        if not isinstance(call, dict):
+            continue
+        call_id = _work_rejection_frontier_call_id(call.get("id"))
+        if call_id is None or call_id <= source_call_id:
+            continue
+        if str(call.get("status") or "") != "completed":
+            continue
+        if str(call.get("tool") or "") == "read_file":
+            return True
+    return False
+
+
+def _work_rejection_frontier_window_read_action(item, reason):
+    if not isinstance(item, dict):
+        return {}
+    path = str(item.get("path") or "").strip()
+    if not path:
+        return {}
+    action = {
+        "type": "read_file",
+        "path": path,
+        "reason": reason,
+    }
+    try:
+        line_start = int(item.get("line_start") or 0)
+        line_end = int(item.get("line_end") or 0)
+    except (TypeError, ValueError):
+        line_start = 0
+        line_end = 0
+    if line_start > 0 and line_end >= line_start:
+        action["line_start"] = line_start
+        action["line_count"] = line_end - line_start + 1
+    return action
+
+
+def _work_rejection_frontier_target_read_actions(context, write_ready_fast_path=None):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = (work_session or {}).get("resume") if isinstance((work_session or {}).get("resume"), dict) else {}
+    fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
+    reason = "active reviewer rejection frontier requires a fresh read_file recovery before another write draft"
+    candidates = []
+    active_work_todo = (
+        resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    )
+    candidates.extend(active_work_todo.get("cached_window_refs") or [])
+    candidates.extend(fast_path.get("recent_windows") or [])
+    candidates.extend(fast_path.get("cached_windows") or [])
+    for observation in resume.get("plan_item_observations") or []:
+        if isinstance(observation, dict):
+            candidates.extend(observation.get("cached_windows") or [])
+    candidates.extend(resume.get("target_path_cached_window_observations") or [])
+
+    actions = []
+    seen = set()
+    for candidate in candidates:
+        action = _work_rejection_frontier_window_read_action(candidate, reason)
+        if not action:
+            continue
+        key = (
+            _normalized_work_path(action.get("path")),
+            action.get("line_start"),
+            action.get("line_count"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        actions.append(action)
+        if len(actions) >= 5:
+            break
+    if actions:
+        return actions
+
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    target_paths = _write_ready_paired_target_paths(source.get("target_paths") or [])
+    frontier = _work_rejection_frontier_active_reviewer_rejection(context)
+    frontier_path = str((frontier or {}).get("path") or "").strip()
+    if frontier_path and not any(_work_paths_match(frontier_path, path) for path in target_paths):
+        target_paths.append(frontier_path)
+    for path in target_paths[:5]:
+        actions.append({"type": "read_file", "path": path, "reason": reason})
+    return actions
+
+
+def _work_rejection_frontier_recovery_action(context, write_ready_fast_path=None):
+    frontier = _work_rejection_frontier_active_reviewer_rejection(context)
+    if not frontier:
+        return {}
+    if _work_rejection_frontier_has_recovery_read_after(context, frontier):
+        return {}
+    read_actions = _work_rejection_frontier_target_read_actions(context, write_ready_fast_path)
+    if not read_actions:
+        return {
+            "type": "wait",
+            "reason": "active reviewer rejection frontier requires a fresh read_file recovery before another write draft",
+        }
+    if len(read_actions) == 1:
+        return read_actions[0]
+    return {
+        "type": "batch",
+        "tools": read_actions,
+        "reason": "active reviewer rejection frontier requires fresh read_file recovery before another write draft",
+    }
+
+
+def _work_action_is_write_draft(action):
+    action = action if isinstance(action, dict) else {}
+    action_type = str(action.get("type") or "").strip()
+    if action_type in WRITE_WORK_TOOLS:
+        return True
+    if action_type != "batch":
+        return False
+    return any(
+        isinstance(tool, dict) and str(tool.get("type") or "").strip() in WRITE_WORK_TOOLS
+        for tool in action.get("tools") or []
+    )
+
+
+def _enforce_rejection_frontier_recovery_gate(context, action, write_ready_fast_path=None):
+    if not _work_action_is_write_draft(action):
+        return action
+    recovery_action = _work_rejection_frontier_recovery_action(context, write_ready_fast_path)
+    return recovery_action or action
+
+
 def _work_write_ready_cached_window_incomplete_preflight_blocker(
     *,
     refresh_forbidden,
@@ -6076,6 +6228,43 @@ def plan_work_model_turn(
             "model_metrics": model_metrics,
             "model_stream": {"phases": [], "chunks": 0, "chars": 0},
         }
+    rejection_frontier_recovery = (
+        _work_rejection_frontier_recovery_action(context, write_ready_fast_path)
+        if write_ready_fast_path.get("active")
+        else {}
+    )
+    if rejection_frontier_recovery:
+        model_metrics["think"] = {
+            "prompt_chars": 0,
+            "timeout_seconds": 0.0,
+            "elapsed_seconds": 0.0,
+        }
+        model_metrics["act"] = {
+            "prompt_chars": 0,
+            "elapsed_seconds": 0.0,
+            "mode": "deterministic",
+        }
+        model_metrics["total_model_seconds"] = 0.0
+        if pre_model_metrics_sink:
+            pre_model_metrics_sink(dict(model_metrics))
+        if progress:
+            progress(f"session #{session.get('id')}: rejection frontier recovery before redraft")
+        return {
+            "decision_plan": {
+                "summary": rejection_frontier_recovery.get("reason")
+                or "refresh exact context before redrafting after reviewer rejection",
+            },
+            "action_plan": {
+                "summary": rejection_frontier_recovery.get("reason")
+                or "refresh exact context before redrafting after reviewer rejection",
+                "action": rejection_frontier_recovery,
+                "act_mode": "deterministic",
+            },
+            "action": rejection_frontier_recovery,
+            "context": context,
+            "model_metrics": model_metrics,
+            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+        }
     if write_ready_fast_path.get("active"):
         draft_windows = (
             write_ready_fast_path.get("recent_windows")
@@ -6166,11 +6355,25 @@ def plan_work_model_turn(
                 allowed_write_roots=allowed_write_roots,
                 action_plan=tiny_result.get("action_plan"),
             )
+            action_plan = tiny_result.get("action_plan") if isinstance(tiny_result.get("action_plan"), dict) else {}
+            gated_action = _enforce_rejection_frontier_recovery_gate(
+                context,
+                action,
+                write_ready_fast_path,
+            )
+            if gated_action is not action:
+                action = gated_action
+                action_plan["action"] = action
+                action_plan["summary"] = (
+                    action.get("reason")
+                    or action_plan.get("summary")
+                    or "refresh exact context before redrafting after reviewer rejection"
+                )
             if progress:
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
             return {
                 "decision_plan": tiny_result.get("decision_plan") or {},
-                "action_plan": tiny_result.get("action_plan") or {},
+                "action_plan": action_plan,
                 "action": action,
                 "context": context,
                 "model_metrics": model_metrics,
@@ -6305,6 +6508,20 @@ def plan_work_model_turn(
         allowed_write_roots=allowed_write_roots,
         action_plan=action_plan,
     )
+    gated_action = _enforce_rejection_frontier_recovery_gate(
+        context,
+        action,
+        write_ready_fast_path,
+    )
+    if gated_action is not action:
+        action = gated_action
+        if isinstance(action_plan, dict):
+            action_plan["action"] = action
+            action_plan["summary"] = (
+                action.get("reason")
+                or action_plan.get("summary")
+                or "refresh exact context before redrafting after reviewer rejection"
+            )
     model_metrics["total_model_seconds"] = _round_seconds(
         (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
         + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)

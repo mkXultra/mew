@@ -28659,6 +28659,150 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(action["tools"][0]["dry_run"])
         self.assertTrue(action["tools"][1]["dry_run"])
 
+    def test_rejection_frontier_forces_read_recovery_before_write_ready_redraft(self):
+        from mew.work_loop import _work_rejection_frontier_recovery_action
+
+        context = {
+            "work_session": {
+                "tool_calls": [
+                    {
+                        "id": 10,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/dogfood.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 11,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {"query": "run_dogfood_scenario"},
+                        "result": {"matches": ["src/mew/dogfood.py:100:def run_dogfood_scenario(args):"]},
+                    },
+                ],
+                "resume": {
+                    "active_rejection_frontier": {
+                        "status": "active",
+                        "drift_class": "reviewer_rejected_patch",
+                        "source_tool_call_id": 10,
+                        "path": "src/mew/dogfood.py",
+                    },
+                    "active_work_todo": {
+                        "source": {
+                            "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                        },
+                        "cached_window_refs": [
+                            {
+                                "path": "src/mew/dogfood.py",
+                                "line_start": 80,
+                                "line_end": 160,
+                            },
+                            {
+                                "path": "tests/test_dogfood.py",
+                                "line_start": 900,
+                                "line_end": 960,
+                            },
+                        ],
+                    },
+                },
+            }
+        }
+
+        action = _work_rejection_frontier_recovery_action(context, {"active": True})
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual([tool["type"] for tool in action["tools"]], ["read_file", "read_file"])
+        self.assertEqual(
+            [(tool["path"], tool["line_start"], tool["line_count"]) for tool in action["tools"]],
+            [
+                ("src/mew/dogfood.py", 80, 81),
+                ("tests/test_dogfood.py", 900, 61),
+            ],
+        )
+        self.assertIn("reviewer rejection frontier", action["reason"])
+
+    def test_rejection_frontier_recovery_clears_after_fresh_read_file(self):
+        from mew.work_loop import _work_rejection_frontier_recovery_action
+
+        context = {
+            "work_session": {
+                "tool_calls": [
+                    {
+                        "id": 10,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/dogfood.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                    {
+                        "id": 11,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/dogfood.py"},
+                        "result": {"text": "def run_dogfood_scenario(args):\n    pass\n"},
+                    },
+                ],
+                "resume": {
+                    "active_rejection_frontier": {
+                        "status": "active",
+                        "drift_class": "reviewer_rejected_patch",
+                        "source_tool_call_id": 10,
+                        "path": "src/mew/dogfood.py",
+                    },
+                    "active_work_todo": {
+                        "source": {
+                            "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                        },
+                    },
+                },
+            }
+        }
+
+        self.assertEqual(_work_rejection_frontier_recovery_action(context, {"active": True}), {})
+
+    def test_rejection_frontier_replaces_write_draft_with_recovery_read(self):
+        from mew.work_loop import _enforce_rejection_frontier_recovery_gate
+
+        context = {
+            "work_session": {
+                "tool_calls": [
+                    {
+                        "id": 20,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "parameters": {"path": "src/mew/dogfood.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                ],
+                "resume": {
+                    "active_rejection_frontier": {
+                        "status": "active",
+                        "drift_class": "reviewer_rejected_patch",
+                        "source_tool_call_id": 20,
+                        "path": "src/mew/dogfood.py",
+                    },
+                    "active_work_todo": {
+                        "source": {
+                            "target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"],
+                        },
+                    },
+                },
+            }
+        }
+        write_action = {
+            "type": "batch",
+            "tools": [
+                {"type": "edit_file", "path": "tests/test_dogfood.py", "old": "old", "new": "new"},
+                {"type": "edit_file", "path": "src/mew/dogfood.py", "old": "old", "new": "new"},
+            ],
+        }
+
+        action = _enforce_rejection_frontier_recovery_gate(context, write_action, {"active": True})
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual([tool["type"] for tool in action["tools"]], ["read_file", "read_file"])
+        self.assertEqual([tool["path"] for tool in action["tools"]], ["src/mew/dogfood.py", "tests/test_dogfood.py"])
+
     def test_search_text_marks_truncated_when_more_matches_exist(self):
         from mew.read_tools import search_text, summarize_read_result
 
