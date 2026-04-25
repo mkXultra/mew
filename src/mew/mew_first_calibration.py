@@ -235,12 +235,14 @@ def summarize_mew_first_calibration(
     drift_counts = Counter(attempt.drift_class for attempt in attempts)
     rejected_counts = Counter(attempt.rejected_patch_family for attempt in attempts)
     clean_or_practical = sum(1 for attempt in attempts if attempt.result_class in SUCCESS_CLASSES)
+    section_headings = list(DEFAULT_ATTEMPT_SECTION_HEADINGS)
     total = len(attempts)
     return {
         "kind": "mew_first_calibration",
         "schema_version": 1,
         "source_path": str(path),
         "limit": limit,
+        "included_attempt_sections": section_headings,
         "attempts_total": total,
         "gate": {
             "success_threshold": gate_success_threshold,
@@ -261,16 +263,22 @@ def format_mew_first_calibration_report(summary: Mapping[str, Any]) -> str:
     gate = summary.get("gate") or {}
     counts = summary.get("counts") or {}
     result_counts = counts.get("result_class") or {}
+    included_sections = summary.get("included_attempt_sections") or []
     lines = [
         "Mew-first calibration economics",
         f"source: {summary.get('source_path')}",
+    ]
+    if included_sections:
+        section_bits = [str(section) for section in included_sections]
+        lines.append("included_attempt_sections: " + ", ".join(section_bits))
+    lines.append(
         (
             "gate: "
             f"{gate.get('clean_or_practical_successes')}/{summary.get('attempts_total')} "
             f"clean_or_practical threshold={gate.get('success_threshold')} "
             f"passed={bool(gate.get('passed'))}"
-        ),
-    ]
+        )
+    )
     if result_counts:
         result_bits = [f"{key}={value}" for key, value in sorted(result_counts.items())]
         lines.append("result_classes: " + " ".join(result_bits))
