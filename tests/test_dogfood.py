@@ -552,7 +552,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(all(item["passed"] for item in scenario["checks"]))
             self.assertTrue(artifacts["recall_shortened_deliberation"])
             self.assertEqual(artifacts["reviewer_rescue_edits"], 0)
-            self.assertEqual(artifacts["shape_count"], 9)
+            self.assertEqual(artifacts["shape_count"], 10)
             self.assertEqual(
                 set(artifacts["task_shapes"]),
                 {
@@ -565,6 +565,7 @@ class DogfoodTests(unittest.TestCase):
                     "bounded_memory_pair",
                     "bounded_tasks_pair",
                     "bounded_runtime_pair",
+                    "bounded_snapshot_pair",
                 },
             )
             self.assertGreater(
@@ -585,11 +586,12 @@ class DogfoodTests(unittest.TestCase):
                     "bounded_memory_pair",
                     "bounded_tasks_pair",
                     "bounded_runtime_pair",
+                    "bounded_snapshot_pair",
                 },
             )
             self.assertTrue(all(count > 0 for count in artifacts["per_shape_recalled_file_pair_counts"].values()))
             self.assertEqual(trace["scenario"], "m6_9-repeated-task-recall")
-            self.assertEqual(trace["shape_count"], 9)
+            self.assertEqual(trace["shape_count"], 10)
             self.assertEqual(
                 set(trace["task_shapes"]),
                 {
@@ -602,6 +604,7 @@ class DogfoodTests(unittest.TestCase):
                     "bounded_memory_pair",
                     "bounded_tasks_pair",
                     "bounded_runtime_pair",
+                    "bounded_snapshot_pair",
                 },
             )
             self.assertFalse(trace["repetitions"][0]["durable_recall_used"])
