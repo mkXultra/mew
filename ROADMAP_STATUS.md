@@ -2134,9 +2134,13 @@ Closed proof:
 
 Residual active scope:
 
-- Phase 5 isolated review lane: validated patch artifacts should pass through
-  structured review before approval/apply, and findings should attach to the
-  active `WorkTodo`.
+- Phase 5 isolated review lane: `done` in `f69b94b`. Validated patch
+  artifacts can pass through `review_patch_draft_previews()` before
+  approval/apply; accepted reviews preserve previews, while rejected reviews
+  return `review_rejected` with `revise_patch_from_review_findings`,
+  `patch_draft_id`, review metadata, and preserved findings. Task `#577` is
+  intentionally recorded as `product_progress_supervisor_rescue` because the
+  mew-first attempt still timed out after the bounded substrate repair.
 - Phase 6 executor lifecycle tightening: executor state should distinguish
   `queued`, `executing`, `completed`, `cancelled`, and `yielded`, with terminal
   records on interruption/fallback.
@@ -2162,6 +2166,14 @@ Evidence:
 - open loop failure buckets remain concrete and named:
   `#399` exact cached windows but no safe dry-run patch,
   `#401` exact cached windows reached but timeout before drafting
+- residual Phase 5 evidence: task `#577` exposed a repeated tiny-draft timeout
+  in mew-first mode; bounded substrate repair `#578` landed in `c5db6b4`, and
+  the Phase 5 review-lane product slice landed as a supervisor rescue in
+  `f69b94b`. Validation: `uv run pytest -q tests/test_work_session.py
+  --no-testmon` passed with 605 tests for the substrate repair,
+  `uv run pytest -q tests/test_patch_draft.py --no-testmon` passed with 38
+  tests for Phase 5, ruff passed for touched files, `git diff --check` was
+  clean, and codex-ultra approved both slices.
 
 Historical proof trail before core close:
 - refusal separation is landed in `src/mew/codex_api.py`, but the later
