@@ -26,7 +26,7 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus six post-M6.12 proof/report slices landed; repeated-task recall now covers three deterministic shapes with per-shape matrix reporting, but the 10-shape gate and comparator rerun are still open. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus eight post-M6.12 proof/report/substrate slices landed; repeated-task recall now covers four deterministic shapes with per-shape matrix reporting, but the 10-shape gate and comparator rerun are still open. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
@@ -39,17 +39,17 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 14:31 JST.
+Last assessed: 2026-04-25 14:53 JST.
 
 Active work: **M6.9 Durable Coding Intelligence** from the clean proof-slice
-boundary. M6.9 has landed its Phase 1 substrate and six post-M6.12 proof/report
-slices, and the M6.11 residual hardening pause is now closed by
-`docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The next M6.9 push should use
-the closed review, executor-lifecycle, memory-explore, and prompt/cache
-surfaces to scale durable-coding proof without losing failure diagnosis. The
-small repeated-task runner/report slice is now present as a per-shape artifact,
-so the next proof work should add more deterministic task shapes rather than
-inventing a separate tracker.
+boundary. M6.9 has landed its Phase 1 substrate and eight post-M6.12
+proof/report/substrate slices, and the M6.11 residual hardening pause is now
+closed by `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The next M6.9 push
+should use the closed review, executor-lifecycle, memory-explore, and
+prompt/cache surfaces to scale durable-coding proof without losing failure
+diagnosis. The small repeated-task runner/report slice is now present as a
+per-shape artifact, so the next proof work should add more deterministic task
+shapes rather than inventing a separate tracker.
 M6.10 stays registered but inactive until the M6.9 proof push creates an
 accelerator-sized need. M6.13 is registered as the later deliberation-lane
 milestone, but it stays inactive until M6.9 ranked-recall/internalization
@@ -2126,12 +2126,27 @@ Progress / remaining proof:
   targeted ruff for `src/mew/work_loop.py` and `tests/test_work_session.py`,
   and `git diff --check`. Retry `#588` from a clean work session after this
   repair; do not count the failed pre-repair attempt as shape proof.
+- The `#588` retry after `#589` is now landed as mixed mew-first/product
+  progress. Fresh session `#576` still initially read the wrong source area,
+  then the supervisor supplied exact cached windows and a precise bounded
+  steer. Mew produced and applied the paired source/test dry-run patch adding
+  `bounded_memory_explore_pair`, raising the repeated-task matrix to 4/10
+  deterministic shapes while preserving aggregate/per-shape artifacts and
+  `reviewer_rescue_edits=0`. Count this as product progress with partial
+  autonomy credit because detailed supervisor steer was still required.
+  Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run python -m unittest tests.test_dogfood`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  targeted ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
+  `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
-  purpose. Phase 1 substrate and six post-M6.12 proof/report slices have
-  landed, and the repeated-task proof matrix has 3/10 deterministic shapes plus
-  per-shape reporting. The comparator rerun has not started. The now-closed M6.11
-  residual review, executor lifecycle, memory exploration, and prompt/cache
-  boundaries should be used to classify the next mew-first proof slices.
+  purpose. Phase 1 substrate and eight post-M6.12 proof/report/substrate slices
+  have landed, and the repeated-task proof matrix has 4/10 deterministic shapes
+  plus per-shape reporting. The comparator rerun has not started. The
+  now-closed M6.11 residual review, executor lifecycle, memory exploration, and
+  prompt/cache boundaries should be used to classify the next mew-first proof
+  slices.
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices
@@ -2145,7 +2160,7 @@ Progress / remaining proof:
 
 Next proof step:
 
-- continue scaling the repeated-task proof matrix beyond the current 3/10
+- continue scaling the repeated-task proof matrix beyond the current 4/10
   deterministic shapes using the existing per-shape matrix artifact. Rerun an
   appropriate M6.6 comparator once there is enough repeated-task evidence to
   attribute a measurable gain to durable recall.
