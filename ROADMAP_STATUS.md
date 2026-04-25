@@ -41,7 +41,7 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 21:29 JST.
+Last assessed: 2026-04-26 01:23 JST.
 
 Active work: **M6.9 Durable Coding Intelligence**.
 M6.14 is now closed. Task `#613` (`M6.9 drift-canary dogfood scenario v0`)
@@ -78,6 +78,14 @@ M6.9+ rule that bounded roadmap/coding implementation is mew-owned by default.
 Direct Codex edits remain allowed for reviewer-owned
 roadmap/status/policy updates and loop-substrate fixes, not hidden product
 rescue.
+
+The first M6.9 close-gate aggregation pass is recorded in
+`docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`. Recommendation:
+`NOT_CLOSE_READY_ONE_GAP`. Seven of eight criteria are passing or
+pass-with-note; the remaining formal gap is criterion 1, because
+`m6_9-repeated-task-recall` currently proves 10-shape durable recall and
+zero rescue edits across two repetitions, but not first-five median wall-time
+reduction. Task `#627` is the next bounded mew-first target to close that gap.
 
 The durable execution contract from this point forward is: M6.9+ bounded
 roadmap/coding implementation belongs to mew. If mew fails, classify the
@@ -2471,6 +2479,11 @@ Resume condition:
   of durable-recall evidence and any remaining measurable comparator proof,
   unless a fresh M6.9 failure requires another bounded M6.14 repair episode
   first.
+- `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md` now records the close-gate
+  aggregation result as `NOT_CLOSE_READY_ONE_GAP`. Task `#627`
+  (`M6.9 repeated-task five-repetition close-gate proof`) is ready to close
+  criterion 1 by extending repeated-task proof to five repetitions with
+  per-shape wall-time / deliberation evidence and `reviewer_rescue_edits=0`.
 
 ### M6.10: Execution Accelerators and Mew-First Reliability
 
@@ -3907,12 +3920,14 @@ Active focus: **M6.9 Durable Coding Intelligence**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- continue M6.9 from the verified #619 / M6.14 duplicated-adjacent repair
-  boundary. Drift-canary / novel-task, simulated alignment-decay, repeated
-  recall, reasoning-trace recall, and frozen comparator Phase 1/Phase 2
-  deterministic proof slices now exist, so the next target should be
-  close-gate aggregation of durable-recall evidence and any remaining measured
-  comparator gap unless a fresh M6.9 failure identifies a narrower blocker;
+- continue M6.9 from task `#627`, the verified #619 / M6.14
+  duplicated-adjacent repair boundary, and
+  `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`. Drift-canary / novel-task,
+  simulated alignment-decay, repeated recall, reasoning-trace recall, and
+  frozen comparator Phase 1/Phase 2 deterministic proof slices now exist; the
+  remaining active target is criterion 1, first-five repeated-task wall-time
+  evidence with `reviewer_rescue_edits=0`, unless a fresh M6.9 failure
+  identifies a narrower blocker;
 - keep applying the M6.14 repair-ledger rule: if a mew-owned M6.9+
   implementation fails structurally, pause the active product milestone,
   append or activate a bounded M6.14 repair episode, fix the loop substrate or
