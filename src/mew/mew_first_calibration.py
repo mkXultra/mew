@@ -253,6 +253,7 @@ def summarize_mew_first_calibration(
         "gate": {
             "success_threshold": gate_success_threshold,
             "clean_or_practical_successes": clean_or_practical,
+            "success_gap": max(0, gate_success_threshold - clean_or_practical),
             "success_rate": round(clean_or_practical / total, 3) if total else None,
             "passed": total >= limit and clean_or_practical >= gate_success_threshold,
         },
@@ -282,6 +283,7 @@ def format_mew_first_calibration_report(summary: Mapping[str, Any]) -> str:
             "gate: "
             f"{gate.get('clean_or_practical_successes')}/{summary.get('attempts_total')} "
             f"clean_or_practical threshold={gate.get('success_threshold')} "
+            f"success_gap={gate.get('success_gap')} "
             f"passed={bool(gate.get('passed'))}"
         )
     )

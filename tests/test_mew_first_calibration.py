@@ -80,9 +80,11 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
 
     summary = summarize_mew_first_calibration(source_path=source, limit=10)
 
+    assert summary["gate"]["success_gap"] == 3
     assert summary["gate"] == {
         "success_threshold": 7,
         "clean_or_practical_successes": 4,
+        "success_gap": 3,
         "success_rate": 0.4,
         "passed": False,
     }
@@ -90,7 +92,7 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
     assert summary["counts"]["result_class"]["supervisor_rescue"] == 3
     text = format_mew_first_calibration_report(summary)
     assert "included_attempt_sections: ### M6.9:, ### M6.10:" in text
-    assert "gate: 4/10 clean_or_practical threshold=7 passed=False" in text
+    assert "gate: 4/10 clean_or_practical threshold=7 success_gap=3 passed=False" in text
     assert "#599 supervisor_rescue" in text
 
 
