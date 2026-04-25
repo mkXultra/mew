@@ -2647,6 +2647,22 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
             "memory_name": "M6.9 repeated-task recall tasks file pair",
             "task_title": "M6.9 Repeated Task Recall Tasks",
         },
+        {
+            "task_id": 78,
+            "task_shape": "bounded_runtime_pair",
+            "source_rel": "src/mew/runtime.py",
+            "test_rel": "tests/test_runtime.py",
+            "source_text": (
+                "def repeated_task_runtime_anchor():\n"
+                "    return 'm6.9 runtime repeated-task-recall source'\n"
+            ),
+            "test_text": (
+                "def test_repeated_task_runtime_anchor():\n"
+                "    assert 'runtime repeated-task-recall'\n"
+            ),
+            "memory_name": "M6.9 repeated-task recall runtime file pair",
+            "task_title": "M6.9 Repeated Task Recall Runtime",
+        },
     ]
     for shape in shapes:
         source_path = workspace / shape["source_rel"]
@@ -2893,7 +2909,7 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "m6_9_repeated_task_recall_covers_multiple_task_shapes",
-        trace["shape_count"] >= 8
+        trace["shape_count"] >= 9
         and {
             "bounded_source_test_pair",
             "bounded_symbol_index_pair",
@@ -2903,6 +2919,7 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
             "bounded_work_loop_pair",
             "bounded_memory_pair",
             "bounded_tasks_pair",
+            "bounded_runtime_pair",
         }.issubset(set(trace["task_shapes"])),
         observed={"shape_count": trace["shape_count"], "task_shapes": trace["task_shapes"]},
         expected="the repeated-task proof matrix covers multiple deterministic task shapes",
