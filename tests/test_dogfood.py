@@ -552,10 +552,10 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(all(item["passed"] for item in scenario["checks"]))
             self.assertTrue(artifacts["recall_shortened_deliberation"])
             self.assertEqual(artifacts["reviewer_rescue_edits"], 0)
-            self.assertEqual(artifacts["shape_count"], 2)
+            self.assertEqual(artifacts["shape_count"], 3)
             self.assertEqual(
                 set(artifacts["task_shapes"]),
-                {"bounded_source_test_pair", "bounded_symbol_index_pair"},
+                {"bounded_source_test_pair", "bounded_symbol_index_pair", "bounded_commands_pair"},
             )
             self.assertGreater(
                 artifacts["repetition_1_deliberation_search_step_count"],
@@ -565,14 +565,14 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(artifacts["resolved_test_path"], "tests/test_dogfood.py")
             self.assertEqual(
                 set(artifacts["per_shape_recalled_file_pair_counts"]),
-                {"bounded_source_test_pair", "bounded_symbol_index_pair"},
+                {"bounded_source_test_pair", "bounded_symbol_index_pair", "bounded_commands_pair"},
             )
             self.assertTrue(all(count > 0 for count in artifacts["per_shape_recalled_file_pair_counts"].values()))
             self.assertEqual(trace["scenario"], "m6_9-repeated-task-recall")
-            self.assertEqual(trace["shape_count"], 2)
+            self.assertEqual(trace["shape_count"], 3)
             self.assertEqual(
                 set(trace["task_shapes"]),
-                {"bounded_source_test_pair", "bounded_symbol_index_pair"},
+                {"bounded_source_test_pair", "bounded_symbol_index_pair", "bounded_commands_pair"},
             )
             self.assertFalse(trace["repetitions"][0]["durable_recall_used"])
             self.assertTrue(trace["repetitions"][1]["durable_recall_used"])
@@ -594,7 +594,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_repeated_task_recall_first_repetition_writes_typed_memory_index_evidence", check_names)
             self.assertIn("m6_9_repeated_task_recall_second_repetition_uses_durable_recall_index", check_names)
             self.assertIn("m6_9_repeated_task_recall_second_repetition_shortens_deliberation_without_rescue", check_names)
-            self.assertIn("m6_9_repeated_task_recall_covers_two_task_shapes", check_names)
+            self.assertIn("m6_9_repeated_task_recall_covers_multiple_task_shapes", check_names)
             self.assertIn("m6_9_repeated_task_recall_writes_deterministic_trace_artifact", check_names)
 
     def test_run_dogfood_m6_9_symbol_index_hit_scenario(self):
