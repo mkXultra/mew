@@ -26,7 +26,7 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Resumed after M6.14 repair episodes fixed #613/#615/#617 substrate blockers and the same tasks retried into verified mew-owned product patches. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Resumed after M6.14 repair episodes fixed #613/#615/#617/#619 substrate blockers and the same tasks retried into verified mew-owned product patches. |
 | 6.10. Execution Accelerators and Mew-First Reliability | `done` | Closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: latest 10 attempts reached 7/10 clean-or-practical with classified failures and no rescue edits for counted successes. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
@@ -67,10 +67,15 @@ write-ready draft context, so mew proposed shallow alias/rename patches instead
 of the requested matrix. M6.14 repair task `#618` preserved milestone and
 structured field terms, and the same #617 task retried through session `#602`
 and landed as the mew-authored product patch `ebccb4a`. The next work should
-continue from the #617/#618 boundary toward remaining M6.9 durable-memory
-proof, especially live comparator / measurable durable-recall evidence, still
-using the M6.9+ rule that bounded roadmap/coding implementation is mew-owned
-by default. Direct Codex edits remain allowed for reviewer-owned
+continue from the later #619/#626 boundary: task `#619`
+(`M6.9 phase2 comparator regression dogfood scenario`) first exposed
+duplicated-adjacent patch recovery loss, M6.14 repair task `#626` preserved
+same-patch repair hints for that class, and retried session `#610` landed the
+neutral Phase 2 comparator regression scenario as a mew-authored patch with no
+supervisor product rescue. Remaining M6.9 work should continue toward
+measurable durable-recall evidence and close-gate aggregation, still using the
+M6.9+ rule that bounded roadmap/coding implementation is mew-owned by default.
+Direct Codex edits remain allowed for reviewer-owned
 roadmap/status/policy updates and loop-substrate fixes, not hidden product
 rescue.
 
@@ -2391,12 +2396,30 @@ Progress / remaining proof:
   broader `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff
   for `src/mew/dogfood.py` plus `tests/test_dogfood.py`,
   `./mew dogfood --scenario m6_9-drift-canary --json`, and `git diff --check`.
+- Task `#619` added the deterministic `m6_9-phase2-regression` comparator
+  scenario as a mew-first retry after M6.14 repair task `#626`. Initial
+  session `#609` reached the correct paired source/test Phase 2 patch but
+  failed normal dry-run writes twice with `duplicated_adjacent_context`.
+  The supervisor did not land the product patch; task `#626` repaired
+  same-patch repair hint preservation for duplicated-adjacent failures, then
+  retried session `#610` applied the scoped source/test patch and finished.
+  The scenario reuses the frozen M6.6 comparator fixture, marks
+  `phase=phase2`, `comparator_source=m6_6`,
+  `durable_recall_active=true`, and `budget_multiplier=1.0`, and proves the
+  stricter neutral budget `median_wall_seconds <= B0.comparator`. Count this
+  as `success_after_substrate_fix` / practical mew-first evidence without
+  rescue edits. Validation covered
+  `./mew dogfood --scenario m6_9-phase2-regression --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_phase2_regression or scenario_choices' --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py --no-testmon`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
   purpose. Phase 1 substrate and fourteen post-M6.12 proof/report/substrate slices
   have landed, and the repeated-task proof matrix has 10/10 deterministic shapes
-  plus per-shape reporting. The Phase 1 comparator regression scenario now
-  passes against the frozen M6.6 comparator fixture, and three reviewer-steering
-  durable rules now fire in a later simulated iteration. A
+  plus per-shape reporting. The Phase 1 and neutral Phase 2 comparator
+  regression scenarios now pass against the frozen M6.6 comparator fixture,
+  and three reviewer-steering durable rules now fire in a later simulated
+  iteration. A
   two-case failure-shield proof now blocks reverted approaches before
   implementation. Reasoning-trace recall now has two later-iteration recalls
   with reviewer-confirmed shortened deliberation, including one abstract task.
@@ -2438,10 +2461,16 @@ Resume condition:
   structured field terms in write-ready draft context, and task `#617` then
   landed the novel-task exploration matrix as mew-authored code in commit
   `ebccb4a`.
-- next M6.9 work should continue from the #617/M6.14 required-field repair
-  boundary. The next highest-value criterion is live comparator / measurable
-  durable-recall evidence, unless a fresh M6.9 failure requires another bounded
-  M6.14 repair episode first.
+- fulfilled again on 2026-04-25 by the M6.14 duplicated-adjacent repair
+  episode: task `#619` first exposed same-patch repair loss after
+  duplicated-adjacent write failures, task `#626` preserved failed patch repair
+  hints for that class, and task `#619` then landed the neutral Phase 2
+  comparator regression scenario as mew-authored code.
+- next M6.9 work should continue from the #619/M6.14 duplicated-adjacent
+  repair boundary. The next highest-value criterion is close-gate aggregation
+  of durable-recall evidence and any remaining measurable comparator proof,
+  unless a fresh M6.9 failure requires another bounded M6.14 repair episode
+  first.
 
 ### M6.10: Execution Accelerators and Mew-First Reliability
 
@@ -3733,9 +3762,12 @@ Evidence:
   source/test phase2 patch, but normal dry-run `edit_file_hunks` failed twice
   with `duplicated_adjacent_context`. Task `#626` repaired this by treating
   duplicated-adjacent write failures as same-patch repair evidence, so
-  `failed_patch_repair` preserves the exact product proposal for the next
-  retry instead of drifting into broad redrafts. No supervisor product rescue
-  landed for `#619`.
+  `failed_patch_repair` preserves the exact product proposal for retry instead
+  of drifting into broad redrafts. Retried session `#610` then landed #619 as a
+  mew-authored source/test patch with no supervisor product rescue, adding the
+  neutral Phase 2 comparator dogfood proof and validating it with the focused
+  selector, full `tests/test_dogfood.py`, the dogfood scenario itself, targeted
+  ruff, and `git diff --check`.
 
 Validation:
 
@@ -3744,8 +3776,10 @@ Validation:
 - `uv run pytest -q tests/test_work_session.py -k 'failed_patch_repair or suggested_safe_reobserve' --no-testmon`
 - `uv run pytest -q tests/test_work_session.py --no-testmon`
 - `uv run pytest -q tests/test_dogfood.py -k "m6_9_drift_canary or m6_9_novel_task or scenario_choices" --no-testmon`
+- `uv run pytest -q tests/test_dogfood.py -k "m6_9_phase2_regression or scenario_choices" --no-testmon`
 - `uv run pytest -q tests/test_dogfood.py --no-testmon`
 - `./mew dogfood --scenario m6_9-drift-canary --json`
+- `./mew dogfood --scenario m6_9-phase2-regression --json`
 - `uv run ruff check src/mew/work_loop.py src/mew/work_session.py tests/test_work_session.py`
 - `uv run ruff check src/mew/dogfood.py tests/test_dogfood.py`
 - `git diff --check`
@@ -3759,7 +3793,8 @@ Missing proof:
 
 Next action:
 
-- keep M6.9 active and continue the durable-memory proof sequence. If another
+- keep M6.9 active from the #619/#626 boundary and continue the
+  durable-memory proof sequence toward close-gate aggregation. If another
   mew-first structural failure appears, append or activate a bounded repair
   episode under M6.14, pause M6.9 while repairing it, and retry the same task.
   Create a new milestone only when the failure is a genuinely new product or
@@ -3872,11 +3907,12 @@ Active focus: **M6.9 Durable Coding Intelligence**.
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- continue M6.9 from the verified #617 / M6.14 required-field repair boundary.
-  Drift-canary / novel-task and simulated alignment-decay deterministic proof
-  slices now exist, so the next target should be live comparator / measurable
-  durable-recall evidence unless a fresh M6.9 failure identifies a narrower
-  blocker;
+- continue M6.9 from the verified #619 / M6.14 duplicated-adjacent repair
+  boundary. Drift-canary / novel-task, simulated alignment-decay, repeated
+  recall, reasoning-trace recall, and frozen comparator Phase 1/Phase 2
+  deterministic proof slices now exist, so the next target should be
+  close-gate aggregation of durable-recall evidence and any remaining measured
+  comparator gap unless a fresh M6.9 failure identifies a narrower blocker;
 - keep applying the M6.14 repair-ledger rule: if a mew-owned M6.9+
   implementation fails structurally, pause the active product milestone,
   append or activate a bounded M6.14 repair episode, fix the loop substrate or

@@ -86,6 +86,7 @@ DOGFOOD_SCENARIOS = (
     "m6_9-active-memory-recall",
     "m6_9-repeated-task-recall",
     "m6_9-phase1-regression",
+    "m6_9-phase2-regression",
     "m6_9-symbol-index-hit",
     "m6_9-drift-canary",
     "m6_9-alignment-decay-rehearsal",
@@ -1687,6 +1688,115 @@ def run_m6_9_phase1_regression_scenario(workspace, env=None):
         "phase": "phase1",
         "comparator_source": "m6_6",
         "durable_recall_active": True,
+        "b0_comparator_wall_seconds": b0_comparator_wall_seconds,
+        "budget_wall_seconds": budget_wall_seconds,
+        "median_wall_seconds": median_wall_seconds,
+        "comparator_cases": comparator_cases,
+    }
+    return report
+
+
+def run_m6_9_phase2_regression_scenario(workspace, env=None):
+    checks = []
+    commands = []
+
+    fixture = _load_json_file(
+        M6_6_COMPARATOR_BUDGET_FIXTURE_ROOT / "scenario.json"
+    )
+    b0_comparator_wall_seconds = _to_float_seconds((fixture.get("B0") or {}).get("iter_wall"))
+    budget_multiplier = 1.0
+    budget_wall_seconds = (
+        b0_comparator_wall_seconds * budget_multiplier
+        if isinstance(b0_comparator_wall_seconds, (int, float))
+        else None
+    )
+
+    raw_cases = fixture.get("comparator_cases", []) if isinstance(fixture, dict) else []
+    comparator_cases = []
+    if isinstance(raw_cases, list):
+        for case in raw_cases:
+            case_id = _phase4_comparator_case_id(case)
+            wall_seconds = _phase4_case_wall_seconds(case)
+            case_shape = _phase4_comparator_case_shape(case)
+            comparator_cases.append(
+                {
+                    "case_id": case_id,
+                    "shape": case_shape,
+                    "iter_wall_seconds": wall_seconds,
+                    "wall_seconds": wall_seconds,
+                    "source_reference": case.get("source_reference") if isinstance(case, dict) else "",
+                }
+            )
+
+    case_count = len(comparator_cases)
+    case_pairs = sorted((case.get("case_id"), case.get("shape")) for case in comparator_cases)
+    expected_case_pairs = sorted(M6_11_PHASE4_COMPARATOR_CASES.items())
+    case_wall_seconds = [case.get("iter_wall_seconds") for case in comparator_cases]
+    missing_timing_cases = [
+        case.get("case_id")
+        for case in comparator_cases
+        if not isinstance(case.get("iter_wall_seconds"), (int, float))
+    ]
+    numeric_case_wall_seconds = [
+        value for value in case_wall_seconds if isinstance(value, (int, float))
+    ]
+    median_wall_seconds = (
+        _median_wall_seconds(numeric_case_wall_seconds)
+        if len(numeric_case_wall_seconds) == len(case_wall_seconds)
+        else None
+    )
+    case_timing_present = not missing_timing_cases
+
+    _scenario_check(
+        checks,
+        "m6_9_phase2_regression_case_count",
+        case_count == 3,
+        observed={"case_count": case_count},
+        expected=3,
+    )
+    _scenario_check(
+        checks,
+        "m6_9_phase2_regression_expected_comparator_cases",
+        case_pairs == expected_case_pairs,
+        observed={
+            "observed_case_pairs": case_pairs,
+            "expected_case_pairs": expected_case_pairs,
+        },
+        expected="comparator cases include exactly the frozen M6.6 A/B/C mapping",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_phase2_regression_case_wall_time_present",
+        case_timing_present,
+        observed={
+            "cases_missing_wall_time": sorted(missing_timing_cases),
+            "case_count": case_count,
+        },
+        expected="all cases include a numeric iter_wall_seconds field",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_phase2_regression_median_vs_neutral_budget",
+        isinstance(median_wall_seconds, (int, float))
+        and isinstance(budget_wall_seconds, (int, float))
+        and isinstance(b0_comparator_wall_seconds, (int, float))
+        and budget_wall_seconds == b0_comparator_wall_seconds
+        and median_wall_seconds <= b0_comparator_wall_seconds,
+        observed={
+            "median_wall_seconds": median_wall_seconds,
+            "b0_comparator_wall_seconds": b0_comparator_wall_seconds,
+            "budget_wall_seconds": budget_wall_seconds,
+            "budget_multiplier": budget_multiplier,
+        },
+        expected="median_wall_seconds is <= B0.comparator with neutral Phase 2 budget",
+    )
+
+    report = _scenario_report("m6_9-phase2-regression", workspace, commands, checks)
+    report["artifacts"] = {
+        "phase": "phase2",
+        "comparator_source": "m6_6",
+        "durable_recall_active": True,
+        "budget_multiplier": budget_multiplier,
         "b0_comparator_wall_seconds": b0_comparator_wall_seconds,
         "budget_wall_seconds": budget_wall_seconds,
         "median_wall_seconds": median_wall_seconds,
@@ -13556,6 +13666,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_9_repeated_task_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-phase1-regression":
             reports.append(run_m6_9_phase1_regression_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-phase2-regression":
+            reports.append(run_m6_9_phase2_regression_scenario(scenario_workspace, env=env))
         elif name == "m6_9-symbol-index-hit":
             reports.append(run_m6_9_symbol_index_hit_scenario(scenario_workspace, env=env))
         elif name == "m6_9-drift-canary":

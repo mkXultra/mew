@@ -1126,6 +1126,65 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertEqual(len(artifacts["comparator_cases"]), 3)
 
+    def test_run_dogfood_m6_9_phase2_regression_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-phase2-regression",
+                cleanup=False,
+            )
+            fixture_path = (
+                Path(__file__).resolve().parents[1]
+                / "tests"
+                / "fixtures"
+                / "work_loop"
+                / "phase4_regression"
+                / "m6_6_comparator_budget"
+                / "scenario.json"
+            )
+            fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+            fixture_b0 = (fixture.get("B0") or {}).get("iter_wall")
+            comparator_cases = fixture.get("comparator_cases", [])
+            expected_mapping = {
+                "M6.6-A": "M6.6-A",
+                "M6.6-B": "M6.6-B",
+                "M6.6-C": "M6.6-C",
+            }
+            expected_provenance = {
+                item.get("case_id"): item.get("source_reference") for item in comparator_cases
+            }
+            case_walls = [case.get("iter_wall_seconds") for case in comparator_cases]
+            median_wall = sorted(case_walls)[len(case_walls) // 2]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-phase2-regression")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertEqual(scenario["command_count"], 0)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertIn("m6_9-phase2-regression: pass", text)
+            self.assertEqual(artifacts["phase"], "phase2")
+            self.assertEqual(artifacts["comparator_source"], "m6_6")
+            self.assertTrue(artifacts["durable_recall_active"])
+            self.assertEqual(artifacts["budget_multiplier"], 1.0)
+            self.assertEqual(artifacts["b0_comparator_wall_seconds"], fixture_b0)
+            self.assertEqual(artifacts["budget_wall_seconds"], fixture_b0)
+            self.assertEqual(artifacts["median_wall_seconds"], median_wall)
+            self.assertLessEqual(artifacts["median_wall_seconds"], artifacts["b0_comparator_wall_seconds"])
+            self.assertEqual(
+                {case.get("case_id"): case.get("shape") for case in artifacts["comparator_cases"]},
+                expected_mapping,
+            )
+            self.assertEqual(
+                {case.get("case_id"): case.get("source_reference") for case in artifacts["comparator_cases"]},
+                expected_provenance,
+            )
+            self.assertEqual(len(artifacts["comparator_cases"]), 3)
+
     def test_run_dogfood_m6_11_all_subset_aggregate_reflects_full_coverage(self):
         with tempfile.TemporaryDirectory() as tmp, patch(
             "mew.dogfood.DOGFOOD_SCENARIOS",
