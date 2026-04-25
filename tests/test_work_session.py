@@ -11112,6 +11112,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(details["active"])
         self.assertEqual(build_write_ready_work_model_context(context)["write_ready_fast_path"]["active"], True)
 
+    def test_write_ready_fast_path_allows_complete_indented_call_window(self):
+        from mew.work_loop import _write_ready_window_text_is_structurally_complete
+
+        fragment = (
+            "    _scenario_check(\n"
+            "        checks,\n"
+            "        \"m6_9_repeated_task_recall_covers_multiple_task_shapes\",\n"
+            "        trace[\"shape_count\"] >= 6,\n"
+            "    )\n"
+        )
+
+        self.assertTrue(_write_ready_window_text_is_structurally_complete(fragment))
+
     def test_write_ready_fast_path_blocks_clause_tail_fragment(self):
         from mew.work_loop import _work_write_ready_fast_path_details, build_write_ready_work_model_context
 

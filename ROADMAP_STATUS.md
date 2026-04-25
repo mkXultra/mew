@@ -2154,14 +2154,16 @@ Progress / remaining proof:
   `git diff --check`.
 - Task `#591` landed a bounded M6.9 substrate repair for the failure class
   exposed by `#590`: write-ready structural completeness now accepts complete
-  indented assignment/list fragments, such as an in-function `shapes = [...]`
-  block, while preserving blockers for orphaned indented body fragments, clause
-  tails, unmatched parentheses, and mid-fragment starts. This should reduce
-  false `cached_window_incomplete` stops when a long function contains the
-  exact local edit surface. Validation covered focused work-session tests for
-  the new indented-assignment path plus the existing negative structural
-  fragment cases, targeted ruff for `src/mew/work_loop.py` and
-  `tests/test_work_session.py`, and `git diff --check`.
+  indented assignment/list fragments and multi-line call fragments, such as
+  an in-function `shapes = [...]` block or `_scenario_check(...)`, while
+  preserving blockers for orphaned indented body fragments, single-line call
+  fragments, clause tails, unmatched parentheses, and mid-fragment starts. This
+  should reduce false `cached_window_incomplete` stops when a long function
+  contains the exact local edit surface. Validation covered focused
+  work-session tests for the new indented-assignment/call paths plus the
+  existing negative structural fragment cases, targeted ruff for
+  `src/mew/work_loop.py` and `tests/test_work_session.py`, and
+  `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
   purpose. Phase 1 substrate and eight post-M6.12 proof/report/substrate slices
   have landed, and the repeated-task proof matrix has 5/10 deterministic shapes

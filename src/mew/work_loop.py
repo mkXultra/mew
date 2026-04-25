@@ -2493,6 +2493,8 @@ def _write_ready_indented_statement_fragment_is_allowed(significant_lines):
         first_stripped,
     ) and re.search(r"=\s*[\[\{\(]", first_stripped):
         return True
+    if first_stripped.rstrip().endswith("(") and re.match(r"[A-Za-z_][A-Za-z0-9_.]*\s*\(", first_stripped):
+        return True
     return False
 
 
