@@ -2178,6 +2178,17 @@ Progress / remaining proof:
   `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
   `uv run python -m unittest tests.test_dogfood`, targeted ruff for
   `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#594` landed a second bounded M6.9 write-ready refresh repair after
+  the `#593` seventh-shape attempt read only the later
+  `covers_multiple_task_shapes` gate and missed the earlier shape-list edit
+  surface. Refresh search ranking now prefers same-path read windows that cover
+  multiple search anchors, so a `bounded_work_loop_pair`/shape-list anchor can
+  win over a later gate-only anchor when one 520-line read covers both. This
+  should make the next repeated-shape attempt less dependent on exact
+  supervisor line windows. Validation covered focused work-session tests for
+  refresh-search anchor ranking, nearby write-ready fast-path/preflight cases,
+  targeted ruff for `src/mew/work_loop.py` and `tests/test_work_session.py`,
+  and `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
   purpose. Phase 1 substrate and eight post-M6.12 proof/report/substrate slices
   have landed, and the repeated-task proof matrix has 6/10 deterministic shapes

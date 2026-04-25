@@ -3717,8 +3717,7 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
 
     actions = []
     for target_path in target_paths:
-        best_anchor_line = 0
-        best_anchor_score = -10
+        candidate_anchors = []
         for call in reversed(tool_calls):
             if not usable_anchor_search(call):
                 continue
@@ -3736,15 +3735,32 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
                     continue
                 score, line = snippet_anchor(snippet)
                 score += anchor_proximity_score(target_path, line)
-                if line > 0 and score > best_anchor_score:
-                    best_anchor_score = score
-                    best_anchor_line = line
-        if best_anchor_line <= 0:
+                if line > 0:
+                    candidate_anchors.append((score, line))
+        if not candidate_anchors:
             continue
-        line_start = max(1, best_anchor_line - 120)
-        line_count = 520
-        line_end = line_start + line_count - 1
-        if not already_read(target_path, line_start, line_end):
+
+        anchor_lines = {line for _, line in candidate_anchors if line > 0}
+
+        def read_window_bounds(anchor_line):
+            line_start = max(1, anchor_line - 120)
+            line_count = 520
+            line_end = line_start + line_count - 1
+            return line_start, line_count, line_end
+
+        def window_anchor_coverage(anchor_line):
+            line_start, _, line_end = read_window_bounds(anchor_line)
+            return sum(1 for line in anchor_lines if line_start <= line <= line_end)
+
+        ranked_candidates = sorted(
+            candidate_anchors,
+            key=lambda item: (item[0] + 20 * window_anchor_coverage(item[1]), -item[1]),
+            reverse=True,
+        )
+        for _, anchor_line in ranked_candidates:
+            line_start, line_count, line_end = read_window_bounds(anchor_line)
+            if already_read(target_path, line_start, line_end):
+                continue
             actions.append(
                 {
                     "type": "read_file",
@@ -3754,6 +3770,7 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
                     "reason": "read explicitly located write-ready cached window",
                 }
             )
+            break
         if len(actions) >= 5:
             break
     return actions

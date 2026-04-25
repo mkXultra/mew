@@ -9805,6 +9805,73 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_preflight_prefers_anchor_window_covering_multiple_source_hits(self):
+        from mew.work_loop import _work_write_ready_refresh_search_result_read_actions
+
+        actions = _work_write_ready_refresh_search_result_read_actions(
+            {
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/dogfood.py",
+                            "query": "bounded_work_loop_pair",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "src/mew/dogfood.py",
+                                    "line": 2605,
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {
+                            "path": "src/mew/dogfood.py",
+                            "query": "covers_multiple_task_shapes",
+                        },
+                        "result": {
+                            "snippets": [
+                                {
+                                    "path": "src/mew/dogfood.py",
+                                    "line": 2863,
+                                }
+                            ]
+                        },
+                    },
+                ],
+                "recent_read_file_windows": [
+                    {
+                        "path": "src/mew/dogfood.py",
+                        "line_start": 2743,
+                        "line_end": 3262,
+                        "text": "    _scenario_check(\n        checks,\n",
+                        "context_truncated": False,
+                    }
+                ],
+            },
+            ["src/mew/dogfood.py"],
+        )
+
+        self.assertEqual(
+            actions,
+            [
+                {
+                    "type": "read_file",
+                    "path": "src/mew/dogfood.py",
+                    "line_start": 2485,
+                    "line_count": 520,
+                    "reason": "read explicitly located write-ready cached window",
+                }
+            ],
+        )
+
     def test_write_ready_preflight_uses_refresh_search_calls_outside_recent_window(self):
         from mew.work_loop import (
             _work_write_ready_refresh_search_result_read_actions,
