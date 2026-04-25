@@ -6403,6 +6403,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "updated_at": session.get("updated_at"),
         "active_work_todo": active_work_todo or {},
         "work_todos": list_work_session_todos(session),
+        "active_rejection_frontier": session.get("active_rejection_frontier") or {},
+        "rejection_frontiers": list(session.get("rejection_frontiers") or [])[-limit:],
         "draft_phase": draft_state.get("draft_phase") or "",
         "draft_attempts": draft_state.get("draft_attempts", 0),
         "cached_window_ref_count": draft_state.get("cached_window_ref_count", 0),
@@ -6543,6 +6545,18 @@ def format_work_session_resume(resume):
         lines.append("work_todos:")
         for todo in work_todos:
             lines.append(f"- {todo.get('id')} [{todo.get('status')}] {todo.get('text')}")
+    rejection_frontier = resume.get("active_rejection_frontier") or {}
+    if rejection_frontier:
+        lines.append(
+            "active_rejection_frontier: "
+            f"id={rejection_frontier.get('id') or ''} "
+            f"drift={rejection_frontier.get('drift_class') or ''} "
+            f"patch_family={rejection_frontier.get('rejected_patch_family') or ''}"
+        )
+        if rejection_frontier.get("stop_rule"):
+            lines.append(f"rejection_stop_rule: {rejection_frontier.get('stop_rule')}")
+        if rejection_frontier.get("next_action"):
+            lines.append(f"rejection_next_action: {rejection_frontier.get('next_action')}")
     failed_patch_repair = resume.get("failed_patch_repair") or {}
     if failed_patch_repair:
         terms = ", ".join(failed_patch_repair.get("must_preserve_terms") or [])

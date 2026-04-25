@@ -27,7 +27,7 @@ not be resumed until the recorded resume condition fires.
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Paused at a clean proof boundary: Phase 1 substrate, 10 repeated-task shapes, comparator regression, reviewer-steering/failure-shield, and reasoning-trace recall exist, but drift/rehearsal proof should wait until mew-first implementation reliability improves. |
-| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0 and Todo D1 now land; current baseline remains 4/10 clean-or-practical against the 7/10 gate, and next focus is structured rejection/frontier. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0, Todo D1, and structured rejection/frontier D1 now land; current baseline remains 4/10 clean-or-practical against the 7/10 gate, and next focus is Todo D2 or post-D1 proof attempts. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
@@ -2390,11 +2390,16 @@ Progress:
   `uv run pytest -q tests/test_work_todos.py --no-testmon`, targeted ruff,
   command smoke for `--todo-add`/`--todo-update`/`--todo-list`, and work-session
   resume JSON showing the session Todo list.
+- Structured rejection/frontier D1 landed by turning `mew work --reject-tool`
+  and reply-file reject actions into a per-session `active_rejection_frontier`
+  plus retained `rejection_frontiers` entries. Each frontier records the
+  rejected tool, path, reason, drift class, rejected patch family, stop rule,
+  and same-task next action. The first real smoke was task #604 / work session
+  #589, which rejected a generic cleanup substitution dry-run before apply and
+  surfaced the next action in `mew work 604 --session --resume`.
 
 Missing proof:
 
-- no structured rejection/frontier surface converts reject/redirect decisions
-  into durable same-task next actions and stop rules
 - Todo D2 is only partial: work-session resume JSON exposes `work_todos`, but
   focus/brief or another reviewer-facing surface still needs a deliberate
   decision before calling the D2 operator-view criterion fully met
@@ -2408,8 +2413,10 @@ Missing proof:
 
 Next action:
 
-- take structured rejection/frontier D1 before considering Explorer; use
-  `mew metrics --mew-first` as the economics baseline for post-D1 attempts
+- decide whether Todo D2 operator visibility should widen to focus/brief now
+  or whether the next highest-value step is a post-D1 mew-first attempt window;
+  do not consider Explorer until post-D1 evidence shows read-only exploration
+  churn remains a measured blocker
 
 ### M6.11: Loop Stabilization
 
@@ -3568,8 +3575,8 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
 - Todo D1 is landed; Todo D2 remains partial until reviewer/operator visibility
   is deliberately widened beyond work-session resume JSON or accepted as
   sufficient;
-- structured rejection/frontier D1 so reject/redirect decisions become durable
-  same-task next actions and stop rules instead of free-text advice;
+- structured rejection/frontier D1 is landed and should now be used to classify
+  future reject/redirect decisions as durable same-task next actions;
 - keeping M6.12 closed as the read-only failure-science baseline unless a fresh
   regression appears;
 - using the closed M6.11 residual surfaces (isolated review, executor

@@ -5941,11 +5941,108 @@ def _should_preserve_patch_draft_replay_for_reject_reason(task, reason):
     )
 
 
+WORK_REJECTION_FRONTIER_MAX_ITEMS = 10
+
+
+def _work_rejection_frontier_drift_class(session, source_call, reason):
+    path = work_call_path(source_call)
+    result = (source_call or {}).get("result") if isinstance((source_call or {}).get("result"), dict) else {}
+    text = " ".join(
+        str(item or "")
+        for item in (
+            reason,
+            path,
+            (source_call or {}).get("summary"),
+            result.get("summary"),
+            result.get("diff_preview"),
+            result.get("diff"),
+        )
+    ).casefold()
+    pairing = work_write_pairing_status(session, source_call)
+    if (pairing or {}).get("status") == "missing_test_edit" or "unpaired" in text or "missing test" in text:
+        return "unpaired_source_edit"
+    if "missing focused verifier" in text or "no focused verifier" in text or (
+        "missing" in text and "verifier" in text
+    ):
+        return "missing_focused_verifier"
+    if (
+        "existing-scenario" in text
+        or "existing scenario" in text
+        or "artifact tweak" in text
+        or "wrong milestone artifact" in text
+    ):
+        return "existing_scenario_artifact_tweak"
+    if "generic cleanup" in text or "cleanup substitution" in text or "polish" in text:
+        return "generic_cleanup_substitution"
+    return "reviewer_rejected_patch"
+
+
+def _work_rejection_frontier_policy(drift_class):
+    policies = {
+        "existing_scenario_artifact_tweak": {
+            "rejected_patch_family": "existing_scenario_artifact_tweak",
+            "stop_rule": "block existing-scenario artifact tweaks; require a novel task/proof artifact tied to the active criterion",
+            "next_action": "return to the active milestone criterion and draft a novel bounded proof slice instead of editing an existing scenario artifact",
+        },
+        "generic_cleanup_substitution": {
+            "rejected_patch_family": "generic_cleanup",
+            "stop_rule": "block generic cleanup substitutions; require scoped source/test changes tied to the active task",
+            "next_action": "replace the cleanup patch with one bounded source/test change mapped to the current Todo or task criterion",
+        },
+        "unpaired_source_edit": {
+            "rejected_patch_family": "unpaired_source_edit",
+            "stop_rule": "block unpaired mew source edits; require a paired tests/** dry-run edit or an explicit reviewer override",
+            "next_action": "add the paired tests/** change or narrow the patch to a non-source artifact before approval",
+        },
+        "missing_focused_verifier": {
+            "rejected_patch_family": "missing_focused_verifier",
+            "stop_rule": "block implementation without a focused verifier; require a verifier command before approval",
+            "next_action": "define and run the focused verifier before retrying the patch",
+        },
+        "reviewer_rejected_patch": {
+            "rejected_patch_family": "reviewer_rejected_patch",
+            "stop_rule": "block the rejected patch family until reviewer feedback is incorporated",
+            "next_action": "revise the patch from reviewer feedback before asking for approval again",
+        },
+    }
+    return policies.get(drift_class) or policies["reviewer_rejected_patch"]
+
+
+def record_work_rejection_frontier(session, source_call, reason="", current_time=None):
+    if not isinstance(session, dict) or not isinstance(source_call, dict):
+        return {}
+    current_time = current_time or now_iso()
+    drift_class = _work_rejection_frontier_drift_class(session, source_call, reason)
+    policy = _work_rejection_frontier_policy(drift_class)
+    ordinal = int(session.get("last_rejection_frontier_ordinal") or 0) + 1
+    session["last_rejection_frontier_ordinal"] = ordinal
+    frontier = {
+        "id": f"rejection-frontier-{session.get('id') or 'session'}-{ordinal}",
+        "status": "active",
+        "source_tool_call_id": source_call.get("id"),
+        "path": work_call_path(source_call),
+        "reason": clip_inline_text(reason or "", 500),
+        "drift_class": drift_class,
+        "rejected_patch_family": policy["rejected_patch_family"],
+        "stop_rule": policy["stop_rule"],
+        "next_action": policy["next_action"],
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+    frontiers = list(session.get("rejection_frontiers") or [])
+    frontiers.append(frontier)
+    session["rejection_frontiers"] = frontiers[-WORK_REJECTION_FRONTIER_MAX_ITEMS:]
+    session["active_rejection_frontier"] = frontier
+    source_call["rejection_frontier_id"] = frontier["id"]
+    return frontier
+
+
 def reject_work_tool_call(session, source_call, reason=""):
     current_time = now_iso()
     source_call["approval_status"] = "rejected"
     source_call["rejected_at"] = current_time
     source_call["rejection_reason"] = reason or ""
+    record_work_rejection_frontier(session, source_call, reason, current_time=current_time)
     session["updated_at"] = current_time
     return source_call
 
@@ -6004,9 +6101,24 @@ def cmd_work_reject_tool(args):
         )
         save_state(state)
     if args.json:
-        print(json.dumps({"rejected_tool_call": source_call}, ensure_ascii=False, indent=2))
+        frontier = {}
+        frontier_id = source_call.get("rejection_frontier_id")
+        for item in (session or {}).get("rejection_frontiers") or []:
+            if item.get("id") == frontier_id:
+                frontier = item
+                break
+        print(
+            json.dumps(
+                {"rejected_tool_call": source_call, "rejection_frontier": frontier},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print(f"rejected work tool #{source_call['id']}")
+        frontier = (session or {}).get("active_rejection_frontier") or {}
+        if frontier.get("id") == source_call.get("rejection_frontier_id"):
+            print(f"frontier: {frontier.get('drift_class')} -> {frontier.get('next_action')}")
     return 0
 
 
