@@ -26,7 +26,7 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus ten post-M6.12 proof/report/substrate slices landed; repeated-task recall covers the required 10 deterministic shapes, the Phase 1 comparator regression passes, one reviewer-steering reuse proof fires, and the two-case failure-shield proof blocks reverted approaches; broader M6.9 close gates remain open. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus eleven post-M6.12 proof/report/substrate slices landed; repeated-task recall covers the required 10 deterministic shapes, comparator regression passes, reviewer-steering/failure-shield proofs fire, and reasoning-trace recall now covers two iterations including one abstract task; broader M6.9 close gates remain open. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
@@ -39,19 +39,20 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 17:07 JST.
+Last assessed: 2026-04-25 17:16 JST.
 
 Active work: **M6.9 Durable Coding Intelligence** from the clean proof-slice
-boundary. M6.9 has landed its Phase 1 substrate and ten post-M6.12
+boundary. M6.9 has landed its Phase 1 substrate and eleven post-M6.12
 proof/report/substrate slices, and the M6.11 residual hardening pause is now
 closed by `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The next M6.9 push
 should use the closed review, executor-lifecycle, memory-explore, and
 prompt/cache surfaces to scale durable-coding proof without losing failure
 diagnosis. The small repeated-task runner/report slice is now present as a
 per-shape artifact and the 10-shape matrix is complete. The failure-shield
-two-case proof is now present, so the next proof work should add the remaining
-reviewer-correction durable-rule cases or move to reasoning-trace recall rather
-than expanding shape count or inventing a separate tracker.
+two-case proof and reasoning-trace recall proof are now present, so the next
+proof work should add the remaining reviewer-correction durable-rule cases and
+then move to drift-canary / simulated alignment-decay proof rather than
+expanding shape count or inventing a separate tracker.
 M6.10 stays registered but inactive until the M6.9 proof push creates an
 accelerator-sized need. M6.13 is registered as the later deliberation-lane
 milestone, but it stays inactive until M6.9 ranked-recall/internalization
@@ -2277,14 +2278,30 @@ Progress / remaining proof:
   `uv run pytest -q tests/test_dogfood.py -k 'm6_9_failure_shield or scenario_choices' --no-testmon`,
   `uv run python -m unittest tests.test_dogfood`, targeted ruff for
   `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#601` is supervisor-owned product progress that enabled the minimal
+  `reasoning-trace` typed-memory write gate and added deterministic
+  `m6_9-reasoning-trace-recall` proof. Reasoning-trace
+  writes now require explicit approval plus `--situation`, `--reasoning`,
+  `--verdict`, and `--abstraction-level shallow|deep`, and typed-memory
+  read/search/show surfaces preserve those fields. The dogfood scenario writes
+  one shallow mechanical trace and one deep abstract trace, recalls both in
+  later task iterations, records reviewer-confirmed shortened deliberation for
+  both, and proves at least one abstract-task recall. Validation covered
+  focused `tests/test_memory.py` reasoning-trace tests,
+  `./mew dogfood --scenario m6_9-reasoning-trace-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_reasoning_trace or m6_9_memory_taxonomy or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_memory tests.test_dogfood`, targeted
+  ruff for the edited memory/command/dogfood/test files, and `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
-  purpose. Phase 1 substrate and ten post-M6.12 proof/report/substrate slices
+  purpose. Phase 1 substrate and eleven post-M6.12 proof/report/substrate slices
   have landed, and the repeated-task proof matrix has 10/10 deterministic shapes
   plus per-shape reporting. The Phase 1 comparator regression scenario now
   passes against the frozen M6.6 comparator fixture, and one reviewer-steering
   durable-rule reuse proof now fires in a later simulated iteration. A
   two-case failure-shield proof now blocks reverted approaches before
-  implementation. The
+  implementation. Reasoning-trace recall now has two later-iteration recalls
+  with reviewer-confirmed shortened deliberation, including one abstract task.
+  The
   now-closed M6.11 residual review, executor lifecycle, memory exploration, and
   prompt/cache boundaries should be used to classify the next mew-first proof
   slices.
@@ -2305,8 +2322,8 @@ Next proof step:
 
 - treat the deterministic Phase 1 comparator regression as enough for the
   current proof slice and keep moving through M6.9 Done-when criteria: add two
-  more reviewer-correction durable-rule proofs, or move to reasoning-trace
-  recall if another reviewer-steering attempt repeats the same scenario shape.
+  more reviewer-correction durable-rule proofs, then run or implement the
+  drift-canary / novel-task proof slice.
 
 ### M6.10: Execution Accelerators
 

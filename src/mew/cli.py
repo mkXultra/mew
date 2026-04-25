@@ -1544,6 +1544,15 @@ def build_parser():
         action="store_true",
         help="mark the paired focused test green for a file-pair durable write",
     )
+    memory_parser.add_argument("--situation", help="situation required for a reasoning-trace durable write")
+    memory_parser.add_argument("--reasoning", help="reasoning required for a reasoning-trace durable write")
+    memory_parser.add_argument("--verdict", help="verdict required for a reasoning-trace durable write")
+    memory_parser.add_argument(
+        "--abstraction-level",
+        dest="abstraction_level",
+        choices=("shallow", "deep"),
+        help="abstraction level required for a reasoning-trace durable write",
+    )
     memory_parser.add_argument(
         "--kind",
         dest="memory_kind",

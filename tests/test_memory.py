@@ -222,6 +222,26 @@ class MemoryTests(unittest.TestCase):
             self.assertEqual(file_pair.test_path, "tests/test_work_session.py")
             self.assertTrue(file_pair.focused_test_green)
 
+            trace = backend.write(
+                "When verifier ordering is ambiguous, run the focused test first.",
+                scope="private",
+                memory_type="project",
+                memory_kind="reasoning-trace",
+                name="Focused verifier trace",
+                approved=True,
+                situation="choosing verifier order for a bounded coding edit",
+                reasoning="focused tests localize regression before broader suites",
+                verdict="run focused verifier before broader unittest",
+                abstraction_level="shallow",
+            )
+            self.assertEqual(trace.memory_kind, "reasoning-trace")
+            self.assertEqual(trace.situation, "choosing verifier order for a bounded coding edit")
+            self.assertEqual(trace.abstraction_level, "shallow")
+            self.assertIn(
+                'situation = "choosing verifier order for a bounded coding edit"',
+                trace.path.read_text(encoding="utf-8"),
+            )
+
             with self.assertRaisesRegex(ValueError, "--root-cause"):
                 backend.write(
                     "Broken failure shield",
@@ -257,6 +277,19 @@ class MemoryTests(unittest.TestCase):
                     source_path="src/mew/work_session.py",
                     test_path="tests/test_work_session.py",
                     structural_evidence="same-session read of both files",
+                )
+
+            with self.assertRaisesRegex(ValueError, "--verdict"):
+                backend.write(
+                    "Broken reasoning trace",
+                    scope="private",
+                    memory_type="project",
+                    memory_kind="reasoning-trace",
+                    name="Broken trace",
+                    approved=True,
+                    situation="choosing verifier order",
+                    reasoning="focused tests localize regression",
+                    abstraction_level="shallow",
                 )
 
     def test_recall_memory_filters_typed_memory_without_migrating_legacy(self):
@@ -977,12 +1010,12 @@ class MemoryTests(unittest.TestCase):
             self.assertEqual(main(["memory", "--veto-log", "--search", "trace"]), 1)
         self.assertIn("cannot be combined", stderr.getvalue())
 
-    def test_cli_memory_add_rejects_reasoning_trace_direct_write(self):
+    def test_cli_memory_add_accepts_reasoning_trace_with_required_fields(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
             os.chdir(tmp)
             try:
-                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
                         main(
                             [
@@ -993,11 +1026,50 @@ class MemoryTests(unittest.TestCase):
                                 "project",
                                 "--kind",
                                 "reasoning-trace",
+                                "--name",
+                                "Abstract trace",
+                                "--approved",
+                                "--situation",
+                                "choosing between polish and milestone proof",
+                                "--reasoning",
+                                "active milestone evidence beats nearby polish",
+                                "--verdict",
+                                "select milestone proof",
+                                "--abstraction-level",
+                                "deep",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                self.assertEqual(data["entry"]["memory_kind"], "reasoning-trace")
+                self.assertEqual(data["entry"]["situation"], "choosing between polish and milestone proof")
+                self.assertEqual(data["entry"]["abstraction_level"], "deep")
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "memory",
+                                "--add",
+                                "Store incomplete reasoning trace.",
+                                "--type",
+                                "project",
+                                "--kind",
+                                "reasoning-trace",
+                                "--approved",
+                                "--situation",
+                                "choosing between polish and milestone proof",
+                                "--reasoning",
+                                "active milestone evidence beats nearby polish",
+                                "--abstraction-level",
+                                "deep",
                             ]
                         ),
                         1,
                     )
-                self.assertIn("schema-only until Phase 2", stderr.getvalue())
+                self.assertIn("--verdict", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 

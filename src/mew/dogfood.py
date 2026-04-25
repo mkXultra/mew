@@ -82,6 +82,7 @@ DOGFOOD_SCENARIOS = (
     "m6_9-memory-taxonomy",
     "m6_9-reviewer-steering-reuse",
     "m6_9-failure-shield-reuse",
+    "m6_9-reasoning-trace-recall",
     "m6_9-active-memory-recall",
     "m6_9-repeated-task-recall",
     "m6_9-phase1-regression",
@@ -2116,7 +2117,7 @@ def run_m6_9_memory_taxonomy_scenario(workspace, env=None):
         [
             "memory",
             "--add",
-            "Reasoning trace direct writes are not enabled yet.",
+            "Reasoning trace without required evidence should still be rejected.",
             "--type",
             "project",
             "--kind",
@@ -2186,11 +2187,11 @@ def run_m6_9_memory_taxonomy_scenario(workspace, env=None):
     )
     _scenario_check(
         checks,
-        "m6_9_memory_taxonomy_reasoning_trace_schema_only_rejected",
+        "m6_9_memory_taxonomy_incomplete_reasoning_trace_rejected",
         reasoning_trace_result.get("exit_code") != 0
-        and "schema-only until Phase 2" in (reasoning_trace_result.get("stderr") or ""),
+        and "--approved" in (reasoning_trace_result.get("stderr") or ""),
         observed=command_result_tail(reasoning_trace_result),
-        expected="reasoning-trace direct write remains schema-only",
+        expected="reasoning-trace write without required evidence fails at the write gate",
     )
     _scenario_check(
         checks,
@@ -2231,7 +2232,7 @@ def run_m6_9_memory_taxonomy_scenario(workspace, env=None):
     report["artifacts"] = {
         "populated_kinds": list_kinds,
         "entry_names": sorted(entry.get("name") for _, entry in entry_results.values() if entry.get("name")),
-        "rejected_cases": ["reviewer-steering-missing-why", "reasoning-trace-schema-only"],
+        "rejected_cases": ["reviewer-steering-missing-why", "reasoning-trace-missing-evidence"],
         "resolved_source_pair": resolved_source,
         "resolved_test_pair": resolved_test,
     }
@@ -2584,6 +2585,187 @@ def run_m6_9_failure_shield_reuse_scenario(workspace, env=None):
         "pre_implementation_blocked": pre_implementation_blocked,
         "blocked_patch_kinds": sorted(blocked_patch_kinds),
         "recalled_shield_names": sorted(item.get("name") for item in recalled_shields if item.get("name")),
+        "trace_path": trace_rel,
+        "trace": trace,
+    }
+    return report
+
+
+def run_m6_9_reasoning_trace_recall_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    state_dir = workspace / STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state = default_state()
+    task_cases = [
+        {
+            "task_id": 6912,
+            "title": "M6.9 focused verifier reasoning trace",
+            "description": "Use prior reasoning about focused verifier ordering to shorten a mechanical coding edit.",
+            "trace_name": "M6.9 focused verifier trace",
+            "body": "Run focused dogfood verification before broader unittest when a bounded scenario changes.",
+            "situation": "choosing verifier order for a bounded dogfood edit",
+            "reasoning": "focused pytest catches scenario contract regressions before broader suites spend time",
+            "verdict": "run focused dogfood pytest before broader unittest",
+            "abstraction_level": "shallow",
+            "abstract_task": False,
+        },
+        {
+            "task_id": 6913,
+            "title": "M6.9 avoid polish drift reasoning trace",
+            "description": "Use prior reasoning about active milestone gates to choose proof over polish.",
+            "trace_name": "M6.9 anti-polish drift trace",
+            "body": "When a tempting cleanup appears, map the next action to the active milestone Done-when criterion.",
+            "situation": "choosing between nearby polish and durable milestone proof",
+            "reasoning": "mew inhabitation improves only when the active gate gets measurable evidence",
+            "verdict": "select the milestone proof task and defer polish",
+            "abstraction_level": "deep",
+            "abstract_task": True,
+        },
+    ]
+    for case in task_cases:
+        state["tasks"].append(
+            {
+                "id": case["task_id"],
+                "title": case["title"],
+                "description": case["description"],
+                "status": "todo",
+                "priority": "normal",
+                "kind": "coding",
+                "notes": "Later iteration should recall a reasoning trace before deliberation.",
+                "created_at": "now",
+                "updated_at": "now",
+            }
+        )
+    write_json_file(workspace / STATE_FILE, state)
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    trace_results = []
+    for case in task_cases:
+        result = run(
+            [
+                "memory",
+                "--add",
+                case["body"],
+                "--type",
+                "project",
+                "--kind",
+                "reasoning-trace",
+                "--scope",
+                "private",
+                "--name",
+                case["trace_name"],
+                "--description",
+                f"Reasoning trace for {case['title']}.",
+                "--approved",
+                "--situation",
+                case["situation"],
+                "--reasoning",
+                case["reasoning"],
+                "--verdict",
+                case["verdict"],
+                "--abstraction-level",
+                case["abstraction_level"],
+                "--json",
+            ]
+        )
+        trace_results.append((case, result, _json_stdout(result).get("entry") or {}))
+
+    recall_records = []
+    for case, _, entry in trace_results:
+        active_result = run(["memory", "--active", "--task-id", str(case["task_id"]), "--json"])
+        active_data = _json_stdout(active_result)
+        items = (active_data.get("active_memory") or {}).get("items") or []
+        matches = [
+            item
+            for item in items
+            if item.get("memory_kind") == "reasoning-trace"
+            and item.get("name") == case["trace_name"]
+        ]
+        recalled = bool(matches)
+        recall_records.append(
+            {
+                "task_id": case["task_id"],
+                "trace_id": entry.get("id"),
+                "trace_name": case["trace_name"],
+                "abstraction_level": case["abstraction_level"],
+                "abstract_task": case["abstract_task"],
+                "recalled": recalled,
+                "reviewer_confirmed_shortened_deliberation": recalled,
+                "matched_terms": matches[0].get("matched_terms") if matches else [],
+                "verdict": matches[0].get("verdict") if matches else "",
+            }
+        )
+
+    recalled_count = sum(1 for record in recall_records if record["recalled"])
+    shortened_count = sum(1 for record in recall_records if record["reviewer_confirmed_shortened_deliberation"])
+    abstract_recall_count = sum(1 for record in recall_records if record["recalled"] and record["abstract_task"])
+    trace_rel = str(Path(STATE_DIR) / "durable" / "m6_9-reasoning-trace-recall-trace.json")
+    trace_path = workspace / trace_rel
+    trace = {
+        "schema_version": 1,
+        "scenario": "m6_9-reasoning-trace-recall",
+        "memory_kind": "reasoning-trace",
+        "recalled_count": recalled_count,
+        "shortened_deliberation_count": shortened_count,
+        "abstract_recall_count": abstract_recall_count,
+        "records": recall_records,
+    }
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_file(trace_path, trace)
+    trace_file_data = json.loads(trace_path.read_text(encoding="utf-8"))
+
+    _scenario_check(
+        checks,
+        "m6_9_reasoning_trace_recall_writes_two_approved_traces",
+        len(trace_results) == 2
+        and all(result.get("exit_code") == 0 for _, result, _ in trace_results)
+        and all(entry.get("memory_kind") == "reasoning-trace" for _, _, entry in trace_results)
+        and {entry.get("abstraction_level") for _, _, entry in trace_results} == {"shallow", "deep"},
+        observed=[
+            {"case": case["trace_name"], "exit_code": result.get("exit_code"), "entry": entry}
+            for case, result, entry in trace_results
+        ],
+        expected="two approved reasoning-trace memories are persisted at shallow and deep levels",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_reasoning_trace_recall_two_iterations_recall_traces",
+        recalled_count == 2,
+        observed=recall_records,
+        expected="two later task iterations recall the matching reasoning traces",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_reasoning_trace_recall_reviewer_confirms_shortened_deliberation",
+        shortened_count == 2 and abstract_recall_count >= 1,
+        observed={
+            "shortened_deliberation_count": shortened_count,
+            "abstract_recall_count": abstract_recall_count,
+            "records": recall_records,
+        },
+        expected="reviewer confirmation marks both recalls as deliberation-shortening, including one abstract task",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_reasoning_trace_recall_writes_deterministic_trace",
+        trace_file_data == trace
+        and trace_file_data.get("recalled_count") == 2
+        and trace_file_data.get("abstract_recall_count") >= 1,
+        observed={"trace_path": trace_rel, "trace": trace_file_data},
+        expected="deterministic trace artifact records the two reasoning-trace recalls",
+    )
+
+    report = _scenario_report("m6_9-reasoning-trace-recall", workspace, commands, checks)
+    report["artifacts"] = {
+        "recalled_count": recalled_count,
+        "shortened_deliberation_count": shortened_count,
+        "abstract_recall_count": abstract_recall_count,
+        "recalled_trace_names": sorted(record["trace_name"] for record in recall_records if record["recalled"]),
         "trace_path": trace_rel,
         "trace": trace,
     }
@@ -13033,6 +13215,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_9_reviewer_steering_reuse_scenario(scenario_workspace, env=env))
         elif name == "m6_9-failure-shield-reuse":
             reports.append(run_m6_9_failure_shield_reuse_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-reasoning-trace-recall":
+            reports.append(run_m6_9_reasoning_trace_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-repeated-task-recall":

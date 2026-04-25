@@ -498,10 +498,10 @@ class DogfoodTests(unittest.TestCase):
                 {"reviewer-steering", "task-template", "failure-shield", "file-pair"},
             )
             self.assertIn("reviewer-steering-missing-why", scenario["artifacts"]["rejected_cases"])
-            self.assertIn("reasoning-trace-schema-only", scenario["artifacts"]["rejected_cases"])
+            self.assertIn("reasoning-trace-missing-evidence", scenario["artifacts"]["rejected_cases"])
             self.assertIn("m6_9_memory_taxonomy_reviewer-steering_write_accepts_required_evidence", check_names)
             self.assertIn("m6_9_memory_taxonomy_missing_reviewer_why_rejected", check_names)
-            self.assertIn("m6_9_memory_taxonomy_reasoning_trace_schema_only_rejected", check_names)
+            self.assertIn("m6_9_memory_taxonomy_incomplete_reasoning_trace_rejected", check_names)
             self.assertIn("m6_9_memory_taxonomy_resolves_source_to_test_pair", check_names)
             self.assertIn("m6_9_memory_taxonomy_resolves_test_to_source_pair", check_names)
 
@@ -592,6 +592,36 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_failure_shield_reuse_active_recall_finds_two_shields", check_names)
             self.assertIn("m6_9_failure_shield_reuse_blocks_two_reverted_approaches", check_names)
             self.assertIn("m6_9_failure_shield_reuse_writes_deterministic_trace", check_names)
+
+    def test_run_dogfood_m6_9_reasoning_trace_recall_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-reasoning-trace-recall",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-reasoning-trace-recall")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-reasoning-trace-recall: pass", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["recalled_count"], 2)
+            self.assertEqual(scenario["artifacts"]["shortened_deliberation_count"], 2)
+            self.assertGreaterEqual(scenario["artifacts"]["abstract_recall_count"], 1)
+            self.assertIn("M6.9 focused verifier trace", scenario["artifacts"]["recalled_trace_names"])
+            self.assertIn("M6.9 anti-polish drift trace", scenario["artifacts"]["recalled_trace_names"])
+            self.assertEqual(scenario["artifacts"]["trace"]["recalled_count"], 2)
+            self.assertGreaterEqual(scenario["artifacts"]["trace"]["abstract_recall_count"], 1)
+            self.assertIn("m6_9_reasoning_trace_recall_writes_two_approved_traces", check_names)
+            self.assertIn("m6_9_reasoning_trace_recall_two_iterations_recall_traces", check_names)
+            self.assertIn("m6_9_reasoning_trace_recall_reviewer_confirms_shortened_deliberation", check_names)
+            self.assertIn("m6_9_reasoning_trace_recall_writes_deterministic_trace", check_names)
 
     def test_run_dogfood_m6_9_repeated_task_recall_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

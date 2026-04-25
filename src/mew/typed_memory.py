@@ -46,6 +46,10 @@ class MemoryEntry:
     test_path: str = ""
     structural_evidence: str = ""
     focused_test_green: bool = False
+    situation: str = ""
+    reasoning: str = ""
+    verdict: str = ""
+    abstraction_level: str = ""
     path: Path | None = None
 
 
@@ -76,6 +80,10 @@ class FileMemoryBackend:
         test_path: str = "",
         structural_evidence: str = "",
         focused_test_green: bool = False,
+        situation: str = "",
+        reasoning: str = "",
+        verdict: str = "",
+        abstraction_level: str = "",
     ) -> MemoryEntry:
         scope = normalize_scope(scope)
         memory_type = normalize_memory_type(memory_type)
@@ -96,6 +104,10 @@ class FileMemoryBackend:
             test_path,
             structural_evidence,
             focused_test_green,
+            situation,
+            reasoning,
+            verdict,
+            abstraction_level,
         ) = validate_write_gate(
             memory_type=memory_type,
             memory_kind=memory_kind,
@@ -111,6 +123,10 @@ class FileMemoryBackend:
             test_path=test_path,
             structural_evidence=structural_evidence,
             focused_test_green=focused_test_green,
+            situation=situation,
+            reasoning=reasoning,
+            verdict=verdict,
+            abstraction_level=abstraction_level,
         )
         created_at = created_at or now_iso()
         name = normalize_text(name) or first_line(body) or "Untitled memory"
@@ -140,6 +156,10 @@ class FileMemoryBackend:
             test_path=test_path,
             structural_evidence=structural_evidence,
             focused_test_green=focused_test_green,
+            situation=situation,
+            reasoning=reasoning,
+            verdict=verdict,
+            abstraction_level=abstraction_level,
             path=path,
         )
         path.write_text(render_memory_entry(entry), encoding="utf-8")
@@ -318,8 +338,6 @@ def normalize_memory_kind(value: str | None, *, memory_type: str | None = None) 
         raise ValueError("coding memory kinds require --type project")
     if normalized not in CODING_MEMORY_KINDS:
         raise ValueError(f"memory kind must be one of: {', '.join(CODING_MEMORY_KINDS)}")
-    if normalized == "reasoning-trace":
-        raise ValueError("reasoning-trace is schema-only until Phase 2")
     return normalized
 
 
@@ -339,7 +357,11 @@ def validate_write_gate(
     test_path: str = "",
     structural_evidence: str = "",
     focused_test_green: bool = False,
-) -> tuple[bool, str, str, str, str, str, str, str, str, str, str, bool]:
+    situation: str = "",
+    reasoning: str = "",
+    verdict: str = "",
+    abstraction_level: str = "",
+) -> tuple[bool, str, str, str, str, str, str, str, str, str, str, bool, str, str, str, str]:
     normalized_why = normalize_text(why)
     normalized_how = normalize_text(how_to_apply)
     normalized_rationale = normalize_text(rationale)
@@ -350,6 +372,10 @@ def validate_write_gate(
     normalized_source_path = normalize_text(source_path)
     normalized_test_path = normalize_text(test_path)
     normalized_structural_evidence = normalize_text(structural_evidence)
+    normalized_situation = normalize_text(situation)
+    normalized_reasoning = normalize_text(reasoning)
+    normalized_verdict = normalize_text(verdict)
+    normalized_abstraction_level = normalize_text(abstraction_level).casefold()
     if memory_type != "project" or not memory_kind:
         return (
             bool(approved),
@@ -364,6 +390,10 @@ def validate_write_gate(
             normalized_test_path,
             normalized_structural_evidence,
             bool(focused_test_green),
+            normalized_situation,
+            normalized_reasoning,
+            normalized_verdict,
+            normalized_abstraction_level,
         )
     if memory_kind == "reviewer-steering":
         if not approved:
@@ -397,6 +427,17 @@ def validate_write_gate(
             raise ValueError("file-pair writes require --structural-evidence")
         if not focused_test_green:
             raise ValueError("file-pair writes require --focused-test-green")
+    if memory_kind == "reasoning-trace":
+        if not approved:
+            raise ValueError("reasoning-trace writes require --approved")
+        if not normalized_situation:
+            raise ValueError("reasoning-trace writes require --situation")
+        if not normalized_reasoning:
+            raise ValueError("reasoning-trace writes require --reasoning")
+        if not normalized_verdict:
+            raise ValueError("reasoning-trace writes require --verdict")
+        if normalized_abstraction_level not in {"shallow", "deep"}:
+            raise ValueError("reasoning-trace writes require --abstraction-level shallow|deep")
     return (
         bool(approved),
         normalized_why,
@@ -410,6 +451,10 @@ def validate_write_gate(
         normalized_test_path,
         normalized_structural_evidence,
         bool(focused_test_green),
+        normalized_situation,
+        normalized_reasoning,
+        normalized_verdict,
+        normalized_abstraction_level,
     )
 
 
@@ -498,6 +543,14 @@ def render_memory_entry(entry: MemoryEntry) -> str:
         fields["structural_evidence"] = entry.structural_evidence
     if entry.focused_test_green:
         fields["focused_test_green"] = "true"
+    if entry.situation:
+        fields["situation"] = entry.situation
+    if entry.reasoning:
+        fields["reasoning"] = entry.reasoning
+    if entry.verdict:
+        fields["verdict"] = entry.verdict
+    if entry.abstraction_level:
+        fields["abstraction_level"] = entry.abstraction_level
     lines = [FRONTMATTER_DELIMITER]
     for key, value in fields.items():
         lines.append(f"{key} = {quote_frontmatter(value)}")
@@ -559,6 +612,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
     test_path = normalize_text(metadata.get("test_path"))
     structural_evidence = normalize_text(metadata.get("structural_evidence"))
     focused_test_green = normalize_text(metadata.get("focused_test_green")).casefold() in {"true", "yes", "1"}
+    situation = normalize_text(metadata.get("situation"))
+    reasoning = normalize_text(metadata.get("reasoning"))
+    verdict = normalize_text(metadata.get("verdict"))
+    abstraction_level = normalize_text(metadata.get("abstraction_level"))
     if root:
         memory_id = normalize_text(metadata.get("id")) or path.relative_to(root).with_suffix("").as_posix()
     else:
@@ -584,6 +641,10 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
         test_path=test_path,
         structural_evidence=structural_evidence,
         focused_test_green=focused_test_green,
+        situation=situation,
+        reasoning=reasoning,
+        verdict=verdict,
+        abstraction_level=abstraction_level,
         path=path,
     )
 
@@ -610,6 +671,10 @@ def memory_entry_matches(entry: MemoryEntry, query: str) -> bool:
             entry.source_path,
             entry.test_path,
             entry.structural_evidence,
+            entry.situation,
+            entry.reasoning,
+            entry.verdict,
+            entry.abstraction_level,
             "true" if entry.focused_test_green else "",
         ]
     ).casefold()
@@ -646,6 +711,10 @@ def entry_to_dict(entry: MemoryEntry, *, veto: dict[str, str] | None = None) -> 
         "test_path": entry.test_path,
         "structural_evidence": entry.structural_evidence,
         "focused_test_green": entry.focused_test_green,
+        "situation": entry.situation,
+        "reasoning": entry.reasoning,
+        "verdict": entry.verdict,
+        "abstraction_level": entry.abstraction_level,
     }
     if entry.path:
         data["path"] = str(entry.path)

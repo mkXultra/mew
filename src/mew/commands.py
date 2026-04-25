@@ -11986,6 +11986,14 @@ def _format_memory_entry_show(item):
         lines.append(f"structural_evidence: {item.get('structural_evidence')}")
     if item.get("focused_test_green"):
         lines.append("focused_test_green: yes")
+    if item.get("situation"):
+        lines.append(f"situation: {item.get('situation')}")
+    if item.get("reasoning"):
+        lines.append(f"reasoning: {item.get('reasoning')}")
+    if item.get("verdict"):
+        lines.append(f"verdict: {item.get('verdict')}")
+    if item.get("abstraction_level"):
+        lines.append(f"abstraction_level: {item.get('abstraction_level')}")
     if item.get("vetoed"):
         lines.append("vetoed: yes")
         lines.append(f"veto_reason: {item.get('veto_reason') or ''}")
@@ -12204,6 +12212,10 @@ def cmd_memory(args):
                     test_path=args.test_path or "",
                     structural_evidence=args.structural_evidence or "",
                     focused_test_green=bool(args.focused_test_green),
+                    situation=args.situation or "",
+                    reasoning=args.reasoning or "",
+                    verdict=args.verdict or "",
+                    abstraction_level=args.abstraction_level or "",
                 )
             except ValueError as exc:
                 print(f"mew: {exc}", file=sys.stderr)
