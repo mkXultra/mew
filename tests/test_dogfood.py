@@ -563,6 +563,11 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertEqual(artifacts["resolved_source_path"], "src/mew/dogfood.py")
             self.assertEqual(artifacts["resolved_test_path"], "tests/test_dogfood.py")
+            self.assertEqual(
+                set(artifacts["per_shape_recalled_file_pair_counts"]),
+                {"bounded_source_test_pair", "bounded_symbol_index_pair"},
+            )
+            self.assertTrue(all(count > 0 for count in artifacts["per_shape_recalled_file_pair_counts"].values()))
             self.assertEqual(trace["scenario"], "m6_9-repeated-task-recall")
             self.assertEqual(trace["shape_count"], 2)
             self.assertEqual(

@@ -2835,6 +2835,9 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
         "resolved_test_path": primary_shape["durable_index_evidence"]["test_path"],
         "durable_file_pair_id": primary_shape["durable_index_evidence"]["memory_id"],
         "recalled_file_pair_count": sum(item["recalled_file_pair_count"] for item in shape_traces),
+        "per_shape_recalled_file_pair_counts": {
+            item["task_shape"]: item["recalled_file_pair_count"] for item in shape_traces
+        },
     }
     return report
 
