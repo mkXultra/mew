@@ -196,6 +196,7 @@ from .read_tools import (
     summarize_read_result,
 )
 from .tasks import (
+    build_task_selector_proposal,
     clip_output,
     find_task,
     format_task,
@@ -481,6 +482,105 @@ def format_task_notes_display(notes, max_lines=12, max_chars=4000):
     if len(lines) > max_lines:
         text = "[...older task notes omitted...]\n" + "\n".join(lines[-max_lines:])
     return clip_output(text, max_chars)
+
+
+def _task_selector_candidate_is_open_coding(task):
+    return (
+        bool(task)
+        and task.get("status") in ("ready", "todo")
+        and task_kind(task) == "coding"
+    )
+
+
+def _task_selector_display_value(value):
+    if isinstance(value, (bool, list, dict)) or value is None:
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def format_task_selector_proposal(proposal):
+    keys = [
+        "previous_task_id",
+        "proposed_task_id",
+        "proposed_task_title",
+        "selector_reason",
+        "approval_required",
+        "memory_signal_refs",
+        "failure_cluster_reason",
+        "preference_signal_refs",
+        "blocked",
+        "blocked_reason",
+        "governance_violation",
+    ]
+    return "\n".join(
+        f"{key}: {_task_selector_display_value(proposal.get(key))}"
+        for key in keys
+    )
+
+
+def _task_selector_no_candidate_response(previous_task, message):
+    return {
+        "previous_task_id": previous_task.get("id"),
+        "proposed_task_id": None,
+        "proposed_task_title": "",
+        "selector_reason": message,
+        "approval_required": True,
+        "memory_signal_refs": [],
+        "failure_cluster_reason": "",
+        "preference_signal_refs": [],
+        "blocked": True,
+        "blocked_reason": message,
+        "governance_violation": False,
+    }
+
+
+def cmd_task_propose_next(args):
+    state = load_state()
+    previous_task = find_task(state, args.previous_task_id)
+    if not previous_task:
+        print(f"mew: task not found: {args.previous_task_id}", file=sys.stderr)
+        return 1
+
+    candidate_task = None
+    message = ""
+    candidate_task_id = getattr(args, "candidate_task_id", None)
+    if candidate_task_id:
+        candidate_task = find_task(state, candidate_task_id)
+        if not candidate_task:
+            message = f"candidate task not found: {candidate_task_id}"
+        elif str(candidate_task.get("id")) == str(previous_task.get("id")):
+            message = "candidate task matches the previous task"
+        elif not _task_selector_candidate_is_open_coding(candidate_task):
+            message = "candidate task is not a ready/todo coding task"
+    else:
+        for task in sorted(open_tasks(state), key=task_sort_key):
+            if str(task.get("id")) == str(previous_task.get("id")):
+                continue
+            if _task_selector_candidate_is_open_coding(task):
+                candidate_task = task
+                break
+        if not candidate_task:
+            message = "no safe selector candidate found"
+
+    if message:
+        proposal = _task_selector_no_candidate_response(previous_task, message)
+        if getattr(args, "json", False):
+            print(json.dumps(proposal, ensure_ascii=False, indent=2))
+        else:
+            print(format_task_selector_proposal(proposal))
+        return 1
+
+    selector_reason = (
+        f"explicit candidate task #{candidate_task.get('id')} after previous task #{previous_task.get('id')}"
+        if candidate_task_id
+        else f"first ready/todo coding task after previous task #{previous_task.get('id')}"
+    )
+    proposal = build_task_selector_proposal(previous_task, candidate_task, selector_reason)
+    if getattr(args, "json", False):
+        print(json.dumps(proposal, ensure_ascii=False, indent=2))
+    else:
+        print(format_task_selector_proposal(proposal))
+    return 1 if proposal.get("blocked") else 0
 
 
 def cmd_task_show(args):

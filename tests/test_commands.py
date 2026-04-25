@@ -116,6 +116,107 @@ class CommandTests(unittest.TestCase):
             ["src/mew/commands.py", "tests/test_commands.py"],
         )
 
+    def test_task_propose_next_json_is_read_only(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"])
+                self.assertEqual(code, 0)
+                previous = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"])
+                self.assertEqual(code, 0)
+                candidate = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "propose-next", str(previous["id"]), "--json"])
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        self.assertEqual(proposal["previous_task_id"], previous["id"])
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(proposal["proposed_task_title"], "Candidate")
+        self.assertTrue(proposal["approval_required"])
+        self.assertFalse(proposal["blocked"])
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_human_output_for_explicit_candidate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                candidate = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "task",
+                            "propose-next",
+                            str(previous["id"]),
+                            "--candidate-task-id",
+                            str(candidate["id"]),
+                        ]
+                    )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        output = stdout.getvalue()
+        self.assertIn(f"previous_task_id: {previous['id']}", output)
+        self.assertIn(f"proposed_task_id: {candidate['id']}", output)
+        self.assertIn("proposed_task_title: Candidate", output)
+        self.assertIn("approval_required: true", output)
+        self.assertIn("blocked: false", output)
+
+    def test_task_propose_next_blocks_governance_candidate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "roadmap-status update", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "task",
+                            "propose-next",
+                            str(previous["id"]),
+                            "--candidate-task-id",
+                            str(candidate["id"]),
+                            "--json",
+                        ]
+                    )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        proposal = json.loads(stdout.getvalue())
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertTrue(proposal["approval_required"])
+        self.assertTrue(proposal["blocked"])
+        self.assertTrue(proposal["governance_violation"])
+        self.assertIn("ROADMAP_STATUS.md", proposal["blocked_reason"])
+
     def test_do_uses_supervised_work_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

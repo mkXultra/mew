@@ -94,6 +94,18 @@ Current M6.8 evidence:
   `uv run pytest -q tests/test_tasks.py tests/test_commands.py --no-testmon`,
   `uv run ruff check src/mew/tasks.py tests/test_tasks.py`, and
   `git diff --check`.
+- Task `#629` / session `#614` exposed the proposal helper as the read-only
+  `mew task propose-next` CLI. It supports JSON and human output, keeps
+  `approval_required=true`, reports governance-blocked candidates, and does not
+  dispatch or mutate agent runs.
+- #629 mew-first note: the first implementation verifier failed on a test
+  expectation case mismatch (`roadmap` vs `ROADMAP_STATUS.md`). Reviewer steered
+  mew to preserve product behavior and repair the test; mew re-applied the CLI
+  parser and the paired test repair with no supervisor product edit.
+- #629 validation passed: `uv run pytest -q tests/test_commands.py --no-testmon`,
+  `uv run pytest -q tests/test_tasks.py tests/test_commands.py --no-testmon`,
+  `uv run ruff check src/mew/commands.py src/mew/cli.py tests/test_commands.py`,
+  and `git diff --check`.
 
 M6.8 is done when:
 
