@@ -3603,6 +3603,15 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
     if not target_paths:
         return []
 
+    def usable_anchor_search(call):
+        if not isinstance(call, dict) or call.get("tool") != "search_text":
+            return False
+        if str(call.get("status") or "") != "completed":
+            return False
+        parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+        reason = str(parameters.get("reason") or "").strip()
+        return reason in ("", "locate explicitly requested write-ready cached window")
+
     recent_windows = [
         item
         for item in (work_session.get("recent_read_file_windows") or [])
@@ -3683,14 +3692,10 @@ def _work_write_ready_refresh_search_result_read_actions(work_session, target_pa
         best_anchor_line = 0
         best_anchor_score = -10
         for call in reversed(tool_calls):
-            if not isinstance(call, dict) or call.get("tool") != "search_text":
-                continue
-            if str(call.get("status") or "") != "completed":
+            if not usable_anchor_search(call):
                 continue
             parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
             if not _work_paths_match(parameters.get("path"), target_path):
-                continue
-            if str(parameters.get("reason") or "") != "locate explicitly requested write-ready cached window":
                 continue
             result = call.get("result") if isinstance(call.get("result"), dict) else {}
             snippets = result.get("snippets") if isinstance(result.get("snippets"), list) else []

@@ -2114,6 +2114,18 @@ Progress / remaining proof:
   `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
   targeted ruff for `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and
   `git diff --check`.
+- The attempted `#588` fourth-shape slice reproduced the
+  `cached_window_incomplete` loop blocker before any patch landed: after exact
+  source/test anchor reads, the refresh path consumed broad structural windows
+  that missed the intended shape-list hunk or ended mid-block. The bounded
+  substrate repair `#589` is supervisor-owned product progress: write-ready
+  refresh recovery can now use ordinary model `search_text` anchors, not only
+  explicitly tagged refresh searches, to schedule exact `read_file` windows
+  after a structural refresh misses the edit surface. Focused validation covered
+  the new model-search-anchor regression plus nearby refresh-search tests,
+  targeted ruff for `src/mew/work_loop.py` and `tests/test_work_session.py`,
+  and `git diff --check`. Retry `#588` from a clean work session after this
+  repair; do not count the failed pre-repair attempt as shape proof.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
   purpose. Phase 1 substrate and six post-M6.12 proof/report slices have
   landed, and the repeated-task proof matrix has 3/10 deterministic shapes plus
