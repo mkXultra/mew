@@ -560,11 +560,13 @@ Why it matters:
   than the 1st, which is the only long-term basis for a resident that a
   frontier model would prefer to inhabit over Claude Code or Codex CLI.
 
-## Milestone 6.10: Execution Accelerators
+## Milestone 6.10: Execution Accelerators and Mew-First Reliability
 
-Increase mew's single-session implementation throughput with explicit short-
-horizon todo state and bounded read-only exploration, without widening the
-governance surface.
+Make mew-first implementation economical enough to use in place of Codex CLI
+for ordinary bounded coding tasks. The milestone uses short-horizon Todo,
+bounded exploration, structured rejection, and M6.12-style calibration
+economics to reduce drift, rescue edits, and repeated read-only churn without
+widening governance.
 
 Target:
 
@@ -575,39 +577,57 @@ Target:
 - `mew focus`, `mew brief`, or the equivalent reviewer-facing coding surfaces
   can show the current Todo state without silently promoting it into durable
   memory
+- a mew-first calibration economics report that classifies the latest
+  implementation attempts by success class, drift class, supervisor rescue
+  cost, rejected patch family, and verifier/proof status using M6.12 evidence
+  surfaces rather than a new instrumentation framework
+- structured rejection/frontier state that turns reviewer rejection into a
+  durable next action for the same task, including explicit stop rules for
+  existing-scenario artifact tweaks, unpaired edits, missing focused
+  verifiers, and generic cleanup substitutions
 - a bounded Explorer helper for read-only repository exploration that can
   gather cited findings for the main session but cannot edit files, run shell,
   or mutate mew state
-- Todo lands before Explorer; Explorer may depend on Todo state, but not vice
-  versa
+- Todo and structured rejection land before Explorer; Explorer may depend on
+  Todo state, but not vice versa
 - explicit non-goals for this milestone: no cross-session Todo persistence, no
   write-capable Explorer, no multi-Explorer concurrency, and no governance or
   milestone-close edits through these accelerators
 
 Done when:
 
+- Calibration D0 lands as a repeatable report or command that summarizes the
+  latest 10 mew-first implementation attempts with clean/practical/partial/
+  supervisor-rescue counts, drift classes, rescue edits, rejected patch
+  families, and verifier/proof status
 - Todo D1 lands with passing tests and is used in at least one real bounded
   coding iteration to keep short-horizon work decomposition visible without
   replacing persistent tasks
 - Todo D2 surfaces the current Todo state in reviewer/operator views and
   prevents obvious duplicate `in_progress` or stale-item churn inside a
   session
-- Explorer D1 lands as a read-only bounded helper with passing tests, explicit
-  scope fence, and at least one real bounded iteration where its output
-  shortens repository exploration without producing writes
-- at least one post-M6.9 bounded implementation slice shows reduced planning
-  churn or read-only churn attributable to Todo and/or Explorer, with no
-  governance regression
+- structured rejection/frontier D1 lands with passing tests and blocks at
+  least one real or replayed abstract-task drift into existing-surface polish,
+  generic cleanup, unpaired edits, or missing-verifier patches before
+  implementation
+- the latest 10 bounded mew-first implementation attempts after D0/D1 include
+  at least 7 clean or practical mew-first successes, with `rescue_edits=0` for
+  counted successes and every failure classified through the calibration
+  economics surface
+- Explorer D1 lands only if D0/D1 evidence shows read-only exploration churn
+  remains a measured blocker; otherwise it is explicitly deferred without
+  blocking M6.10 close
 - the scope fence holds across the proof run: no cross-session Todo writes, no
   write or shell capability in Explorer, no multi-Explorer fan-out, and no
   milestone or roadmap-status edits through accelerator surfaces
 
 Why it matters:
 
-- M6.9 makes mew smarter across sessions. M6.10 makes one session move better
-  by separating short-horizon planning from durable memory and keeping
-  exploration additive, bounded, and read-only. Without that split, mew keeps
-  spending turns on avoidable planning churn.
+- M6.9 makes mew smarter across sessions, but its proof is polluted if mew
+  cannot reliably implement bounded tasks without supervisor rescue. M6.10
+  makes one session trustworthy and economical enough to use as the default
+  implementation body, then M6.9 can resume durable-memory proof with cleaner
+  autonomy evidence.
 
 ## Milestone 6.11: Loop Stabilization
 
