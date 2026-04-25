@@ -26,7 +26,7 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus eight post-M6.12 proof/report/substrate slices landed; repeated-task recall now covers five deterministic shapes with per-shape matrix reporting, but the 10-shape gate and comparator rerun are still open. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus eight post-M6.12 proof/report/substrate slices landed; repeated-task recall now covers six deterministic shapes with per-shape matrix reporting, but the 10-shape gate and comparator rerun are still open. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
@@ -2164,9 +2164,23 @@ Progress / remaining proof:
   existing negative structural fragment cases, targeted ruff for
   `src/mew/work_loop.py` and `tests/test_work_session.py`, and
   `git diff --check`.
+- Task `#592` landed the sixth repeated-task proof shape,
+  `bounded_work_loop_pair`, after the `#591` write-ready repair. The first
+  pre-repair attempt drifted into an unrelated runtime-focus summary and hit an
+  unpaired-source-edit blocker. After the repair and exact local source
+  windows, mew retried the same paired dry-run patch, hit one ambiguous hunk,
+  then corrected it with broader unique test context. Count this as mixed
+  mew-first/product progress: mew produced the final paired source/test patch
+  and verification passed, but the supervisor supplied exact local cached
+  windows and one retry steer. The repeated-task matrix is now 6/10
+  deterministic shapes. Validation covered approval-time
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
   purpose. Phase 1 substrate and eight post-M6.12 proof/report/substrate slices
-  have landed, and the repeated-task proof matrix has 5/10 deterministic shapes
+  have landed, and the repeated-task proof matrix has 6/10 deterministic shapes
   plus per-shape reporting. The comparator rerun has not started. The
   now-closed M6.11 residual review, executor lifecycle, memory exploration, and
   prompt/cache boundaries should be used to classify the next mew-first proof
@@ -2184,7 +2198,7 @@ Progress / remaining proof:
 
 Next proof step:
 
-- continue scaling the repeated-task proof matrix beyond the current 5/10
+- continue scaling the repeated-task proof matrix beyond the current 6/10
   deterministic shapes using the existing per-shape matrix artifact. Rerun an
   appropriate M6.6 comparator once there is enough repeated-task evidence to
   attribute a measurable gain to durable recall.
