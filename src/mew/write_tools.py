@@ -205,6 +205,14 @@ def _apply_edit_hunks(before, edits):
                 "end": start + len(old),
             }
         )
+        _raise_for_duplicated_adjacent_context(
+            before,
+            old=old,
+            new=edit["new"],
+            start=start,
+            end=start + len(old),
+            label=f"edit hunk #{index + 1}",
+        )
 
     placements.sort(key=lambda item: (item["start"], item["end"], item["index"]))
     for previous, current in zip(placements, placements[1:]):
@@ -221,6 +229,50 @@ def _apply_edit_hunks(before, edits):
         cursor = placement["end"]
     pieces.append(before[cursor:])
     return "".join(pieces)
+
+
+def _raise_for_duplicated_adjacent_context(before, *, old, new, start, end, label):
+    if new.startswith(old):
+        inserted = new[len(old) :]
+        following = before[end:]
+        prefix = _meaningful_edge_text(inserted, from_start=True)
+        if prefix and following.startswith(prefix):
+            raise ValueError(
+                f"{label} duplicated adjacent context: replacement repeats text already adjacent after the old text; "
+                "include the complete old block or narrow the insertion anchor"
+            )
+    if new.endswith(old):
+        inserted = new[: -len(old)]
+        preceding = before[:start]
+        suffix = _meaningful_edge_text(inserted, from_start=False)
+        if suffix and preceding.endswith(suffix):
+            raise ValueError(
+                f"{label} duplicated adjacent context: replacement repeats text already adjacent before the old text; "
+                "include the complete old block or narrow the insertion anchor"
+            )
+
+
+def _meaningful_edge_text(text, *, from_start):
+    lines = text.splitlines(keepends=True)
+    if not from_start:
+        lines = list(reversed(lines))
+    selected = []
+    non_blank = 0
+    char_count = 0
+    for line in lines:
+        if not selected and not line.strip():
+            continue
+        selected.append(line)
+        char_count += len(line)
+        if line.strip():
+            non_blank += 1
+        if non_blank >= 2 or char_count >= 160:
+            break
+    if not selected or non_blank == 0:
+        return ""
+    if not from_start:
+        selected = list(reversed(selected))
+    return "".join(selected)
 
 
 def build_write_intent(tool, parameters):
@@ -395,6 +447,34 @@ def edit_file(
         raise ValueError(
             f"old text matched {count} times; pass --replace-all to replace all matches "
             "or include surrounding context to narrow the match"
+        )
+
+    start = before.find(old)
+    if replace_all:
+        search_start = 0
+        match_index = 1
+        while True:
+            start = before.find(old, search_start)
+            if start == -1:
+                break
+            _raise_for_duplicated_adjacent_context(
+                before,
+                old=old,
+                new=new,
+                start=start,
+                end=start + len(old),
+                label=f"edit_file match #{match_index}",
+            )
+            search_start = start + len(old)
+            match_index += 1
+    else:
+        _raise_for_duplicated_adjacent_context(
+            before,
+            old=old,
+            new=new,
+            start=start,
+            end=start + len(old),
+            label="edit_file",
         )
 
     after = before.replace(old, new) if replace_all else before.replace(old, new, 1)

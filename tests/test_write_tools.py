@@ -173,6 +173,76 @@ class WriteToolsTests(unittest.TestCase):
                     dry_run=True,
                 )
 
+    def test_edit_file_hunks_refuses_duplicate_adjacent_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dogfood.py"
+            before_text = (
+                '    report["artifacts"] = {\n'
+                '        "phase": "phase1",\n'
+                '        "comparator_source": "m6_6",\n'
+                '        "durable_recall_active": True,\n'
+                '        "b0_comparator_wall_seconds": b0_comparator_wall_seconds,\n'
+                '        "budget_wall_seconds": budget_wall_seconds,\n'
+                "    }\n"
+                "    return report\n"
+                "\n"
+                "\n"
+                "def run_next_scenario(workspace):\n"
+                "    return None\n"
+            )
+            path.write_text(before_text, encoding="utf-8")
+            old = (
+                '        "phase": "phase1",\n'
+                '        "comparator_source": "m6_6",\n'
+                '        "durable_recall_active": True,\n'
+            )
+
+            with self.assertRaisesRegex(ValueError, "duplicated adjacent context"):
+                edit_file_hunks(
+                    str(path),
+                    [
+                        {
+                            "old": old,
+                            "new": (
+                                old
+                                + '        "b0_comparator_wall_seconds": b0_comparator_wall_seconds,\n'
+                                + '        "budget_wall_seconds": budget_wall_seconds,\n'
+                                + "    }\n"
+                                + "    return report\n"
+                                + "\n"
+                                + "\n"
+                                + "def run_m6_9_phase2_regression_scenario(workspace):\n"
+                                + "    return None\n"
+                            ),
+                        }
+                    ],
+                    [tmp],
+                    dry_run=True,
+                )
+
+    def test_edit_file_hunks_allows_non_duplicate_insertion_after_old_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "multi.py"
+            path.write_text("alpha\nomega\n", encoding="utf-8")
+
+            result = edit_file_hunks(
+                str(path),
+                [{"old": "alpha\n", "new": "alpha\nbeta\n"}],
+                [tmp],
+                dry_run=True,
+            )
+
+            self.assertTrue(result["changed"])
+            self.assertIn("+beta", result["diff"])
+
+    def test_edit_file_refuses_duplicate_adjacent_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "notes.md"
+            path.write_text("alpha\nomega\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "duplicated adjacent context"):
+                edit_file(str(path), "alpha\n", "alpha\nomega\n", [tmp], dry_run=True)
+
     def test_snapshot_restore_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "notes.md"
