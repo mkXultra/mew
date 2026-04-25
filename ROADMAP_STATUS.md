@@ -79,6 +79,22 @@ Current M6.8 target:
   governance files
 - drift canary and proof-or-revert discipline remain active across the chain
 
+Current M6.8 evidence:
+
+- Task `#628` / session `#612` landed the first mew-first selector-contract
+  slice: `build_task_selector_proposal()` in `src/mew/tasks.py` produces a
+  reviewer-gated proposal with `previous_task_id`, proposed task identity,
+  `selector_reason`, `approval_required=true`, optional M6.8.5 signal refs, and
+  governance/status blocking fields.
+- The first #628 patch was correctly rejected as a shallow
+  `task_kind_report` passthrough. After reviewer steering, mew retried the same
+  task and produced the accepted helper/test patch without supervisor product
+  rescue.
+- Validation passed: `uv run pytest -q tests/test_tasks.py --no-testmon`,
+  `uv run pytest -q tests/test_tasks.py tests/test_commands.py --no-testmon`,
+  `uv run ruff check src/mew/tasks.py tests/test_tasks.py`, and
+  `git diff --check`.
+
 M6.8 is done when:
 
 - mew completes three consecutive bounded iterations in one supervised session

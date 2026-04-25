@@ -231,6 +231,70 @@ def task_kind_report(task):
         "mismatch": bool(explicit and inferred not in ("", "unknown") and explicit != inferred),
     }
 
+_SELECTOR_GOVERNANCE_TARGETS = (
+    ("ROADMAP_STATUS.md", ("roadmap_status.md", "roadmap-status")),
+    ("milestone close", ("milestone close", "milestone-close", "close milestone")),
+    ("governance", ("governance",)),
+    ("policy", ("policy",)),
+    ("auth", ("auth",)),
+    ("permissions", ("permission", "permissions")),
+    ("skills", ("skill", "skills")),
+)
+
+def _selector_task_text(task):
+    task = task if isinstance(task, dict) else {}
+    values = [
+        task.get("title") or "",
+        task.get("description") or "",
+        task.get("notes") or "",
+    ]
+    scope = task.get("scope") or {}
+    if isinstance(scope, dict):
+        raw_target_paths = scope.get("target_paths") or []
+        if isinstance(raw_target_paths, str):
+            raw_target_paths = [raw_target_paths]
+        values.extend(str(path) for path in raw_target_paths if path)
+    return "\n".join(str(value) for value in values if value).casefold()
+
+def _selector_governance_blocked_reason(task):
+    text = _selector_task_text(task)
+    for label, needles in _SELECTOR_GOVERNANCE_TARGETS:
+        if any(needle in text for needle in needles):
+            return f"selector-owned proposal cannot target {label}"
+    return ""
+
+def _selector_signal_refs(refs):
+    if refs is None:
+        return []
+    if isinstance(refs, (list, tuple)):
+        return list(refs)
+    return [refs]
+
+def build_task_selector_proposal(
+    previous_task,
+    candidate_task,
+    selector_reason,
+    memory_signal_refs=None,
+    failure_cluster_reason="",
+    preference_signal_refs=None,
+):
+    previous_task = previous_task if isinstance(previous_task, dict) else {}
+    candidate_task = candidate_task if isinstance(candidate_task, dict) else {}
+    blocked_reason = _selector_governance_blocked_reason(candidate_task)
+    return {
+        "previous_task_id": previous_task.get("id"),
+        "proposed_task_id": candidate_task.get("id"),
+        "proposed_task_title": candidate_task.get("title") or "",
+        "selector_reason": selector_reason or "",
+        "approval_required": True,
+        "memory_signal_refs": _selector_signal_refs(memory_signal_refs),
+        "failure_cluster_reason": failure_cluster_reason or "",
+        "preference_signal_refs": _selector_signal_refs(preference_signal_refs),
+        "blocked": bool(blocked_reason),
+        "blocked_reason": blocked_reason,
+        "governance_violation": bool(blocked_reason),
+    }
+
 def normalize_task_scope(scope):
     if not isinstance(scope, dict):
         return {}

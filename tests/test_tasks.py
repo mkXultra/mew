@@ -1,6 +1,7 @@
 import unittest
 
 from mew.tasks import (
+    build_task_selector_proposal,
     infer_task_kind,
     normalize_task_id,
     normalize_task_scope,
@@ -63,6 +64,60 @@ class TaskKindTests(unittest.TestCase):
 
         self.assertEqual(report["inferred_kind"], "unknown")
         self.assertFalse(report["mismatch"])
+
+    def test_task_selector_proposal_requires_approval(self):
+        proposal = build_task_selector_proposal(
+            {"id": 10, "title": "Previous task"},
+            {"id": 11, "title": "Implement bounded selector"},
+            "M6.8 next bounded roadmap task",
+        )
+
+        self.assertEqual(proposal["previous_task_id"], 10)
+        self.assertEqual(proposal["proposed_task_id"], 11)
+        self.assertEqual(proposal["proposed_task_title"], "Implement bounded selector")
+        self.assertEqual(proposal["selector_reason"], "M6.8 next bounded roadmap task")
+        self.assertTrue(proposal["approval_required"])
+        self.assertEqual(proposal["memory_signal_refs"], [])
+        self.assertEqual(proposal["failure_cluster_reason"], "")
+        self.assertEqual(proposal["preference_signal_refs"], [])
+        self.assertFalse(proposal["blocked"])
+        self.assertEqual(proposal["blocked_reason"], "")
+        self.assertFalse(proposal["governance_violation"])
+
+    def test_task_selector_proposal_preserves_optional_signal_refs(self):
+        proposal = build_task_selector_proposal(
+            {"id": 10},
+            {"title": "Investigate next coding task"},
+            "Recent failure makes this bounded follow-up useful",
+            memory_signal_refs=("memory://task/10",),
+            failure_cluster_reason="same verifier failure cluster",
+            preference_signal_refs=["preference://small-patches"],
+        )
+
+        self.assertIsNone(proposal["proposed_task_id"])
+        self.assertEqual(proposal["proposed_task_title"], "Investigate next coding task")
+        self.assertEqual(proposal["memory_signal_refs"], ["memory://task/10"])
+        self.assertEqual(proposal["failure_cluster_reason"], "same verifier failure cluster")
+        self.assertEqual(proposal["preference_signal_refs"], ["preference://small-patches"])
+        self.assertTrue(proposal["approval_required"])
+
+    def test_task_selector_proposal_blocks_governance_and_status_targets(self):
+        proposal = build_task_selector_proposal(
+            {"id": 10},
+            {
+                "id": 12,
+                "title": "Close milestone and update governance",
+                "description": "Edit ROADMAP_STATUS.md after policy review.",
+                "notes": "Requires permissions and skills updates.",
+                "scope": {"target_paths": ["ROADMAP_STATUS.md"]},
+            },
+            "Governance target should be flagged, not executed",
+        )
+
+        self.assertTrue(proposal["approval_required"])
+        self.assertTrue(proposal["blocked"])
+        self.assertTrue(proposal["governance_violation"])
+        self.assertIn("ROADMAP_STATUS.md", proposal["blocked_reason"])
 
     def test_normalize_task_scope_requires_matching_source_test_pair(self):
         self.assertEqual(
