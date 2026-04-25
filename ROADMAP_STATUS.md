@@ -38,7 +38,7 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 09:04 JST.
+Last assessed: 2026-04-25 09:37 JST.
 
 Active work: **M6.9 Durable Coding Intelligence** while M5.1, M6, M6.6,
 M6.7, M6.11, and M6.12 remain closed baselines. M6.12 v0 has turned the
@@ -138,6 +138,13 @@ Reasoning:
   using the M6.12 failure-science report to choose recurrence-reducing slices;
   not speculative cockpit polish, premature M6.10 implementation, or reopening
   M6.11/M6.12 without fresh regression evidence.
+- The mew-first implementation loop is now a cross-cutting operating policy in
+  `ROADMAP.md` and an executable Codex skill at
+  `.codex/skills/mew-first-implementation-loop/SKILL.md`. It should govern
+  bounded roadmap/coding work after task selection: mew attempts first, Codex
+  reviews, failures are classified, one bounded substrate repair/retry is
+  allowed when justified, and supervisor rescue remains product progress rather
+  than autonomy credit.
 
 Current next action:
 
@@ -195,6 +202,11 @@ Current next action:
    as M6.8/M6.9 input and Explorer deferred post-M6.7; reconsider the broader
    proposal only if a new fresh bounded M6.7 item still stalls after these
    write-ready fast-path fixes.
+16. Use `mew-first-implementation-loop` for bounded post-M6.7 roadmap/coding
+    implementation unless the task is governance, milestone-close,
+    roadmap-status, permission, safety, skill-policy, or explicit agent-loop
+    substrate surgery. Record mew-first failures instead of silently converting
+    them into supervisor-authored autonomy credit.
 
 Human-role transition rule:
 
@@ -214,6 +226,10 @@ Human-role transition rule:
 - Low- and medium-risk implementation can now use mew as primary implementer
   with Codex acting as human reviewer/approver. Rescue edits by Codex still
   disqualify the loop from autonomy credit and should be recorded as blockers.
+- The durable execution protocol is the `mew-first-implementation-loop` skill:
+  classify every attempt as mew-first success, success after bounded substrate
+  fix, supervisor rescue/product progress, reproducible blocker, deferred
+  blocker, invalid task spec, or transient model failure.
 - Until M6.8 closes, keep **task selection** reviewer-owned even when mew is
   the implementer. Do not let mew choose its own next roadmap task as part of
   the M6.7 loop.
@@ -3080,6 +3096,8 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
 - keeping M6.6 as a closed regression baseline for resident coding work;
 - keeping M6 and M6.7 close artifacts as closed baseline evidence;
 - reviewer-owned roadmap/status updates and checkpointing around M6.9 runs;
+- `mew-first-implementation-loop` as the default implementation protocol for
+  bounded roadmap/coding tasks after the active milestone criterion is chosen;
 - roadmap/status maintenance that preserves the active decision across context
   compression.
 

@@ -22,6 +22,13 @@ If you cannot write that chain in one line, you are not ready to choose a task.
 Run `mew-product-evaluator` again or rewrite the criterion/measurement instead
 of drifting into nearby work.
 
+For bounded roadmap/coding implementation after task selection, use
+`mew-first-implementation-loop` unless the task is governance, milestone-close,
+roadmap-status, permission, safety, or agent-loop substrate surgery. The
+default ownership is mew as implementer and Codex as human-style reviewer.
+Supervisor rescue edits count as product progress, not mew-first autonomy
+credit, and must be recorded as such.
+
 ## Decision Precedence
 
 When deciding what to do next, apply this order:
@@ -91,6 +98,8 @@ If roadmap status is the question, use `mew-roadmap-status` after this reentry c
 If product direction or next implementation target is the question, use
 `mew-product-evaluator` after this reentry check and choose only work that maps
 to the active milestone's Done-when checklist.
+If implementation is the next action, use `mew-first-implementation-loop` after
+the active milestone chain is written.
 If the latest chunk ended in a commit, use `mew-post-commit-check` before any
 user-visible response.
 

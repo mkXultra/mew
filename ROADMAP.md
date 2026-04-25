@@ -30,6 +30,35 @@ This roadmap aligns the current Codex view with claude-ultra reviews.
 - "Would I want to be inside mew?" is the product question. The answer should
   converge into milestone work, not endless polish.
 
+## Operating Policy: Mew-First Implementation Loop
+
+After M6.7, bounded roadmap/coding implementation should default to **mew
+first**: mew attempts the task as implementer, while Codex acts as the
+human-style reviewer/approver.
+
+This is a product-development policy, not a separate milestone. Each attempt
+must still map to the active milestone's Done-when criteria.
+
+Default loop:
+
+- choose one chain:
+  `active milestone -> unmet/partial Done-when criterion -> bounded task`
+- run mew as implementer and require a scoped patch, proof command, and
+  reviewer-visible rationale
+- classify the result as one of:
+  `success_mew_first`, `success_after_substrate_fix`,
+  `product_progress_supervisor_rescue`, `blocked_reproducible`,
+  `blocked_deferred`, `invalid_task_spec`, or `transient_model_failure`
+- if mew exposes a reproducible loop/substrate blocker, make at most one
+  bounded repair and retry the same task
+- if mew still fails, record the blocker and either supervisor-rescue the
+  product gap or choose another active-milestone task
+
+Supervisor-authored patches can move the product forward, but they do not count
+as mew-first autonomy credit. Roadmap/status edits, milestone-close decisions,
+governance, permission, safety, and skill-policy changes remain reviewer-owned
+unless a later milestone explicitly moves that boundary.
+
 ## Current Position
 
 M1-M5 are closed as of 2026-04-20.
