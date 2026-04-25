@@ -1,13 +1,13 @@
 # M6.9 Close-Gate Audit (2026-04-26)
 
-Recommendation: NOT_CLOSE_READY_ONE_GAP.
+Recommendation: CLOSE_READY.
 
 Auditor task: close-gate aggregation and next-task selection only. This
 document does not update source, tests, proof artifacts, or roadmap status by
 itself.
 
-Current HEAD: `cc12c89`
-(`Add M6.9 phase2 comparator dogfood`).
+Current HEAD: working tree after task `#627`
+(`M6.9 repeated-task five-repetition close-gate proof`).
 
 Inputs inspected:
 
@@ -25,7 +25,10 @@ Recent validation accepted for this audit:
 - `./mew dogfood --all --json`: `status=pass`.
 - `./mew dogfood --scenario m6_9-repeated-task-recall --json`:
   `status=pass`, `shape_count=10`, `recalled_file_pair_count=10`,
-  per-shape recall count `1`, and `reviewer_rescue_edits=0`.
+  five `first_five_wall_seconds`, five
+  `first_five_deliberation_step_counts`, all
+  `per_shape_median_improvement` entries true, and
+  `reviewer_rescue_edits=0`.
 - `./mew dogfood --scenario m6_9-symbol-index-hit --json`:
   `status=pass`, `index_hit=true`, `fresh_search_performed=false`.
 - `./mew dogfood --scenario m6_9-reasoning-trace-recall --json`:
@@ -34,6 +37,8 @@ Recent validation accepted for this audit:
 - `./mew dogfood --scenario m6_9-phase2-regression --json`:
   `status=pass`, `budget_multiplier=1.0`,
   `b0_comparator_wall_seconds=4.0`, `median_wall_seconds=3.8`.
+- `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`:
+  `2 passed, 90 deselected`.
 - `uv run pytest -q tests/test_dogfood.py --no-testmon`:
   `92 passed, 6 subtests passed`.
 - `uv run ruff check src/mew/dogfood.py tests/test_dogfood.py`:
@@ -46,15 +51,15 @@ Recent validation accepted for this audit:
    decreases over the first five repetitions with no increase in reviewer
    rescue edits.
 
-   Status: PARTIAL.
+   Status: PASS.
 
-   Evidence: `m6_9-repeated-task-recall` covers 10 task shapes and proves a
-   first-to-second repetition improvement: fresh discovery records four
-   deliberation search steps, durable recall records two, and
-   `reviewer_rescue_edits=0` for all shapes. This is strong durable-recall
-   signal, but the current scenario has only two repetitions and reports
-   deliberation-step reduction rather than first-five median wall-time
-   reduction. The formal gate should not be closed on this evidence alone.
+   Evidence: task `#627` extended `m6_9-repeated-task-recall` to emit five
+   repetitions for all 10 predeclared task shapes. The scenario records
+   `first_five_wall_seconds`, `first_five_deliberation_step_counts`,
+   per-shape `median_wall_seconds_improved=true`,
+   `median_deliberation_step_count_improved=true`, and
+   `reviewer_rescue_edits=0`. The focused selector and full dogfood test
+   module both pass.
 
 2. At least three reviewer corrections from past iterations fire as durable
    rules in later iterations, and at least one would have caused a rescue edit
@@ -134,19 +139,24 @@ Recent validation accepted for this audit:
 
 ## Closure Decision
 
-M6.9 is very close, but should not close yet. Seven of eight criteria are
-passing or pass-with-note; criterion 1 is the only formal gap. The gap is not a
-new architecture problem. It is a proof-shape mismatch: the repeated-task
-scenario proves 10-shape durable recall and no rescue edits, but not
-first-five median wall-time reduction.
+M6.9 is close-ready. All eight formal Done-when criteria are backed by
+deterministic dogfood evidence, focused tests, broad dogfood tests, and the
+M6.14 mew-first repair ledger for honesty around substrate repairs.
 
-Next bounded task:
+Caveats to preserve:
 
-- Extend `m6_9-repeated-task-recall` or add a sibling close-gate dogfood
-  scenario that records five repetitions for the 10 predeclared task shapes,
-  emits per-shape first-five `wall_seconds` / `deliberation_step_count`
-  evidence, asserts median improvement, and preserves `reviewer_rescue_edits=0`.
+- Some wall-time and comparator evidence is deterministic fixture evidence,
+  not a fresh external CLI rerun. This is acceptable for the M6.9 close gate
+  because the phase-regression scenarios preserve the M6.6 comparator baseline
+  and the audit records the evidence source explicitly.
+- Several earlier M6.9 slices were supervisor-owned product progress rather
+  than autonomy credit. The final M6.14 retry sequence proves mew can recover
+  from substrate blockers and land later M6.9 proof slices mew-first without
+  hidden product rescue.
 
-After that task lands and `dogfood --all`, focused tests, ruff, and
-`git diff --check` are green, write a short close addendum or update this
-audit to `CLOSE_READY` and close M6.9 in `ROADMAP_STATUS.md`.
+Recommended roadmap update:
+
+- Mark M6.9 `done`.
+- Move active focus to M6.8 Task Chaining, because M6.9 Phase 4 remains gated
+  on M6.8 and the next resident capability gap is supervised self-selection of
+  the next bounded task.

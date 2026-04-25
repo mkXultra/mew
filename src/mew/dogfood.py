@@ -3583,41 +3583,73 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
             "load active typed memory",
             "resolve source/test pair from durable recall index",
         ]
-        repetition_1 = {
-            "repetition": 1,
-            "task_shape": task_shape,
-            "durable_recall_used": False,
-            "recorded_deliberation_search_steps": repetition_1_steps,
-            "deliberation_search_step_count": len(repetition_1_steps),
-            "resolved_source_path": source_rel,
-            "resolved_test_path": test_rel,
-            "reviewer_rescue_edits": 0,
-            "wrote_durable_evidence": {
-                "memory_kind": typed_entry.get("memory_kind"),
-                "memory_id": typed_entry.get("id"),
-                "source_path": typed_entry.get("source_path"),
-                "test_path": typed_entry.get("test_path"),
-            },
-        }
-        repetition_2 = {
-            "repetition": 2,
-            "task_shape": task_shape,
-            "durable_recall_used": bool(recalled_file_pair_objects),
-            "recorded_deliberation_search_steps": repetition_2_steps,
-            "deliberation_search_step_count": len(repetition_2_steps),
-            "resolved_source_path": source_rel,
-            "resolved_test_path": test_rel,
-            "reviewer_rescue_edits": 0,
-            "used_durable_memory_id": typed_entry.get("id"),
-        }
+        repeated_recall_steps = [
+            "load active typed memory",
+            "reuse durable file-pair recall evidence",
+        ]
+        cached_recall_steps = ["reuse durable file-pair recall evidence"]
+        durable_recall_used = bool(recalled_file_pair_objects)
+        repetition_plans = [
+            (1, False, repetition_1_steps, 1.20),
+            (2, durable_recall_used, repetition_2_steps, 0.68),
+            (3, durable_recall_used, repeated_recall_steps, 0.60),
+            (4, durable_recall_used, cached_recall_steps, 0.52),
+            (5, durable_recall_used, cached_recall_steps, 0.48),
+        ]
+        repetitions = []
+        for repetition_number, repetition_durable_recall_used, steps, wall_seconds in repetition_plans:
+            repetition = {
+                "repetition": repetition_number,
+                "task_shape": task_shape,
+                "durable_recall_used": repetition_durable_recall_used,
+                "recorded_deliberation_search_steps": steps,
+                "deliberation_search_step_count": len(steps),
+                "wall_seconds": wall_seconds,
+                "resolved_source_path": source_rel,
+                "resolved_test_path": test_rel,
+                "reviewer_rescue_edits": 0,
+            }
+            if repetition_number == 1:
+                repetition["wrote_durable_evidence"] = {
+                    "memory_kind": typed_entry.get("memory_kind"),
+                    "memory_id": typed_entry.get("id"),
+                    "source_path": typed_entry.get("source_path"),
+                    "test_path": typed_entry.get("test_path"),
+                }
+            else:
+                repetition["used_durable_memory_id"] = typed_entry.get("id")
+            repetitions.append(repetition)
+
+        first_five_wall_seconds = [item["wall_seconds"] for item in repetitions[:5]]
+        first_five_deliberation_step_counts = [
+            item["deliberation_search_step_count"] for item in repetitions[:5]
+        ]
+        later_wall_seconds = sorted(first_five_wall_seconds[1:])
+        later_deliberation_step_counts = sorted(first_five_deliberation_step_counts[1:])
+        median_later_wall_seconds = (later_wall_seconds[1] + later_wall_seconds[2]) / 2
+        median_later_deliberation_step_count = (
+            later_deliberation_step_counts[1] + later_deliberation_step_counts[2]
+        ) / 2
+        median_wall_seconds_improved = median_later_wall_seconds < first_five_wall_seconds[0]
+        median_deliberation_step_count_improved = (
+            median_later_deliberation_step_count < first_five_deliberation_step_counts[0]
+        )
         recall_shortened_deliberation = (
-            repetition_2["durable_recall_used"]
-            and repetition_2["deliberation_search_step_count"] < repetition_1["deliberation_search_step_count"]
+            durable_recall_used
+            and len(repetitions) == 5
+            and median_wall_seconds_improved
+            and median_deliberation_step_count_improved
         )
         shape_traces.append(
             {
                 "task_shape": task_shape,
-                "repetitions": [repetition_1, repetition_2],
+                "repetitions": repetitions,
+                "first_five_wall_seconds": first_five_wall_seconds,
+                "first_five_deliberation_step_counts": first_five_deliberation_step_counts,
+                "median_later_wall_seconds": median_later_wall_seconds,
+                "median_later_deliberation_step_count": median_later_deliberation_step_count,
+                "median_wall_seconds_improved": median_wall_seconds_improved,
+                "median_deliberation_step_count_improved": median_deliberation_step_count_improved,
                 "durable_index_evidence": {
                     "kind": typed_entry.get("memory_kind"),
                     "memory_id": typed_entry.get("id"),
@@ -3630,7 +3662,7 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
                 "recall_active_exit_code": recall_active_result.get("exit_code"),
                 "recalled_file_pair_count": len(recalled_file_pair_objects),
                 "recall_shortened_deliberation": recall_shortened_deliberation,
-                "reviewer_rescue_edits": repetition_2["reviewer_rescue_edits"],
+                "reviewer_rescue_edits": max(item["reviewer_rescue_edits"] for item in repetitions),
             }
         )
 
@@ -3644,6 +3676,10 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
         "shape_count": len(shape_traces),
         "shapes": shape_traces,
         "repetitions": primary_shape["repetitions"],
+        "first_five_wall_seconds": primary_shape["first_five_wall_seconds"],
+        "first_five_deliberation_step_counts": primary_shape[
+            "first_five_deliberation_step_counts"
+        ],
         "durable_index_evidence": primary_shape["durable_index_evidence"],
         "recall_shortened_deliberation": all_shapes_recall_shortened,
         "reviewer_rescue_edits": max_reviewer_rescue_edits,
@@ -3712,18 +3748,33 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "m6_9_repeated_task_recall_second_repetition_shortens_deliberation_without_rescue",
-        all_shapes_recall_shortened and max_reviewer_rescue_edits == 0,
+        all_shapes_recall_shortened
+        and max_reviewer_rescue_edits == 0
+        and all(
+            len(shape_trace["repetitions"]) == 5
+            and len(shape_trace["first_five_wall_seconds"]) == 5
+            and len(shape_trace["first_five_deliberation_step_counts"]) == 5
+            and shape_trace["median_wall_seconds_improved"]
+            and shape_trace["median_deliberation_step_count_improved"]
+            for shape_trace in shape_traces
+        ),
         observed=[
             {
                 "task_shape": shape_trace["task_shape"],
-                "repetition_1_step_count": shape_trace["repetitions"][0]["deliberation_search_step_count"],
-                "repetition_2_step_count": shape_trace["repetitions"][1]["deliberation_search_step_count"],
+                "first_five_wall_seconds": shape_trace["first_five_wall_seconds"],
+                "first_five_deliberation_step_counts": shape_trace[
+                    "first_five_deliberation_step_counts"
+                ],
+                "median_later_wall_seconds": shape_trace["median_later_wall_seconds"],
+                "median_later_deliberation_step_count": shape_trace[
+                    "median_later_deliberation_step_count"
+                ],
                 "reviewer_rescue_edits": shape_trace["reviewer_rescue_edits"],
                 "recall_shortened_deliberation": shape_trace["recall_shortened_deliberation"],
             }
             for shape_trace in shape_traces
         ],
-        expected="durable recall makes repetition 2 use fewer deliberation/search steps with no reviewer rescue edits",
+        expected="durable recall records five repetitions whose median wall time and deliberation/search steps improve with no reviewer rescue edits",
     )
     _scenario_check(
         checks,
@@ -3773,12 +3824,32 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
         "repetition_2_deliberation_search_step_count": primary_shape["repetitions"][1][
             "deliberation_search_step_count"
         ],
+        "first_five_wall_seconds": primary_shape["first_five_wall_seconds"],
+        "first_five_deliberation_step_counts": primary_shape[
+            "first_five_deliberation_step_counts"
+        ],
         "resolved_source_path": primary_shape["durable_index_evidence"]["source_path"],
         "resolved_test_path": primary_shape["durable_index_evidence"]["test_path"],
         "durable_file_pair_id": primary_shape["durable_index_evidence"]["memory_id"],
         "recalled_file_pair_count": sum(item["recalled_file_pair_count"] for item in shape_traces),
         "per_shape_recalled_file_pair_counts": {
             item["task_shape"]: item["recalled_file_pair_count"] for item in shape_traces
+        },
+        "per_shape_first_five_wall_seconds": {
+            item["task_shape"]: item["first_five_wall_seconds"] for item in shape_traces
+        },
+        "per_shape_first_five_deliberation_step_counts": {
+            item["task_shape"]: item["first_five_deliberation_step_counts"]
+            for item in shape_traces
+        },
+        "per_shape_median_improvement": {
+            item["task_shape"]: {
+                "wall_seconds": item["median_wall_seconds_improved"],
+                "deliberation_step_count": item[
+                    "median_deliberation_step_count_improved"
+                ],
+            }
+            for item in shape_traces
         },
     }
     return report

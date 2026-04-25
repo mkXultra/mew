@@ -674,6 +674,16 @@ class DogfoodTests(unittest.TestCase):
                 artifacts["repetition_1_deliberation_search_step_count"],
                 artifacts["repetition_2_deliberation_search_step_count"],
             )
+            self.assertEqual(len(artifacts["first_five_wall_seconds"]), 5)
+            self.assertEqual(len(artifacts["first_five_deliberation_step_counts"]), 5)
+            self.assertGreater(
+                artifacts["first_five_wall_seconds"][0],
+                sorted(artifacts["first_five_wall_seconds"][1:])[2],
+            )
+            self.assertGreater(
+                artifacts["first_five_deliberation_step_counts"][0],
+                sorted(artifacts["first_five_deliberation_step_counts"][1:])[2],
+            )
             self.assertEqual(artifacts["resolved_source_path"], "src/mew/dogfood.py")
             self.assertEqual(artifacts["resolved_test_path"], "tests/test_dogfood.py")
             self.assertEqual(
@@ -691,7 +701,34 @@ class DogfoodTests(unittest.TestCase):
                     "bounded_snapshot_pair",
                 },
             )
+            self.assertEqual(
+                set(artifacts["per_shape_first_five_wall_seconds"]),
+                set(artifacts["per_shape_recalled_file_pair_counts"]),
+            )
+            self.assertEqual(
+                set(artifacts["per_shape_first_five_deliberation_step_counts"]),
+                set(artifacts["per_shape_recalled_file_pair_counts"]),
+            )
+            self.assertEqual(
+                set(artifacts["per_shape_median_improvement"]),
+                set(artifacts["per_shape_recalled_file_pair_counts"]),
+            )
             self.assertTrue(all(count > 0 for count in artifacts["per_shape_recalled_file_pair_counts"].values()))
+            self.assertTrue(
+                all(len(values) == 5 for values in artifacts["per_shape_first_five_wall_seconds"].values())
+            )
+            self.assertTrue(
+                all(
+                    len(values) == 5
+                    for values in artifacts["per_shape_first_five_deliberation_step_counts"].values()
+                )
+            )
+            self.assertTrue(
+                all(
+                    improvement["wall_seconds"] and improvement["deliberation_step_count"]
+                    for improvement in artifacts["per_shape_median_improvement"].values()
+                )
+            )
             self.assertEqual(trace["scenario"], "m6_9-repeated-task-recall")
             self.assertEqual(trace["shape_count"], 10)
             self.assertEqual(
@@ -709,17 +746,33 @@ class DogfoodTests(unittest.TestCase):
                     "bounded_snapshot_pair",
                 },
             )
+            self.assertEqual(len(trace["repetitions"]), 5)
+            self.assertEqual(len(trace["first_five_wall_seconds"]), 5)
+            self.assertEqual(len(trace["first_five_deliberation_step_counts"]), 5)
             self.assertFalse(trace["repetitions"][0]["durable_recall_used"])
             self.assertTrue(trace["repetitions"][1]["durable_recall_used"])
             self.assertEqual(trace["repetitions"][1]["reviewer_rescue_edits"], 0)
             self.assertTrue(trace["recall_shortened_deliberation"])
             for shape_trace in trace["shapes"]:
+                self.assertEqual(len(shape_trace["repetitions"]), 5)
+                self.assertEqual(len(shape_trace["first_five_wall_seconds"]), 5)
+                self.assertEqual(len(shape_trace["first_five_deliberation_step_counts"]), 5)
                 self.assertFalse(shape_trace["repetitions"][0]["durable_recall_used"])
                 self.assertTrue(shape_trace["repetitions"][1]["durable_recall_used"])
                 self.assertGreater(
                     shape_trace["repetitions"][0]["deliberation_search_step_count"],
                     shape_trace["repetitions"][1]["deliberation_search_step_count"],
                 )
+                self.assertGreater(
+                    shape_trace["first_five_wall_seconds"][0],
+                    sorted(shape_trace["first_five_wall_seconds"][1:])[2],
+                )
+                self.assertGreater(
+                    shape_trace["first_five_deliberation_step_counts"][0],
+                    sorted(shape_trace["first_five_deliberation_step_counts"][1:])[2],
+                )
+                self.assertTrue(shape_trace["median_wall_seconds_improved"])
+                self.assertTrue(shape_trace["median_deliberation_step_count_improved"])
                 self.assertEqual(shape_trace["reviewer_rescue_edits"], 0)
                 self.assertTrue(shape_trace["recall_shortened_deliberation"])
             self.assertEqual(trace["durable_index_evidence"]["kind"], "file-pair")

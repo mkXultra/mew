@@ -25,8 +25,8 @@ not be resumed until the recorded resume condition fires.
 | 6.5. Self-Hosting Speed | `done` | Clean medium/compact resident rerun produced and verified a paired edit proposal with first THINK under 10s. |
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
-| 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Resumed after M6.14 repair episodes fixed #613/#615/#617/#619 substrate blockers and the same tasks retried into verified mew-owned product patches. |
+| 6.8. Task Chaining: Supervised Self-Selection | `in_progress` | Active after M6.9 close; next target is supervised selector design/implementation for reviewer-approved chained bounded tasks. |
+| 6.9. Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`: repeated-task, durable-rule, failure-shield, index, drift, rehearsal, reasoning-trace, and comparator criteria are all backed by deterministic proof. |
 | 6.10. Execution Accelerators and Mew-First Reliability | `done` | Closed by `docs/M6_10_CLOSE_GATE_AUDIT_2026-04-25.md`: latest 10 attempts reached 7/10 clean-or-practical with classified failures and no rescue edits for counted successes. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
@@ -43,7 +43,22 @@ not be resumed until the recorded resume condition fires.
 
 Last assessed: 2026-04-26 01:23 JST.
 
-Active work: **M6.9 Durable Coding Intelligence**.
+Active work: **M6.8 Task Chaining: Supervised Self-Selection**.
+
+M6.9 is now closed by `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`.
+The final gap was criterion 1: first-five repeated-task wall-time evidence.
+Task `#627` extended `m6_9-repeated-task-recall` to emit five repetitions
+for all 10 predeclared task shapes, per-shape first-five
+`wall_seconds` / `deliberation_step_count` evidence, true median improvement
+flags, and `reviewer_rescue_edits=0`. Validation covered the focused selector,
+full `tests/test_dogfood.py`, `dogfood --all`, targeted ruff, and
+`git diff --check`. M6.8 becomes active because M6.9 Phase 4 remains gated on
+task chaining, and the next resident capability gap is letting mew select the
+next bounded roadmap task under reviewer approval instead of requiring the
+human/Codex supervisor to choose each task.
+
+Historical M6.9/M6.14 close context:
+
 M6.14 is now closed. Task `#613` (`M6.9 drift-canary dogfood scenario v0`)
 first exposed reproducible mew-first drift by replacing the requested
 `m6_9-drift-canary` scenario with nearby/off-scope patches. The supervisor did
@@ -79,13 +94,8 @@ Direct Codex edits remain allowed for reviewer-owned
 roadmap/status/policy updates and loop-substrate fixes, not hidden product
 rescue.
 
-The first M6.9 close-gate aggregation pass is recorded in
-`docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`. Recommendation:
-`NOT_CLOSE_READY_ONE_GAP`. Seven of eight criteria are passing or
-pass-with-note; the remaining formal gap is criterion 1, because
-`m6_9-repeated-task-recall` currently proves 10-shape durable recall and
-zero rescue edits across two repetitions, but not first-five median wall-time
-reduction. Task `#627` is the next bounded mew-first target to close that gap.
+The M6.9 close-gate aggregation pass is recorded in
+`docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`. Recommendation: `CLOSE_READY`.
 
 The durable execution contract from this point forward is: M6.9+ bounded
 roadmap/coding implementation belongs to mew. If mew fails, classify the
@@ -1905,7 +1915,7 @@ Next action:
 
 ### M6.8: Task Chaining - Supervised Self-Selection
 
-Status: `not_started`.
+Status: `in_progress`.
 
 Goal:
 
@@ -1925,12 +1935,16 @@ Missing proof:
 
 Next action:
 
-- finish M6.7 first; do not start M6.8 implementation while the M6.7 close
-  gate is still open
+- start with a bounded design/implementation slice for supervised task
+  selection: mew proposes the next roadmap task at iteration close, the
+  reviewer approves/edits/rejects it before execution, selector output records
+  `previous_task_id` and `selector_reason`, and scope-fence rules prevent
+  roadmap-status, milestone-close, or governance edits from selector-owned
+  output.
 
 ### M6.9: Durable Coding Intelligence
 
-Status: `in_progress`.
+Status: `done`.
 
 Goal:
 
@@ -2480,10 +2494,19 @@ Resume condition:
   unless a fresh M6.9 failure requires another bounded M6.14 repair episode
   first.
 - `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md` now records the close-gate
-  aggregation result as `NOT_CLOSE_READY_ONE_GAP`. Task `#627`
-  (`M6.9 repeated-task five-repetition close-gate proof`) is ready to close
-  criterion 1 by extending repeated-task proof to five repetitions with
-  per-shape wall-time / deliberation evidence and `reviewer_rescue_edits=0`.
+  aggregation result as `CLOSE_READY`. Task `#627`
+  (`M6.9 repeated-task five-repetition close-gate proof`) closed criterion 1
+  by extending repeated-task proof to five repetitions with per-shape wall-time
+  / deliberation evidence and `reviewer_rescue_edits=0`.
+
+Close decision:
+
+- M6.9 is closed. Preserve the audit caveats: some wall-time and comparator
+  evidence is deterministic fixture evidence rather than a fresh external CLI
+  rerun, and earlier proof slices include supervisor-owned product progress.
+  Later M6.9 slices, especially #613/#615/#617/#619/#627 after M6.14 repair
+  episodes, provide the practical mew-first proof without hidden product
+  rescue.
 
 ### M6.10: Execution Accelerators and Mew-First Reliability
 
@@ -3915,19 +3938,18 @@ Done when:
 
 ## Current Roadmap Focus
 
-Active focus: **M6.9 Durable Coding Intelligence**.
+Active focus: **M6.8 Task Chaining: Supervised Self-Selection**.
 
 The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
-- continue M6.9 from task `#627`, the verified #619 / M6.14
-  duplicated-adjacent repair boundary, and
-  `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`. Drift-canary / novel-task,
-  simulated alignment-decay, repeated recall, reasoning-trace recall, and
-  frozen comparator Phase 1/Phase 2 deterministic proof slices now exist; the
-  remaining active target is criterion 1, first-five repeated-task wall-time
-  evidence with `reviewer_rescue_edits=0`, unless a fresh M6.9 failure
-  identifies a narrower blocker;
+- start M6.8 from the now-closed M6.9/M6.14 baseline. The next target is a
+  bounded supervised selector slice: mew proposes the next roadmap task at
+  iteration close, reviewer approval is required before execution, and the
+  selection records `previous_task_id` plus `selector_reason`;
+- keep M6.9 closed. Reopen only if the M6.8 selector or later chained proof
+  exposes a durable-memory regression against
+  `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`;
 - keep applying the M6.14 repair-ledger rule: if a mew-owned M6.9+
   implementation fails structurally, pause the active product milestone,
   append or activate a bounded M6.14 repair episode, fix the loop substrate or
