@@ -119,6 +119,27 @@ class TaskKindTests(unittest.TestCase):
         self.assertTrue(proposal["governance_violation"])
         self.assertIn("ROADMAP_STATUS.md", proposal["blocked_reason"])
 
+    def test_task_selector_proposal_allows_guardrail_context_in_description(self):
+        proposal = build_task_selector_proposal(
+            {"id": 12},
+            {
+                "id": 13,
+                "title": "Fix selector target-surface false positive",
+                "description": (
+                    "Refine coding task detection while preserving governance/status "
+                    "guardrails around ROADMAP_STATUS.md, policy, permissions, and skills."
+                ),
+                "kind": "coding",
+                "scope": {"target_paths": ["src/mew/tasks.py", "tests/test_tasks.py"]},
+            },
+            "Safe coding task that describes guardrails without targeting them",
+        )
+
+        self.assertTrue(proposal["approval_required"])
+        self.assertFalse(proposal["blocked"])
+        self.assertFalse(proposal["governance_violation"])
+        self.assertEqual(proposal["blocked_reason"], "")
+
     def test_normalize_task_scope_requires_matching_source_test_pair(self):
         self.assertEqual(
             normalize_task_scope({"target_paths": ["tests/test_commands.py", "./src/mew/commands.py"]}),

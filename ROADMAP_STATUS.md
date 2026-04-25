@@ -106,6 +106,16 @@ Current M6.8 evidence:
   `uv run pytest -q tests/test_tasks.py tests/test_commands.py --no-testmon`,
   `uv run ruff check src/mew/commands.py src/mew/cli.py tests/test_commands.py`,
   and `git diff --check`.
+- Task `#630` / session `#615` repaired a selector scope-fence
+  false-positive found by dogfooding: M6.8 implementation tasks that merely
+  describe governance/status guardrails were being blocked as if they targeted
+  those surfaces. Selector target checks now inspect task title and explicit
+  `scope.target_paths`, not description/notes. Explicit forbidden titles and
+  target paths still block.
+- #630 validation passed: `uv run pytest -q tests/test_tasks.py --no-testmon`,
+  `uv run pytest -q tests/test_tasks.py tests/test_commands.py --no-testmon`,
+  `uv run ruff check src/mew/tasks.py tests/test_tasks.py`, and
+  `git diff --check`.
 
 M6.8 is done when:
 
@@ -231,7 +241,11 @@ Non-goals for the next session:
 
 ## Latest Validation
 
-Current change is docs/status only.
+Latest committed code baseline: `be318a6 Add M6.8 selector proposal CLI`.
+
+Current uncommitted change: M6.8 selector target-surface false-positive repair
+in `src/mew/tasks.py` and `tests/test_tasks.py`; validation listed above under
+task `#630`.
 
 Observed in this cleanup session:
 

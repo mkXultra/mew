@@ -241,12 +241,10 @@ _SELECTOR_GOVERNANCE_TARGETS = (
     ("skills", ("skill", "skills")),
 )
 
-def _selector_task_text(task):
+def _selector_target_surface_text(task):
     task = task if isinstance(task, dict) else {}
     values = [
         task.get("title") or "",
-        task.get("description") or "",
-        task.get("notes") or "",
     ]
     scope = task.get("scope") or {}
     if isinstance(scope, dict):
@@ -257,7 +255,7 @@ def _selector_task_text(task):
     return "\n".join(str(value) for value in values if value).casefold()
 
 def _selector_governance_blocked_reason(task):
-    text = _selector_task_text(task)
+    text = _selector_target_surface_text(task)
     for label, needles in _SELECTOR_GOVERNANCE_TARGETS:
         if any(needle in text for needle in needles):
             return f"selector-owned proposal cannot target {label}"
