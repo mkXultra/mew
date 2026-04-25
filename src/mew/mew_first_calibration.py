@@ -255,6 +255,11 @@ def summarize_mew_first_calibration(
         for attempt in attempts
         if attempt.result_class not in SUCCESS_CLASSES
     ]
+    gate_blocker_result_class_counts = Counter(
+        attempt.result_class
+        for attempt in attempts
+        if attempt.result_class not in SUCCESS_CLASSES
+    )
     section_headings = [
         heading
         for _, heading in sorted(
@@ -279,6 +284,7 @@ def summarize_mew_first_calibration(
             "success_rate": round(clean_or_practical / total, 3) if total else None,
             "gate_success_task_ids": gate_success_task_ids,
             "gate_blocking_task_ids": gate_blocking_task_ids,
+            "gate_blocker_result_class_counts": dict(gate_blocker_result_class_counts),
             "passed": total >= limit and clean_or_practical >= gate_success_threshold,
         },
         "counts": {
@@ -298,6 +304,7 @@ def format_mew_first_calibration_report(summary: Mapping[str, Any]) -> str:
     attempt_window_task_ids = summary.get("attempt_window_task_ids") or []
     gate_success_task_ids = gate.get("gate_success_task_ids") or []
     gate_blocking_task_ids = gate.get("gate_blocking_task_ids") or []
+    gate_blocker_result_class_counts = gate.get("gate_blocker_result_class_counts") or {}
     lines = [
         "Mew-first calibration economics",
         f"source: {summary.get('source_path')}",
@@ -323,6 +330,12 @@ def format_mew_first_calibration_report(summary: Mapping[str, Any]) -> str:
     if gate_blocking_task_ids:
         blocker_bits = [f"#{task_id}" for task_id in gate_blocking_task_ids]
         lines.append("gate_blockers: " + " ".join(blocker_bits))
+    if gate_blocker_result_class_counts:
+        blocker_class_bits = [
+            f"{key}={value}"
+            for key, value in sorted(gate_blocker_result_class_counts.items())
+        ]
+        lines.append("gate_blocker_classes: " + " ".join(blocker_class_bits))
     if result_counts:
         result_bits = [f"{key}={value}" for key, value in sorted(result_counts.items())]
         lines.append("result_classes: " + " ".join(result_bits))
