@@ -9161,6 +9161,63 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_active_fast_path_honors_read_only_refresh_spans_before_tiny_draft(self):
+        from mew.work_loop import _work_write_ready_explicit_refresh_before_tiny_draft
+
+        target_paths = ["src/mew/dogfood.py", "tests/test_dogfood.py"]
+        context = {
+            "work_session": {
+                "resume": {
+                    "pending_steer": {
+                        "text": (
+                            "Read-only recovery step only. Refresh exact cached windows before any patch attempt: "
+                            "read_file src/mew/dogfood.py lines 70-130 for the registry; "
+                            "read_file tests/test_dogfood.py lines 533-590 for the paired test. "
+                            "Do not draft in this step; just cache these exact windows."
+                        )
+                    },
+                    "active_work_todo": {
+                        "source": {
+                            "target_paths": target_paths,
+                        },
+                    },
+                },
+            },
+            "guidance": "",
+        }
+        fast_path = {
+            "active": True,
+            "reason": "paired_cached_windows_edit_ready",
+            "recent_windows": [
+                {"path": "src/mew/dogfood.py", "line_start": 2440, "line_end": 2959},
+                {"path": "tests/test_dogfood.py", "line_start": 413, "line_end": 932},
+            ],
+        }
+
+        refresh = _work_write_ready_explicit_refresh_before_tiny_draft(context, fast_path)
+
+        self.assertEqual(refresh["action"]["type"], "batch")
+        self.assertEqual(
+            refresh["action"]["tools"],
+            [
+                {
+                    "type": "read_file",
+                    "path": "src/mew/dogfood.py",
+                    "line_start": 70,
+                    "line_count": 61,
+                    "reason": "refresh explicitly requested write-ready cached window",
+                },
+                {
+                    "type": "read_file",
+                    "path": "tests/test_dogfood.py",
+                    "line_start": 533,
+                    "line_count": 58,
+                    "reason": "refresh explicitly requested write-ready cached window",
+                },
+            ],
+        )
+        self.assertEqual(refresh["action_plan"]["act_mode"], "deterministic")
+
     def test_write_ready_preflight_block_does_not_search_path_stem_refresh_cues(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,
@@ -21330,6 +21387,123 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("failed_patch_repair", tiny_context)
         self.assertIn(
+            "Repair the same failed patch proposal",
+            tiny_context["active_work_todo"]["source"]["plan_item"],
+        )
+
+    def test_write_ready_tiny_draft_ignores_unreconstructable_failed_patch_repair(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+        from mew.work_session import build_work_session_resume
+
+        task = {
+            "id": 584,
+            "title": "M6.9: add second repeated-task recall proof shape",
+            "description": "Extend the repeated-task recall dogfood proof.",
+            "scope": {"target_paths": ["src/mew/dogfood.py", "tests/test_dogfood.py"]},
+        }
+        session = {
+            "id": 572,
+            "task_id": 584,
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/dogfood.py", "line_start": 80, "line_count": 40},
+                    "result": {
+                        "path": "src/mew/dogfood.py",
+                        "line_start": 80,
+                        "line_end": 120,
+                        "line_count": 40,
+                        "text": "DOGFOOD_SCENARIOS = (\n    \"m6_9-repeated-task-recall\",\n)\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_dogfood.py", "line_start": 530, "line_count": 50},
+                    "result": {
+                        "path": "tests/test_dogfood.py",
+                        "line_start": 530,
+                        "line_end": 580,
+                        "line_count": 50,
+                        "text": "def test_run_dogfood_m6_9_repeated_task_recall_scenario():\n    assert True\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {
+                        "path": "tests/test_dogfood.py",
+                        "old": "missing exact text\n",
+                        "new": "",
+                    },
+                    "error": "old text was not found",
+                    "summary": "edit failed",
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 10,
+                    "status": "failed",
+                    "summary": "model turn failed: old text was not found",
+                    "tool_call_id": 3,
+                    "tool_call_ids": [3],
+                    "action_plan": {"summary": "Draft repeated-task recall source/test patch."},
+                    "action": {
+                        "type": "edit_file",
+                        "path": "tests/test_dogfood.py",
+                        "old": "missing exact text\n",
+                        "new": "",
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session, task=task)
+        self.assertEqual(resume["failed_patch_repair"]["proposal_snippets"], [])
+        resume["plan_item_observations"] = [
+            {
+                "plan_item": "Draft the second repeated-task recall proof shape.",
+                "target_path": "src/mew/dogfood.py",
+                "edit_ready": True,
+                "cached_windows": [
+                    {
+                        "path": "src/mew/dogfood.py",
+                        "line_start": 80,
+                        "line_end": 120,
+                        "tool_call_id": 1,
+                    },
+                    {
+                        "path": "tests/test_dogfood.py",
+                        "line_start": 530,
+                        "line_end": 580,
+                        "tool_call_id": 2,
+                    },
+                ],
+            },
+        ]
+
+        tiny_context = build_write_ready_tiny_draft_model_context(
+            {
+                "task": task,
+                "capabilities": {"allowed_write_roots": ["."]},
+                "work_session": {
+                    "resume": resume,
+                    "tool_calls": session["tool_calls"],
+                    "model_turns": session["model_turns"],
+                },
+            }
+        )
+
+        self.assertNotIn("failed_patch_repair", tiny_context)
+        self.assertNotIn(
             "Repair the same failed patch proposal",
             tiny_context["active_work_todo"]["source"]["plan_item"],
         )

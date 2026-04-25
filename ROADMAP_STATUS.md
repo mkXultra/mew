@@ -26,10 +26,11 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus three post-M6.12 proof slices landed; M6.11 residual hardening is closed, so broad durable-coding proof can resume from the clean proof-slice boundary. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus four post-M6.12 proof slices landed; repeated-task recall now covers two deterministic shapes, but the 10-shape matrix and comparator rerun are still open. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
+| 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Make mew's state understandable to humans without raw internal structures. |
@@ -38,16 +39,35 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 12:55 JST.
+Last assessed: 2026-04-25 14:00 JST.
 
 Active work: **M6.9 Durable Coding Intelligence** from the clean proof-slice
-boundary. M6.9 has landed its Phase 1 substrate and three post-M6.12 proof
+boundary. M6.9 has landed its Phase 1 substrate and four post-M6.12 proof
 slices, and the M6.11 residual hardening pause is now closed by
 `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The next M6.9 push should use
 the closed review, executor-lifecycle, memory-explore, and prompt/cache
 surfaces to scale durable-coding proof without losing failure diagnosis.
 M6.10 stays registered but inactive until the M6.9 proof push creates an
-accelerator-sized need, and M7 remains deferred.
+accelerator-sized need. M6.13 is registered as the later deliberation-lane
+milestone, but it stays inactive until M6.9 ranked-recall/internalization
+surfaces exist or M6.9 produces direct evidence that a narrow lane-framework
+slice would remove a measured blocker. M7 remains deferred.
+
+Deferred architecture decision from 2026-04-25:
+
+- do not create issues or standalone milestones yet for concurrent executor,
+  memory explore agent, provider-specific prompt caching, or broader
+  MemoryExplore protocol work; these are sequencing decisions, not active
+  implementation tasks
+- the only loop-stabilization follow-up allowed to move ahead of the active
+  M6.9 proof is a small `MemoryExploreRequest/Result` v0 freeze plus replay
+  skeleton, and only if M6.9 failures become ambiguous between durable-memory
+  recall, memory exploration, and drafting
+- provider-specific prompt caching and full concurrent executor work belong to
+  M6.10 unless M6.9 produces direct measured pain that cannot be classified
+  with the existing prompt/cache and executor-lifecycle metrics
+- memory explore agent work stays deferred until after M6.9; adding a second
+  planner before durable-memory proof would make failures harder to attribute
 
 Reasoning:
 
@@ -2042,25 +2062,47 @@ Progress / remaining proof:
   `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
   Count this as one proof-shape slice toward the repeated-task criterion, not
   the full predeclared 10-shape gate
+- The follow-up `#584` slice is now landed as supervisor-rescue product
+  progress, not mew-first autonomy credit. Session `#572` exposed two bounded
+  substrate issues while trying to extend `m6_9-repeated-task-recall`: tiny
+  draft repair context should be suppressed when a failed patch has no
+  reconstructable proposal snippet, and explicit read-only refresh spans should
+  run before the tiny draft model even when the fast path is otherwise active.
+  Both substrate fixes are covered in `tests/test_work_session.py`. The
+  repeated-task dogfood scenario now covers two deterministic task shapes,
+  `bounded_source_test_pair` and `bounded_symbol_index_pair`; each shape starts
+  without durable file-pair memory, writes typed memory in repetition 1, then
+  uses durable recall/index evidence in repetition 2 with fewer
+  deliberation/search steps and `reviewer_rescue_edits=0`. Validation covered
+  `./mew dogfood --scenario m6_9-repeated-task-recall --json`, focused
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_repeated_task_recall or scenario_choices' --no-testmon`,
+  full `uv run pytest -q tests/test_dogfood.py --no-testmon`, focused
+  failed-patch/refresh work-session tests, targeted ruff, and
+  `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
-  purpose. Phase 1 substrate and three post-M6.12 proof slices have landed,
-  but the predeclared 10-shape repeated-task matrix and comparator rerun have
-  not started. The now-closed M6.11 residual review, executor lifecycle, memory
-  exploration, and prompt/cache boundaries should be used to classify the next
-  mew-first proof slices.
+  purpose. Phase 1 substrate and four post-M6.12 proof slices have landed, and
+  the repeated-task proof matrix has 2/10 deterministic shapes. The comparator
+  rerun has not started. The now-closed M6.11 residual review, executor
+  lifecycle, memory exploration, and prompt/cache boundaries should be used to
+  classify the next mew-first proof slices.
 - M6.12 is now closed and can be used as the operator input for choosing the
   next durable-memory slice from failure-family and recurrence evidence
 - no comparator rerun exists yet for the post-split M6.9 slices
 - later observability and broader retrieval changes remain unstarted
+- deferred architecture decision from 2026-04-25: keep M6.9 focused on
+  durable-memory proof, not new platform milestones. Pull forward only a small
+  `MemoryExploreRequest/Result` v0 freeze/replay skeleton if M6.9 failure
+  attribution becomes ambiguous. Keep provider-specific prompt caching, full
+  concurrent executor work, and memory explore agentization out of M6.9 unless
+  M6.9 evidence directly triggers them.
 
 Next proof step:
 
-- scale the `#576` proof shape toward the predeclared repeated-task set:
-  either add the second task shape to the dogfood proof matrix or introduce the
-  small runner/report structure needed to track multiple shapes without
-  inflating the close gate. Rerun an appropriate M6.6 comparator once there is
-  enough repeated-task evidence to attribute a measurable gain to durable
-  recall.
+- continue scaling the repeated-task proof matrix beyond the current 2/10
+  deterministic shapes, preferably by adding the small runner/report structure
+  needed to track multiple shapes without inflating the close gate. Rerun an
+  appropriate M6.6 comparator once there is enough repeated-task evidence to
+  attribute a measurable gain to durable recall.
 
 ### M6.10: Execution Accelerators
 
@@ -2088,6 +2130,8 @@ Missing proof:
 - no bounded read-only Explorer helper exists yet
 - no post-M6.9 implementation slice has demonstrated reduced planning churn or
   read-only churn attributable to Todo or Explorer
+- no M6.9 measurement yet justifies pulling provider-specific prompt caching or
+  full concurrent executor work ahead of durable-memory proof
 
 Next action:
 
@@ -3094,6 +3138,53 @@ Next action:
 - Use the M6.12 report as operator input while resuming bounded M6.9 durable
   coding work. Do not wire M6.12 JSON into `mew-product-evaluator`, roadmap
   governance, or adversarial verification without a later explicit milestone.
+
+### M6.13: High-Effort Deliberation Lane
+
+Status: `not_started`.
+
+Goal:
+
+- add a bounded escalation lane for hard supervised work-loop blockers, with
+  explicit model binding, budget controls, fallback to tiny, and durable
+  internalization through M6.9 reasoning traces
+
+Entry gate:
+
+- M6.11 loop contracts must remain closed and stable
+- M6.12 may be used as a reading surface for lane-aware evidence, but M6.13
+  must not reopen the M6.12 close gate
+- M6.9 ranked recall and reasoning-trace write gates are required before
+  M6.13 can close Phase 3
+- a narrow Phase 1 lane-framework slice may move earlier only if active M6.9
+  evidence shows lane identity, shadow bundles, or escalation provenance would
+  directly remove a measured blocker
+
+Evidence:
+
+- `docs/DESIGN_2026-04-25_M6_13_DELIBERATION_LANE.md` defines the three-phase
+  scope: Phase 1 lane framework, Phase 2 bounded deliberation lane, and Phase
+  3 memory internalization proof.
+- The design explicitly keeps M6.9, M6.11, and M6.12 close gates unchanged and
+  treats `M6.13` as one milestone rather than splitting lane framework,
+  deliberation, and memory internalization into separate milestones.
+
+Missing proof:
+
+- no `WorkTodo.lane` implementation exists yet
+- no mirror lane or lane-scoped replay bundle exists yet
+- no deliberation model binding, budget telemetry, blocker escalation table, or
+  tiny fallback path has been implemented
+- no reviewer-approved `source_lane=deliberation` reasoning trace exists
+- no later same-shape task has reused a deliberation-derived reasoning trace
+  through M6.9 ranked recall
+
+Next action:
+
+- keep M6.13 inactive while M6.9 is active. Revisit after M6.9 ranked recall
+  exists or after a repeated M6.9 blocker shows that a small Phase 1 lane
+  framework slice would produce clearer proof faster than continuing the
+  durable-memory proof directly.
 
 ### M7: Senses - Inbound Signals
 

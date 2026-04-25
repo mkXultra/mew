@@ -2518,36 +2518,65 @@ def run_m6_9_active_memory_recall_scenario(workspace, env=None):
 def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
     commands = []
     checks = []
-    source_rel = "src/mew/dogfood.py"
-    test_rel = "tests/test_dogfood.py"
-    source_path = workspace / source_rel
-    test_path = workspace / test_rel
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    test_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text(
-        "def repeated_task_recall_anchor():\n"
-        "    return 'm6.9 repeated-task-recall dogfood source'\n",
-        encoding="utf-8",
-    )
-    test_path.write_text(
-        "def test_repeated_task_recall_anchor():\n"
-        "    assert 'repeated-task-recall'\n",
-        encoding="utf-8",
-    )
-    state = default_state()
-    state["tasks"].append(
+    shapes = [
         {
-            "id": 70,
-            "title": "M6.9 Repeated Task Recall",
-            "description": "Repeat a bounded coding task for m6_9-repeated-task-recall in src/mew/dogfood.py with tests/test_dogfood.py.",
-            "status": "todo",
-            "priority": "normal",
-            "kind": "coding",
-            "notes": "Dogfood scenario should prove durable recall shortens the second repetition.",
-            "created_at": "now",
-            "updated_at": "now",
-        }
-    )
+            "task_id": 70,
+            "task_shape": "bounded_source_test_pair",
+            "source_rel": "src/mew/dogfood.py",
+            "test_rel": "tests/test_dogfood.py",
+            "source_text": (
+                "def repeated_task_recall_anchor():\n"
+                "    return 'm6.9 repeated-task-recall dogfood source'\n"
+            ),
+            "test_text": (
+                "def test_repeated_task_recall_anchor():\n"
+                "    assert 'repeated-task-recall'\n"
+            ),
+            "memory_name": "M6.9 repeated-task recall file pair",
+            "task_title": "M6.9 Repeated Task Recall",
+        },
+        {
+            "task_id": 71,
+            "task_shape": "bounded_symbol_index_pair",
+            "source_rel": "src/mew/symbol_index.py",
+            "test_rel": "tests/test_symbol_index.py",
+            "source_text": (
+                "def repeated_task_symbol_index_anchor():\n"
+                "    return 'm6.9 repeated-task-recall symbol-index source'\n"
+            ),
+            "test_text": (
+                "def test_repeated_task_symbol_index_anchor():\n"
+                "    assert 'symbol-index repeated-task-recall'\n"
+            ),
+            "memory_name": "M6.9 repeated-task recall symbol index file pair",
+            "task_title": "M6.9 Repeated Task Recall Symbol Index",
+        },
+    ]
+    for shape in shapes:
+        source_path = workspace / shape["source_rel"]
+        test_path = workspace / shape["test_rel"]
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        test_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(shape["source_text"], encoding="utf-8")
+        test_path.write_text(shape["test_text"], encoding="utf-8")
+    state = default_state()
+    for shape in shapes:
+        state["tasks"].append(
+            {
+                "id": shape["task_id"],
+                "title": shape["task_title"],
+                "description": (
+                    "Repeat a bounded coding task for m6_9-repeated-task-recall in "
+                    f"{shape['source_rel']} with {shape['test_rel']}."
+                ),
+                "status": "todo",
+                "priority": "normal",
+                "kind": "coding",
+                "notes": "Dogfood scenario should prove durable recall shortens the second repetition.",
+                "created_at": "now",
+                "updated_at": "now",
+            }
+        )
     write_json_file(workspace / STATE_FILE, state)
 
     def run(args, timeout=30):
@@ -2555,163 +2584,223 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
         commands.append(result)
         return result
 
-    fresh_active_result = run(["memory", "--active", "--task-id", "70", "--json"])
-    typed_memory_result = run(
-        [
-            "memory",
-            "--add",
-            "M6.9 repeated-task-recall dogfood change pairs src/mew/dogfood.py with tests/test_dogfood.py after fresh discovery.",
-            "--type",
-            "project",
-            "--kind",
-            "file-pair",
-            "--scope",
-            "private",
-            "--name",
-            "M6.9 repeated-task recall file pair",
-            "--description",
-            "Repeated task recall should use this durable file-pair index for the second repetition.",
-            "--source-path",
-            source_rel,
-            "--test-path",
-            test_rel,
-            "--structural-evidence",
-            "repetition 1 fresh discovery resolved the bounded source/test task pair in the temp workspace",
-            "--focused-test-green",
-            "--json",
-        ]
-    )
-    recall_active_result = run(["memory", "--active", "--task-id", "70", "--json"])
-
-    fresh_active_data = _json_stdout(fresh_active_result)
-    typed_entry = (_json_stdout(typed_memory_result).get("entry") or {})
-    recall_active_data = _json_stdout(recall_active_result)
-    fresh_items = (fresh_active_data.get("active_memory") or {}).get("items") or []
-    recall_items = (recall_active_data.get("active_memory") or {}).get("items") or []
-
     def object_text(value):
         return json.dumps(value, sort_keys=True, default=str)
 
     def object_contains(value, needle):
         return needle.lower() in object_text(value).lower()
 
-    fresh_relevant_objects = [item for item in fresh_items if object_contains(item, "M6.9 repeated-task recall file pair")]
-    recalled_file_pair_objects = [
-        item
-        for item in recall_items
-        if object_contains(item, "M6.9 repeated-task recall file pair")
-        and object_contains(item, source_rel)
-        and object_contains(item, test_rel)
-        and not object_contains(item, "precondition_miss")
-    ]
+    shape_traces = []
+    for shape in shapes:
+        source_rel = shape["source_rel"]
+        test_rel = shape["test_rel"]
+        task_shape = shape["task_shape"]
+        memory_name = shape["memory_name"]
+        fresh_active_result = run(["memory", "--active", "--task-id", str(shape["task_id"]), "--json"])
+        typed_memory_result = run(
+            [
+                "memory",
+                "--add",
+                (
+                    f"M6.9 repeated-task-recall {task_shape} pairs {source_rel} "
+                    f"with {test_rel} after fresh discovery."
+                ),
+                "--type",
+                "project",
+                "--kind",
+                "file-pair",
+                "--scope",
+                "private",
+                "--name",
+                memory_name,
+                "--description",
+                "Repeated task recall should use this durable file-pair index for the second repetition.",
+                "--source-path",
+                source_rel,
+                "--test-path",
+                test_rel,
+                "--structural-evidence",
+                f"repetition 1 fresh discovery resolved the {task_shape} source/test task pair",
+                "--focused-test-green",
+                "--json",
+            ]
+        )
+        recall_active_result = run(["memory", "--active", "--task-id", str(shape["task_id"]), "--json"])
 
-    repetition_1_steps = [
-        "inspect temp workspace source tree",
-        "search source for repeated-task-recall anchor",
-        "search tests for repeated-task-recall anchor",
-        "resolve bounded source/test pair from fresh discovery",
-    ]
-    repetition_2_steps = [
-        "load active typed memory",
-        "resolve source/test pair from durable recall index",
-    ]
-    repetition_1 = {
-        "repetition": 1,
-        "task_shape": "bounded_source_test_pair",
-        "durable_recall_used": False,
-        "recorded_deliberation_search_steps": repetition_1_steps,
-        "deliberation_search_step_count": len(repetition_1_steps),
-        "resolved_source_path": source_rel,
-        "resolved_test_path": test_rel,
-        "reviewer_rescue_edits": 0,
-        "wrote_durable_evidence": {
-            "memory_kind": typed_entry.get("memory_kind"),
-            "memory_id": typed_entry.get("id"),
-            "source_path": typed_entry.get("source_path"),
-            "test_path": typed_entry.get("test_path"),
-        },
-    }
-    repetition_2 = {
-        "repetition": 2,
-        "task_shape": "bounded_source_test_pair",
-        "durable_recall_used": bool(recalled_file_pair_objects),
-        "recorded_deliberation_search_steps": repetition_2_steps,
-        "deliberation_search_step_count": len(repetition_2_steps),
-        "resolved_source_path": source_rel,
-        "resolved_test_path": test_rel,
-        "reviewer_rescue_edits": 0,
-        "used_durable_memory_id": typed_entry.get("id"),
-    }
-    recall_shortened_deliberation = (
-        repetition_2["durable_recall_used"]
-        and repetition_2["deliberation_search_step_count"] < repetition_1["deliberation_search_step_count"]
-    )
+        fresh_active_data = _json_stdout(fresh_active_result)
+        typed_entry = (_json_stdout(typed_memory_result).get("entry") or {})
+        recall_active_data = _json_stdout(recall_active_result)
+        fresh_items = (fresh_active_data.get("active_memory") or {}).get("items") or []
+        recall_items = (recall_active_data.get("active_memory") or {}).get("items") or []
+        fresh_relevant_objects = [item for item in fresh_items if object_contains(item, memory_name)]
+        recalled_file_pair_objects = [
+            item
+            for item in recall_items
+            if object_contains(item, memory_name)
+            and object_contains(item, source_rel)
+            and object_contains(item, test_rel)
+            and not object_contains(item, "precondition_miss")
+        ]
+
+        repetition_1_steps = [
+            "inspect temp workspace source tree",
+            f"search source for {task_shape} anchor",
+            f"search tests for {task_shape} anchor",
+            "resolve bounded source/test pair from fresh discovery",
+        ]
+        repetition_2_steps = [
+            "load active typed memory",
+            "resolve source/test pair from durable recall index",
+        ]
+        repetition_1 = {
+            "repetition": 1,
+            "task_shape": task_shape,
+            "durable_recall_used": False,
+            "recorded_deliberation_search_steps": repetition_1_steps,
+            "deliberation_search_step_count": len(repetition_1_steps),
+            "resolved_source_path": source_rel,
+            "resolved_test_path": test_rel,
+            "reviewer_rescue_edits": 0,
+            "wrote_durable_evidence": {
+                "memory_kind": typed_entry.get("memory_kind"),
+                "memory_id": typed_entry.get("id"),
+                "source_path": typed_entry.get("source_path"),
+                "test_path": typed_entry.get("test_path"),
+            },
+        }
+        repetition_2 = {
+            "repetition": 2,
+            "task_shape": task_shape,
+            "durable_recall_used": bool(recalled_file_pair_objects),
+            "recorded_deliberation_search_steps": repetition_2_steps,
+            "deliberation_search_step_count": len(repetition_2_steps),
+            "resolved_source_path": source_rel,
+            "resolved_test_path": test_rel,
+            "reviewer_rescue_edits": 0,
+            "used_durable_memory_id": typed_entry.get("id"),
+        }
+        recall_shortened_deliberation = (
+            repetition_2["durable_recall_used"]
+            and repetition_2["deliberation_search_step_count"] < repetition_1["deliberation_search_step_count"]
+        )
+        shape_traces.append(
+            {
+                "task_shape": task_shape,
+                "repetitions": [repetition_1, repetition_2],
+                "durable_index_evidence": {
+                    "kind": typed_entry.get("memory_kind"),
+                    "memory_id": typed_entry.get("id"),
+                    "source_path": typed_entry.get("source_path"),
+                    "test_path": typed_entry.get("test_path"),
+                },
+                "fresh_relevant_count": len(fresh_relevant_objects),
+                "fresh_exit_code": fresh_active_result.get("exit_code"),
+                "typed_memory_exit_code": typed_memory_result.get("exit_code"),
+                "recall_active_exit_code": recall_active_result.get("exit_code"),
+                "recalled_file_pair_count": len(recalled_file_pair_objects),
+                "recall_shortened_deliberation": recall_shortened_deliberation,
+                "reviewer_rescue_edits": repetition_2["reviewer_rescue_edits"],
+            }
+        )
+
+    primary_shape = shape_traces[0]
+    all_shapes_recall_shortened = all(item["recall_shortened_deliberation"] for item in shape_traces)
+    max_reviewer_rescue_edits = max(item["reviewer_rescue_edits"] for item in shape_traces)
     trace = {
         "scenario": "m6_9-repeated-task-recall",
-        "task_shape": "bounded_source_test_pair",
-        "repetitions": [repetition_1, repetition_2],
-        "durable_index_evidence": {
-            "kind": typed_entry.get("memory_kind"),
-            "memory_id": typed_entry.get("id"),
-            "source_path": typed_entry.get("source_path"),
-            "test_path": typed_entry.get("test_path"),
-        },
-        "recall_shortened_deliberation": recall_shortened_deliberation,
-        "reviewer_rescue_edits": repetition_2["reviewer_rescue_edits"],
+        "task_shape": primary_shape["task_shape"],
+        "task_shapes": [item["task_shape"] for item in shape_traces],
+        "shape_count": len(shape_traces),
+        "shapes": shape_traces,
+        "repetitions": primary_shape["repetitions"],
+        "durable_index_evidence": primary_shape["durable_index_evidence"],
+        "recall_shortened_deliberation": all_shapes_recall_shortened,
+        "reviewer_rescue_edits": max_reviewer_rescue_edits,
     }
 
     _scenario_check(
         checks,
         "m6_9_repeated_task_recall_first_repetition_starts_without_durable_memory",
-        source_path.exists()
-        and test_path.exists()
-        and fresh_active_result.get("exit_code") == 0
-        and not fresh_relevant_objects,
-        observed={
-            "source_exists": source_path.exists(),
-            "test_exists": test_path.exists(),
-            "fresh_relevant_count": len(fresh_relevant_objects),
-            "fresh_exit_code": fresh_active_result.get("exit_code"),
-        },
+        all(
+            (workspace / shape["source_rel"]).exists()
+            and (workspace / shape["test_rel"]).exists()
+            and shape_trace["fresh_exit_code"] == 0
+            and shape_trace["fresh_relevant_count"] == 0
+            for shape, shape_trace in zip(shapes, shape_traces)
+        ),
+        observed=[
+            {
+                "task_shape": shape_trace["task_shape"],
+                "source_exists": (workspace / shape["source_rel"]).exists(),
+                "test_exists": (workspace / shape["test_rel"]).exists(),
+                "fresh_relevant_count": shape_trace["fresh_relevant_count"],
+                "fresh_exit_code": shape_trace["fresh_exit_code"],
+            }
+            for shape, shape_trace in zip(shapes, shape_traces)
+        ],
         expected="repetition 1 has the bounded task files but no durable repeated-task file-pair memory yet",
     )
     _scenario_check(
         checks,
         "m6_9_repeated_task_recall_first_repetition_writes_typed_memory_index_evidence",
-        typed_memory_result.get("exit_code") == 0
-        and typed_entry.get("memory_kind") == "file-pair"
-        and typed_entry.get("source_path") == source_rel
-        and typed_entry.get("test_path") == test_rel,
-        observed={"exit_code": typed_memory_result.get("exit_code"), "entry": typed_entry},
+        all(
+            shape_trace["typed_memory_exit_code"] == 0
+            and shape_trace["durable_index_evidence"]["kind"] == "file-pair"
+            and shape_trace["durable_index_evidence"]["source_path"] == shape["source_rel"]
+            and shape_trace["durable_index_evidence"]["test_path"] == shape["test_rel"]
+            for shape, shape_trace in zip(shapes, shape_traces)
+        ),
+        observed=[
+            {
+                "task_shape": shape_trace["task_shape"],
+                "exit_code": shape_trace["typed_memory_exit_code"],
+                "evidence": shape_trace["durable_index_evidence"],
+            }
+            for shape_trace in shape_traces
+        ],
         expected="repetition 1 persists typed file-pair memory usable as durable recall/index evidence",
     )
     _scenario_check(
         checks,
         "m6_9_repeated_task_recall_second_repetition_uses_durable_recall_index",
-        recall_active_result.get("exit_code") == 0 and bool(recalled_file_pair_objects),
+        all(
+            shape_trace["recall_active_exit_code"] == 0 and shape_trace["recalled_file_pair_count"] > 0
+            for shape_trace in shape_traces
+        ),
         observed=[
             {
-                "name": item.get("name"),
-                "memory_kind": item.get("memory_kind"),
-                "reason": item.get("reason"),
-                "source_path": item.get("source_path"),
-                "test_path": item.get("test_path"),
+                "task_shape": shape_trace["task_shape"],
+                "recall_active_exit_code": shape_trace["recall_active_exit_code"],
+                "recalled_file_pair_count": shape_trace["recalled_file_pair_count"],
+                "evidence": shape_trace["durable_index_evidence"],
             }
-            for item in recalled_file_pair_objects
+            for shape_trace in shape_traces
         ],
         expected="repetition 2 resolves the same source/test pair from durable typed recall/index evidence",
     )
     _scenario_check(
         checks,
         "m6_9_repeated_task_recall_second_repetition_shortens_deliberation_without_rescue",
-        recall_shortened_deliberation and repetition_2["reviewer_rescue_edits"] == 0,
-        observed={
-            "repetition_1_step_count": repetition_1["deliberation_search_step_count"],
-            "repetition_2_step_count": repetition_2["deliberation_search_step_count"],
-            "reviewer_rescue_edits": repetition_2["reviewer_rescue_edits"],
-            "recall_shortened_deliberation": recall_shortened_deliberation,
-        },
+        all_shapes_recall_shortened and max_reviewer_rescue_edits == 0,
+        observed=[
+            {
+                "task_shape": shape_trace["task_shape"],
+                "repetition_1_step_count": shape_trace["repetitions"][0]["deliberation_search_step_count"],
+                "repetition_2_step_count": shape_trace["repetitions"][1]["deliberation_search_step_count"],
+                "reviewer_rescue_edits": shape_trace["reviewer_rescue_edits"],
+                "recall_shortened_deliberation": shape_trace["recall_shortened_deliberation"],
+            }
+            for shape_trace in shape_traces
+        ],
         expected="durable recall makes repetition 2 use fewer deliberation/search steps with no reviewer rescue edits",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_repeated_task_recall_covers_two_task_shapes",
+        trace["shape_count"] >= 2
+        and {"bounded_source_test_pair", "bounded_symbol_index_pair"}.issubset(set(trace["task_shapes"])),
+        observed={"shape_count": trace["shape_count"], "task_shapes": trace["task_shapes"]},
+        expected="the repeated-task proof matrix covers at least two deterministic task shapes",
     )
     _scenario_check(
         checks,
@@ -2719,8 +2808,12 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
         trace["scenario"] == "m6_9-repeated-task-recall"
         and trace["recall_shortened_deliberation"] is True
         and trace["reviewer_rescue_edits"] == 0
-        and trace["durable_index_evidence"]["source_path"] == source_rel
-        and trace["durable_index_evidence"]["test_path"] == test_rel,
+        and trace["shape_count"] == len(shapes)
+        and all(
+            shape_trace["durable_index_evidence"]["source_path"] == shape["source_rel"]
+            and shape_trace["durable_index_evidence"]["test_path"] == shape["test_rel"]
+            for shape, shape_trace in zip(shapes, shape_traces)
+        ),
         observed=trace,
         expected="trace artifact deterministically records both repetitions and recall_shortened_deliberation=true",
     )
@@ -2728,14 +2821,20 @@ def run_m6_9_repeated_task_recall_scenario(workspace, env=None):
     report = _scenario_report("m6_9-repeated-task-recall", workspace, commands, checks)
     report["artifacts"] = {
         "trace": trace,
-        "recall_shortened_deliberation": recall_shortened_deliberation,
-        "reviewer_rescue_edits": repetition_2["reviewer_rescue_edits"],
-        "repetition_1_deliberation_search_step_count": repetition_1["deliberation_search_step_count"],
-        "repetition_2_deliberation_search_step_count": repetition_2["deliberation_search_step_count"],
-        "resolved_source_path": source_rel,
-        "resolved_test_path": test_rel,
-        "durable_file_pair_id": typed_entry.get("id"),
-        "recalled_file_pair_count": len(recalled_file_pair_objects),
+        "shape_count": len(shape_traces),
+        "task_shapes": [item["task_shape"] for item in shape_traces],
+        "recall_shortened_deliberation": all_shapes_recall_shortened,
+        "reviewer_rescue_edits": max_reviewer_rescue_edits,
+        "repetition_1_deliberation_search_step_count": primary_shape["repetitions"][0][
+            "deliberation_search_step_count"
+        ],
+        "repetition_2_deliberation_search_step_count": primary_shape["repetitions"][1][
+            "deliberation_search_step_count"
+        ],
+        "resolved_source_path": primary_shape["durable_index_evidence"]["source_path"],
+        "resolved_test_path": primary_shape["durable_index_evidence"]["test_path"],
+        "durable_file_pair_id": primary_shape["durable_index_evidence"]["memory_id"],
+        "recalled_file_pair_count": sum(item["recalled_file_pair_count"] for item in shape_traces),
     }
     return report
 

@@ -745,6 +745,65 @@ Why it matters:
   choose the next hardening slice from recurrence data instead of scattered
   review notes.
 
+## Milestone 6.13: High-Effort Deliberation Lane
+
+Add a bounded escalation lane for hard supervised work-loop blockers without
+making high-effort reasoning the default path.
+
+Target:
+
+- additive `WorkTodo.lane` state with `tiny` as the backward-compatible
+  default
+- a small lane registry for `tiny`, `mirror`, and `deliberation`, where only
+  the existing tiny path remains write-capable in v0
+- additive lane metadata in replay bundles, with legacy bundles interpreted as
+  `lane=tiny`
+- a mirror lane that proves non-authoritative lane identity and lane-scoped
+  bundles without changing tiny-lane behavior
+- explicit deliberation model binding with requested/effective backend, model,
+  effort, timeout, schema contract, and budget telemetry
+- blocker-code escalation rules that refresh stale state instead of escalating,
+  block policy-limit cases, and allow only eligible semantic blockers or
+  reviewer-commanded attempts under budget
+- fallback to tiny on missing binding, budget exhaustion, timeout, refusal,
+  non-schema output, validation failure, or reviewer rejection
+- reviewer-approved conversion of useful deliberation output into M6.9-style
+  reasoning traces, never raw transcript storage
+- design spec:
+  `docs/DESIGN_2026-04-25_M6_13_DELIBERATION_LANE.md`
+
+Done when:
+
+- old sessions with no lane normalize to `tiny`, existing active-todo fields
+  keep their meanings, and tiny remains the default lane
+- existing M6.11 replay bundles parse without migration, new lane metadata is
+  additive, and non-tiny lane bundles can use a lane-scoped layout without
+  breaking the legacy resolver
+- Phase 1 proves tiny-lane behavior is unchanged: prompt, effort override,
+  compiler path, and fallback semantics stay authoritative, and mirror-lane
+  failure cannot fail a tiny run
+- the mirror lane records a non-authoritative bundle that a reader can
+  reconstruct separately from the authoritative tiny result
+- at least one reviewer-command deliberation attempt and one automatic eligible
+  blocker attempt run under explicit model binding and budget accounting
+- at least one ineligible blocker is blocked from escalation, and at least one
+  deliberation failure falls back to tiny without breaking the work loop
+- cost events record budget checks, reservations, spend or estimates, blocks,
+  and fallback
+- one full internalization cycle is proven: deliberation solves or materially
+  advances a hard task, reviewer approval writes a `source_lane=deliberation`
+  reasoning trace, and a later same-shape task retrieves that trace through
+  M6.9 ranked recall and is solved by tiny without re-invoking deliberation
+- M6.9, M6.11, and M6.12 close gates remain unchanged
+
+Why it matters:
+
+- M6.9 gives mew durable memory and M6.11 stabilizes the drafting loop, but
+  some blockers are genuinely too hard for a tiny lane. M6.13 gives mew a
+  controlled way to ask for expensive reasoning, keep budgets and fallback
+  visible, and then internalize the useful result so later tiny-lane work gets
+  smarter instead of merely calling a stronger model again.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only

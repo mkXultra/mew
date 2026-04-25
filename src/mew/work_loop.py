@@ -2570,6 +2570,8 @@ def _write_ready_failed_patch_repair_for_targets(resume, target_paths):
         ][:4],
         "repair_instruction": str(repair.get("repair_instruction") or "").strip(),
     }
+    if not any(str((item or {}).get("new_snippet") or "").strip() for item in result["proposal_snippets"]):
+        return {}
     return {key: value for key, value in result.items() if value not in (None, "", [])}
 
 
@@ -3955,6 +3957,86 @@ def _work_write_ready_guidance_forbids_refresh(context, resume):
             "don't read again",
         )
     )
+
+
+def _work_write_ready_guidance_requests_refresh_before_draft(context, resume):
+    text_parts = []
+    guidance = str((context or {}).get("guidance") or "").strip()
+    if guidance:
+        text_parts.append(guidance)
+    pending_steer = (resume or {}).get("pending_steer")
+    if isinstance(pending_steer, dict):
+        steer_text = str(pending_steer.get("text") or "").strip()
+        if steer_text:
+            text_parts.append(steer_text)
+    text = "\n".join(text_parts).casefold()
+    if not text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "read-only",
+            "read only",
+            "do not draft",
+            "don't draft",
+            "no draft",
+            "just cache",
+            "before any patch attempt",
+            "before any patch",
+        )
+    )
+
+
+def _work_write_ready_explicit_refresh_before_tiny_draft(context, write_ready_fast_path):
+    fast_path = write_ready_fast_path if isinstance(write_ready_fast_path, dict) else {}
+    if not fast_path.get("active"):
+        return {}
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    if not _work_write_ready_guidance_requests_refresh_before_draft(context, resume):
+        return {}
+    target_paths = _write_ready_tiny_draft_observation_target_paths(resume)
+    if not target_paths:
+        active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+        source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+        target_paths = _write_ready_paired_target_paths(source.get("target_paths") or [])
+    if not target_paths:
+        target_paths = _write_ready_paired_target_paths(
+            [item.get("path") for item in (fast_path.get("recent_windows") or fast_path.get("cached_windows") or [])]
+        )
+    if not target_paths:
+        return {}
+    refresh_actions = _work_write_ready_explicit_refresh_read_actions(context, target_paths)
+    if not refresh_actions:
+        return {}
+    action = {
+        "type": "batch",
+        "tools": refresh_actions,
+        "reason": "write-ready active fast path: refresh explicitly requested windows before tiny draft",
+    }
+    decision_plan = {
+        "summary": action["reason"],
+        "working_memory": {
+            "hypothesis": "The current guidance asks to refresh exact cached windows before drafting.",
+            "next_step": "Retry the paired dry-run draft after these exact windows are cached.",
+            "plan_items": [
+                "Refresh the explicitly requested exact windows.",
+                "Retry the paired tiny draft after the refreshed windows are available.",
+            ],
+            "target_paths": target_paths,
+            "last_verified_state": "Write-ready fast path was active, but refresh-before-draft guidance takes precedence.",
+        },
+    }
+    return {
+        "decision_plan": decision_plan,
+        "action_plan": {
+            "summary": action["reason"],
+            "action": action,
+            "act_mode": "deterministic",
+        },
+        "action": action,
+        "cached_windows_for_replay": fast_path.get("recent_windows") or fast_path.get("cached_windows") or [],
+    }
 
 
 def _work_write_ready_cached_window_incomplete_preflight_blocker(
@@ -5770,6 +5852,34 @@ def plan_work_model_turn(
             "decision_plan": preflight_block.get("decision_plan") or {},
             "action_plan": preflight_block.get("action_plan") or {},
             "action": preflight_block.get("action") or {"type": "wait", "reason": "preflight blocker"},
+            "context": context,
+            "model_metrics": model_metrics,
+            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+        }
+    explicit_refresh_before_draft = _work_write_ready_explicit_refresh_before_tiny_draft(
+        context,
+        write_ready_fast_path,
+    )
+    if explicit_refresh_before_draft:
+        model_metrics["think"] = {
+            "prompt_chars": 0,
+            "timeout_seconds": 0.0,
+            "elapsed_seconds": 0.0,
+        }
+        model_metrics["act"] = {
+            "prompt_chars": 0,
+            "elapsed_seconds": 0.0,
+            "mode": "deterministic",
+        }
+        model_metrics["total_model_seconds"] = 0.0
+        if pre_model_metrics_sink:
+            pre_model_metrics_sink(dict(model_metrics))
+        if progress:
+            progress(f"session #{session.get('id')}: explicit refresh before tiny draft")
+        return {
+            "decision_plan": explicit_refresh_before_draft.get("decision_plan") or {},
+            "action_plan": explicit_refresh_before_draft.get("action_plan") or {},
+            "action": explicit_refresh_before_draft.get("action") or {"type": "wait", "reason": "refresh unavailable"},
             "context": context,
             "model_metrics": model_metrics,
             "model_stream": {"phases": [], "chunks": 0, "chars": 0},
