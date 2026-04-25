@@ -27,7 +27,7 @@ not be resumed until the recorded resume condition fires.
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Paused at a clean proof boundary: Phase 1 substrate, 10 repeated-task shapes, comparator regression, reviewer-steering/failure-shield, and reasoning-trace recall exist, but drift/rehearsal proof should wait until mew-first implementation reliability improves. |
-| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0, Todo D1/D2, and structured rejection/frontier D1 are landed; current baseline remains 4/10 clean-or-practical against the 7/10 gate, and next focus is post-D1/D2 proof attempts. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0/D1, Todo D1/D2, and structured rejection/frontier D1 are landed; current baseline remains 4/10 clean-or-practical against the 7/10 gate, and next focus is post-D1/D2 proof attempts. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
@@ -2382,6 +2382,12 @@ Progress:
   Validation covered `uv run pytest -q tests/test_mew_first_calibration.py
   tests/test_metrics.py --no-testmon`, `./mew metrics --mew-first --json`,
   `./mew metrics --mew-first`, targeted ruff, and `git diff --check`.
+- Calibration D1 landed by widening `mew metrics --mew-first` from the original
+  M6.9 attempt section to the ordered M6.9 + M6.10 attempt sections. This lets
+  post-D1/D2 M6.10 mew-first attempts move the reliability gate instead of
+  remaining invisible behind the older M6.9 baseline. Validation covered
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon` and
+  targeted ruff.
 - Todo D1 landed as session-scoped `mew work <task-id> --todo-add`,
   `--todo-update`, and `--todo-list` controls backed by per-session
   `work_todos`, explicit statuses, duplicate-open-item guards, and a
@@ -3574,7 +3580,8 @@ The next long session should not drift into broad polish, open-ended
 infrastructure, or unattended autonomy. The acceptable near-term work is:
 
 - use Calibration D0 (`mew metrics --mew-first`) as the current economics
-  baseline: 4/10 clean-or-practical against the 7/10 M6.10 reliability gate;
+  baseline: 4/10 clean-or-practical against the 7/10 M6.10 reliability gate,
+  with Calibration D1 now allowing M6.10 attempts to update that window;
 - Todo D1/D2 are landed: session Todo is now editable with `mew work` and
   visible in `mew focus` for active work sessions;
 - structured rejection/frontier D1 is landed and should now be used to classify

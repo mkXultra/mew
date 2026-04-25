@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 
 DEFAULT_MILESTONE_STATUS_PATH = Path("ROADMAP_STATUS.md")
 SUCCESS_CLASSES = frozenset({"clean_mew_first", "practical_mew_first"})
+DEFAULT_ATTEMPT_SECTION_HEADINGS = ("### M6.9:", "### M6.10:")
 
 
 @dataclass(frozen=True)
@@ -36,14 +37,28 @@ class MewFirstAttempt:
         }
 
 
-def _milestone_section(text: str, heading: str = "### M6.9:") -> str:
+def _milestone_section(text: str, heading: str) -> str:
     start = text.find(heading)
     if start < 0:
-        return text
+        return ""
     next_heading = text.find("\n### ", start + len(heading))
     if next_heading < 0:
         return text[start:]
     return text[start:next_heading]
+
+
+def _milestone_sections(text: str, headings: Iterable[str] = DEFAULT_ATTEMPT_SECTION_HEADINGS) -> Iterable[str]:
+    found = []
+    for heading in headings:
+        start = text.find(heading)
+        if start >= 0:
+            found.append((start, _milestone_section(text, heading)))
+    if not found:
+        yield text
+        return
+    for _, section in sorted(found, key=lambda item: item[0]):
+        if section:
+            yield section
 
 
 def _bullet_blocks(text: str) -> Iterable[str]:
@@ -185,25 +200,25 @@ def _norm(text: str) -> str:
 
 
 def extract_mew_first_attempts(text: str, *, limit: int = 10) -> list[MewFirstAttempt]:
-    section = _milestone_section(text)
     attempts: list[MewFirstAttempt] = []
-    for block in _bullet_blocks(section):
-        task_id = _task_id(block)
-        if task_id is None or not _is_attempt_block(block):
-            continue
-        result_class = _result_class(block)
-        attempts.append(
-            MewFirstAttempt(
-                task_id=task_id,
-                result_class=result_class,
-                patch_owner=_patch_owner(result_class),
-                autonomy_credit=_autonomy_credit(result_class),
-                drift_class=_drift_class(block),
-                rejected_patch_family=_rejected_patch_family(block),
-                verifier_status=_verifier_status(block),
-                source_excerpt=_excerpt(block),
+    for section in _milestone_sections(text):
+        for block in _bullet_blocks(section):
+            task_id = _task_id(block)
+            if task_id is None or not _is_attempt_block(block):
+                continue
+            result_class = _result_class(block)
+            attempts.append(
+                MewFirstAttempt(
+                    task_id=task_id,
+                    result_class=result_class,
+                    patch_owner=_patch_owner(result_class),
+                    autonomy_credit=_autonomy_credit(result_class),
+                    drift_class=_drift_class(block),
+                    rejected_patch_family=_rejected_patch_family(block),
+                    verifier_status=_verifier_status(block),
+                    source_excerpt=_excerpt(block),
+                )
             )
-        )
     return attempts[-limit:]
 
 

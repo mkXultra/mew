@@ -92,6 +92,23 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
     assert "#599 supervisor_rescue" in text
 
 
+def test_extract_mew_first_attempts_includes_m6_10_attempts_after_m6_9() -> None:
+    text = (
+        M6_9_FIXTURE
+        + """
+- Task `#606` landed a post-D1/D2 M6.10 mew-first implementation slice.
+  The fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+"""
+    )
+
+    attempts = extract_mew_first_attempts(text, limit=10)
+
+    assert [attempt.task_id for attempt in attempts][-2:] == [602, 606]
+    assert attempts[-1].result_class == "clean_mew_first"
+    assert attempts[-1].patch_owner == "mew"
+
+
 def test_metrics_parser_accepts_mew_first_calibration_flags() -> None:
     args = build_parser().parse_args(["metrics", "--mew-first", "--source-file", "status.md", "--json"])
 
