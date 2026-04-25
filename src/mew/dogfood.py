@@ -13238,10 +13238,42 @@ def run_m6_9_drift_canary_scenario(workspace, env=None):
         item["iteration"] == index for index, item in enumerate(memory_entries, start=1)
     )
     novel_task_injection = {
-        "task_id": "novel-drift-canary-exploration",
+        "task_id": "novel-task-durable-memory-drift-canary-exploration",
+        "task_family": "m6_9_novel_task",
+        "durable_memory_proof_slice": "m6_9_drift_canary",
+        "scenario_choices_anchor": "m6_9-drift-canary",
+        "verifier_hint": "uv run pytest -q tests/test_dogfood.py -k 'm6_9_drift_canary or m6_9_novel_task or scenario_choices' --no-testmon",
+        "mew_first": True,
         "known_memory_matches": [],
+        "unknown_memory_match": True,
         "forced_exploration": True,
+        "forced_source_read": True,
+        "forced_test_read": True,
         "silent_memory_reliance": False,
+        "no_silent_memory_reliance": True,
+        "reviewer_visible_exploration_reason": "reviewer-visible novel-task durable-memory drift-canary found unknown-memory, so mew-first exploration forced source and test reads instead of silent memory reliance",
+        "exploration_decision_matrix": [
+            {
+                "decision": "unknown-memory match",
+                "observed": True,
+                "action": "do not reuse durable memory as an answer",
+            },
+            {
+                "decision": "forced source read",
+                "observed": True,
+                "action": "inspect src/mew/dogfood.py before drafting",
+            },
+            {
+                "decision": "forced test read",
+                "observed": True,
+                "action": "inspect tests/test_dogfood.py before drafting",
+            },
+            {
+                "decision": "no silent memory reliance",
+                "observed": True,
+                "action": "record an explicit reviewer-visible exploration reason",
+            },
+        ],
         "exploration_steps": [
             "inspect_current_task",
             "read_current_source_anchor",
@@ -13289,10 +13321,21 @@ def run_m6_9_drift_canary_scenario(workspace, env=None):
         checks,
         "m6_9_drift_canary_novel_task_forces_exploration",
         loaded_novel_task.get("forced_exploration") is True
+        and loaded_novel_task.get("forced_source_read") is True
+        and loaded_novel_task.get("forced_test_read") is True
         and loaded_novel_task.get("silent_memory_reliance") is False
-        and not loaded_novel_task.get("known_memory_matches"),
+        and loaded_novel_task.get("no_silent_memory_reliance") is True
+        and loaded_novel_task.get("unknown_memory_match") is True
+        and not loaded_novel_task.get("known_memory_matches")
+        and "reviewer-visible" in (loaded_novel_task.get("reviewer_visible_exploration_reason") or ""),
         observed=loaded_novel_task,
-        expected={"forced_exploration": True, "silent_memory_reliance": False},
+        expected={
+            "unknown_memory_match": True,
+            "forced_source_read": True,
+            "forced_test_read": True,
+            "silent_memory_reliance": False,
+            "reviewer_visible_exploration_reason": "reviewer-visible",
+        },
     )
     _scenario_check(
         checks,

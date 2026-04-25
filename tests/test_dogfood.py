@@ -791,8 +791,23 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(artifacts["drift_canary_green_count"], 5)
             self.assertTrue(artifacts["memory_accumulated"])
             self.assertTrue(novel_task["forced_exploration"])
+            self.assertTrue(novel_task["unknown_memory_match"])
+            self.assertTrue(novel_task["forced_source_read"])
+            self.assertTrue(novel_task["forced_test_read"])
             self.assertFalse(novel_task["silent_memory_reliance"])
+            self.assertTrue(novel_task["no_silent_memory_reliance"])
             self.assertEqual(novel_task["known_memory_matches"], [])
+            self.assertIn("novel-task", novel_task["reviewer_visible_exploration_reason"])
+            self.assertIn("reviewer-visible", novel_task["reviewer_visible_exploration_reason"])
+            self.assertEqual(
+                [item["decision"] for item in novel_task["exploration_decision_matrix"]],
+                [
+                    "unknown-memory match",
+                    "forced source read",
+                    "forced test read",
+                    "no silent memory reliance",
+                ],
+            )
             self.assertEqual(trace["iterations_total"], 5)
             self.assertEqual(trace["drift_canary_green_count"], 5)
             self.assertTrue(trace["memory_accumulated"])
@@ -800,7 +815,14 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(trace_json["drift_canary_green_count"], 5)
             self.assertTrue(trace_json["memory_accumulated"])
             self.assertTrue(trace_json["novel_task_injection"]["forced_exploration"])
+            self.assertTrue(trace_json["novel_task_injection"]["forced_source_read"])
+            self.assertTrue(trace_json["novel_task_injection"]["forced_test_read"])
             self.assertFalse(trace_json["novel_task_injection"]["silent_memory_reliance"])
+            self.assertTrue(trace_json["novel_task_injection"]["no_silent_memory_reliance"])
+            self.assertIn(
+                "reviewer-visible",
+                trace_json["novel_task_injection"]["reviewer_visible_exploration_reason"],
+            )
             self.assertEqual(
                 [item["memory_item_count"] for item in trace_json["iterations"]],
                 [1, 2, 3, 4, 5],
