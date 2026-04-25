@@ -80,6 +80,7 @@ DOGFOOD_SCENARIOS = (
     "m6_11-drafting-recovery",
     "m6_11-phase4-regression",
     "m6_9-memory-taxonomy",
+    "m6_9-reviewer-steering-reuse",
     "m6_9-active-memory-recall",
     "m6_9-repeated-task-recall",
     "m6_9-phase1-regression",
@@ -2232,6 +2233,173 @@ def run_m6_9_memory_taxonomy_scenario(workspace, env=None):
         "rejected_cases": ["reviewer-steering-missing-why", "reasoning-trace-schema-only"],
         "resolved_source_pair": resolved_source,
         "resolved_test_pair": resolved_test,
+    }
+    return report
+
+
+def run_m6_9_reviewer_steering_reuse_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    state_dir = workspace / STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state = default_state()
+    state["tasks"].append(
+        {
+            "id": 6910,
+            "title": "M6.9 reviewer steering reuse dogfood",
+            "description": (
+                "Add a new reviewer-steering durable-rule dogfood scenario with source/test "
+                "registration, dispatch, and a paired test."
+            ),
+            "status": "todo",
+            "priority": "normal",
+            "kind": "coding",
+            "notes": "Later iteration should recall reviewer steering before drafting.",
+            "created_at": "now",
+            "updated_at": "now",
+        }
+    )
+    write_json_file(workspace / STATE_FILE, state)
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    steering_result = run(
+        [
+            "memory",
+            "--add",
+            (
+                "For M6.9 dogfood scenario work, do not polish an existing scenario when the task "
+                "asks for a new durable-rule proof; require DOGFOOD_SCENARIOS registration, "
+                "run_dogfood_scenario dispatch, and a paired tests/test_dogfood.py assertion."
+            ),
+            "--type",
+            "project",
+            "--kind",
+            "reviewer-steering",
+            "--scope",
+            "private",
+            "--name",
+            "M6.9 reviewer steering reuse rule",
+            "--description",
+            "Reviewer correction from a past iteration should fire before a later off-scope draft.",
+            "--approved",
+            "--why",
+            "a prior reviewer rejection caught an off-scope symbol-index-only dogfood patch",
+            "--how-to-apply",
+            "if a later M6.9 dogfood task asks for a new scenario, block patches that only tweak an existing scenario",
+            "--json",
+        ]
+    )
+    active_result = run(["memory", "--active", "--task-id", "6910", "--json"])
+
+    steering_entry = _json_stdout(steering_result).get("entry") or {}
+    active_data = _json_stdout(active_result)
+    active_items = (active_data.get("active_memory") or {}).get("items") or []
+    reviewer_rules = [
+        item
+        for item in active_items
+        if item.get("memory_kind") == "reviewer-steering"
+        and item.get("name") == "M6.9 reviewer steering reuse rule"
+    ]
+    proposed_patch = {
+        "kind": "existing_scenario_artifact_tweak",
+        "target": "m6_9-symbol-index-hit",
+        "adds_new_scenario": False,
+        "updates_scenario_registry": False,
+        "updates_dispatch": False,
+        "would_have_needed_rescue_edit": True,
+    }
+    durable_rule_fired = bool(reviewer_rules)
+    blocked_pre_implementation = (
+        durable_rule_fired
+        and not proposed_patch["adds_new_scenario"]
+        and not proposed_patch["updates_scenario_registry"]
+        and not proposed_patch["updates_dispatch"]
+    )
+    simulated_rescue_edit_prevented = blocked_pre_implementation and proposed_patch["would_have_needed_rescue_edit"]
+    trace_rel = str(Path(STATE_DIR) / "durable" / "m6_9-reviewer-steering-reuse-trace.json")
+    trace_path = workspace / trace_rel
+    trace = {
+        "schema_version": 1,
+        "scenario": "m6_9-reviewer-steering-reuse",
+        "memory_kind": "reviewer-steering",
+        "rule_id": steering_entry.get("id"),
+        "durable_rule_fired": durable_rule_fired,
+        "reviewer_steering_rule_count": len(reviewer_rules),
+        "blocked_pre_implementation": blocked_pre_implementation,
+        "simulated_rescue_edit_prevented": simulated_rescue_edit_prevented,
+        "blocked_patch_kind": proposed_patch["kind"],
+    }
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_file(trace_path, trace)
+    trace_file_data = json.loads(trace_path.read_text(encoding="utf-8"))
+
+    _scenario_check(
+        checks,
+        "m6_9_reviewer_steering_reuse_writes_approved_rule",
+        steering_result.get("exit_code") == 0
+        and steering_entry.get("memory_kind") == "reviewer-steering"
+        and steering_entry.get("approved") is True
+        and bool(steering_entry.get("why"))
+        and bool(steering_entry.get("how_to_apply")),
+        observed={"exit_code": steering_result.get("exit_code"), "entry": steering_entry},
+        expected="approved reviewer-steering memory is persisted with durable rule evidence",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_reviewer_steering_reuse_active_recall_finds_rule",
+        active_result.get("exit_code") == 0 and bool(reviewer_rules),
+        observed=[
+            {
+                "name": item.get("name"),
+                "memory_kind": item.get("memory_kind"),
+                "matched_terms": item.get("matched_terms"),
+                "reason": item.get("reason"),
+            }
+            for item in reviewer_rules
+        ],
+        expected="later coding task recalls the approved reviewer-steering rule",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_reviewer_steering_reuse_blocks_off_scope_patch",
+        blocked_pre_implementation,
+        observed={"proposed_patch": proposed_patch, "durable_rule_fired": durable_rule_fired},
+        expected="recalled reviewer-steering rule blocks an existing-scenario tweak before implementation",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_reviewer_steering_reuse_prevents_simulated_rescue_edit",
+        simulated_rescue_edit_prevented,
+        observed={
+            "blocked_pre_implementation": blocked_pre_implementation,
+            "would_have_needed_rescue_edit": proposed_patch["would_have_needed_rescue_edit"],
+        },
+        expected="the durable rule would have prevented a reviewer rescue edit",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_reviewer_steering_reuse_writes_deterministic_trace",
+        trace_file_data == trace
+        and trace_file_data.get("durable_rule_fired") is True
+        and trace_file_data.get("simulated_rescue_edit_prevented") is True,
+        observed={"trace_path": trace_rel, "trace": trace_file_data},
+        expected="deterministic trace artifact records rule firing and rescued-edit prevention",
+    )
+
+    report = _scenario_report("m6_9-reviewer-steering-reuse", workspace, commands, checks)
+    report["artifacts"] = {
+        "durable_rule_fired": durable_rule_fired,
+        "simulated_rescue_edit_prevented": simulated_rescue_edit_prevented,
+        "blocked_pre_implementation": blocked_pre_implementation,
+        "reviewer_steering_rule_count": len(reviewer_rules),
+        "recalled_rule_names": sorted(item.get("name") for item in reviewer_rules if item.get("name")),
+        "blocked_patch_kind": proposed_patch["kind"],
+        "trace_path": trace_rel,
+        "trace": trace,
     }
     return report
 
@@ -12675,6 +12843,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_11_phase4_regression_scenario(scenario_workspace, env=env))
         elif name == "m6_9-memory-taxonomy":
             reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-reviewer-steering-reuse":
+            reports.append(run_m6_9_reviewer_steering_reuse_scenario(scenario_workspace, env=env))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-repeated-task-recall":

@@ -26,7 +26,7 @@ not be resumed until the recorded resume condition fires.
 | 6.6. Coding Competence: Codex CLI Parity | `done` | Bootstrap, three comparator slots, and the frozen Codex CLI side-by-side batch all passed with `rescue_edits=0`; closure caveats stay recorded, but the gate is closed. |
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
-| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus eight post-M6.12 proof/report/substrate slices landed; repeated-task recall now covers the required 10 deterministic shapes and the Phase 1 comparator regression passes; broader M6.9 close gates remain open. |
+| 6.9. Durable Coding Intelligence | `in_progress` | Phase 1 substrate plus nine post-M6.12 proof/report/substrate slices landed; repeated-task recall covers the required 10 deterministic shapes, the Phase 1 comparator regression passes, and one reviewer-steering reuse proof fires as a durable rule; broader M6.9 close gates remain open. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
@@ -39,17 +39,18 @@ not be resumed until the recorded resume condition fires.
 
 ## Active Milestone Decision
 
-Last assessed: 2026-04-25 14:53 JST.
+Last assessed: 2026-04-25 16:57 JST.
 
 Active work: **M6.9 Durable Coding Intelligence** from the clean proof-slice
-boundary. M6.9 has landed its Phase 1 substrate and eight post-M6.12
+boundary. M6.9 has landed its Phase 1 substrate and nine post-M6.12
 proof/report/substrate slices, and the M6.11 residual hardening pause is now
 closed by `docs/M6_11_RESIDUAL_CLOSE_AUDIT_2026-04-25.md`. The next M6.9 push
 should use the closed review, executor-lifecycle, memory-explore, and
 prompt/cache surfaces to scale durable-coding proof without losing failure
 diagnosis. The small repeated-task runner/report slice is now present as a
-per-shape artifact, so the next proof work should add more deterministic task
-shapes rather than inventing a separate tracker.
+per-shape artifact and the 10-shape matrix is complete, so the next proof work
+should move to reviewer-steering and failure-shield durable-rule proofs rather
+than expanding shape count or inventing a separate tracker.
 M6.10 stays registered but inactive until the M6.9 proof push creates an
 accelerator-sized need. M6.13 is registered as the later deliberation-lane
 milestone, but it stays inactive until M6.9 ranked-recall/internalization
@@ -2246,11 +2247,27 @@ Progress / remaining proof:
   `uv run pytest -q tests/test_dogfood.py -k 'm6_9_phase1_regression or scenario_choices' --no-testmon`,
   `uv run python -m unittest tests.test_dogfood`, targeted ruff for
   `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
+- Task `#599` added the deterministic `m6_9-reviewer-steering-reuse` durable
+  rule scenario. The mew-first session drifted into a rejected
+  `m6_9-symbol-index-hit` artifact tweak instead of adding the requested new
+  reviewer-steering proof, so the supervisor rescued the bounded product
+  slice. The new scenario writes approved `reviewer-steering` memory, recalls
+  it through a later coding task, fires it as a durable rule, blocks an
+  existing-scenario artifact tweak before implementation, and records
+  `simulated_rescue_edit_prevented=true` in a deterministic trace. Count this
+  as the first reviewer-correction durable-rule proof toward the M6.9
+  correction-fire criterion, but as product progress rather than mew-first
+  autonomy credit. Validation covered
+  `./mew dogfood --scenario m6_9-reviewer-steering-reuse --json`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_9_reviewer_steering or scenario_choices' --no-testmon`,
+  `uv run python -m unittest tests.test_dogfood`, targeted ruff for
+  `src/mew/dogfood.py` plus `tests/test_dogfood.py`, and `git diff --check`.
 - M6.9 resumed on 2026-04-25 after the clean pause boundary served its
-  purpose. Phase 1 substrate and eight post-M6.12 proof/report/substrate slices
+  purpose. Phase 1 substrate and nine post-M6.12 proof/report/substrate slices
   have landed, and the repeated-task proof matrix has 10/10 deterministic shapes
   plus per-shape reporting. The Phase 1 comparator regression scenario now
-  passes against the frozen M6.6 comparator fixture. The
+  passes against the frozen M6.6 comparator fixture, and one reviewer-steering
+  durable-rule reuse proof now fires in a later simulated iteration. The
   now-closed M6.11 residual review, executor lifecycle, memory exploration, and
   prompt/cache boundaries should be used to classify the next mew-first proof
   slices.
@@ -2269,9 +2286,11 @@ Progress / remaining proof:
 
 Next proof step:
 
-- decide whether the deterministic Phase 1 comparator regression is enough for
-  the current M6.9 proof slice or whether a live fresh-CLI comparator rerun is
-  needed before moving to the next M6.9 Done-when criterion.
+- treat the deterministic Phase 1 comparator regression as enough for the
+  current proof slice and move to the next M6.9 Done-when criterion: add two
+  more reviewer-correction durable-rule proofs, or start the two-case
+  failure-shield pre-implementation block proof if reviewer-steering starts to
+  repeat the same shape.
 
 ### M6.10: Execution Accelerators
 

@@ -530,6 +530,37 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_active_memory_recall_keeps_relevant_file_pair", check_names)
             self.assertIn("m6_9_active_memory_recall_drops_stale_file_pair_with_precondition_miss", check_names)
 
+    def test_run_dogfood_m6_9_reviewer_steering_reuse_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_9-reviewer-steering-reuse",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_9-reviewer-steering-reuse")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_9-reviewer-steering-reuse: pass", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertTrue(scenario["artifacts"]["durable_rule_fired"])
+            self.assertTrue(scenario["artifacts"]["blocked_pre_implementation"])
+            self.assertTrue(scenario["artifacts"]["simulated_rescue_edit_prevented"])
+            self.assertGreaterEqual(scenario["artifacts"]["reviewer_steering_rule_count"], 1)
+            self.assertEqual(scenario["artifacts"]["blocked_patch_kind"], "existing_scenario_artifact_tweak")
+            self.assertIn("M6.9 reviewer steering reuse rule", scenario["artifacts"]["recalled_rule_names"])
+            self.assertTrue(scenario["artifacts"]["trace"]["durable_rule_fired"])
+            self.assertTrue(scenario["artifacts"]["trace"]["simulated_rescue_edit_prevented"])
+            self.assertIn("m6_9_reviewer_steering_reuse_active_recall_finds_rule", check_names)
+            self.assertIn("m6_9_reviewer_steering_reuse_blocks_off_scope_patch", check_names)
+            self.assertIn("m6_9_reviewer_steering_reuse_prevents_simulated_rescue_edit", check_names)
+            self.assertIn("m6_9_reviewer_steering_reuse_writes_deterministic_trace", check_names)
+
     def test_run_dogfood_m6_9_repeated_task_recall_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
