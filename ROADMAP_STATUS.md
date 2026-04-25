@@ -28,7 +28,7 @@ not be resumed until the recorded resume condition fires.
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Phase 1 substrate plus three post-M6.12 proof slices landed; intentionally paused before the 10-shape/comparator push while M6.11 residual hardening closes review/executor/memory-explore boundaries. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
-| 6.11. Loop Stabilization | `in_progress` | Core close-gate phases 0-4 remain closed; residual Phase 5/6, read-only MemoryExploreProvider, and prompt/cache boundary hardening have landed; residual close audit/next-focus selection remains. |
+| 6.11. Loop Stabilization | `in_progress` | Core close-gate phases 0-4 remain closed; residual Phase 5, Phase 6 lifecycle expansion, read-only MemoryExploreProvider, and prompt/cache boundary hardening have landed; residual close audit/next-focus selection remains. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
@@ -178,10 +178,11 @@ Current next action:
 9. Treat M6.12 as a closed baseline. Reopen only if the M6.12 report stops
    classifying the closed 127-row ledger, loses bundle provenance, mutates the
    canonical M6.11 ledger, or regresses the existing proof-summary strict modes.
-10. Treat M6.11 core phases 0-4 as a closed baseline, but make M6.11 residual
-   hardening the active focus until Phase 5 isolated review, Phase 6 executor
+10. Treat M6.11 core phases 0-4 as a closed baseline. The residual hardening
+   implementation slices for Phase 5 isolated review, Phase 6 executor
    lifecycle tightening, read-only `MemoryExploreProvider` v0, and
-   prompt/cache boundary observability are closed.
+   prompt/cache boundary observability have landed; the active focus is the
+   residual close audit and next-focus selection before broad M6.9 resumes.
 11. Calibration checkpoint evaluator for M6.11 phase2/3 is now implemented via
    `mew proof-summary --m6_11-phase2-calibration`, scanning
    `.mew/replays/work-loop` for only patch compiler and work-loop-model-failure
@@ -2141,12 +2142,14 @@ Residual active scope:
   `patch_draft_id`, review metadata, and preserved findings. Task `#577` is
   intentionally recorded as `product_progress_supervisor_rescue` because the
   mew-first attempt still timed out after the bounded substrate repair.
-- Phase 6 executor lifecycle tightening: `done` for the first terminal
-  yielded overlay. Failed model turns with an active `WorkTodo` now persist
-  `active_work_todo.executor_lifecycle.state=yielded` with the failed turn id,
-  turn status, reason, and replay bundle path while preserving the canonical
-  draft-domain `WorkTodo.status`. Remaining lifecycle expansion, if needed,
-  should add other terminal overlays without replacing `WorkTodo.status`.
+- Phase 6 executor lifecycle tightening: `done` through task `#583`.
+  `active_work_todo.executor_lifecycle` is now an overlay rather than the
+  canonical draft state: the recorder accepts `queued`, `executing`,
+  `completed`, `cancelled`, and `yielded`, while producer paths record
+  executing/completed/yielded/cancelled across non-batch tools, batch tools,
+  model/tool failure replay, explicit stops, user interrupts, and `mew repair`
+  stale-running-work recovery. The draft-domain `WorkTodo.status` and blocker
+  fields remain unchanged by lifecycle updates.
 - Provisional read-only `MemoryExploreProvider` v0: `done` in task `#580`.
   Memory-assisted exploration now feeds the same explore handoff keys as
   filesystem exploration (`target_paths`, `cached_window_refs`,
@@ -2192,6 +2195,16 @@ Evidence:
   --no-testmon` passed with 605 tests and 24 subtests, ruff passed for touched
   files, `git diff --check` was clean, and codex-ultra approved review session
   `019dc24c-11db-7951-a51a-63595df08087`.
+- residual Phase 6 expansion evidence: task `#583` completed the remaining
+  executor lifecycle overlays as a reviewed supervisor rescue after two
+  mew-first attempts timed out before a patch. Validation: `uv run pytest -q
+  tests/test_work_session.py -k 'executor_lifecycle or draft_failure_bundle'
+  --no-testmon` passed with 7 tests, full `uv run pytest -q
+  tests/test_work_session.py --no-testmon` passed with 613 tests and 24
+  subtests, `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
+  with 24 tests and 4 subtests, ruff passed for touched files, `git diff
+  --check` was clean, and codex-ultra approved review session
+  `019dc2b2-22d9-7cb0-b915-4d9f2b89df2b`.
 - residual MemoryExploreProvider evidence: task `#580` first exposed a narrow
   mew-first missing-target substrate blocker, fixed by `97433f0`; after retry,
   mew implemented the provider and repaired two codex-ultra privacy review

@@ -1503,7 +1503,34 @@ def mark_running_work_interrupted(state, current_time=None):
     for session in state.get("work_sessions", []):
         if not isinstance(session, dict):
             continue
-        repairs.extend(mark_work_session_running_interrupted(session, current_time=current_time))
+        session_repairs = mark_work_session_running_interrupted(session, current_time=current_time)
+        if session_repairs:
+            interrupted_call = next(
+                (
+                    call
+                    for call in reversed(session.get("tool_calls") or [])
+                    if isinstance(call, dict) and call.get("status") == "interrupted"
+                ),
+                {},
+            )
+            interrupted_turn = next(
+                (
+                    turn
+                    for turn in reversed(session.get("model_turns") or [])
+                    if isinstance(turn, dict) and turn.get("status") == "interrupted"
+                ),
+                {},
+            )
+            record_active_work_todo_executor_lifecycle(
+                state,
+                session.get("id"),
+                "cancelled",
+                model_turn=interrupted_turn,
+                tool_call=interrupted_call,
+                reason="Interrupted before the work executor completed.",
+                current_time=current_time,
+            )
+        repairs.extend(session_repairs)
     return repairs
 
 
@@ -5100,11 +5127,13 @@ def _normalize_active_work_todo(todo):
     return normalized
 
 
-def record_active_work_todo_executor_yield(
+def record_active_work_todo_executor_lifecycle(
     state,
     session_id,
+    lifecycle_state,
     *,
     model_turn=None,
+    tool_call=None,
     reason="",
     replay_bundle_path="",
     current_time=None,
@@ -5115,14 +5144,25 @@ def record_active_work_todo_executor_yield(
     todo = _normalize_active_work_todo(session.get("active_work_todo") or {})
     if not todo:
         return {}
+    lifecycle_state = str(lifecycle_state or "").strip()
+    if lifecycle_state not in WORK_EXECUTOR_LIFECYCLE_STATES:
+        return {}
     model_turn = model_turn if isinstance(model_turn, dict) else {}
+    tool_call = tool_call if isinstance(tool_call, dict) else {}
     current_time = current_time or now_iso()
     lifecycle = {
-        "state": "yielded",
-        "reason": reason or model_turn.get("error") or model_turn.get("summary") or "work model turn yielded",
+        "state": lifecycle_state,
+        "reason": (
+            reason
+            or tool_call.get("error")
+            or tool_call.get("summary")
+            or model_turn.get("error")
+            or model_turn.get("summary")
+            or f"work executor {lifecycle_state}"
+        ),
         "recorded_at": current_time,
         "model_turn_id": model_turn.get("id"),
-        "tool_call_id": model_turn.get("tool_call_id"),
+        "tool_call_id": tool_call.get("id") or model_turn.get("tool_call_id"),
         "model_turn_status": model_turn.get("status") or "",
         "replay_bundle_path": replay_bundle_path or model_turn.get("replay_bundle_path") or "",
     }
@@ -5131,6 +5171,26 @@ def record_active_work_todo_executor_yield(
     session["active_work_todo"] = _normalize_active_work_todo(todo)
     session["updated_at"] = current_time
     return session["active_work_todo"]
+
+
+def record_active_work_todo_executor_yield(
+    state,
+    session_id,
+    *,
+    model_turn=None,
+    reason="",
+    replay_bundle_path="",
+    current_time=None,
+):
+    return record_active_work_todo_executor_lifecycle(
+        state,
+        session_id,
+        "yielded",
+        model_turn=model_turn,
+        reason=reason,
+        replay_bundle_path=replay_bundle_path,
+        current_time=current_time,
+    )
 
 
 def _active_work_todo_frontier_key(todo):

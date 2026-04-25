@@ -248,6 +248,7 @@ from .work_session import (
     latest_work_verify_command,
     mark_running_work_interrupted,
     mark_work_tool_call_interrupted,
+    record_active_work_todo_executor_lifecycle,
     record_active_work_todo_executor_yield,
     APPROVAL_STATUS_INDETERMINATE,
     clip_tail,
@@ -2952,6 +2953,14 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                     )
                     if write_batch and not tool_call_ids:
                         _mark_batch_turn_replay_non_counted_on_stop(turn, stop_request)
+                    record_active_work_todo_executor_lifecycle(
+                        state,
+                        session_id,
+                        "cancelled",
+                        model_turn=turn,
+                        tool_call=tool_calls[-1] if tool_calls else {},
+                        reason=turn["summary"],
+                    )
                 save_state(state)
             else:
                 turn = None
@@ -3026,6 +3035,14 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                     tool_call = finish_repeated_work_tool_guard(state, session, action_type, parameters, repeat_guard)
                 else:
                     tool_call = start_work_tool_call(state, session, action_type, parameters)
+                    record_active_work_todo_executor_lifecycle(
+                        state,
+                        session_id,
+                        "executing",
+                        model_turn=turn,
+                        tool_call=tool_call,
+                        reason=f"executing batch work tool {action_type}",
+                    )
             tool_call_id = tool_call.get("id") if tool_call else None
             save_state(state)
         guard_error = ""
@@ -3061,6 +3078,14 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
+            record_active_work_todo_executor_lifecycle(
+                state,
+                session_id,
+                "completed" if tool_call.get("status") == "completed" and not error else "yielded",
+                model_turn=turn,
+                tool_call=tool_call,
+                reason=error or tool_call.get("summary") or f"batch work tool {tool_call.get('status')}",
+            )
             save_state(state)
         tool_calls.append(tool_call)
         result = tool_call.get("result") or {}
@@ -3098,6 +3123,14 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         )
         if turn is not None:
             turn["tool_call_ids"] = tool_call_ids
+        record_active_work_todo_executor_lifecycle(
+            state,
+            session_id,
+            "yielded" if error else "completed",
+            model_turn=turn or {},
+            tool_call=tool_calls[-1] if tool_calls else {},
+            reason=error or f"completed {len(tool_calls)} batch work tool(s)",
+        )
         save_state(state)
     return {
         "index": index,
@@ -3633,6 +3666,32 @@ def pause_work_session_after_user_interrupt(session_id, step_index):
             turn["summary"] = turn.get("summary") or "interrupted work model turn"
             turn["recovery_hint"] = recovery_hint
             repairs.append({"type": "interrupted_work_model_turn", "model_turn_id": turn.get("id")})
+        if repairs:
+            interrupted_call = next(
+                (
+                    call
+                    for call in reversed(session.get("tool_calls") or [])
+                    if isinstance(call, dict) and call.get("status") == "interrupted"
+                ),
+                {},
+            )
+            interrupted_turn = next(
+                (
+                    turn
+                    for turn in reversed(session.get("model_turns") or [])
+                    if isinstance(turn, dict) and turn.get("status") == "interrupted"
+                ),
+                {},
+            )
+            record_active_work_todo_executor_lifecycle(
+                state,
+                session_id,
+                "cancelled",
+                model_turn=interrupted_turn,
+                tool_call=interrupted_call,
+                reason="Interrupted by user during follow.",
+                current_time=current_time,
+            )
         add_work_session_note(session, note_text, source="system", current_time=current_time)
         session["last_user_interrupt"] = {
             "step": step_index,
@@ -4219,6 +4278,13 @@ def cmd_work_ai(args):
                         f"stopped before tool execution: {stop_request.get('reason') or ''}".strip(),
                         4000,
                     )
+                    record_active_work_todo_executor_lifecycle(
+                        state,
+                        session_id,
+                        "cancelled",
+                        model_turn=turn,
+                        reason=turn["summary"],
+                    )
                 save_state(state)
             elif steer_consumed or followup_consumed:
                 save_state(state)
@@ -4514,6 +4580,13 @@ def cmd_work_ai(args):
                         f"stopped before tool execution: {stop_request.get('reason') or ''}".strip(),
                         4000,
                     )
+                    record_active_work_todo_executor_lifecycle(
+                        state,
+                        session_id,
+                        "cancelled",
+                        model_turn=turn,
+                        reason=turn["summary"],
+                    )
                 save_state(state)
         if stop_request:
             report["steps"].append(
@@ -4691,6 +4764,14 @@ def cmd_work_ai(args):
                     tool_call_id=turn["tool_call_id"],
                     error=broad_read_guard.get("message") or "broad-read-after-search-miss guard blocked tool call",
                 )
+                record_active_work_todo_executor_lifecycle(
+                    state,
+                    session_id,
+                    "yielded",
+                    model_turn=turn,
+                    tool_call=tool_call,
+                    reason=broad_read_guard.get("message") or "broad-read-after-search-miss guard blocked tool call",
+                )
             else:
                 repeat_guard = work_tool_repeat_guard(session, action_type, parameters)
                 if repeat_guard:
@@ -4703,9 +4784,25 @@ def cmd_work_ai(args):
                         tool_call_id=turn["tool_call_id"],
                         error=repeat_guard.get("message") or "repeat-action guard blocked tool call",
                     )
+                    record_active_work_todo_executor_lifecycle(
+                        state,
+                        session_id,
+                        "yielded",
+                        model_turn=turn,
+                        tool_call=tool_call,
+                        reason=repeat_guard.get("message") or "repeat-action guard blocked tool call",
+                    )
                 else:
                     tool_call = start_work_tool_call(state, session, action_type, parameters)
                     turn["tool_call_id"] = tool_call.get("id")
+                    record_active_work_todo_executor_lifecycle(
+                        state,
+                        session_id,
+                        "executing",
+                        model_turn=turn,
+                        tool_call=tool_call,
+                        reason=f"executing work tool {action_type}",
+                    )
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id") if tool_call else None
             save_state(state)
@@ -4814,6 +4911,14 @@ def cmd_work_ai(args):
                     result=tool_call.get("result") or {},
                 )
             turn = finish_work_model_turn(state, session_id, turn_id, tool_call_id=tool_call_id, error=error)
+            record_active_work_todo_executor_lifecycle(
+                state,
+                session_id,
+                "completed" if tool_call.get("status") == "completed" and not error else "yielded",
+                model_turn=turn,
+                tool_call=tool_call,
+                reason=error or tool_call.get("summary") or f"work tool {tool_call.get('status')}",
+            )
             save_state(state)
         if progress:
             progress(f"step #{index}: tool #{tool_call_id} {tool_call.get('status')}")
