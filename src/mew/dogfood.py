@@ -81,6 +81,7 @@ DOGFOOD_SCENARIOS = (
     "m6_11-phase4-regression",
     "m6_9-memory-taxonomy",
     "m6_9-reviewer-steering-reuse",
+    "m6_9-failure-shield-reuse",
     "m6_9-active-memory-recall",
     "m6_9-repeated-task-recall",
     "m6_9-phase1-regression",
@@ -2398,6 +2399,191 @@ def run_m6_9_reviewer_steering_reuse_scenario(workspace, env=None):
         "reviewer_steering_rule_count": len(reviewer_rules),
         "recalled_rule_names": sorted(item.get("name") for item in reviewer_rules if item.get("name")),
         "blocked_patch_kind": proposed_patch["kind"],
+        "trace_path": trace_rel,
+        "trace": trace,
+    }
+    return report
+
+
+def run_m6_9_failure_shield_reuse_scenario(workspace, env=None):
+    commands = []
+    checks = []
+    state_dir = workspace / STATE_DIR
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state = default_state()
+    state["tasks"].append(
+        {
+            "id": 6911,
+            "title": "M6.9 failure shield reuse dogfood",
+            "description": (
+                "Use durable failure-shield memory to block reverted cached-window and generic-cleanup "
+                "approaches before implementation."
+            ),
+            "status": "todo",
+            "priority": "normal",
+            "kind": "coding",
+            "notes": "Later iteration should recall failure-shield rules before drafting.",
+            "created_at": "now",
+            "updated_at": "now",
+        }
+    )
+    write_json_file(workspace / STATE_FILE, state)
+
+    def run(args, timeout=30):
+        result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
+        commands.append(result)
+        return result
+
+    shield_cases = [
+        {
+            "name": "M6.9 stale cached-window shield",
+            "body": (
+                "Previously reverted approach: retry the same cached-window draft after an identical "
+                "cached_window_incomplete blocker instead of refreshing exact source/test windows."
+            ),
+            "symptom": "cached_window_incomplete repeats after the same source/test anchors",
+            "root_cause": "stale cached windows outrank newly refreshed exact windows",
+            "fix": "refresh exact source/test windows and preserve the task goal before drafting",
+            "stop_rule": "block repeat_cached_window_retry before implementation",
+            "patch_kind": "repeat_cached_window_retry",
+        },
+        {
+            "name": "M6.9 generic cleanup shield",
+            "body": (
+                "Previously reverted approach: answer a durable-memory proof task by changing generic "
+                "dogfood cleanup/default behavior instead of adding the requested proof scenario."
+            ),
+            "symptom": "draft touches generic dogfood cleanup while the task asks for a durable proof scenario",
+            "root_cause": "nearby cached windows overshadow the active milestone criterion",
+            "fix": "reject the generic cleanup and re-anchor on the requested M6.9 proof scenario",
+            "stop_rule": "block generic_cleanup_default_flag before implementation",
+            "patch_kind": "generic_cleanup_default_flag",
+        },
+    ]
+    shield_results = []
+    for case in shield_cases:
+        result = run(
+            [
+                "memory",
+                "--add",
+                case["body"],
+                "--type",
+                "project",
+                "--kind",
+                "failure-shield",
+                "--scope",
+                "private",
+                "--name",
+                case["name"],
+                "--description",
+                "Failure shield should block this reverted approach in a later iteration.",
+                "--approved",
+                "--symptom",
+                case["symptom"],
+                "--root-cause",
+                case["root_cause"],
+                "--fix",
+                case["fix"],
+                "--stop-rule",
+                case["stop_rule"],
+                "--json",
+            ]
+        )
+        shield_results.append((case, result, _json_stdout(result).get("entry") or {}))
+
+    active_result = run(["memory", "--active", "--task-id", "6911", "--json"])
+    active_data = _json_stdout(active_result)
+    active_items = (active_data.get("active_memory") or {}).get("items") or []
+    recalled_shields = [
+        item
+        for item in active_items
+        if item.get("memory_kind") == "failure-shield"
+        and item.get("name") in {case["name"] for case in shield_cases}
+    ]
+    recalled_by_name = {item.get("name"): item for item in recalled_shields}
+    proposed_patches = [
+        {
+            "kind": case["patch_kind"],
+            "target": "src/mew/dogfood.py",
+            "previously_reverted": True,
+            "would_apply_without_shield": True,
+        }
+        for case in shield_cases
+    ]
+    blocked_patch_kinds = []
+    for case in shield_cases:
+        shield = recalled_by_name.get(case["name"]) or {}
+        stop_rule = str(shield.get("stop_rule") or "")
+        if case["patch_kind"] in stop_rule:
+            blocked_patch_kinds.append(case["patch_kind"])
+    shield_blocked_count = len(blocked_patch_kinds)
+    pre_implementation_blocked = shield_blocked_count == len(proposed_patches)
+    trace_rel = str(Path(STATE_DIR) / "durable" / "m6_9-failure-shield-reuse-trace.json")
+    trace_path = workspace / trace_rel
+    trace = {
+        "schema_version": 1,
+        "scenario": "m6_9-failure-shield-reuse",
+        "memory_kind": "failure-shield",
+        "shield_count": len(recalled_shields),
+        "shield_blocked_count": shield_blocked_count,
+        "pre_implementation_blocked": pre_implementation_blocked,
+        "blocked_patch_kinds": sorted(blocked_patch_kinds),
+    }
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_file(trace_path, trace)
+    trace_file_data = json.loads(trace_path.read_text(encoding="utf-8"))
+
+    _scenario_check(
+        checks,
+        "m6_9_failure_shield_reuse_writes_two_approved_shields",
+        len(shield_results) == 2
+        and all(result.get("exit_code") == 0 for _, result, _ in shield_results)
+        and all(entry.get("memory_kind") == "failure-shield" for _, _, entry in shield_results)
+        and all(entry.get("approved") is True for _, _, entry in shield_results),
+        observed=[
+            {"case": case["name"], "exit_code": result.get("exit_code"), "entry": entry}
+            for case, result, entry in shield_results
+        ],
+        expected="two approved failure-shield memories are persisted with required evidence",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_failure_shield_reuse_active_recall_finds_two_shields",
+        active_result.get("exit_code") == 0 and len(recalled_shields) == 2,
+        observed=[
+            {
+                "name": item.get("name"),
+                "memory_kind": item.get("memory_kind"),
+                "matched_terms": item.get("matched_terms"),
+                "stop_rule": item.get("stop_rule"),
+            }
+            for item in recalled_shields
+        ],
+        expected="later coding task recalls both approved failure-shield memories",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_failure_shield_reuse_blocks_two_reverted_approaches",
+        pre_implementation_blocked and shield_blocked_count == 2,
+        observed={"proposed_patches": proposed_patches, "blocked_patch_kinds": sorted(blocked_patch_kinds)},
+        expected="failure-shield memory blocks both reverted approaches before implementation",
+    )
+    _scenario_check(
+        checks,
+        "m6_9_failure_shield_reuse_writes_deterministic_trace",
+        trace_file_data == trace
+        and trace_file_data.get("shield_blocked_count") == 2
+        and trace_file_data.get("pre_implementation_blocked") is True,
+        observed={"trace_path": trace_rel, "trace": trace_file_data},
+        expected="deterministic trace artifact records two pre-implementation shield blocks",
+    )
+
+    report = _scenario_report("m6_9-failure-shield-reuse", workspace, commands, checks)
+    report["artifacts"] = {
+        "shield_blocked_count": shield_blocked_count,
+        "pre_implementation_blocked": pre_implementation_blocked,
+        "blocked_patch_kinds": sorted(blocked_patch_kinds),
+        "recalled_shield_names": sorted(item.get("name") for item in recalled_shields if item.get("name")),
         "trace_path": trace_rel,
         "trace": trace,
     }
@@ -12845,6 +13031,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_9_memory_taxonomy_scenario(scenario_workspace, env=env))
         elif name == "m6_9-reviewer-steering-reuse":
             reports.append(run_m6_9_reviewer_steering_reuse_scenario(scenario_workspace, env=env))
+        elif name == "m6_9-failure-shield-reuse":
+            reports.append(run_m6_9_failure_shield_reuse_scenario(scenario_workspace, env=env))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-repeated-task-recall":
