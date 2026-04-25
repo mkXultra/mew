@@ -261,6 +261,7 @@ def summarize_mew_first_calibration(
         "limit": limit,
         "included_attempt_sections": section_headings,
         "attempts_total": total,
+        "attempt_window_task_ids": [attempt.task_id for attempt in attempts],
         "gate": {
             "success_threshold": gate_success_threshold,
             "clean_or_practical_successes": clean_or_practical,
@@ -282,6 +283,7 @@ def format_mew_first_calibration_report(summary: Mapping[str, Any]) -> str:
     counts = summary.get("counts") or {}
     result_counts = counts.get("result_class") or {}
     included_sections = summary.get("included_attempt_sections") or []
+    attempt_window_task_ids = summary.get("attempt_window_task_ids") or []
     lines = [
         "Mew-first calibration economics",
         f"source: {summary.get('source_path')}",
@@ -289,6 +291,9 @@ def format_mew_first_calibration_report(summary: Mapping[str, Any]) -> str:
     if included_sections:
         section_bits = [str(section) for section in included_sections]
         lines.append("included_attempt_sections: " + ", ".join(section_bits))
+    if attempt_window_task_ids:
+        window_bits = [f"#{task_id}" for task_id in attempt_window_task_ids]
+        lines.append("attempt_window: " + " ".join(window_bits))
     lines.append(
         (
             "gate: "
