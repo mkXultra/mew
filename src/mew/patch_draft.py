@@ -22,6 +22,7 @@ PATCH_BLOCKER_RECOVERY_ACTIONS = {
     "model_returned_non_schema": "retry_with_schema",
     "model_returned_refusal": "inspect_refusal",
     "review_rejected": "revise_patch_from_review_findings",
+    "task_goal_term_missing": "revise_patch_scope",
 }
 
 
@@ -59,6 +60,9 @@ def compile_patch_draft(*, todo, proposal, cached_windows, live_files, allowed_w
         return normalized
 
     edited_paths = [item["path"] for item in normalized["files"]]
+    goal_blocker = _validate_required_terms(todo, normalized)
+    if goal_blocker:
+        return goal_blocker
     pairing_blocker = _validate_pairing(
         todo,
         edited_paths,
@@ -297,9 +301,60 @@ def _normalize_todo(todo):
                 normalize_work_path(path)
                 for path in (source.get("target_paths") or [])
                 if normalize_work_path(path)
-            ]
+            ],
+            "required_terms": _normalize_required_terms(source.get("required_terms") or []),
         },
     }
+
+
+def _normalize_required_terms(terms):
+    normalized = []
+    seen = set()
+    for term in terms or []:
+        value = str(term or "").strip()
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(value)
+    return normalized
+
+
+def _proposal_search_text(proposal):
+    pieces = [str(proposal.get("summary") or "")]
+    for file_item in proposal.get("files") or []:
+        if not isinstance(file_item, dict):
+            continue
+        pieces.append(str(file_item.get("path") or ""))
+        for edit in file_item.get("edits") or []:
+            if not isinstance(edit, dict):
+                continue
+            pieces.append(str(edit.get("old") or ""))
+            pieces.append(str(edit.get("new") or ""))
+    return "\n".join(pieces).casefold()
+
+
+def _validate_required_terms(todo, proposal):
+    required_terms = list(((todo.get("source") or {}).get("required_terms") or []))
+    if not required_terms:
+        return {}
+    proposal_text = _proposal_search_text(proposal)
+    missing = [
+        term
+        for term in required_terms
+        if str(term or "").strip() and str(term or "").strip().casefold() not in proposal_text
+    ]
+    if not missing:
+        return {}
+    blocker = build_patch_blocker(
+        todo.get("id") or "",
+        "task_goal_term_missing",
+        detail="patch proposal is missing required task-goal term(s): " + ", ".join(missing),
+    )
+    blocker["missing_terms"] = missing
+    return blocker
 
 
 def _normalize_review_findings(raw_findings):

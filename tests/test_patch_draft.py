@@ -721,6 +721,55 @@ class PatchDraftTests(unittest.TestCase):
         self.assertEqual(artifact["kind"], "patch_blocker")
         self.assertEqual(artifact["code"], "missing_exact_cached_window_texts")
 
+    def test_compile_patch_draft_blocks_missing_task_goal_terms(self):
+        source_path = "src/mew/dogfood.py"
+        test_path = "tests/test_dogfood.py"
+        source_text = "DOGFOOD_SCENARIOS = (\n    'm6_9-phase1-regression',\n)\n"
+        test_text = "def test_phase1():\n    assert True\n"
+        proposal = {
+            "kind": "patch_proposal",
+            "summary": "Touch the existing phase1 regression scenario",
+            "files": [
+                {
+                    "path": source_path,
+                    "edits": [
+                        {
+                            "old": "'m6_9-phase1-regression',",
+                            "new": "'m6_9-phase1-regression',\n    'm6_9-phase1-extra',",
+                        }
+                    ],
+                },
+                {
+                    "path": test_path,
+                    "edits": [{"old": "assert True", "new": "assert 'phase1'"}],
+                },
+            ],
+        }
+
+        artifact = compile_patch_draft(
+            todo={
+                "id": "todo-613",
+                "source": {
+                    "target_paths": [source_path, test_path],
+                    "required_terms": ["m6_9-drift-canary"],
+                },
+            },
+            proposal=proposal,
+            cached_windows={
+                source_path: _window(source_path, source_text),
+                test_path: _window(test_path, test_text),
+            },
+            live_files={
+                source_path: _live_file(source_text),
+                test_path: _live_file(test_text),
+            },
+            allowed_write_roots=ALLOWED_WRITE_ROOTS,
+        )
+
+        self.assertEqual(artifact["kind"], "patch_blocker")
+        self.assertEqual(artifact["code"], "task_goal_term_missing")
+        self.assertEqual(artifact["missing_terms"], ["m6_9-drift-canary"])
+
     def test_compile_patch_draft_accepts_cached_window_text_when_not_truncated(self):
         path = "tests/test_patch_draft.py"
         before_text = "a = 1\n"

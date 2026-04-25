@@ -6513,10 +6513,27 @@ class WorkSessionTests(unittest.TestCase):
             [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
         )
+        self.assertEqual(tiny_context["task_goal"]["required_terms"], [])
         self.assertIn("Write-ready tiny draft lane is active.", tiny_prompt)
+        self.assertIn("task_goal.required_terms", tiny_prompt)
         self.assertIn('"kind": "patch_proposal|patch_blocker"', tiny_prompt)
         self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
         self.assertLess(len(tiny_prompt), len(fast_prompt))
+
+    def test_tiny_write_ready_draft_context_carries_task_goal_terms(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="DOGFOOD_SCENARIOS = (\n    'm6_9-phase1-regression',\n)\n",
+            test_text="def test_dogfood():\n    assert True\n",
+        )
+        context["task"]["title"] = "M6.9 drift-canary dogfood scenario v0"
+        context["task"]["description"] = "Add scenario m6_9-drift-canary without touching phase1 regression."
+        context["guidance"] = "Draft only m6_9-drift-canary."
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertIn("m6_9-drift-canary", tiny_context["task_goal"]["required_terms"])
 
     def test_tiny_write_ready_draft_context_prefers_first_actionable_plan_item_surface(self):
         from mew.work_loop import (

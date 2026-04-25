@@ -94,6 +94,7 @@ WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
 WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS = 1.0
+WORK_TASK_GOAL_TERM_RE = re.compile(r"\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+\b")
 
 
 def _work_model_timeout_guard_available():
@@ -2603,6 +2604,38 @@ def _write_ready_failed_patch_repair_for_targets(resume, target_paths):
     return {key: value for key, value in result.items() if value not in (None, "", [])}
 
 
+def _write_ready_task_goal_required_terms(context, resume=None):
+    context = context if isinstance(context, dict) else {}
+    resume = resume if isinstance(resume, dict) else ((context.get("work_session") or {}).get("resume") or {})
+    task = context.get("task") if isinstance(context.get("task"), dict) else {}
+    text_parts = [
+        str(task.get("title") or ""),
+        str(task.get("description") or ""),
+        str(context.get("guidance") or ""),
+    ]
+    pending_steer = resume.get("pending_steer") if isinstance(resume.get("pending_steer"), dict) else {}
+    text_parts.append(str(pending_steer.get("text") or ""))
+    active_work_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    text_parts.append(str(source.get("plan_item") or ""))
+
+    terms = []
+    seen = set()
+    for text in text_parts:
+        for match in WORK_TASK_GOAL_TERM_RE.finditer(text):
+            term = match.group(0).strip()
+            key = term.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            terms.append(term)
+
+    milestone_terms = [term for term in terms if term.casefold().startswith("m6_")]
+    if milestone_terms:
+        return milestone_terms[:4]
+    return terms[:4]
+
+
 def _work_write_ready_fast_path_latest_completed_verifier_tool_call(context):
     work_session = (context or {}).get("work_session") or {}
     latest_call = {}
@@ -4300,7 +4333,10 @@ def _write_ready_patch_draft_environment(
                 target_paths.append(normalized_path)
     todo = {
         "id": str(active_work_todo.get("id") or todo_id_override or "").strip(),
-        "source": {"target_paths": target_paths},
+        "source": {
+            "target_paths": target_paths,
+            "required_terms": _write_ready_task_goal_required_terms(context, resume),
+        },
     }
     cached_windows = {}
     for window in recent_windows:
@@ -4986,6 +5022,7 @@ def build_write_ready_work_model_context(context):
     capabilities = (context or {}).get("capabilities") or {}
     target_paths = list(((active_work_todo.get("source") or {}).get("target_paths") or []))
     failed_patch_repair = _write_ready_failed_patch_repair_for_targets(resume, target_paths)
+    required_terms = _write_ready_task_goal_required_terms(context, resume)
     result = {
         "active_work_todo": active_work_todo,
         "write_ready_fast_path": {
@@ -4996,6 +5033,9 @@ def build_write_ready_work_model_context(context):
                 _write_ready_cached_window_prompt_item(item)
                 for item in recent_windows
             ],
+        },
+        "task_goal": {
+            "required_terms": required_terms,
         },
         "allowed_roots": {
             "read": capabilities.get("allowed_read_roots") or [],
@@ -5021,6 +5061,7 @@ def build_write_ready_tiny_draft_model_context(context):
         actionable_target_paths = [str(path or "") for path in (fast_path.get("cached_paths") or []) if str(path).strip()]
     recent_windows = fast_path.get("recent_windows") or []
     active_work_todo = write_ready_context.get("active_work_todo") or {}
+    required_terms = list(((write_ready_context.get("task_goal") or {}).get("required_terms") or []))
     plan_item_observations = resume.get("plan_item_observations") or []
     first_observation = plan_item_observations[0] if plan_item_observations and isinstance(plan_item_observations[0], dict) else {}
     actionable_plan_item = ""
@@ -5108,6 +5149,9 @@ def build_write_ready_tiny_draft_model_context(context):
             "active": True,
             "reason": "paired cached windows are edit-ready; emit one patch artifact or one blocker",
             "cached_window_texts": cached_window_texts,
+        },
+        "task_goal": {
+            "required_terms": required_terms,
         },
         "allowed_roots": {
             "write": list(((write_ready_context.get("allowed_roots") or {}).get("write") or [])),
@@ -5236,6 +5280,7 @@ def build_work_write_ready_think_prompt(context):
         "Return the standard work JSON schema below and exactly one next action.\n"
         "Use write_ready_fast_path.cached_window_texts as the exact old text source for edit_file/edit_file_hunks.\n"
         "Keep the action inside active_work_todo.source.target_paths and allowed_roots.write.\n"
+        "If task_goal.required_terms is non-empty, the patch must preserve the task goal by including those terms in the proposed edits; do not switch to a nearby helper or easier patch.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "Prefer one paired dry-run batch under tests/** and src/mew/** now.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
@@ -5256,6 +5301,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "Return exactly one patch artifact for the active paired src/test slice.\n"
         "Allowed kinds are patch_proposal or patch_blocker.\n"
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts.\n"
+        "If task_goal.required_terms is non-empty, include those terms in the patch proposal; otherwise return patch_blocker instead of proposing a nearby or unrelated patch.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "Stay inside allowed_roots.write and do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
