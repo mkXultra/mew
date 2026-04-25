@@ -15904,7 +15904,7 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertFalse(_write_ready_window_text_is_structurally_complete(partial_window))
 
-    def test_build_work_session_resume_surfaces_draft_placeholders(self):
+    def test_build_work_session_resume_surfaces_draft_placeholders_and_prompt_cache_boundary(self):
         session = {
             "id": 1,
             "task_id": 1,
@@ -15963,6 +15963,31 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(resume["draft_prompt_static_chars"], 100)
         self.assertEqual(resume["draft_prompt_dynamic_chars"], 200)
         self.assertTrue(resume["draft_retry_same_prefix"])
+        self.assertEqual(
+            resume["prompt_cache_boundary"],
+            {
+                "contract_version": "v2",
+                "runtime_mode": "guarded",
+                "static_chars": 100,
+                "dynamic_chars": 200,
+                "retry_same_prefix": True,
+            },
+        )
+        empty_resume = build_work_session_resume(
+            {
+                "id": 2,
+                "task_id": 2,
+                "status": "active",
+                "title": "No draft metrics",
+                "goal": "Keep the prompt cache boundary empty without draft metrics.",
+                "created_at": "2026-04-21T13:25:16Z",
+                "updated_at": "2026-04-21T13:25:16Z",
+                "tool_calls": [],
+                "calls": [],
+                "model_turns": [],
+            }
+        )
+        self.assertEqual(empty_resume["prompt_cache_boundary"], {})
 
     def test_active_work_todo_round_trips_through_session_state(self):
         old_cwd = os.getcwd()

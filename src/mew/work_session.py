@@ -5494,6 +5494,24 @@ def _build_draft_state_from_turns(model_turns, plan_item_observations, active_wo
     return draft_state
 
 
+def _build_prompt_cache_boundary(draft_state):
+    if not isinstance(draft_state, dict):
+        return {}
+    contract_version = str(draft_state.get("draft_prompt_contract_version") or "").strip()
+    runtime_mode = str(draft_state.get("draft_runtime_mode") or "").strip()
+    static_chars = draft_state.get("draft_prompt_static_chars")
+    dynamic_chars = draft_state.get("draft_prompt_dynamic_chars")
+    if not contract_version and not runtime_mode and static_chars is None and dynamic_chars is None:
+        return {}
+    return {
+        "contract_version": contract_version,
+        "runtime_mode": runtime_mode,
+        "static_chars": static_chars,
+        "dynamic_chars": dynamic_chars,
+        "retry_same_prefix": bool(draft_state.get("draft_retry_same_prefix")),
+    }
+
+
 def _latest_verifier_closeout_summary(calls, turns):
     latest_call = {}
     for call in reversed(list(calls or [])):
@@ -6139,6 +6157,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     effort = build_work_session_effort(session, current_time=current_time)
     same_surface_audit = build_same_surface_audit_checkpoint(session, task, calls)
     verification_confidence = verification_confidence_checkpoint_for_calls(calls, task=task)
+    prompt_cache_boundary = _build_prompt_cache_boundary(draft_state)
 
     resume = {
         "session_id": session.get("id"),
@@ -6158,6 +6177,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "draft_prompt_static_chars": draft_state.get("draft_prompt_static_chars"),
         "draft_prompt_dynamic_chars": draft_state.get("draft_prompt_dynamic_chars"),
         "draft_retry_same_prefix": bool(draft_state.get("draft_retry_same_prefix")),
+        "prompt_cache_boundary": prompt_cache_boundary,
         "files_touched": paths[-limit:],
         "declared_write_roots": declared_write_roots,
         "commands": commands[-limit:],

@@ -28,7 +28,7 @@ not be resumed until the recorded resume condition fires.
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Phase 1 substrate plus three post-M6.12 proof slices landed; intentionally paused before the 10-shape/comparator push while M6.11 residual hardening closes review/executor/memory-explore boundaries. |
 | 6.10. Execution Accelerators | `not_started` | Register Todo-first, Explorer-second single-session accelerators for post-M6.9 work without widening governance, durable-memory, or multi-agent scope. |
-| 6.11. Loop Stabilization | `in_progress` | Core close-gate phases 0-4 remain closed; residual Phase 5/6 plus read-only MemoryExploreProvider and prompt/cache boundary hardening are now active for roadmap-wide mew-first throughput. |
+| 6.11. Loop Stabilization | `in_progress` | Core close-gate phases 0-4 remain closed; residual Phase 5/6, read-only MemoryExploreProvider, and prompt/cache boundary hardening have landed; residual close audit/next-focus selection remains. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 7. Senses: Inbound Signals | `foundation` | Signal source gates, journaling, RSS/Atom parsing, and atom source-kind fetch support exist; deeper wiring stays deferred until M6.9 and M6.10 stop dominating execution throughput. |
 | 8. Identity: Cross-Project Self | `not_started` | Add user-scope identity and memory across projects while preserving project boundaries. |
@@ -2155,9 +2155,10 @@ Residual active scope:
   The privacy boundary rejects traversal, tilde, drive-letter absolute, NUL,
   and private memory paths from path-bearing fields and omits free-text fields
   from `memory_refs`.
-- Prompt/cache boundary observability: the drafting contract should expose
-  stable-prefix and dynamic-payload measurements so future prompt-cache
-  behavior is deliberate.
+- Prompt/cache boundary observability: `done` in task `#582`. Work-session
+  resume now exposes a compact `prompt_cache_boundary` derived from the
+  existing draft prompt contract/runtime/static/dynamic/retry metrics while
+  preserving the flat resume fields.
 
 Evidence:
 
@@ -2202,6 +2203,17 @@ Evidence:
   ruff passed for touched files, `git diff --check --cached` was clean, and
   codex-ultra approved final static review session
   `019dc287-8591-7610-a0c7-135d5a52cc98`.
+- residual prompt/cache evidence: task `#582` exposed one non-counted mew-first
+  drift patch that codex-ultra rejected, then the supervisor reworked the slice
+  to the intended resume boundary. This is recorded as `supervisor_rescue`, not
+  mew-first autonomy credit. Validation: `uv run pytest -q
+  tests/test_work_session.py -k 'prompt_cache_boundary or draft_prompt'
+  --no-testmon` passed with 1 test, full `uv run pytest -q
+  tests/test_work_session.py --no-testmon` passed with 607 tests and 24
+  subtests, `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
+  with 24 tests and 4 subtests, ruff passed for touched files, `git diff
+  --check` was clean, and codex-ultra approved review session
+  `019dc29c-2015-7432-b44e-06eca6f517a5`.
 
 Historical proof trail before core close:
 - refusal separation is landed in `src/mew/codex_api.py`, but the later
@@ -3171,10 +3183,10 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
 
 - bounded M6.11 residual hardening from
   `docs/LOOP_STABILIZATION_DESIGN_2026-04-22.md`;
-- Phase 5 isolated review lane, Phase 6 executor lifecycle tightening, and
-  provisional read-only `MemoryExploreProvider` v0 are done; the remaining
-  active residual boundary is prompt/cache observability unless a fresh review
-  finding reopens an earlier residual slice;
+- Phase 5 isolated review lane, Phase 6 executor lifecycle tightening,
+  provisional read-only `MemoryExploreProvider` v0, and prompt/cache boundary
+  observability are done unless a fresh review finding reopens an earlier
+  residual slice;
 - keeping M6.9 pending at the current proof-slice boundary until residual
   hardening closes, then resuming the repeated-task proof matrix or its
   runner/report structure;
