@@ -116,6 +116,73 @@ class WorkRejectionFrontierTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_reject_tool_keeps_rejected_same_turn_pair_as_reviewer_frontier(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Reject paired budget", "--kind", "coding", "--json"]), 0)
+                task_id = str(json.loads(stdout.getvalue())["task"]["id"])
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", task_id, "--start-session"]), 0)
+                with state_lock():
+                    state = load_state()
+                    session = state["work_sessions"][0]
+                    session["tool_calls"].extend(
+                        [
+                            {
+                                "id": 20,
+                                "tool": "edit_file",
+                                "status": "completed",
+                                "approval_status": "rejected",
+                                "parameters": {"path": "tests/test_dogfood.py"},
+                                "result": {"dry_run": True, "changed": True, "diff_preview": "- old\n+ test\n"},
+                            },
+                            {
+                                "id": 21,
+                                "tool": "edit_file",
+                                "status": "completed",
+                                "parameters": {"path": "src/mew/dogfood.py"},
+                                "result": {
+                                    "dry_run": True,
+                                    "changed": True,
+                                    "diff_preview": "- budget_multiplier = 1.0\n+ budget_multiplier = 1.15\n",
+                                },
+                            },
+                        ]
+                    )
+                    session["model_turns"].append(
+                        {
+                            "id": 1,
+                            "status": "completed",
+                            "tool_call_ids": [20, 21],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                task_id,
+                                "--reject-tool",
+                                "21",
+                                "--reject-reason",
+                                "budget_multiplier must be exactly 1.0",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                frontier = json.loads(stdout.getvalue())["rejection_frontier"]
+                self.assertEqual(frontier["drift_class"], "reviewer_rejected_patch")
+                self.assertEqual(frontier["rejected_patch_family"], "reviewer_rejected_patch")
+                self.assertIn("reviewer feedback", frontier["next_action"])
+            finally:
+                os.chdir(old_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

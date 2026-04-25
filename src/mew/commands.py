@@ -5959,7 +5959,11 @@ def _work_rejection_frontier_drift_class(session, source_call, reason):
         )
     ).casefold()
     pairing = work_write_pairing_status(session, source_call)
-    if (pairing or {}).get("status") == "missing_test_edit" or "unpaired" in text or "missing test" in text:
+    same_turn_test_edit = _work_rejection_frontier_has_same_turn_test_edit(session, source_call)
+    explicit_unpaired_rejection = "unpaired" in text or "missing test" in text
+    if explicit_unpaired_rejection or (
+        (pairing or {}).get("status") == "missing_test_edit" and not same_turn_test_edit
+    ):
         return "unpaired_source_edit"
     if "missing focused verifier" in text or "no focused verifier" in text or (
         "missing" in text and "verifier" in text
@@ -5975,6 +5979,39 @@ def _work_rejection_frontier_drift_class(session, source_call, reason):
     if "generic cleanup" in text or "cleanup substitution" in text or "polish" in text:
         return "generic_cleanup_substitution"
     return "reviewer_rejected_patch"
+
+
+def _work_rejection_frontier_has_same_turn_test_edit(session, source_call):
+    """Treat a rejected paired test dry-run as pairing evidence for rejection classification."""
+    if not isinstance(session, dict) or not isinstance(source_call, dict):
+        return False
+    source_id = source_call.get("id")
+    turn = find_model_turn_for_tool_call(session, source_id)
+    if not isinstance(turn, dict):
+        return False
+    turn_ids = []
+    if turn.get("tool_call_id") is not None:
+        turn_ids.append(str(turn.get("tool_call_id")))
+    turn_ids.extend(str(value) for value in (turn.get("tool_call_ids") or []) if value is not None)
+    if not turn_ids:
+        return False
+    turn_id_set = set(turn_ids)
+    for candidate in session.get("tool_calls") or []:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_id = candidate.get("id")
+        if candidate_id == source_id or str(candidate_id) not in turn_id_set:
+            continue
+        if candidate.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        if str(candidate.get("status") or "") != "completed":
+            continue
+        result = candidate.get("result") if isinstance(candidate.get("result"), dict) else {}
+        if not result.get("changed"):
+            continue
+        if _work_path_is_tests_path(work_call_path(candidate)):
+            return True
+    return False
 
 
 def _work_rejection_frontier_policy(drift_class):
