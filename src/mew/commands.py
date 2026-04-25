@@ -217,6 +217,7 @@ from .write_tools import edit_file, restore_write_snapshot, snapshot_write_path,
 from .work_session import (
     active_work_session,
     active_work_sessions,
+    add_work_session_todo,
     add_work_session_note,
     active_memory_item_detail_parts,
     append_work_tool_running_output,
@@ -245,11 +246,14 @@ from .work_session import (
     format_work_session_diffs,
     format_work_session_resume,
     format_work_session,
+    format_work_session_todos,
     format_work_session_tests,
     format_work_session_timeline,
     build_work_session_timeline,
     latest_unresolved_failure,
+    latest_work_session_for_task,
     latest_work_verify_command,
+    list_work_session_todos,
     mark_running_work_interrupted,
     mark_work_tool_call_interrupted,
     record_active_work_todo_executor_lifecycle,
@@ -265,6 +269,7 @@ from .work_session import (
     broad_read_after_search_miss_guard,
     suggested_verify_command_for_call_path,
     update_work_model_turn_plan,
+    update_work_session_todo,
     verification_command_covers_suggestion,
     work_approval_default_defer_reason,
     work_tool_repeat_guard,
@@ -276,6 +281,7 @@ from .work_session import (
     work_session_has_pending_write_approval,
     work_session_has_running_activity,
     work_session_phase,
+    work_session_for_task,
     work_recovery_read_root,
     work_call_path,
     work_session_runtime_command,
@@ -3161,6 +3167,8 @@ def cmd_work(args):
         return cmd_work_reply_schema(args)
     if getattr(args, "reply_file", None):
         return cmd_work_reply_file(args)
+    if getattr(args, "todo_list", False) or getattr(args, "todo_add", None) or getattr(args, "todo_update", None):
+        return cmd_work_todo(args)
     if getattr(args, "live", False) or getattr(args, "follow", False):
         args.ai = True
     if getattr(args, "ai", False):
@@ -3212,6 +3220,90 @@ def cmd_work(args):
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return 0
     print(format_workbench(data))
+    return 0
+
+
+def _work_todo_json_payload(session, todo=None):
+    payload = {
+        "work_session": {
+            "id": session.get("id"),
+            "task_id": session.get("task_id"),
+        },
+        "work_todos": list_work_session_todos(session),
+    }
+    if todo:
+        payload["todo"] = todo
+    return payload
+
+
+def _cmd_work_todo_session(state, args, *, create):
+    task_id = getattr(args, "task_id", None)
+    task = select_workbench_task(state, task_id)
+    if not task:
+        if task_id:
+            return None, None, f"task not found: {task_id}", False
+        return None, None, "no task selected", False
+    if create and task.get("status") == "done":
+        return None, None, done_task_work_session_error(task), False
+    if create:
+        session, created = create_work_session(state, task)
+        return task, session, "", created
+    session = work_session_for_task(state, task.get("id")) or latest_work_session_for_task(state, task.get("id"))
+    if not session:
+        return task, None, f"no active work session for task #{task.get('id')}; run `{mew_command('work', task.get('id'), '--start-session')}`", False
+    return task, session, "", False
+
+
+def cmd_work_todo(args):
+    requested = [
+        bool(getattr(args, "todo_list", False)),
+        bool(getattr(args, "todo_add", None)),
+        bool(getattr(args, "todo_update", None)),
+    ]
+    if sum(1 for item in requested if item) != 1:
+        print("mew: choose exactly one of --todo-list, --todo-add, or --todo-update", file=sys.stderr)
+        return 1
+    if not getattr(args, "task_id", None):
+        print("mew: work todo commands require a task id", file=sys.stderr)
+        return 1
+    create = bool(getattr(args, "todo_add", None) or getattr(args, "todo_update", None))
+    with state_lock():
+        state = load_state()
+        _task, session, error, created = _cmd_work_todo_session(state, args, create=create)
+        if error:
+            print(f"mew: {error}", file=sys.stderr)
+            return 1
+        todo = {}
+        if getattr(args, "todo_add", None):
+            todo, error = add_work_session_todo(
+                session,
+                getattr(args, "todo_add", None),
+                status=getattr(args, "todo_status", None) or "todo",
+                note=getattr(args, "todo_note", None) or "",
+            )
+        elif getattr(args, "todo_update", None):
+            todo, error = update_work_session_todo(
+                session,
+                getattr(args, "todo_update", None),
+                text=getattr(args, "todo_text", None),
+                status=getattr(args, "todo_status", None),
+                note=getattr(args, "todo_note", None),
+            )
+        if error:
+            print(f"mew: {error}", file=sys.stderr)
+            return 1
+        if create or created:
+            save_state(state)
+        payload = _work_todo_json_payload(session, todo=todo)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if todo:
+        action = "added" if getattr(args, "todo_add", None) else "updated"
+        print(f"{action} work todo {todo.get('id')} [{todo.get('status')}] {todo.get('text')}")
+    else:
+        print(f"Work session #{session.get('id')} task=#{session.get('task_id')}")
+        print(format_work_session_todos(payload.get("work_todos") or []))
     return 0
 
 

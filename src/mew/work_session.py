@@ -45,6 +45,9 @@ WORK_SESSION_STATUSES = {"active", "closed"}
 WORK_TOOL_STATUSES = {"running", "completed", "failed", "interrupted"}
 WORK_MODEL_TURN_STATUSES = {"running", "completed", "failed", "interrupted"}
 WORK_EXECUTOR_LIFECYCLE_STATES = {"queued", "executing", "completed", "cancelled", "yielded"}
+WORK_SESSION_TODO_STATUSES = {"todo", "in_progress", "blocked", "done", "dropped"}
+WORK_SESSION_TODO_OPEN_STATUSES = {"todo", "in_progress", "blocked"}
+WORK_SESSION_TODO_MAX_ITEMS = 10
 WORK_TODO_STATUSES = {
     "queued",
     "drafting",
@@ -5127,6 +5130,177 @@ def _normalize_active_work_todo(todo):
     return normalized
 
 
+def _normalize_work_session_todo_text(value):
+    return " ".join(str(value or "").strip().split())
+
+
+def _work_session_todo_duplicate_key(text):
+    return _normalize_work_session_todo_text(text).casefold()
+
+
+def normalize_work_session_todo_item(item):
+    if not isinstance(item, dict):
+        return {}
+    todo_id = str(item.get("id") or "").strip()
+    text = _normalize_work_session_todo_text(item.get("text") or item.get("title") or item.get("summary"))
+    status = str(item.get("status") or "todo").strip()
+    if not todo_id or not text or status not in WORK_SESSION_TODO_STATUSES:
+        return {}
+    normalized = {
+        "id": todo_id,
+        "text": text,
+        "status": status,
+        "note": clip_output(str(item.get("note") or item.get("notes") or "").strip(), 1000),
+        "created_at": str(item.get("created_at") or "").strip(),
+        "updated_at": str(item.get("updated_at") or "").strip(),
+    }
+    return normalized
+
+
+def normalize_work_session_todos(items):
+    normalized = []
+    seen_ids = set()
+    seen_open = set()
+    in_progress_seen = False
+    for item in items or []:
+        todo = normalize_work_session_todo_item(item)
+        if not todo or todo["id"] in seen_ids:
+            continue
+        if todo["status"] in WORK_SESSION_TODO_OPEN_STATUSES:
+            duplicate_key = _work_session_todo_duplicate_key(todo["text"])
+            if duplicate_key in seen_open:
+                continue
+            seen_open.add(duplicate_key)
+        if todo["status"] == "in_progress":
+            if in_progress_seen:
+                todo["status"] = "todo"
+            in_progress_seen = True
+        normalized.append(todo)
+        seen_ids.add(todo["id"])
+        if len(normalized) >= WORK_SESSION_TODO_MAX_ITEMS:
+            break
+    return normalized
+
+
+def _next_work_session_todo_id(session):
+    ordinal = int(session.get("last_work_session_todo_ordinal") or 0) + 1
+    session["last_work_session_todo_ordinal"] = ordinal
+    session_id = session.get("id")
+    if session_id is None:
+        return f"work-todo-{ordinal}"
+    return f"work-todo-{session_id}-{ordinal}"
+
+
+def _work_session_todo_duplicate_error(todos, text, *, current_id=""):
+    duplicate_key = _work_session_todo_duplicate_key(text)
+    if not duplicate_key:
+        return ""
+    for todo in todos:
+        if current_id and str(todo.get("id")) == str(current_id):
+            continue
+        if todo.get("status") not in WORK_SESSION_TODO_OPEN_STATUSES:
+            continue
+        if _work_session_todo_duplicate_key(todo.get("text")) == duplicate_key:
+            return f"duplicate open work todo: {todo.get('id')}"
+    return ""
+
+
+def _work_session_todo_in_progress_error(todos, *, current_id=""):
+    for todo in todos:
+        if current_id and str(todo.get("id")) == str(current_id):
+            continue
+        if todo.get("status") == "in_progress":
+            return f"another work todo is already in_progress: {todo.get('id')}"
+    return ""
+
+
+def list_work_session_todos(session):
+    return normalize_work_session_todos((session or {}).get("work_todos") or [])
+
+
+def add_work_session_todo(session, text, *, status="todo", note="", current_time=None):
+    if not isinstance(session, dict):
+        return {}, "work session is required"
+    text = _normalize_work_session_todo_text(text)
+    if not text:
+        return {}, "work todo text is required"
+    status = str(status or "todo").strip()
+    if status not in WORK_SESSION_TODO_STATUSES:
+        return {}, f"invalid work todo status: {status}"
+    todos = list_work_session_todos(session)
+    if len(todos) >= WORK_SESSION_TODO_MAX_ITEMS:
+        return {}, f"work todo limit reached ({WORK_SESSION_TODO_MAX_ITEMS})"
+    duplicate_error = _work_session_todo_duplicate_error(todos, text)
+    if duplicate_error:
+        return {}, duplicate_error
+    if status == "in_progress":
+        in_progress_error = _work_session_todo_in_progress_error(todos)
+        if in_progress_error:
+            return {}, in_progress_error
+    current_time = current_time or now_iso()
+    todo = {
+        "id": _next_work_session_todo_id(session),
+        "text": text,
+        "status": status,
+        "note": clip_output(str(note or "").strip(), 1000),
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+    todos.append(todo)
+    session["work_todos"] = normalize_work_session_todos(todos)
+    session["updated_at"] = current_time
+    return todo, ""
+
+
+def update_work_session_todo(session, todo_id, *, text=None, status=None, note=None, current_time=None):
+    if not isinstance(session, dict):
+        return {}, "work session is required"
+    todo_id = str(todo_id or "").strip()
+    if not todo_id:
+        return {}, "work todo id is required"
+    todos = list_work_session_todos(session)
+    for index, todo in enumerate(todos):
+        if todo.get("id") != todo_id:
+            continue
+        next_text = todo["text"] if text is None else _normalize_work_session_todo_text(text)
+        if not next_text:
+            return {}, "work todo text is required"
+        next_status = todo["status"] if status is None else str(status or "").strip()
+        if next_status not in WORK_SESSION_TODO_STATUSES:
+            return {}, f"invalid work todo status: {next_status}"
+        duplicate_error = _work_session_todo_duplicate_error(todos, next_text, current_id=todo_id)
+        if duplicate_error:
+            return {}, duplicate_error
+        if next_status == "in_progress":
+            in_progress_error = _work_session_todo_in_progress_error(todos, current_id=todo_id)
+            if in_progress_error:
+                return {}, in_progress_error
+        current_time = current_time or now_iso()
+        updated = dict(todo)
+        updated["text"] = next_text
+        updated["status"] = next_status
+        if note is not None:
+            updated["note"] = clip_output(str(note or "").strip(), 1000)
+        updated["updated_at"] = current_time
+        todos[index] = updated
+        session["work_todos"] = normalize_work_session_todos(todos)
+        session["updated_at"] = current_time
+        return updated, ""
+    return {}, f"work todo not found: {todo_id}"
+
+
+def format_work_session_todos(todos):
+    todos = normalize_work_session_todos(todos)
+    if not todos:
+        return "Work todos: (none)"
+    lines = ["Work todos"]
+    for todo in todos:
+        lines.append(f"- {todo.get('id')} [{todo.get('status')}] {todo.get('text')}")
+        if todo.get("note"):
+            lines.append(f"  note: {todo.get('note')}")
+    return "\n".join(lines)
+
+
 def record_active_work_todo_executor_lifecycle(
     state,
     session_id,
@@ -6228,6 +6402,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "phase": phase,
         "updated_at": session.get("updated_at"),
         "active_work_todo": active_work_todo or {},
+        "work_todos": list_work_session_todos(session),
         "draft_phase": draft_state.get("draft_phase") or "",
         "draft_attempts": draft_state.get("draft_attempts", 0),
         "cached_window_ref_count": draft_state.get("cached_window_ref_count", 0),
@@ -6363,6 +6538,11 @@ def format_work_session_resume(resume):
         todo_source = active_work_todo.get("source") or {}
         if todo_source.get("plan_item"):
             lines.append(f"active_work_todo_plan_item: {todo_source.get('plan_item')}")
+    work_todos = resume.get("work_todos") or []
+    if work_todos:
+        lines.append("work_todos:")
+        for todo in work_todos:
+            lines.append(f"- {todo.get('id')} [{todo.get('status')}] {todo.get('text')}")
     failed_patch_repair = resume.get("failed_patch_repair") or {}
     if failed_patch_repair:
         terms = ", ".join(failed_patch_repair.get("must_preserve_terms") or [])

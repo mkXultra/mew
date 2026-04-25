@@ -27,7 +27,7 @@ not be resumed until the recorded resume condition fires.
 | 6.7. Supervised Self-Hosting Loop | `done` | The supervised hybrid gate is now closed: bounded reviewer-gated iterations, real reentry, and the detached frozen close-watch together satisfied the multi-hour proof window without proof-or-revert failures. |
 | 6.8. Task Chaining: Supervised Self-Selection | `not_started` | Remove per-iteration human-dispatch latency from the M6.7 loop by letting mew pick the next roadmap task itself under reviewer gating. |
 | 6.9. Durable Coding Intelligence | `pending` | Paused at a clean proof boundary: Phase 1 substrate, 10 repeated-task shapes, comparator regression, reviewer-steering/failure-shield, and reasoning-trace recall exist, but drift/rehearsal proof should wait until mew-first implementation reliability improves. |
-| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0 now reports recent mew-first economics as 4/10 clean-or-practical against the 7/10 gate; next focus is Todo plus structured rejection/frontier. |
+| 6.10. Execution Accelerators and Mew-First Reliability | `in_progress` | Calibration D0 and Todo D1 now land; current baseline remains 4/10 clean-or-practical against the 7/10 gate, and next focus is structured rejection/frontier. |
 | 6.11. Loop Stabilization | `done` | Core close gate and residual hardening are both closed; residual audit records Phase 5 review, Phase 6 lifecycle, read-only MemoryExploreProvider, and prompt/cache boundary evidence. |
 | 6.12. Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed with strict live proof, focused tests, preserved M6.11 behavior, and close-gate audit. |
 | 6.13. High-Effort Deliberation Lane | `not_started` | Design is drafted for a bounded high-effort lane, but implementation is deferred until M6.9 produces ranked-recall surfaces or direct hard-blocker evidence that lane infrastructure would shorten. |
@@ -2382,14 +2382,22 @@ Progress:
   Validation covered `uv run pytest -q tests/test_mew_first_calibration.py
   tests/test_metrics.py --no-testmon`, `./mew metrics --mew-first --json`,
   `./mew metrics --mew-first`, targeted ruff, and `git diff --check`.
+- Todo D1 landed as session-scoped `mew work <task-id> --todo-add`,
+  `--todo-update`, and `--todo-list` controls backed by per-session
+  `work_todos`, explicit statuses, duplicate-open-item guards, and a
+  single-`in_progress` guard. It was used in real task #603 / work session
+  #588 to track the Todo D1 implementation smoke. Validation covered
+  `uv run pytest -q tests/test_work_todos.py --no-testmon`, targeted ruff,
+  command smoke for `--todo-add`/`--todo-update`/`--todo-list`, and work-session
+  resume JSON showing the session Todo list.
 
 Missing proof:
 
-- no Todo tool exists yet for session-scoped write/update/list
-- no reviewer/operator surface currently exposes a session Todo list with
-  duplicate-state guards
 - no structured rejection/frontier surface converts reject/redirect decisions
   into durable same-task next actions and stop rules
+- Todo D2 is only partial: work-session resume JSON exposes `work_todos`, but
+  focus/brief or another reviewer-facing surface still needs a deliberate
+  decision before calling the D2 operator-view criterion fully met
 - no bounded read-only Explorer helper exists yet
 - no post-D0/D1 window of 10 bounded mew-first implementation attempts has
   reached 7 clean/practical successes with `rescue_edits=0` for counted
@@ -2400,9 +2408,8 @@ Missing proof:
 
 Next action:
 
-- take Todo D1 and structured rejection/frontier D1 before considering
-  Explorer; use `mew metrics --mew-first` as the economics baseline for
-  post-D1 attempts
+- take structured rejection/frontier D1 before considering Explorer; use
+  `mew metrics --mew-first` as the economics baseline for post-D1 attempts
 
 ### M6.11: Loop Stabilization
 
@@ -3558,8 +3565,9 @@ infrastructure, or unattended autonomy. The acceptable near-term work is:
 
 - use Calibration D0 (`mew metrics --mew-first`) as the current economics
   baseline: 4/10 clean-or-practical against the 7/10 M6.10 reliability gate;
-- Todo D1/D2 for session-scoped short-horizon work decomposition and
-  reviewer/operator visibility;
+- Todo D1 is landed; Todo D2 remains partial until reviewer/operator visibility
+  is deliberately widened beyond work-session resume JSON or accepted as
+  sufficient;
 - structured rejection/frontier D1 so reject/redirect decisions become durable
   same-task next actions and stop rules instead of free-text advice;
 - keeping M6.12 closed as the read-only failure-science baseline unless a fresh

@@ -1197,6 +1197,16 @@ def build_parser():
     )
     work_parser.add_argument("--reject-tool", type=int, help="reject a dry-run write/edit tool call")
     work_parser.add_argument("--reject-reason", help="reason recorded with --reject-tool")
+    work_parser.add_argument("--todo-list", action="store_true", help="list session-scoped work Todo items")
+    work_parser.add_argument("--todo-add", help="add a session-scoped work Todo item")
+    work_parser.add_argument("--todo-update", help="update a session-scoped work Todo item by id")
+    work_parser.add_argument("--todo-text", help="replacement text for --todo-update")
+    work_parser.add_argument(
+        "--todo-status",
+        choices=("todo", "in_progress", "blocked", "done", "dropped"),
+        help="status for --todo-add or --todo-update",
+    )
+    work_parser.add_argument("--todo-note", help="note for --todo-add or --todo-update")
     work_parser.add_argument(
         "--tool",
         choices=(
