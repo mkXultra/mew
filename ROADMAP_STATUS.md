@@ -146,6 +146,22 @@ Current M6.13 evidence:
 - #649 same-surface audit found only `src/mew/work_lanes.py`,
   `tests/test_work_lanes.py`, and the architecture design doc referencing the
   new lane-attempt surface, so no production call sites need migration yet.
+- Task `#650` / session `#637` exposed an M6.14 repair-class blocker before
+  replay metadata could proceed: after `missing_required_terms`, mew produced
+  rejected dry-run tools `#5890`/`#5891` that treated `required_terms` as
+  product replay metadata and invented schema. Task `#651` records the bounded
+  M6.14 repair episode for this `synthetic_schema_substitution` failure.
+- Task `#651` landed the substrate repair: write-ready prompts now define
+  `task_goal.required_terms` as semantic anchors, not fields or metadata keys
+  to persist, and instruct the draft lane to return `task_goal_term_missing`
+  rather than inventing schema when anchors cannot fit naturally. This is loop
+  substrate surgery, not mew-first product autonomy credit. Retry target remains
+  task `#650`.
+- #651 validation passed:
+  `uv run pytest -q tests/test_work_session.py -k "required_terms or tiny_write_ready_draft_prompt" --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "write_ready" --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`.
 - Resident architecture framing was recorded in
   `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`. Claude Ultra and
   Codex Ultra both reviewed the direction as `approve_with_changes`; the
@@ -581,6 +597,9 @@ The next implementation task should map to this chain:
 
 Acceptable near-term work:
 
+- retry task `#650` mew-first after the #651 substrate repair; the retry must
+  implement real replay lane provenance/defaulting rather than synthetic
+  `required_terms` metadata
 - prove old sessions and existing replay bundles continue to resolve missing
   or absent lane metadata as `tiny`
 - wire the minimal lane-attempt telemetry helper into future lane attempts only
@@ -604,6 +623,13 @@ Non-goals for the next session:
 
 Latest M6.13 source/test validation:
 
+- task `#651`: M6.14 repair for #650 required-terms synthetic schema
+- `uv run pytest -q tests/test_work_session.py -k "required_terms or tiny_write_ready_draft_prompt" --no-testmon`
+  passed
+- `uv run pytest -q tests/test_work_session.py -k "write_ready" --no-testmon`
+  passed
+- `uv run ruff check src/mew/work_loop.py tests/test_work_session.py` passed
+- `git diff --check` passed
 - task `#649` / session `#636`: data-only lane-attempt telemetry v0
 - `uv run pytest -q tests/test_work_lanes.py --no-testmon` passed
 - `uv run python -m unittest tests.test_work_lanes` passed

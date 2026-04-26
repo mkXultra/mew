@@ -6984,6 +6984,42 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("no_silent_memory_reliance", required_terms)
         self.assertIn("reviewer_visible_exploration_reason", required_terms)
 
+    def test_tiny_write_ready_draft_prompt_keeps_required_terms_semantic(self):
+        from mew.work_loop import (
+            build_write_ready_tiny_draft_model_context,
+            build_work_write_ready_tiny_draft_prompt,
+        )
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def compile_replay_metadata():\n    return {'kind': 'patch'}\n",
+            test_text="def test_replay_metadata():\n    assert True\n",
+        )
+        context["task"]["title"] = "M6.13 replay metadata tiny lane default"
+        context["task"]["description"] = (
+            "Add replay metadata lane so missing lane defaults to tiny and "
+            "lane_role, lane_schema_version, and lane_attempt_id stay authoritative."
+        )
+        context["guidance"] = (
+            "Draft the paired source/test patch. Do not add required_terms as "
+            "product replay metadata; use existing lane APIs and return a "
+            "blocker if the anchors cannot fit naturally."
+        )
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        required_terms = tiny_context["task_goal"]["required_terms"]
+
+        self.assertIn("lane_role", required_terms)
+        self.assertIn("lane_schema_version", required_terms)
+        self.assertIn("lane_attempt_id", required_terms)
+
+        prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
+
+        self.assertIn("semantic anchors from the task goal", prompt)
+        self.assertIn("not product fields to copy", prompt)
+        self.assertIn("do not add fields or keys solely because a required term names them", prompt)
+        self.assertIn("Never persist a key named required_terms", prompt)
+        self.assertIn("task_goal_term_missing", prompt)
+
     def test_tiny_write_ready_draft_context_prefers_first_actionable_plan_item_surface(self):
         from mew.work_loop import (
             build_write_ready_tiny_draft_model_context,
