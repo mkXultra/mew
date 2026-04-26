@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default and lane registry v0 landed; next prove legacy replay compatibility and mirror-lane bundles. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, and lane-attempt telemetry v0 landed; next prove legacy replay compatibility and mirror-lane bundles. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
@@ -129,6 +129,23 @@ Current M6.13 evidence:
   The reviewer rejected the first role-enum draft and steered the exact
   authoritative/mirror/shadow contract, but mew authored and verified the final
   source/test patch. No supervisor product rescue was used.
+- Task `#649` / session `#636` landed the first data-only lane-attempt
+  telemetry v0 helper. `build_lane_attempt_event()` emits the minimum
+  `lane_attempt` event shape from the resident architecture design doc, maps
+  the persisted `tiny` lane to display name `implementation`, keeps unknown
+  lanes unsupported while preserving their string, and leaves routing,
+  mirror execution, EV selection, and broad refactoring untouched. This was a
+  mew-first implementation: after one transient model timeout and restarted
+  live run, mew produced the paired source/test patch and the supervisor
+  approved without rescue edits. Validation covered focused tests.
+- #649 validation passed: work-session focused verifier
+  `uv run pytest -q tests/test_work_lanes.py --no-testmon`,
+  `uv run python -m unittest tests.test_work_lanes`,
+  `uv run ruff check src/mew/work_lanes.py tests/test_work_lanes.py`, and
+  `git diff --check`.
+- #649 same-surface audit found only `src/mew/work_lanes.py`,
+  `tests/test_work_lanes.py`, and the architecture design doc referencing the
+  new lane-attempt surface, so no production call sites need migration yet.
 - Resident architecture framing was recorded in
   `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`. Claude Ultra and
   Codex Ultra both reviewed the direction as `approve_with_changes`; the
@@ -564,11 +581,10 @@ The next implementation task should map to this chain:
 
 Acceptable near-term work:
 
-- create the smallest mew-first task that adds lane metadata with `tiny` as the
-  default
-- prove old sessions and existing replay bundles remain compatible
-- emit minimal lane-attempt telemetry for future calibration economics without
-  enabling EV routing
+- prove old sessions and existing replay bundles continue to resolve missing
+  or absent lane metadata as `tiny`
+- wire the minimal lane-attempt telemetry helper into future lane attempts only
+  when that slice already needs a lane attempt record; do not add EV routing
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
 
@@ -588,6 +604,11 @@ Non-goals for the next session:
 
 Latest M6.13 source/test validation:
 
+- task `#649` / session `#636`: data-only lane-attempt telemetry v0
+- `uv run pytest -q tests/test_work_lanes.py --no-testmon` passed
+- `uv run python -m unittest tests.test_work_lanes` passed
+- `uv run ruff check src/mew/work_lanes.py tests/test_work_lanes.py` passed
+- `git diff --check` passed
 - task `#648` / session `#635`: data-only lane registry v0
 - `uv run pytest -q tests/test_work_lanes.py tests/test_work_session.py -k 'work_lane or active_work_todo_lane' --no-testmon`
   passed

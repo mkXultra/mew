@@ -11,6 +11,7 @@ from mew.work_lanes import (
     LANE_ROLE_UNSUPPORTED,
     MIRROR_LANE,
     TINY_LANE,
+    build_lane_attempt_event,
     get_work_lane_view,
     get_work_todo_lane_view,
     list_supported_work_lanes,
@@ -66,6 +67,62 @@ class WorkLaneRegistryTests(unittest.TestCase):
                 self.assertTrue(lane.write_capable)
                 self.assertEqual(lane.role, LANE_ROLE_AUTHORITATIVE)
                 self.assertEqual(lane.fallback_lane, TINY_LANE)
+
+    def test_lane_attempt_event_defaults_to_tiny_implementation_with_v0_fields(self):
+        event = build_lane_attempt_event(
+            task_id=649,
+            session_id=636,
+            task_kind="coding",
+            task_shape="bounded_source_test_patch",
+            model_backend="codex",
+            model="gpt-5.5",
+            effort="high",
+            timeout_seconds=60,
+        )
+
+        self.assertEqual(
+            event,
+            {
+                "event": "lane_attempt",
+                "task_id": 649,
+                "session_id": 636,
+                "task_kind": "coding",
+                "lane": TINY_LANE,
+                "lane_display_name": "implementation",
+                "task_shape": "bounded_source_test_patch",
+                "blocker_code": "",
+                "model_backend": "codex",
+                "model": "gpt-5.5",
+                "effort": "high",
+                "timeout_seconds": 60,
+                "budget_reserved": None,
+                "budget_spent_or_estimated": None,
+                "first_output_latency_seconds": None,
+                "first_edit_latency_seconds": None,
+                "approval_rejected": False,
+                "verifier_failed": False,
+                "fallback_taken": False,
+                "rescue_edit_used": False,
+                "reviewer_decision": "",
+                "outcome": "",
+                "later_reuse_value": "unknown",
+            },
+        )
+
+    def test_lane_attempt_event_preserves_unknown_lane_without_mutating_todo(self):
+        todo = {"id": "todo-1-1", "lane": "experimental", "status": "drafting"}
+
+        event = build_lane_attempt_event(
+            task_id=1,
+            session_id=2,
+            task_kind="coding",
+            lane=todo["lane"],
+        )
+
+        self.assertEqual(todo["lane"], "experimental")
+        self.assertEqual(event["event"], "lane_attempt")
+        self.assertEqual(event["lane"], "experimental")
+        self.assertEqual(event["lane_display_name"], "unsupported")
 
     def test_work_lane_unknown_todo_lookup_is_unsupported_without_mutating_lane_string(self):
         todo = {"id": "todo-1-1", "lane": "experimental", "status": "drafting"}
