@@ -3620,7 +3620,26 @@ def _work_path_is_mew_source_path(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
-def _paired_write_batch_actions(actions):
+def _work_path_under_allowed_write_roots(path, allowed_write_roots=None):
+    normalized = str(path or "").replace("\\", "/").lstrip("./")
+    if not normalized:
+        return False
+    roots = [
+        str(root or "").replace("\\", "/").lstrip("./").rstrip("/")
+        for root in (allowed_write_roots or [])
+        if str(root or "").strip()
+    ]
+    if not roots:
+        return False
+    for root in roots:
+        if root in {".", "*"}:
+            return True
+        if normalized == root or normalized.startswith(f"{root}/"):
+            return True
+    return False
+
+
+def _paired_write_batch_actions(actions, allowed_write_roots=None):
     write_actions = [
         dict(action)
         for action in actions or []
@@ -3630,15 +3649,21 @@ def _paired_write_batch_actions(actions):
         return []
     tests = [action for action in write_actions if _work_path_is_tests_path(action.get("path"))]
     sources = [action for action in write_actions if _work_path_is_mew_source_path(action.get("path"))]
-    if not tests or not sources or len(tests) + len(sources) != len(write_actions):
+    if sources and (not tests or len(tests) + len(sources) != len(write_actions)):
         return []
-    source_path = sources[0].get("path")
+    if not sources and not all(
+        _work_path_under_allowed_write_roots(action.get("path"), allowed_write_roots)
+        for action in write_actions
+    ):
+        return []
+    source_path = sources[0].get("path") if sources else ""
     ordered = []
-    for raw_action in [*tests, *sources]:
+    ordered_actions = [*tests, *sources] if sources else write_actions
+    for raw_action in ordered_actions:
         action = dict(raw_action)
         action["apply"] = False
         action["dry_run"] = True
-        if raw_action in tests:
+        if source_path and raw_action in tests:
             action["defer_verify_on_approval"] = True
             action["paired_test_source_path"] = source_path
         ordered.append(action)
@@ -3649,7 +3674,10 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
     raw_sub_actions = [sub_action for sub_action in (action.get("tools") or [])[:5] if isinstance(sub_action, dict)]
     write_batch = any((sub_action.get("type") or sub_action.get("tool")) in BATCH_WRITE_WORK_TOOLS for sub_action in raw_sub_actions)
     if write_batch:
-        sub_actions = _paired_write_batch_actions(raw_sub_actions)
+        sub_actions = _paired_write_batch_actions(
+            raw_sub_actions,
+            allowed_write_roots=getattr(args, "allow_write", []) or [],
+        )
     else:
         sub_actions = [
             sub_action
@@ -3657,14 +3685,18 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             if (sub_action.get("type") or sub_action.get("tool")) in BATCH_READ_WORK_TOOLS
         ]
     if not sub_actions:
+        write_block_reason = "batch has no read-only tools"
+        if write_batch:
+            if any(_work_path_is_mew_source_path((action or {}).get("path")) for action in raw_sub_actions):
+                write_block_reason = (
+                    "batch requires write/edit tools under tests/** and src/mew/** with at least one of each"
+                )
+            else:
+                write_block_reason = "batch requires write/edit tools inside the declared allowed write roots"
         sub_actions = [
             {
                 "type": "wait",
-                "reason": (
-                    "batch requires write/edit tools under tests/** and src/mew/** with at least one of each"
-                    if write_batch
-                    else "batch has no read-only tools"
-                ),
+                "reason": write_block_reason,
             }
         ]
     with state_lock():

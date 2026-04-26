@@ -151,6 +151,15 @@ Current M6.13 evidence:
   budget, or state-limit cases record fallback trace data and leave tiny
   available. `cmd_work_ai` now persists the returned session trace patch
   through `apply_work_session_trace_patch`.
+- GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
+  class: write-batch normalization/execution assumed every code batch must be
+  a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
+  non-core product roots such as `experiments/mew-companion-log`. The repair
+  keeps the strict mew-core paired-test rule for `src/mew/**` writes, but lets
+  non-core write batches proceed when every write is inside
+  `allowed_write_roots`; prompts now describe the same distinction. This is
+  substrate repair from side-project evidence, not side-project implementation
+  progress.
 - Mirror-lane validation passed:
   `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,
   `uv run pytest -q tests/test_proof_summary.py -k "lane_metadata" --no-testmon`,
@@ -760,6 +769,11 @@ Latest M6.13 source/test validation:
   `uv run pytest -q tests/test_work_session.py -k 'deliberation or active_work_todo or lane' --no-testmon`,
   `uv run pytest -q tests/test_work_session.py -k 'plan_work_model_turn' --no-testmon`,
   `uv run ruff check src/mew/work_loop.py src/mew/work_session.py src/mew/commands.py tests/test_work_deliberation_loop.py`,
+  and `git diff --check` passed.
+- M6.14 side-project write-scope repair from GitHub issue `#1`:
+  `uv run pytest -q tests/test_work_write_scope.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'plan_work_model_turn or paired or write_batch' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py src/mew/commands.py tests/test_work_write_scope.py`,
   and `git diff --check` passed.
 - M6.13 mirror lane-scoped replay bundle slice:
   `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,

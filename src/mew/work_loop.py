@@ -5561,7 +5561,10 @@ def _attempt_write_ready_tiny_draft_turn(
     }
     if tiny_write_ready_todo_id:
         action_plan["todo_id"] = tiny_write_ready_todo_id
-    action = normalize_work_model_action(action_plan)
+    action = normalize_work_model_action(
+        action_plan,
+        allowed_write_roots=allowed_write_roots,
+    )
     if action.get("type") == "wait":
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = "translated_preview_unusable"
@@ -5959,7 +5962,7 @@ def build_work_think_prompt(context):
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. If a needed recent_read_file_windows entry is context_truncated, fall back to the matching read_file tool_calls result text before declaring that old text unrecoverable. "
-        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you already know the exact scoped edits, you may use one batch action with up to five write/edit tools under capabilities.allowed_write_roots. For mew core source edits under src/mew/**, include a paired tests/** edit in the same batch. For non-core product roots such as experiments/**, keep every write under the declared root and include local tests when the task scope calls for them. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file, edit_file_hunks, or write_file. For edit_file you must include exact old and new strings; for edit_file_hunks you must give one path plus a non-empty edits list of exact old/new pairs for disjoint hunks in that same file. If you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file or edit_file_hunks. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
@@ -6000,7 +6003,7 @@ def build_work_write_ready_think_prompt(context):
         "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
         "If a required term cannot naturally appear in the scoped source/test edit, return wait with blocker task_goal_term_missing instead of inventing schema or switching to a nearby helper.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
-        "Prefer one paired dry-run batch under tests/** and src/mew/** now.\n"
+        "Prefer one scoped dry-run batch under active_work_todo.source.target_paths now. For mew core target paths this means paired tests/** plus src/mew/**; for non-core allowed roots, stay inside the declared product root and include local tests when they are in scope.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
         "Do not add read, search, glob, git, shell, or verification actions on this fast path.\n"
         "Do not broaden scope, roots, or the focused verify command.\n"
@@ -6016,7 +6019,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Write-ready tiny draft lane is active.\n"
-        "Return exactly one patch artifact for the active paired src/test slice.\n"
+        "Return exactly one patch artifact for the active scoped implementation slice.\n"
         "Allowed kinds are patch_proposal or patch_blocker.\n"
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts.\n"
         "If task_goal.required_terms is non-empty, treat those terms as semantic anchors from the task goal, not product fields to copy into code or metadata.\n"
@@ -6026,7 +6029,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "Stay inside allowed_roots.write and do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
-        "If one file needs multiple hunks, express them in one files[i].edits array.\n"
+        "For mew core target paths, keep the patch paired across src/mew/** and tests/**. For non-core target paths, stay inside active_work_todo.source.target_paths and allowed_roots.write. If one file needs multiple hunks, express them in one files[i].edits array.\n"
         "If drafting cannot proceed from the cached windows, return patch_blocker with one stable code and detail.\n"
         "Use cached_window_incomplete when the cached text exists but ends mid-block; use missing_exact_cached_window_texts when exact cached text is absent.\n"
         "Schema:\n"
@@ -6053,7 +6056,12 @@ def build_work_act_prompt(context, decision_plan):
     )
 
 
-def normalize_work_model_action(action_plan, verify_command="", suggested_verify_command=""):
+def normalize_work_model_action(
+    action_plan,
+    verify_command="",
+    suggested_verify_command="",
+    allowed_write_roots=None,
+):
     if not isinstance(action_plan, dict):
         action_plan = {}
     action = action_plan.get("action")
@@ -6085,6 +6093,7 @@ def normalize_work_model_action(action_plan, verify_command="", suggested_verify
                 {"action": item},
                 verify_command=verify_command,
                 suggested_verify_command=suggested_verify_command,
+                allowed_write_roots=allowed_write_roots,
             )
             dropped_tool_count += int(sub_action.get("truncated_tools") or 0)
             if sub_action.get("type") == "batch":
@@ -6120,14 +6129,20 @@ def normalize_work_model_action(action_plan, verify_command="", suggested_verify
                     "type": "wait",
                     "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",
                 }
-            paired_reason = paired_write_batch_rejection_reason(normalized_tools)
+            paired_reason = paired_write_batch_rejection_reason(
+                normalized_tools,
+                allowed_write_roots=allowed_write_roots,
+            )
             if paired_reason:
                 return {"type": "wait", "reason": paired_reason}
-            paired_tools = normalize_paired_write_batch_tools(normalized_tools)
+            paired_tools = normalize_paired_write_batch_tools(
+                normalized_tools,
+                allowed_write_roots=allowed_write_roots,
+            )
             if not paired_tools:
                 return {
                     "type": "wait",
-                    "reason": "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each",
+                    "reason": "write batch could not be normalized inside the declared write roots",
                 }
             normalized_tools = paired_tools
         normalized = {"type": "batch", "tools": normalized_tools}
@@ -6327,6 +6342,25 @@ def _work_batch_path_is_mew_source(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
+def _work_batch_path_under_allowed_write_roots(path, allowed_write_roots=None):
+    normalized = _normalized_work_path(path)
+    if not normalized:
+        return False
+    roots = [
+        _normalized_work_path(root)
+        for root in (allowed_write_roots or [])
+        if _normalized_work_path(root)
+    ]
+    if not roots:
+        return False
+    for root in roots:
+        if root in {".", "*"}:
+            return True
+        if normalized == root or normalized.startswith(f"{root.rstrip('/')}/"):
+            return True
+    return False
+
+
 def duplicate_paired_write_batch_paths(tools):
     seen = set()
     duplicates = []
@@ -6341,12 +6375,12 @@ def duplicate_paired_write_batch_paths(tools):
     return duplicates
 
 
-def paired_write_batch_rejection_reason(tools):
+def paired_write_batch_rejection_reason(tools, allowed_write_roots=None):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
-        return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+        return "write batch requires at least two write/edit tools for a complete scoped slice"
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
-        return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+        return "write batch contains an invalid write/edit tool; provide path and exact content or old/new hunks"
     duplicates = duplicate_paired_write_batch_paths(write_tools)
     if duplicates:
         return (
@@ -6355,8 +6389,17 @@ def paired_write_batch_rejection_reason(tools):
         )
     tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
     source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
-    if not tests_tools or not source_tools or len(tests_tools) + len(source_tools) != len(write_tools):
+    if source_tools and (not tests_tools or len(tests_tools) + len(source_tools) != len(write_tools)):
         return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+    if source_tools:
+        return ""
+    if all(
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        for tool in write_tools
+    ):
+        return ""
+    if allowed_write_roots:
+        return "write batch contains paths outside the declared allowed_write_roots"
     return ""
 
 
@@ -6383,7 +6426,7 @@ def valid_paired_write_batch_sub_action(action):
     return False
 
 
-def normalize_paired_write_batch_tools(tools):
+def normalize_paired_write_batch_tools(tools, allowed_write_roots=None):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
         return []
@@ -6393,15 +6436,21 @@ def normalize_paired_write_batch_tools(tools):
         return []
     tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
     source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
-    if not tests_tools or not source_tools or len(tests_tools) + len(source_tools) != len(write_tools):
+    if source_tools and (not tests_tools or len(tests_tools) + len(source_tools) != len(write_tools)):
         return []
-    source_path = source_tools[0].get("path")
+    if not source_tools and not all(
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        for tool in write_tools
+    ):
+        return []
+    source_path = source_tools[0].get("path") if source_tools else ""
     normalized = []
-    for raw_tool in [*tests_tools, *source_tools]:
+    ordered_tools = [*tests_tools, *source_tools] if source_tools else write_tools
+    for raw_tool in ordered_tools:
         tool = dict(raw_tool)
         tool["apply"] = False
         tool["dry_run"] = True
-        if raw_tool in tests_tools:
+        if source_path and raw_tool in tests_tools:
             tool["defer_verify_on_approval"] = True
             tool["paired_test_source_path"] = source_path
         normalized.append(tool)
@@ -6978,6 +7027,7 @@ def plan_work_model_turn(
             decision_plan,
             verify_command=verify_command,
             suggested_verify_command=suggested_verify_command,
+            allowed_write_roots=allowed_write_roots,
         )
         action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""
         action_plan = {
@@ -7020,6 +7070,7 @@ def plan_work_model_turn(
         action_plan,
         verify_command=verify_command,
         suggested_verify_command=suggested_verify_command,
+        allowed_write_roots=allowed_write_roots,
     )
     if write_ready_fast_path.get("active") and not skip_shadow_compile:
         model_metrics.update(
