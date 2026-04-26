@@ -154,11 +154,13 @@ from .signals import (
     disable_signal_source,
     enable_signal_source,
     find_signal_source,
+    fetch_signal_source,
     format_signal_journal,
     format_signal_sources,
     list_signal_journal,
     list_signal_sources,
     record_signal_observation,
+    select_signal_proof_source,
 )
 from .state import (
     add_attention_item,
@@ -10012,6 +10014,24 @@ def cmd_signals(args):
             print(format_signal_journal(items))
         return 0
 
+    if command == "proof-source":
+        with state_lock():
+            state = load_state()
+            result = select_signal_proof_source(state)
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif result.get("status") == "selected":
+            proof = result.get("proof") or {}
+            print(
+                "selected signal proof source "
+                f"{proof.get('source')} [{proof.get('kind')}] "
+                f"url={proof.get('url')} budget_remaining={proof.get('budget_remaining')}"
+            )
+        else:
+            print(f"mew: signal proof source blocked: {result.get('reason')}", file=sys.stderr)
+            return 1
+        return 0
+
     if command == "enable":
         try:
             config = parse_event_payload(getattr(args, "config", ""))
@@ -10051,6 +10071,26 @@ def cmd_signals(args):
             print(json.dumps({"source": source}, ensure_ascii=False, indent=2))
         else:
             print(f"disabled signal source {source['name']}")
+        return 0
+
+    if command == "fetch":
+        with state_lock():
+            state = load_state()
+            result = fetch_signal_source(state, args.source)
+            if result.get("status") == "recorded":
+                save_state(state)
+        if result.get("status") != "recorded":
+            if getattr(args, "json", False):
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(f"mew: signal blocked: {result.get('reason')}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            signal_item = result.get("signal") or {}
+            event_text = f" event=#{signal_item.get('event_id')}" if signal_item.get("event_id") else ""
+            print(f"fetched signal #{signal_item.get('id')} source={args.source}{event_text}")
         return 0
 
     if command == "record":

@@ -501,7 +501,10 @@ def build_parser():
     event_parser.add_argument("--mark-read", action="store_true", help="mark printed responses as read")
     event_parser.set_defaults(func=cmd_event)
 
-    signals_parser = subparsers.add_parser("signals", help="manage audited inbound signal sources")
+    signals_parser = subparsers.add_parser(
+        "signals",
+        help="manage reviewer-visible audited inbound signal sources for gated auto-fetch",
+    )
     signals_subparsers = signals_parser.add_subparsers(dest="signals_command")
     signals_parser.set_defaults(func=cmd_signals)
 
@@ -534,10 +537,27 @@ def build_parser():
     signals_record_parser.add_argument("--json", action="store_true", help="print structured JSON")
     signals_record_parser.set_defaults(func=cmd_signals)
 
+    signals_fetch_parser = signals_subparsers.add_parser(
+        "fetch",
+        help="fetch and record one observation from an enabled signal source",
+        description="Fetch and record one observation from an enabled signal source.",
+    )
+    signals_fetch_parser.add_argument("source", help="enabled source name")
+    signals_fetch_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_fetch_parser.set_defaults(func=cmd_signals)
+
     signals_journal_parser = signals_subparsers.add_parser("journal", help="show recent signal observations")
     signals_journal_parser.add_argument("--limit", type=int, default=20, help="number of observations to show")
     signals_journal_parser.add_argument("--json", action="store_true", help="print structured JSON")
     signals_journal_parser.set_defaults(func=cmd_signals)
+
+    signals_proof_source_parser = signals_subparsers.add_parser(
+        "proof-source",
+        help="show the reviewer-visible auto-fetch proof source",
+        description="Show the reviewer-visible auto-fetch proof source.",
+    )
+    signals_proof_source_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    signals_proof_source_parser.set_defaults(func=cmd_signals)
 
     webhook_parser = subparsers.add_parser("webhook", help="serve HTTP external event ingress")
     webhook_parser.add_argument("--host", default="127.0.0.1", help="bind host")

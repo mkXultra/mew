@@ -107,6 +107,20 @@ Current M7 evidence:
   tests.test_signals`, `uv run ruff check src/mew/signals.py
   tests/test_signals.py`, and `git diff --check`. Codex-ultra review
   `019dcc07-6515-71d0-afe0-d280a002c6a9` returned `STATUS: pass`.
+- Task `#683` added the first explicit gated non-file signal fetch surface as
+  product-progress supervisor rescue after mew session `#673` drifted into
+  help/proof-source-only edits. `mew signals fetch <source> [--json]` now uses
+  existing `fetch_signal_source` gates and budgets, saves state only after a
+  recorded observation, and reports blocked sources without queueing or saving.
+  `mew signals proof-source [--json]` exposes the read-only selector from task
+  `#682`. Reviewer correction moved budget checking before network access and
+  added proof that exhausted budgets do not call the opener. Validation passed:
+  `uv run python -m unittest tests.test_signals tests.test_signal_fetch
+  tests.test_commands`, `uv run ruff check src/mew/signals.py src/mew/cli.py
+  src/mew/commands.py tests/test_signals.py tests/test_signal_fetch.py`, and
+  `git diff --check`. Codex-ultra review
+  `019dcc19-8fa5-72c3-b88c-7030398e3cc1` initially failed the pre-network
+  budget gate, then passed after the fix.
 
 M6.17 close evidence:
 

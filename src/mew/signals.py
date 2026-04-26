@@ -323,6 +323,14 @@ def fetch_signal_source(state, source_name, *, opener=None, current_time=None):
     url = ((source.get("config") or {}).get("url") or "").strip()
     if not url:
         return {"status": "blocked", "reason": "missing_url", "source": source}
+    budget = _refresh_budget_window(source, current_time or now_iso())
+    if budget["used"] + 1 > budget["limit"]:
+        return {
+            "status": "blocked",
+            "reason": "budget_exhausted",
+            "source": source,
+            "budget": deepcopy(budget),
+        }
 
     opener = opener or urlopen
     with opener(url, timeout=10) as response:

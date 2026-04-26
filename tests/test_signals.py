@@ -5,6 +5,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 
+import mew.signals as signals_module
 from mew.cli import main
 from mew.signals import (
     disable_signal_source,
@@ -170,6 +171,89 @@ class SignalTests(unittest.TestCase):
         )
         self.assertEqual(disabled["reason"], "source_disabled")
 
+    def test_signals_cli_proof_source_help_exposes_reviewer_visible_auto_fetch(self):
+        with redirect_stdout(StringIO()) as stdout:
+            with self.assertRaises(SystemExit) as raised:
+                main(["signals", "proof-source", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        help_text = stdout.getvalue()
+        self.assertIn("proof-source", help_text)
+        self.assertIn("reviewer-visible auto-fetch proof source", help_text)
+
+    def test_signals_cli_fetch_records_gated_observation(self):
+        old_cwd = os.getcwd()
+        old_urlopen = signals_module.urlopen
+
+        class FakeResponse:
+            def read(self):
+                return (
+                    "<?xml version='1.0' encoding='UTF-8'?>"
+                    "<rss version='2.0'><channel><item>"
+                    "<title>Fixture feed item</title>"
+                    "<link>https://example.test/item</link>"
+                    "</item></channel></rss>"
+                ).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        calls = []
+
+        def fake_urlopen(url, timeout=10):
+            calls.append((url, timeout))
+            return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            signals_module.urlopen = fake_urlopen
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "signals",
+                                "enable",
+                                "hn",
+                                "--kind",
+                                "rss",
+                                "--reason",
+                                "watch engineering links",
+                                "--config",
+                                '{"url":"https://example.test/feed.xml"}',
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["signals", "fetch", "hn", "--json"]), 0)
+                fetched = json.loads(stdout.getvalue())
+                self.assertEqual(fetched["status"], "recorded")
+                self.assertEqual(fetched["signal"]["source"], "hn")
+                self.assertEqual(fetched["signal"]["summary"], "Fixture feed item")
+                self.assertEqual(fetched["signal"]["payload"]["url"], "https://example.test/item")
+                self.assertEqual(fetched["signal"]["reason_for_use"], "watch engineering links")
+                self.assertEqual(calls, [("https://example.test/feed.xml", 10)])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["signals", "journal", "--json"]), 0)
+                journal = json.loads(stdout.getvalue())
+                self.assertEqual(journal["journal"][0]["summary"], "Fixture feed item")
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["signals", "disable", "hn"]), 0)
+                signals_module.urlopen = old_urlopen
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["signals", "fetch", "hn"]), 1)
+                self.assertIn("signal blocked: source_disabled", stderr.getvalue())
+            finally:
+                signals_module.urlopen = old_urlopen
+                os.chdir(old_cwd)
+
     def test_signals_cli_enable_record_and_journal(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -254,7 +338,6 @@ class SignalTests(unittest.TestCase):
                 self.assertIn("signal blocked: source_disabled", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
-
 
 if __name__ == "__main__":
     unittest.main()
