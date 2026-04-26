@@ -10,11 +10,108 @@ from mew.signals import (
     disable_signal_source,
     enable_signal_source,
     record_signal_observation,
+    select_signal_proof_source,
 )
 from mew.state import default_state
 
 
 class SignalTests(unittest.TestCase):
+    def test_select_signal_proof_source_prefers_enabled_budgeted_feed(self):
+        state = default_state()
+        enable_signal_source(
+            state,
+            "hn",
+            kind="rss",
+            reason="track engineering stories",
+            budget_limit=1,
+            config={"url": "https://example.test/hn.xml"},
+            current_time="2026-04-20T00:00:00Z",
+        )
+        record_signal_observation(
+            state,
+            "hn",
+            kind="rss_item",
+            summary="Already spent",
+            reason_for_use="consume proof budget",
+            current_time="2026-04-20T00:01:00Z",
+        )
+        enable_signal_source(
+            state,
+            "notes",
+            kind="manual",
+            reason="not fetchable",
+            current_time="2026-04-20T00:02:00Z",
+        )
+        enable_signal_source(
+            state,
+            "blog",
+            kind="atom",
+            reason="watch release notes",
+            budget_limit=2,
+            config={"url": "https://example.test/feed.atom"},
+            current_time="2026-04-20T00:03:00Z",
+        )
+
+        selected = select_signal_proof_source(
+            state,
+            current_time="2026-04-20T00:04:00Z",
+        )
+
+        self.assertEqual(selected["status"], "selected")
+        self.assertEqual(selected["proof"]["source"], "blog")
+        self.assertEqual(selected["proof"]["kind"], "atom")
+        self.assertEqual(selected["proof"]["url"], "https://example.test/feed.atom")
+        self.assertEqual(selected["proof"]["budget_remaining"], 2)
+        self.assertEqual(selected["candidates"][0]["name"], "hn")
+        self.assertIn("budget_exhausted", selected["candidates"][0]["blockers"])
+        self.assertIn("unsupported_source_kind", selected["candidates"][1]["blockers"])
+        selected["source"]["reason"] = "mutated copy"
+        self.assertEqual(state["signals"]["sources"][2]["reason"], "watch release notes")
+
+    def test_select_signal_proof_source_preserves_zero_limit_and_refreshes_day_view(self):
+        state = default_state()
+        enable_signal_source(
+            state,
+            "zero",
+            kind="rss",
+            reason="disabled by budget",
+            budget_limit=0,
+            config={"url": "https://example.test/zero.xml"},
+            current_time="2026-04-19T00:00:00Z",
+        )
+        enable_signal_source(
+            state,
+            "stale",
+            kind="rss",
+            reason="daily budget should refresh in read-only view",
+            budget_limit=1,
+            config={"url": "https://example.test/stale.xml"},
+            current_time="2026-04-19T00:01:00Z",
+        )
+        record_signal_observation(
+            state,
+            "stale",
+            kind="rss_item",
+            summary="Yesterday's budget",
+            reason_for_use="consume yesterday",
+            current_time="2026-04-19T00:02:00Z",
+        )
+
+        selected = select_signal_proof_source(
+            state,
+            current_time="2026-04-20T00:00:00Z",
+        )
+
+        self.assertEqual(selected["status"], "selected")
+        self.assertEqual(selected["proof"]["source"], "stale")
+        self.assertEqual(selected["proof"]["budget_remaining"], 1)
+        self.assertEqual(selected["candidates"][0]["budget"]["limit"], 0)
+        self.assertIn("budget_exhausted", selected["candidates"][0]["blockers"])
+        self.assertEqual(selected["candidates"][1]["budget"]["window_key"], "2026-04-20")
+        self.assertEqual(selected["candidates"][1]["budget"]["used"], 0)
+        self.assertEqual(state["signals"]["sources"][1]["budget"]["window_key"], "2026-04-19")
+        self.assertEqual(state["signals"]["sources"][1]["budget"]["used"], 1)
+
     def test_signal_source_gate_budget_and_event_journal(self):
         state = default_state()
         source = enable_signal_source(

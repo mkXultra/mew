@@ -95,6 +95,18 @@ Current M7 evidence:
   lane dispatch, calibration refs, failure cluster, and preference refs. This
   proves the closed M6.17 lane chooser can hand off into M7 without falling
   back to stale paused M6 work.
+- Task `#682` completed the first M7 bounded slice. Mew session `#672`
+  selected the existing signal source registry as the smallest deterministic
+  proof-source surface and added `select_signal_proof_source(state,
+  current_time=...)` in `src/mew/signals.py`. The helper is read-only: it
+  inspects configured RSS/Atom sources, returns candidate blockers, proof
+  metadata, reason-for-use, URL, and remaining budget, and does not fetch,
+  record, queue, or save state. Reviewer follow-up fixed zero-budget and
+  stale day-window edge cases, preserving source state while refreshing the
+  returned budget view. Validation passed: `uv run python -m unittest
+  tests.test_signals`, `uv run ruff check src/mew/signals.py
+  tests/test_signals.py`, and `git diff --check`. Codex-ultra review
+  `019dcc07-6515-71d0-afe0-d280a002c6a9` returned `STATUS: pass`.
 
 M6.17 close evidence:
 
