@@ -337,6 +337,13 @@ WORK_ACTION_DISPLAY_FIELDS = (
 )
 ACTIVE_MEMORY_ALWAYS_TYPES = {"user"}
 ACTIVE_MEMORY_RELEVANT_TYPES = {"feedback", "project", "reference", "unknown"}
+ACTIVE_MEMORY_KIND_IMPORTANCE = {
+    "failure-shield": 35,
+    "reasoning-trace": 30,
+    "reviewer-steering": 25,
+    "task-template": 20,
+    "file-pair": 15,
+}
 ACTIVE_MEMORY_STOP_WORDS = {
     "about",
     "after",
@@ -589,11 +596,11 @@ def active_memory_terms(session=None, task=None):
     for source in (task or {}, session or {}):
         if not isinstance(source, dict):
             continue
-        for key in ("title", "description", "kind", "goal"):
+        for key in ("title", "description", "kind", "goal", "notes"):
             value = source.get(key)
             if value:
                 parts.append(active_memory_source_text(value) if key in ("description", "goal") else str(value))
-    text = " ".join(parts).casefold()
+    text = " ".join(parts).casefold().replace("_", " ").replace("-", " ")
     negated = active_memory_negated_terms(text)
     terms = []
     for term in ACTIVE_MEMORY_TERM_RE.findall(text):
@@ -603,7 +610,59 @@ def active_memory_terms(session=None, task=None):
     return terms[:20]
 
 
-def active_memory_match(entry, terms):
+def active_memory_token_set(value):
+    normalized = str(value or "").casefold().replace("_", " ").replace("-", " ")
+    return {
+        term
+        for term in ACTIVE_MEMORY_TERM_RE.findall(normalized)
+        if term not in ACTIVE_MEMORY_STOP_WORDS
+    }
+
+
+def active_memory_context_target_path_tokens(session=None, task=None):
+    values = []
+
+    def collect(value):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in {"path", "source_path", "test_path", "target_path", "target_paths"}:
+                    values.append(nested)
+                collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect(nested)
+        elif isinstance(value, str) and ("/" in value or value.endswith(".py")):
+            values.append(value)
+
+    collect(session or {})
+    collect(task or {})
+    tokens = set()
+    for value in values:
+        if isinstance(value, list):
+            for nested in value:
+                tokens.update(active_memory_token_set(nested))
+        else:
+            tokens.update(active_memory_token_set(value))
+    return tokens
+
+
+def active_memory_importance_score(entry):
+    score = 0
+    if entry.memory_type in ACTIVE_MEMORY_ALWAYS_TYPES:
+        score += 100
+    elif entry.memory_type in ACTIVE_MEMORY_RELEVANT_TYPES:
+        score += 10
+    score += ACTIVE_MEMORY_KIND_IMPORTANCE.get(entry.memory_kind, 0)
+    if entry.approved:
+        score += 15
+    if entry.focused_test_green:
+        score += 5
+    if "rescue" in " ".join([entry.body, entry.description, entry.verdict]).casefold():
+        score += 5
+    return score
+
+
+def active_memory_match(entry, terms, *, session=None, task=None):
     haystack = " ".join(
         [
             entry.name,
@@ -625,21 +684,28 @@ def active_memory_match(entry, terms):
         ]
     ).casefold()
     matched_terms = [term for term in terms if term in haystack]
-    if entry.memory_type in ACTIVE_MEMORY_ALWAYS_TYPES:
-        importance_score = 100
-    elif entry.memory_type in ACTIVE_MEMORY_RELEVANT_TYPES and matched_terms:
-        importance_score = 10
-    else:
+    if entry.memory_type not in ACTIVE_MEMORY_ALWAYS_TYPES and (
+        entry.memory_type not in ACTIVE_MEMORY_RELEVANT_TYPES or not matched_terms
+    ):
         return None
-    relevance_score = len(matched_terms)
-    score = importance_score + relevance_score
+    importance_score = active_memory_importance_score(entry)
+    relevance_score = len(matched_terms) * 3
+    context_path_tokens = active_memory_context_target_path_tokens(session=session, task=task)
+    entry_path_tokens = active_memory_token_set(
+        " ".join([entry.source_path, entry.test_path, entry.source_bundle_ref])
+    )
+    same_shape_tokens = active_memory_token_set(entry.same_shape_key)
+    term_set = set(terms)
+    symbol_overlap_score = len(context_path_tokens & entry_path_tokens) * 4
+    task_shape_similarity_score = len(term_set & same_shape_tokens) * 5
     reason = "always_include_user_memory" if entry.memory_type in ACTIVE_MEMORY_ALWAYS_TYPES else "matched_task_terms"
     return {
-        "score": score,
+        "base_score": importance_score + relevance_score + symbol_overlap_score + task_shape_similarity_score,
         "score_components": {
             "importance": importance_score,
             "relevance": relevance_score,
-            "final": score,
+            "symbol_overlap": symbol_overlap_score,
+            "task_shape_similarity": task_shape_similarity_score,
         },
         "reason": reason,
         "matched_terms": matched_terms[:8],
@@ -857,10 +923,16 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
     result = {
         "source": ".mew/memory",
         "ranker": {
-            "name": "active-memory-scored-recall",
+            "name": "m6_9-ranked-recall",
             "version": 1,
-            "sort": "score_desc_created_at_desc",
-            "components": ["importance", "relevance", "recency_tiebreaker"],
+            "sort": "final_score_desc_created_at_desc",
+            "components": [
+                "recency",
+                "importance",
+                "relevance",
+                "symbol_overlap",
+                "task_shape_similarity",
+            ],
         },
         "terms": terms,
         "items": [],
@@ -875,16 +947,24 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
         entries = []
     scored = []
     dropped = []
+    current_time = parse_time(now_iso())
     for entry in entries:
-        match = active_memory_match(entry, terms)
+        match = active_memory_match(entry, terms, session=session, task=task)
         if not match:
             continue
         item = entry_to_dict(entry)
-        item["score"] = match["score"]
         item["score_components"] = match["score_components"]
         item["reason"] = match["reason"]
         item["matched_terms"] = match["matched_terms"]
         item["text"] = clip_output(item.get("text") or "", DEFAULT_ACTIVE_MEMORY_TEXT_MAX_CHARS)
+        created = parse_time(item.get("created_at"))
+        if created and current_time:
+            age_hours = max(0.0, (current_time - created).total_seconds() / 3600.0)
+            recency_score = max(0, 20 - int(age_hours // 24))
+        else:
+            recency_score = 0
+        item["score_components"]["recency"] = recency_score
+        item["score"] = match["base_score"] + recency_score
         item, dropped_item = revise_active_memory_item(item, base_dir=base_dir)
         if dropped_item:
             dropped.append(dropped_item)
@@ -894,8 +974,8 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
     for rank, item in enumerate(scored, start=1):
         item["rank"] = rank
         components = item.get("score_components") if isinstance(item.get("score_components"), dict) else {}
-        components["recency_tiebreaker"] = item.get("created_at") or ""
         components["rank"] = rank
+        components["final"] = item.get("score") or 0
         item["score_components"] = components
     result["total"] = len(scored)
     result["items"] = scored[:limit]

@@ -183,13 +183,13 @@ Current M6.13 evidence:
   closed. The same live path also passes with omitted `--auth`, preserving
   backend auth defaults.
 - The current M6.13 close-readiness slice records the Phase 3 proof honestly:
-  active memory now emits scored recall rank metadata, the dogfood trace records
-  `contract_cycle_proven=true`, deterministic and live `gpt-5.5` proofs pass,
-  and `close_evidence=false` remains explicit. The readiness audit is
-  `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`. Current close blockers:
-  route the later-task proof through real M6.9 ranked recall, consume an
-  independent reviewer decision artifact, and extend the later tiny task from
-  validated patch planning to applied/verified tiny-only solve.
+  active memory now emits M6.9 ranked recall metadata with recency,
+  importance, relevance, symbol-overlap, and task-shape components; the dogfood
+  trace records `contract_cycle_proven=true`; deterministic and live `gpt-5.5`
+  proofs pass; and `close_evidence=false` remains explicit. The readiness audit
+  is `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`. Current close blockers:
+  consume an independent reviewer decision artifact and extend the later tiny
+  task from validated patch planning to applied/verified tiny-only solve.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
@@ -762,7 +762,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> Phase 3 internalization close gap -> close the ranked-recall / reviewer / tiny-solve blockers`
+`M6.13 -> Phase 3 internalization close gap -> close the reviewer / tiny-solve blockers`
 
 Acceptable near-term work:
 
@@ -775,9 +775,8 @@ Acceptable near-term work:
   3 internalization proof are both reconstructable from status, tests, and
   deterministic dogfood artifacts
 - close exactly one readiness blocker from
-  `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`: real M6.9 ranked recall,
-  independent reviewer decision consumption, or applied/verified tiny-only
-  solve
+  `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`: independent reviewer
+  decision consumption or applied/verified tiny-only solve
 - prove old sessions and existing replay bundles with absent lane metadata keep
   tiny-compatible behavior at their read/report boundary
 - wire the minimal lane-attempt telemetry helper into future lane attempts only

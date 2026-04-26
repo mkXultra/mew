@@ -13,11 +13,12 @@ gate.
   same-shape tiny-lane planning attempt.
 - The scenario now emits a reviewer decision artifact reference under
   `.mew/durable/review/`.
-- `mew memory --active --task-id` emits observable scored recall metadata:
-  ranker name, score, rank, score components, matched terms, and top entry
-  ids.
+- `mew memory --active --task-id` emits observable M6.9 ranked recall
+  metadata: ranker name, score, rank, score components, matched terms, and top
+  entry ids. The v1 scorer includes recency, importance, relevance, symbol
+  overlap, and task-shape similarity.
 - The M6.13 dogfood trace records `contract_cycle_proven=true` when the
-  deliberation result, trace write, scored recall, and tiny patch-draft reuse
+  deliberation result, trace write, ranked recall, and tiny patch-draft reuse
   contract all pass.
 - The deterministic proof and live `gpt-5.5` proof both pass.
 
@@ -32,11 +33,8 @@ M6.13's close gate requires a full internalization cycle:
 5. reviewer evidence confirms the trace shortened or avoided deliberation
 
 The current artifact proves the contract shape, but it still records
-`close_evidence=false` for three reasons:
+`close_evidence=false` for two reasons:
 
-- M6.9 ranked recall with recency, importance, symbol overlap, and task-shape
-  components is not the recall source yet. The current event is scored active
-  recall, not the final M6.9 ranked recall scorer.
 - Reviewer approval is represented by a scenario artifact, not an independent
   reviewer decision consumed from outside the scenario.
 - The later same-shape task proves validated tiny patch planning, not an
@@ -49,10 +47,14 @@ as overclaimed. After revision, the same reviewer approved the current shape:
 
 - `close_evidence=false`
 - `contract_cycle_proven=true`
-- `scored_recall_event` instead of M6.9 ranked-recall close proof
+- explicit close blockers instead of overclaimed close proof
 - explicit `close_blockers`
 
 Reviewer session: `019dc96d-a73d-7762-baa4-6af2430c61b9`.
+
+After that review, the first blocker was reduced further by replacing scored
+active recall with a real `m6_9-ranked-recall` event. This does not close
+M6.13 by itself because the reviewer and tiny-solve blockers remain.
 
 ## Accepted Validation
 
@@ -68,14 +70,13 @@ Reviewer session: `019dc96d-a73d-7762-baa4-6af2430c61b9`.
 
 ## Next Close Tasks
 
-The next M6.13 work should close one of the recorded blockers, in this order:
+The next M6.13 work should close one of the remaining recorded blockers, in
+this order:
 
-1. Route the later-task recall proof through the real M6.9 ranked recall
-   scorer, or explicitly add that scorer before claiming M6.13 close.
-2. Consume an independent reviewer decision artifact instead of synthesizing
+1. Consume an independent reviewer decision artifact instead of synthesizing
    approval inside the scenario.
-3. Extend the later same-shape proof from validated tiny patch planning to an
+2. Extend the later same-shape proof from validated tiny patch planning to an
    applied and verified tiny-only solve.
 
-Do not mark M6.13 done until all three are resolved or the close gate is
+Do not mark M6.13 done until both are resolved or the close gate is
 explicitly rewritten.

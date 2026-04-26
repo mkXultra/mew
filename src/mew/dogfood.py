@@ -3192,7 +3192,7 @@ def run_m6_13_deliberation_internalization_scenario(
     recalled = bool(matches)
     matched_item = matches[0] if matches else {}
     matched_terms = set(matched_item.get("matched_terms") or []) if matches else set()
-    scored_recall_event = {
+    ranked_recall_event = {
         "source": "mew memory --active --task-id",
         "ranker": active_memory.get("ranker") or {},
         "returned": recalled,
@@ -3359,23 +3359,26 @@ def run_m6_13_deliberation_internalization_scenario(
         and planned_action.get("type") == "batch",
     }
     write_json_file(tiny_bundle_path, tiny_bundle)
-    scored_recall_ok = (
+    ranked_recall_ok = (
         recalled
-        and (scored_recall_event.get("ranker") or {}).get("name") == "active-memory-scored-recall"
-        and int(scored_recall_event.get("rank") or 0) >= 1
-        and bool((scored_recall_event.get("score_components") or {}).get("final"))
+        and (ranked_recall_event.get("ranker") or {}).get("name") == "m6_9-ranked-recall"
+        and int(ranked_recall_event.get("rank") or 0) >= 1
+        and bool((ranked_recall_event.get("score_components") or {}).get("final"))
+        and int((ranked_recall_event.get("score_components") or {}).get("task_shape_similarity") or 0) > 0
+        and {"recency", "importance", "relevance", "symbol_overlap", "task_shape_similarity"}.issubset(
+            set((ranked_recall_event.get("score_components") or {}).keys())
+        )
     )
     reviewer_approved = reviewer_decision.get("decision") == "approved" and reviewer_decision.get("raw_transcript_stored") is False
     full_contract_cycle_proven = (
         deliberation_bundle["result"] == "materially_advanced"
         and reviewer_approved
-        and scored_recall_ok
+        and ranked_recall_ok
         and tiny_bundle["reviewer_confirmed_trace_shortened_deliberation"] is True
         and tiny_bundle["deliberation_invoked"] is False
         and tiny_bundle["planned_action_type"] == "batch"
     )
     close_blockers = [
-        "M6.9 ranked recall scorer with recency/importance/symbol-overlap/task-shape components is not the recall source yet",
         "reviewer approval is a scenario artifact, not an independent reviewer decision consumed from outside the scenario",
         "later same-shape task proves validated tiny patch planning, not an applied and verified tiny-only solve",
     ]
@@ -3396,7 +3399,7 @@ def run_m6_13_deliberation_internalization_scenario(
         "evidence_class": "live_provider_internalization_contract" if live_provider else "contract_fixture",
         "close_evidence": False,
         "contract_cycle_proven": full_contract_cycle_proven,
-        "scored_recall_event": scored_recall_event,
+        "ranked_recall_event": ranked_recall_event,
         "active_memory_recall_event": {
             "returned": recalled,
             "matched_terms": matched_item.get("matched_terms") if matches else [],
@@ -3421,7 +3424,7 @@ def run_m6_13_deliberation_internalization_scenario(
         "close_blockers": close_blockers,
         "evidence_notes": [
             "live provider path used for deliberation and tiny draft" if live_provider else "deterministic fake tiny provider used",
-            "scored recall event comes from the general active-memory path, not a lane-local lookup",
+            "ranked recall event comes from the general M6.9 active-memory recall path, not a lane-local lookup",
         ],
         "tiny_provider_mode": tiny_provider_mode,
     }
@@ -3480,13 +3483,13 @@ def run_m6_13_deliberation_internalization_scenario(
     )
     _scenario_check(
         checks,
-        "m6_13_deliberation_internalization_records_scored_recall_event",
-        scored_recall_ok
-        and scored_recall_event.get("entry_id") == entry.get("id")
-        and scored_recall_event.get("rank") == matched_item.get("rank")
-        and {"review", "repair"}.issubset(set(scored_recall_event.get("matched_terms") or [])),
-        observed=scored_recall_event,
-        expected="later same-shape task retrieves the trace through the general active-memory scored recall path",
+        "m6_13_deliberation_internalization_records_ranked_recall_event",
+        ranked_recall_ok
+        and ranked_recall_event.get("entry_id") == entry.get("id")
+        and ranked_recall_event.get("rank") == matched_item.get("rank")
+        and {"review", "repair"}.issubset(set(ranked_recall_event.get("matched_terms") or [])),
+        observed=ranked_recall_event,
+        expected="later same-shape task retrieves the trace through the general M6.9 ranked active-memory path",
     )
     _scenario_check(
         checks,
@@ -3514,7 +3517,7 @@ def run_m6_13_deliberation_internalization_scenario(
         and trace_file_data.get("close_evidence") is False
         and trace_file_data.get("contract_cycle_proven") is True
         and trace_file_data.get("close_blockers")
-        and trace_file_data.get("scored_recall_event", {}).get("returned") is True
+        and trace_file_data.get("ranked_recall_event", {}).get("returned") is True
         and trace_file_data.get("active_memory_recall_event", {}).get("returned") is True
         and trace_file_data.get("adapted_memory_event", {}).get("injected") is True
         and trace_file_data.get("later_task_deliberation_invoked") is False,
