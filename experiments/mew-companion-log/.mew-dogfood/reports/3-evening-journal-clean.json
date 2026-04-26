@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "task_id": 3,
+  "session_id": 5,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP2 fixture-driven evening journal markdown output with CLI mode, fixture data, README usage, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 32.0,
+  "read_turns_before_edit": 2.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_session.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode evening-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode morning-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode evening-journal --output /tmp/mew-companion-log-evening.md"
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "clean",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/5",
+    "experiments/mew-companion-log/.mew-dogfood/reports/3-evening-journal-clean.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented the SP2 evening journal surface using --model gpt-5.5. Codex acted as operator/reviewer/verifier only. Existing report and morning journal behavior were preserved, --mode evening-journal renders fixture-driven markdown, README usage was updated, focused tests passed, and no rescue edits were used."
+}

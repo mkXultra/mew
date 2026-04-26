@@ -1,0 +1,99 @@
+{
+  "id": "sp1-sample",
+  "title": "SP1 scaffold mew-companion-log",
+  "status": "in-progress",
+  "goal": "Create an isolated companion log scaffold under experiments/mew-companion-log.",
+  "highlights": [
+    "Confirmed the side project stays outside core mew source files.",
+    "Rendered a fixture-driven markdown report with minimal Python dependencies."
+  ],
+  "next_steps": [
+    "Run the focused pytest command for the side project.",
+    "Iterate on the report shape after the first scaffold lands."
+  ],
+  "morning_journal": {
+    "title": "Morning Journal: SP2 companion output",
+    "date": "2026-04-26",
+    "intention": "Make the first journal surface feel calm, fixture-driven, and easy to verify.",
+    "gratitude": [
+      "A small isolated experiment keeps product iteration safe.",
+      "Snapshot tests can document the markdown shape."
+    ],
+    "focus": [
+      "Preserve the existing companion report CLI behavior.",
+      "Add a morning journal mode backed by fixture JSON."
+    ],
+    "blockers": [
+      "Avoid touching core mew source files."
+    ],
+    "closing_prompt": "What is the one gentle next action that would make today successful?"
+  },
+  "evening_journal": {
+    "title": "Evening Journal: SP2 companion output",
+    "date": "2026-04-26",
+    "reflection": "The companion log experiment now has room for both planning the day and closing it gently.",
+    "wins": [
+      "Kept the journal surface fixture-driven and easy to snapshot.",
+      "Preserved the existing report and morning journal behavior."
+    ],
+    "learned": [
+      "A small CLI mode can make a second surface discoverable without changing the default report."
+    ],
+    "release": [
+      "No need to solve every future companion prompt in this scaffold."
+    ],
+    "tomorrow": [
+      "Run the focused pytest command after reviewing the markdown shape."
+    ],
+    "closing_prompt": "What should be acknowledged before setting the work down for the night?"
+  },
+  "dream_learning": {
+    "title": "Dream Learning: SP2 companion output",
+    "date": "2026-04-26",
+    "dream": "Let the companion notice quiet patterns across the day without turning them into pressure.",
+    "signals": [
+      "Morning intentions and evening reflections both point toward gentle, fixture-driven surfaces.",
+      "Small CLI modes keep each companion output discoverable without changing the default report."
+    ],
+    "learning": [
+      "Snapshot tests make the markdown contract easy to review.",
+      "A final dream/learning mode can connect planning and reflection into one lightweight surface."
+    ],
+    "practice": [
+      "Choose one learning signal to carry into tomorrow's experiment.",
+      "Keep the next companion iteration isolated under experiments/mew-companion-log."
+    ],
+    "closing_prompt": "What quiet signal wants to become tomorrow's small experiment?"
+  },
+  "research_digest": {
+    "title": "Research Digest: SP4 static companion output",
+    "date": "2026-04-26",
+    "summary": "Fixture-backed digest of local research signals; no live feeds are fetched.",
+    "entries": [
+      {
+        "title": "Mew companion patterns",
+        "source": "Local Notes",
+        "url": "fixture://research/mew-companion-patterns",
+        "score": 98,
+        "reason": "Connects morning, evening, and dream surfaces into one companion loop.",
+        "tags": ["companion", "fixtures"]
+      },
+      {
+        "title": "Deterministic digest rendering",
+        "source": "Test Journal",
+        "url": "fixture://research/deterministic-digest-rendering",
+        "score": 91,
+        "reason": "Keeps ranking stable for snapshot-style tests and CLI review.",
+        "tags": ["testing", "markdown"]
+      },
+      {
+        "title": "Static feed safety",
+        "source": "Experiment Brief",
+        "url": "fixture://research/static-feed-safety",
+        "score": 87,
+        "reason": "Demonstrates a research/feed slice without live network dependency.",
+        "tags": ["offline", "safety"]
+      }
+    ]
+  }
+}

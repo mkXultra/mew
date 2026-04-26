@@ -1,0 +1,28 @@
+{
+  "id": "sp7-sample-bundle",
+  "title": "SP7 multi-fixture companion bundle",
+  "date": "2026-04-26",
+  "entries": [
+    {
+      "label": "Morning journal",
+      "group": "Session fixture surfaces",
+      "fixture": "sample_session.json",
+      "mode": "morning-journal",
+      "surface": "morning-journal"
+    },
+    {
+      "label": "Research digest",
+      "group": "Session fixture surfaces",
+      "fixture": "sample_session.json",
+      "mode": "research-digest",
+      "surface": "research-digest"
+    },
+    {
+      "label": "State brief",
+      "group": "State fixture surfaces",
+      "fixture": "sample_mew_state.json",
+      "mode": "state-brief",
+      "surface": "state-brief"
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "id": "sp6-sample-state",
+  "date": "2026-04-26",
+  "current_state": {
+    "title": "Mew State Companion Brief: SP6 side-project loop",
+    "status": "focused side-project implementation",
+    "summary": "Static fixture snapshot for companion review; it is not read from live .mew state.",
+    "active_task": "SP6 add state brief companion output"
+  },
+  "recent_tasks": [
+    {
+      "id": "sp4",
+      "title": "Research digest companion output",
+      "status": "complete"
+    },
+    {
+      "id": "sp6",
+      "title": "State brief companion output",
+      "status": "in-progress"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "work-session-9",
+      "goal": "Add a state brief mode under experiments/mew-companion-log.",
+      "latest_step": "Inspected renderer dispatch, tests, README, and existing fixtures."
+    }
+  ],
+  "memory_notes": [
+    "Long-session charter keeps SP6 scoped to experiments/mew-companion-log.",
+    "Companion outputs should stay fixture-backed and reviewable with snapshot-style tests."
+  ],
+  "dogfood_rows": [
+    {
+      "surface": "companion-log",
+      "signal": "Static markdown outputs are easy to inspect in CLI stdout and output files."
+    }
+  ],
+  "side_pj_issues": [
+    {
+      "key": "SP6",
+      "summary": "Add state brief companion export from a mew-state-like fixture.",
+      "status": "active"
+    }
+  ],
+  "recent_work": [
+    {
+      "label": "Tasks",
+      "detail": "SP4 research digest completed; SP6 state brief is now active."
+    },
+    {
+      "label": "Sessions",
+      "detail": "Work session 9 inspected the companion-log CLI, tests, README, and fixtures."
+    },
+    {
+      "label": "Memory notes",
+      "detail": "Long-session charter preserves the no-core-source and static-fixture boundary."
+    },
+    {
+      "label": "Dogfood",
+      "detail": "CLI stdout and output-file checks make companion markdown reviewable."
+    },
+    {
+      "label": "Side-pj issues",
+      "detail": "SP6 remains the next side-project issue to land after SP4."
+    }
+  ],
+  "unresolved_risks": [
+    {
+      "name": "Accidentally reading live mew state",
+      "mitigation": "Use only this static fixture under experiments/mew-companion-log."
+    },
+    {
+      "name": "State brief becoming too verbose",
+      "mitigation": "Render only current state, recent work, unresolved risks, and one next action."
+    }
+  ],
+  "next_side_project_action": {
+    "label": "Land SP6 state-brief mode with fixture, README usage, and focused tests.",
+    "reason": "It gives the companion a concise state export without coupling to core mew internals."
+  }
+}

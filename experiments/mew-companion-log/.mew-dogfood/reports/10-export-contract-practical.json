@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "task_id": 10,
+  "session_id": 19,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP10 companion export contract documentation with local fixture schema examples, stable markdown output contracts for every mode, README link, and all-mode output-file compatibility test.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 100.0,
+  "read_turns_before_edit": 7.0,
+  "files_changed": [
+    "experiments/mew-companion-log/CONTRACT.md",
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "git diff --check",
+    "rg -n \"from src|import src|src/mew|\\\\.mew|requests|urllib|os\\\\.walk|rglob\\\\(|glob\\\\(\" experiments/mew-companion-log/CONTRACT.md experiments/mew-companion-log/README.md experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "reviewer_rejections": 1,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "contract_heading_mismatch_reviewer_followup",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/follow/session-18.json",
+    ".mew/follow/session-19.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/10-export-contract-practical.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented SP10 with --model gpt-5.5 under experiments/mew-companion-log only. Session #18 authored CONTRACT.md, a README pointer, and an all-mode output-file compatibility test; the focused verifier passed with 31 tests. Codex reviewer found one contract mismatch after verification: dogfood-digest was documented as heading '# Companion Dogfood Digest:' while the renderer emits '# Dogfood Digest:'. Session #19 repaired the contract text and the focused verifier passed again with 31 tests. No Codex product-code rescue was used."
+}

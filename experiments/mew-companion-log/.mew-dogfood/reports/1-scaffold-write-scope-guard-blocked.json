@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": 1,
+  "session_id": 1,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "SP1 scaffold mew-companion-log with README, runnable fixture-driven markdown CLI, fixture, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 1,
+  "files_changed": [],
+  "tests_run": [],
+  "reviewer_rejections": 1,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "side_project_write_scope_guard_rejected_experiments_paths",
+  "repair_required": true,
+  "proof_artifacts": [
+    ".mew/follow/session-1.json",
+    ".mew/sessions/1",
+    "experiments/mew-companion-log/.mew-dogfood/reports/1-scaffold-write-scope-guard-blocked.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/1-scaffold-write-scope-guard-blocked-issue.md",
+    "https://github.com/mkXultra/mew/issues/1"
+  ],
+  "commit": "",
+  "notes": "Mew inspected the empty target directory, then twice attempted to scaffold under experiments/mew-companion-log. The write-ready/compiler guard rejected the side-project paired source/test paths with: write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each. The second attempt used --model gpt-5.5 and explicit steer that experiments/mew-companion-log was the valid product scope. No product files were written and Codex did not rescue the implementation. Problem issue: https://github.com/mkXultra/mew/issues/1."
+}

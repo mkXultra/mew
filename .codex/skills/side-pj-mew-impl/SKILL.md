@@ -18,13 +18,26 @@ instructions after every step.
 1. `SIDE_PROJECT_ROADMAP.md`
 2. `SIDE_PROJECT_ROADMAP_STATUS.md`
 3. `ROADMAP_STATUS.md` only when core milestone interaction matters
-4. `mew side-dogfood report --json` to see current telemetry
+4. `./mew side-dogfood report --json` from the current repo root to see
+   current telemetry
 
 ## Operating Rule
 
+- Run every mew command for this side-project lane from the current workspace
+  repo root with `./mew ...`. In this checkout that root is expected to be
+  `/Users/mk/dev/personal-pj/mew_side_pj`.
+- Do not run `/Users/mk/dev/personal-pj/mew/mew`, do not `cd` into
+  `/Users/mk/dev/personal-pj/mew` for mew operations, and do not append or
+  report telemetry from another repo unless the user explicitly changes the
+  workspace.
+- If the side-project code lives in an isolated subdirectory, keep that
+  directory as the target path, but run mew from the current repo root and pass
+  gates such as `--allow-read <side-project-dir>` and
+  `--allow-write <side-project-dir>`.
 - mew is the default implementer.
-- Side-project Codex CLI is normally `operator`: it runs mew from the
-  side-project directory, makes local decisions, and supervises the attempt.
+- Side-project Codex CLI is normally `operator`: it runs repo-root `./mew`
+  commands against the side-project target directory, makes local decisions,
+  and supervises the attempt.
 - Codex/Codex CLI may also be `reviewer`, `comparator`, or `verifier` when it
   checks mew's work.
 - If Codex/Codex CLI writes the product patch, record that role as `fallback`
@@ -35,6 +48,27 @@ instructions after every step.
 - Do not make GitHub issues for normal progress. GitHub issues are the
   exception queue: one real problem per issue, using only open/closed state.
 
+## Latest Mew Sync Rule
+
+Before every mew coding operation, sync the current repo from `origin/main`.
+This applies before commands that can make or drive product edits, including
+`./mew code`, `./mew work --ai`, `./mew work --live`, `./mew work --follow`,
+`./mew buddy --dispatch`, and write-capable `./mew work --tool ...` calls.
+
+Run the sync from the current repo root only:
+
+```bash
+pwd  # /Users/mk/dev/personal-pj/mew_side_pj
+git status --short
+git pull origin main
+```
+
+If `git status --short` is not clean, do not pull over local work. First decide
+whether the changes are the current side-project attempt, operator bookkeeping,
+or unrelated user edits. Finish/report the current attempt or ask the user
+before starting a new mew coding operation. Never run the pull from
+`/Users/mk/dev/personal-pj/mew`.
+
 ## Workflow
 
 1. Pick one bounded side-project task from `SIDE_PROJECT_ROADMAP_STATUS.md`.
@@ -44,44 +78,43 @@ instructions after every step.
    - expected files
    - focused verifier
    - expected Codex/Codex CLI role, normally `operator`
-3. In the side-project directory, let Codex CLI operate mew instead of editing
-   the product code directly.
-4. Let mew attempt the implementation first.
-5. Review with Codex/Codex CLI as reviewer/comparator/verifier when needed.
-6. Run the focused verifier.
-7. Write a local structured result report in the side-project report outbox.
-8. Only create a GitHub issue when there is a real problem that main Codex
-   should process.
-9. Stop instead of implementing directly when mew cannot complete the task.
+3. Apply the Latest Mew Sync Rule before any mew coding operation.
+4. From the current repo root, let Codex CLI operate `./mew` against the
+   side-project target directory instead of editing the product code directly.
+5. Let mew attempt the implementation first.
+6. Review with Codex/Codex CLI as reviewer/comparator/verifier when needed.
+7. Run the focused verifier.
+8. Write a local structured result report in the side-project report outbox.
+9. Create GitHub issues only for real problems or reusable implementation-lane
+   polish findings. Keep normal progress in the local report/ledger.
+10. Stop instead of implementing directly when mew cannot complete the task.
 
-## Two-Directory Model
+## Current-Repo Model
 
-There are two active shells/agents:
+There are two separate concerns, but mew state stays in the current repo:
 
-- main mew repo Codex: stays in `/Users/mk/dev/personal-pj/mew`, maintains
+- current repo Codex: stays in the current workspace repo root, maintains
   milestones, status, skills, and the canonical dogfood ledger
-- side-project Codex CLI: works in the side-project directory and operates mew
-  to make mew implement the side project
+- side-project target directory: contains the isolated product files that mew
+  edits through repo-root `./mew` commands
 
-The side-project Codex CLI should run mew from the side-project directory, for
+The side-project Codex CLI should run mew from the current repo root, for
 example:
 
 ```bash
-cd <side-project-dir>
-/Users/mk/dev/personal-pj/mew/mew code <task-id> --allow-read . --allow-write .
+pwd  # /Users/mk/dev/personal-pj/mew_side_pj
+./mew code <task-id> --allow-read <side-project-dir> --allow-write <side-project-dir>
 ```
 
-Append/report telemetry from the main mew repo, not from the side-project
-branch:
+Append/report telemetry from the current repo root:
 
 ```bash
-cd /Users/mk/dev/personal-pj/mew
 ./mew side-dogfood append --input <record.json>
 ./mew side-dogfood report --json
 ```
 
-This keeps the canonical ledger on the main branch while the side-project code
-can live on its own branch or worktree.
+This keeps the canonical ledger in the current workspace while the side-project
+code remains isolated by path.
 
 ## Normal Report Line
 
@@ -92,17 +125,16 @@ record per completed attempt under the side-project directory, for example:
 .mew-dogfood/reports/<task-id>-<short-summary>.json
 ```
 
-Use the main repo template as the schema source:
+Use the current repo template as the schema source:
 
 ```bash
-/Users/mk/dev/personal-pj/mew/mew side-dogfood template
+./mew side-dogfood template
 ```
 
-Main Codex will poll the side-project report outbox and append accepted records
-to the canonical main-branch ledger:
+Current-repo Codex will poll the side-project report outbox and append accepted
+records to the canonical ledger:
 
 ```bash
-cd /Users/mk/dev/personal-pj/mew
 ./mew side-dogfood append --input <side-project-report.json>
 ```
 
@@ -110,9 +142,15 @@ The side-project Codex CLI should not need to update the main ledger directly.
 
 ## Problem Report Line
 
-Use GitHub issues only for problems. Do not use labels for the first version;
-GitHub's open/closed state is enough. Use the title prefix `[side-pj]` so main
-Codex can poll issues without labels.
+Use GitHub issues only for problems or reusable M6.16 implementation-lane
+polish findings. Do not use labels for the first version; GitHub's open/closed
+state is enough. Use the title prefix `[side-pj]` so main Codex can poll
+issues without labels.
+
+Do not upload the whole ledger as an issue. The ledger is the canonical local
+evidence record. Issues are work items extracted from that evidence. Create one
+issue per problem or polish finding, usually keyed by one repeated or reusable
+`failure_class`.
 
 Create one issue per problem when:
 
@@ -124,10 +162,30 @@ Create one issue per problem when:
   honestly
 - the failure appears to be a core mew loop/substrate problem
 
+Also create one issue per polish finding when the ledger shows a failure class
+or practical outcome that did not block the side project but would help M6.16
+make the implementation lane better. Examples:
+
+- repeated or reusable closeout gaps, such as missing README usage, CLI stdout
+  proof, output-file proof, or focused tests after the main implementation
+  passed
+- write/edit ergonomics that cost a turn, such as same-file hunks not being
+  collapsed before a write batch
+- verifier coverage gaps where the configured verifier passed but did not
+  prove the user-facing mode or acceptance contract
+- fast, successful reviewer-rejection recovery that still points to an
+  avoidable implementation-lane interruption
+
+Do not create polish issues for one-off normal progress, purely subjective
+observations, or rows whose only purpose is recording successful side-project
+work. Prefer a compact evidence summary with ledger row refs over pasting raw
+JSONL.
+
 The issue should include:
 
 - title prefix `[side-pj]`
 - side project and task summary
+- relevant ledger row(s), `failure_class`, outcome, and `rescue_edits`
 - command(s) used to operate mew
 - what mew attempted
 - verifier output or failure evidence
@@ -135,8 +193,9 @@ The issue should include:
 - whether this looks like side-project task repair, M6.14 repair, or M6.16
   implementation-lane hardening input
 
-Main Codex processes open problem issues while continuing main milestone work.
-When resolved, close the issue. No `adding/getting/fixing` labels are needed.
+Current-repo Codex processes open problem issues while continuing milestone
+work. When resolved, close the issue. No `adding/getting/fixing` labels are
+needed.
 
 ## Operator Effort Boundary
 

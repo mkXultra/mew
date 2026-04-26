@@ -44,6 +44,8 @@ Target shape:
 - deterministic fixture tests and proof artifacts
 - no dependency on Tauri, screen capture, TTS, or external SaaS for the first
   dogfood loop
+- future state-oriented slices should use mew-state-like fixture JSON first;
+  do not read live `.mew` state or edit core mew from the side-project lane
 
 ## Milestones
 
@@ -125,3 +127,101 @@ Done when:
 - the main failure classes, rescue points, and first-edit latency are named
 - the next core hardening slice is chosen from measured evidence rather than
   subjective impressions
+
+### SP6: Mew State Companion Export
+
+Make the side project more valuable to mew's product story by rendering a
+fixture-driven companion brief from mew-state-like data.
+
+Done when:
+
+- a static fixture represents mew-like local state, such as recent tasks,
+  sessions, memory notes, dogfood rows, and open side-project issues
+- a CLI mode such as `--mode state-brief` renders a concise companion markdown
+  brief from that fixture
+- the output names current state, recent work, unresolved risks, and next
+  suggested side-project action without reading live `.mew` state
+- README usage, stdout behavior, output-file behavior, and snapshot-style tests
+  cover the new mode
+- the attempt leaves a side-project dogfood ledger row with mew-first credit
+  separated from Codex operator/reviewer work
+
+### SP7: Multi-Fixture Companion Bundles
+
+Let the side project combine several local fixture files into one deterministic
+companion bundle.
+
+Done when:
+
+- a bundle fixture or manifest can point at multiple local session/state
+  fixtures
+- a CLI mode or option renders a combined companion markdown bundle without
+  live network or live mew-state dependency
+- ordering, grouping, and missing-fixture behavior are deterministic and
+  covered by tests
+- README examples show the bundle command and output-file path
+- the attempt records whether mew kept closeout completeness without reviewer
+  follow-up
+
+### SP8: Multi-Day Companion Archive
+
+Turn generated companion outputs into a small local archive/index model using
+only fixture data and deterministic output paths.
+
+Done when:
+
+- fixture data can represent multiple days of companion outputs
+- a CLI mode such as `--mode archive-index` renders an index grouped by day,
+  surface, and next action
+- no live filesystem crawl is required beyond explicit fixture paths supplied
+  to the side-project CLI
+- tests cover archive ordering, empty-day behavior, and stable markdown shape
+- README documents how the archive index differs from the single-session brief
+
+### SP9: Issue and Dogfood Ledger Digest
+
+Make the side project summarize side-project implementation evidence in a
+reader-friendly format, still from static fixtures.
+
+Done when:
+
+- fixture data can represent side-project dogfood rows and `[side-pj]` issue
+  summaries without querying GitHub live
+- a CLI mode such as `--mode dogfood-digest` renders outcomes, failure classes,
+  rescue edits, and polish candidates
+- the digest distinguishes product progress, blockers, and M6.16 polish input
+- tests cover failure-class grouping and issue-link rendering
+- any new reusable polish finding is raised as one `[side-pj]` issue rather
+  than being hidden in chat
+
+### SP10: Companion Export Contract
+
+Define the stable local contract that would let a future core milestone consume
+side-project output without coupling the side project to core mew.
+
+Done when:
+
+- the side project documents the input fixture schema and output markdown
+  contract for report, journal, dream, research, state, bundle, archive, and
+  dogfood surfaces
+- schema examples stay local to `experiments/mew-companion-log`
+- tests prove all documented modes still render and write output files
+- no import from `src/mew/**` or live `.mew` state is introduced
+- the contract names which future core milestone could adopt the surface and
+  which decisions remain deferred
+
+### SP11: Second Side-Project Gate
+
+Decide whether `mew-companion-log` has produced enough evidence and product
+clarity, or whether a second isolated side project would teach mew more.
+
+Done when:
+
+- the side-project dogfood ledger is summarized after SP6-SP10
+- repeated failure classes, rescue edits, first-edit latency, and issue queue
+  outcomes are compared against the first cohort
+- the next recommendation is explicit: continue `mew-companion-log`, start a
+  second side project, or pause side-project work for core M6.16/M9/M11 use
+- if a second side project is recommended, it has a name, target shape,
+  non-goals, focused verifier, and first milestone
+- no implementation begins until the new roadmap/status entries are written

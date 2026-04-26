@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "task_id": 7,
+  "session_id": 10,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP7 fixture-driven multi-fixture companion bundle output with static manifest, bundle CLI mode, README usage, deterministic ordering/grouping, missing-fixture coverage, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 70.0,
+  "read_turns_before_edit": 3.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_bundle.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_bundle.json --mode bundle",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_bundle.json --mode bundle --output /tmp/mew-companion-log-bundle.md",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_mew_state.json --mode state-brief",
+    "git diff --check",
+    "rg -n \"src/mew|\\\\.mew|glob\\\\(|rglob\\\\(|os\\\\.walk|requests|urllib|http\" experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/tests/test_companion_log.py experiments/mew-companion-log/README.md experiments/mew-companion-log/fixtures/sample_bundle.json"
+  ],
+  "reviewer_rejections": 4,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "same_file_write_batch_retry_timeout_after_bundle_verifier_failure",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/follow/session-10.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/7-bundle-practical.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented SP7 with --model gpt-5.5. Codex acted as operator/reviewer/verifier only. The first write batch reached the right bundle shape but verifier failed because missing-fixture CLI error handling produced a traceback instead of a stable stderr line; the batch rolled back. A repaired retry then hit the same-file write-batch guard and a later compact retry timed out under high session context pressure. After rejected old pending writes were cleared and model-timeout was raised to 180 seconds, mew authored the final one-edit-per-file patch and the focused verifier passed with 22 tests. No Codex product-code rescue was used. Existing issue #3 already covers the repeated same-file write-batch ergonomics; the retry-timeout pressure is separate M6.16 polish input."
+}
