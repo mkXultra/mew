@@ -440,6 +440,28 @@ class CommandTests(unittest.TestCase):
                         "proposal": {"blocked": True},
                     },
                 ]
+                state["selector_proposals"].extend(
+                    [
+                        {
+                            "id": 3,
+                            "previous_task_id": 2,
+                            "proposed_task_id": 3,
+                            "status": "approved",
+                            "reviewer_decision": "approved",
+                            "reviewer_reason": "second approved",
+                            "proposal": {"selector_reason": "second candidate is ready"},
+                        },
+                        {
+                            "id": 4,
+                            "previous_task_id": 3,
+                            "proposed_task_id": 4,
+                            "status": "approved",
+                            "reviewer_decision": "approved",
+                            "reviewer_reason": "third approved",
+                            "proposal": {"selection_reason": "third candidate is ready"},
+                        },
+                    ]
+                )
                 state["selector_execution_attempts"] = [
                     {
                         "id": 1,
@@ -461,6 +483,32 @@ class CommandTests(unittest.TestCase):
                         "status": "rejected",
                         "blocked_reason": "blocked by review",
                     },
+                    {
+                        "id": 3,
+                        "proposal_id": 3,
+                        "proposed_task_id": 3,
+                        "status": "handoff_ready",
+                        "approval_status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "second approved",
+                        "reviewed_at": "2026-04-26T00:02:00Z",
+                        "timestamp": "2026-04-26T00:03:00Z",
+                        "next_command": "./mew work 3 --start-session",
+                        "auto_run": False,
+                    },
+                    {
+                        "id": 4,
+                        "proposal_id": 4,
+                        "proposed_task_id": 4,
+                        "status": "handoff_ready",
+                        "approval_status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "third approved",
+                        "reviewed_at": "2026-04-26T00:04:00Z",
+                        "timestamp": "2026-04-26T00:05:00Z",
+                        "next_command": "./mew work 4 --start-session",
+                        "auto_run": False,
+                    },
                 ]
                 commands_module.save_state(state)
                 state_before = commands_module.load_state()
@@ -476,9 +524,9 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(
             status["counts"],
             {
-                "proposals": 2,
-                "attempts": 2,
-                "approved_handoffs": 1,
+                "proposals": 4,
+                "attempts": 4,
+                "approved_handoffs": 3,
                 "rejected_attempts": 1,
                 "blocked_proposals": 1,
             },
@@ -488,6 +536,30 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(
             status["recent_handoffs"],
             [
+                {
+                    "proposal_id": 4,
+                    "previous_task_id": 3,
+                    "proposed_task_id": 4,
+                    "selector_reason": "third candidate is ready",
+                    "approval_status": "approved",
+                    "reviewer_decision": "approved",
+                    "reviewer_reason": "third approved",
+                    "reviewed_at": "2026-04-26T00:04:00Z",
+                    "next_command": "./mew work 4 --start-session",
+                    "timestamp": "2026-04-26T00:05:00Z",
+                },
+                {
+                    "proposal_id": 3,
+                    "previous_task_id": 2,
+                    "proposed_task_id": 3,
+                    "selector_reason": "second candidate is ready",
+                    "approval_status": "approved",
+                    "reviewer_decision": "approved",
+                    "reviewer_reason": "second approved",
+                    "reviewed_at": "2026-04-26T00:02:00Z",
+                    "next_command": "./mew work 3 --start-session",
+                    "timestamp": "2026-04-26T00:03:00Z",
+                },
                 {
                     "proposal_id": 1,
                     "previous_task_id": 1,
@@ -499,8 +571,18 @@ class CommandTests(unittest.TestCase):
                     "reviewed_at": "2026-04-26T00:00:00Z",
                     "next_command": "./mew work 2 --start-session",
                     "timestamp": "2026-04-26T00:01:00Z",
-                }
+                },
             ],
+        )
+        self.assertEqual(
+            status["proof_summary"],
+            {
+                "total_recent_handoffs": 3,
+                "contiguous_chain_length": 3,
+                "latest_task_id": 4,
+                "oldest_task_id": 1,
+                "has_three_consecutive_handoffs": True,
+            },
         )
         self.assertEqual(state_after, state_before)
 

@@ -254,6 +254,20 @@ Current M6.8 evidence:
   --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
   --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
   tests/test_commands.py`, and `git diff --check`.
+- Task `#638` / session `#624` added the close-gate proof summary after the
+  reviewer-approved `#637 -> #638` auto-selected handoff. `mew task
+  selector-status --json` now derives `proof_summary` from `recent_handoffs`:
+  total recent handoffs, contiguous chain length, latest task id, oldest task
+  id, and `has_three_consecutive_handoffs`.
+- #638 dogfood: live `selector-status --json` reported
+  `approved_handoffs=4`, `rejected_attempts=2`, `blocked_proposals=6`,
+  `proof_summary.contiguous_chain_length=4`, and
+  `has_three_consecutive_handoffs=true`. The latest three auto-selected links
+  are `#635 -> #636`, `#636 -> #637`, and `#637 -> #638`.
+- #638 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
+  tests/test_commands.py`, and `git diff --check`.
 
 M6.8 is done when:
 
@@ -377,11 +391,11 @@ Non-goals for the next session:
 
 ## Latest Validation
 
-Latest committed code baseline: `6267516 Summarize selector chain status`.
+Latest committed code baseline: `6e1f805 Track selector handoff chain`.
 
-Current uncommitted change: M6.8 selector recent handoff chain v0 in
+Current uncommitted change: M6.8 selector consecutive proof summary v0 in
 `src/mew/commands.py`, `tests/test_commands.py`, and this roadmap status file;
-validation listed above under task `#637`.
+validation listed above under task `#638`.
 
 Observed in this cleanup session:
 
@@ -390,7 +404,7 @@ Observed in this cleanup session:
   `docs/archive/ROADMAP_STATUS_detailed_2026-04-26.md`
 
 Behavioral validation for the active source/test change is listed above under
-task `#637`.
+task `#638`.
 
 ## Maintenance Rule
 

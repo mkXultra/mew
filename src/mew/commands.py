@@ -732,6 +732,35 @@ def _task_selector_recent_handoffs(proposals, attempts, limit=5):
     return handoffs
 
 
+def _task_selector_recent_handoff_proof_summary(handoffs):
+    total_recent_handoffs = len(handoffs)
+    if not handoffs:
+        return {
+            "total_recent_handoffs": 0,
+            "contiguous_chain_length": 0,
+            "latest_task_id": None,
+            "oldest_task_id": None,
+            "has_three_consecutive_handoffs": False,
+        }
+
+    latest_task_id = handoffs[0].get("proposed_task_id")
+    contiguous_chain_length = 1
+    oldest_task_id = handoffs[0].get("previous_task_id")
+    for handoff in handoffs[1:]:
+        if oldest_task_id is None or oldest_task_id != handoff.get("proposed_task_id"):
+            break
+        contiguous_chain_length += 1
+        oldest_task_id = handoff.get("previous_task_id")
+
+    return {
+        "total_recent_handoffs": total_recent_handoffs,
+        "contiguous_chain_length": contiguous_chain_length,
+        "latest_task_id": latest_task_id,
+        "oldest_task_id": oldest_task_id,
+        "has_three_consecutive_handoffs": contiguous_chain_length >= 3,
+    }
+
+
 def task_selector_chain_status(state):
     proposals = list(state.get("selector_proposals") or [])
     attempts = list(state.get("selector_execution_attempts") or [])
@@ -740,6 +769,7 @@ def task_selector_chain_status(state):
         proposal = record.get("proposal") or {}
         if record.get("status") == "blocked" or proposal.get("blocked"):
             blocked_proposals += 1
+    recent_handoffs = _task_selector_recent_handoffs(proposals, attempts)
     return {
         "counts": {
             "proposals": len(proposals),
@@ -750,7 +780,8 @@ def task_selector_chain_status(state):
         },
         "latest_proposal": proposals[-1] if proposals else None,
         "latest_attempt": attempts[-1] if attempts else None,
-        "recent_handoffs": _task_selector_recent_handoffs(proposals, attempts),
+        "proof_summary": _task_selector_recent_handoff_proof_summary(recent_handoffs),
+        "recent_handoffs": recent_handoffs,
     }
 
 
