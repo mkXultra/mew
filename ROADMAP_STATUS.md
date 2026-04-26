@@ -166,6 +166,15 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_work_session.py tests/test_work_rejection_frontier.py -k 'evidence_source_scope_terms or task_goal_substitution or required_terms' --no-testmon`,
   `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
   `git diff --check`.
+- Task `#662` is the next same-family supervisor-owned M6.16/M6.14 repair:
+  the retry after `#661` then blocked on verifier command flag `no-testmon`
+  as a required task-goal term. The repair adds `no-testmon` to the
+  evidence/command stopwords and extends the same focused test. Retry `#660`
+  mew-first after commit. Focused proof:
+  `uv run pytest -q tests/test_work_session.py -k evidence_source_scope_terms --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py tests/test_work_rejection_frontier.py -k 'evidence_source_scope_terms or task_goal_substitution or required_terms' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

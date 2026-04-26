@@ -6995,7 +6995,10 @@ class WorkSessionTests(unittest.TestCase):
             "Strengthen finish guidance for CLI stdout/output-file behavior. "
             "ROADMAP_STATUS is only evidence. Keep this prompt-only and test-only."
         )
-        context["guidance"] = "Draft the paired source/test patch. Do not add side-pj-specific wording."
+        context["guidance"] = (
+            "Draft the paired source/test patch. Do not add side-pj-specific wording. "
+            "Focused verifier uses --no-testmon."
+        )
 
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         required_terms = tiny_context["task_goal"]["required_terms"]
@@ -7005,6 +7008,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("implementation-lane", required_terms)
         self.assertNotIn("prompt-only", required_terms)
         self.assertNotIn("ROADMAP_STATUS", required_terms)
+        self.assertNotIn("no-testmon", required_terms)
         self.assertNotIn("test-only", required_terms)
         self.assertIn("user-facing", required_terms)
         self.assertIn("output-file", required_terms)
