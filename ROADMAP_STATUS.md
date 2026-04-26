@@ -46,10 +46,10 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, mirror bundles, deliberation controls, and Phase 3 internalization readiness proof landed; close blockers are explicit. |
+| 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
-| 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
+| 6.16 Codex-Grade Implementation Lane | `not_started` | Next active milestone: use M6.13 lane telemetry and mew-first evidence to harden ordinary implementation-lane reliability. |
 | 6.17 Resident Meta Loop / Lane Chooser | `not_started` | Future supervisor milestone after lane telemetry, mirror/deliberation boundaries, and implementation-lane reliability are proven. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -59,44 +59,44 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.13 High-Effort Deliberation Lane**.
+Active work: **M6.16 Codex-Grade Implementation Lane**.
 
-Why M6.13 is active:
+Why M6.16 is active:
 
-- M6.8.5 closed the selector intelligence gate and the prior M6.13 deferral
-  trigger has fired.
-- M6.9 durable memory and M6.11 loop stabilization are usable, but hard
-  work-loop blockers still need an explicit, bounded escalation lane.
-- The next resident capability gap is controlled high-effort reasoning: mew
-  should be able to ask for it, account for it, fall back safely, and
-  internalize useful results without making it the default path.
+- M6.13 closed the deliberation/mirror/internalization gate with both
+  deterministic and live gpt-5.5 proof.
+- The next resident capability gap is not another helper lane; it is the
+  ordinary authoritative implementation lane. Mew needs reliable hands before
+  lane composition or a meta loop can be valuable.
+- M6.13.2 side-project dogfood telemetry, mew-first attempt history, and
+  M6.14 repair records now provide enough evidence to choose measured
+  implementation-lane bottlenecks instead of guessing.
 
-Current M6.13 target:
+Current M6.16 target:
 
-- keep the existing tiny lane authoritative and backward compatible
-- treat `implementation` as a display/conceptual name for the authoritative
-  tiny lane; `tiny` remains the persisted canonical lane id in M6.13 v0
-- add lane metadata and a lane registry without changing tiny behavior
-- prove mirror-lane identity/bundles as non-authoritative before any
-  deliberation write path
-- emit lane-attempt telemetry needed for future calibration economics routing,
-  while keeping M6.13 v0 routing rule-based
-- defer broad refactoring until M6.16, except for narrow M6.14 repairs when
-  the same reproducible mew-first failure class blocks M6.13 twice
-- bind deliberation attempts to explicit model, effort, timeout, budget, and
-  schema contracts
-- allow deliberation only for reviewer-commanded or eligible semantic blockers,
-  with fallback to tiny on refusal, timeout, budget, validation, or review
-  failure
-- convert useful deliberation output into reviewed M6.9 reasoning traces,
-  never raw transcript storage
+- treat persisted `tiny` as the authoritative implementation lane while using
+  `implementation` as the product-facing concept
+- measure recent mew-first attempts by rescue rate, approval rejection,
+  verifier failure, first-edit latency, retry path, and failure class
+- consume the M6.13.2 side-project dogfood ledger only as evidence; do not let
+  side-project control preempt the main milestone unless it exposes a core
+  blocker
+- reduce measured friction with narrow changes and focused replay/test proof
+- keep M6.14 as the repair path for structural mew-first failures
+- avoid broad work-loop/work-session refactors unless a measured recurring
+  failure class names the bottleneck
 
-Current M6.13 chain:
+Current M6.16 chain:
 
-`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
+`M6.16 -> implementation-lane baseline -> measured bottleneck reduction cohort`
 
-Current M6.13 evidence:
+Current M6.16 evidence:
 
+- M6.13 close gate passed via
+  `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
+  reviewer-approved deliberation internalization, M6.9 ranked recall, normal
+  tiny batch preview, normal approval apply, and a real unittest verifier with
+  `close_evidence=true` and no close blockers.
 - M6.13.2 decision memory saved at
   `.mew/memory/private/project/20260426T081045Z-decision-m6-13-2-side-project-dogfood-telemetry.md`.
   It records the side-project dogfood reporting flow: side-project task ->
@@ -178,18 +178,17 @@ Current M6.13 evidence:
   `uv run python -m mew dogfood --scenario m6_13-deliberation-internalization --ai --auth auth.json --model gpt-5.5 --model-timeout 180 --json`,
   producing `evidence_class=live_provider_internalization_contract`,
   `deliberation_provider_mode=live_provider`, `tiny_provider_mode=live_provider`,
-  and a validated paired patch draft while keeping `close_evidence=false` until
-  the remaining reviewer/later-task fixture and ranked-recall limitations are
-  closed. The same live path also passes with omitted `--auth`, preserving
-  backend auth defaults.
-- The current M6.13 close-readiness slice records the Phase 3 proof honestly:
-  active memory now emits M6.9 ranked recall metadata with recency,
-  importance, relevance, symbol-overlap, and task-shape components; the dogfood
-  trace records `contract_cycle_proven=true`; deterministic and live `gpt-5.5`
-  proofs pass; and `close_evidence=false` remains explicit. The readiness audit
-  is `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`. Current close blockers:
-  extend the later tiny task from validated patch planning to applied/verified
-  tiny-only solve.
+  and a validated paired patch draft. A later close slice replaced the
+  previous not-close readiness state with normal work-path apply/verify proof.
+- The M6.13 close slice records the full Phase 3 proof: active memory emits
+  M6.9 ranked recall metadata with recency, importance, relevance,
+  symbol-overlap, and task-shape components; the dogfood trace records
+  `contract_cycle_proven=true`; deterministic and live `gpt-5.5` proofs pass;
+  the later tiny task previews through `run_work_batch_action`, applies via
+  `_apply_work_approval_batch`, and runs a real unittest verifier with
+  `verification_test_count>=1`; and `close_evidence=true` has no close
+  blockers. The close audit is
+  `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
@@ -762,25 +761,21 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> Phase 3 internalization close gap -> close the tiny-solve blocker`
+`M6.16 -> implementation-lane baseline -> choose the first measured bottleneck`
 
 Acceptable near-term work:
 
-- add mirror-lane recording as non-authoritative evidence only after tiny
-  compatibility is proven
-- prove the deliberation call boundary with one reviewer-commanded attempt,
-  one automatic eligible attempt, and one deliberate fallback while preserving
-  tiny fallback
-- tighten the M6.13 close evidence so Phase 2 command-boundary proof and Phase
-  3 internalization proof are both reconstructable from status, tests, and
-  deterministic dogfood artifacts
-- close exactly one readiness blocker from
-  `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`: applied/verified tiny-only
-  solve
-- prove old sessions and existing replay bundles with absent lane metadata keep
-  tiny-compatible behavior at their read/report boundary
-- wire the minimal lane-attempt telemetry helper into future lane attempts only
-  when that slice already needs a lane attempt record; do not add EV routing
+- build a compact M6.16 baseline report from recent mew-first attempts,
+  M6.13 lane telemetry, M6.13.2 side-project ledger entries, and M6.14 repair
+  records
+- classify the first implementation-lane bottleneck by rescue rate, approval
+  rejection, verifier failure, first-edit latency, retry path, or failure class
+- make one narrow implementation-lane change tied to that measured bottleneck
+  and record before/after evidence
+- if the bottleneck is structural, open or append an M6.14 repair episode
+  instead of hiding it behind supervisor edits
+- keep deliberation as helper evidence only; do not use it to mask weak normal
+  implementation-lane behavior
 
 Non-goals for the next session:
 
@@ -788,13 +783,11 @@ Non-goals for the next session:
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
-- side-project dogfood; it is user-controlled and outside the current mainline
-  M6.13 task selection unless a reproducible core blocker is reported
+- side-project dogfood control; user controls side-project launch and M6.16
+  only consumes the resulting ledger/problem evidence
 - M7 inbound-signal work
-- raw deliberation transcript storage
-- broad refactors not tied to lane telemetry or a repeated M6.14 repair-class
-  failure
-- broad refactors or polish not mapped to the M6.13 gate
+- broad refactors not tied to a measured implementation-lane bottleneck
+- polish not mapped to the M6.16 gate
 
 ## Latest Validation
 
@@ -820,6 +813,15 @@ Latest M6.13 source/test validation:
   `uv run ruff check src/mew/deliberation.py src/mew/work_loop.py src/mew/commands.py src/mew/cli.py tests/test_deliberation.py tests/test_work_deliberation_loop.py tests/test_work_deliberation_cli.py`,
   and `git diff --check` passed.
 - M6.13 Phase 3 internalization proof slice:
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_13' --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py tests/test_work_session.py -k 'm6_13 or approve_all or paired' --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'approve_all or paired' --no-testmon`,
+  `./mew dogfood --scenario m6_13-deliberation-internalization --workspace /tmp/mew-m6-13-proof-cli-3 --json --report /tmp/mew-m6-13-proof-cli-3-report.json`,
+  `./mew dogfood --scenario m6_13-deliberation-internalization --ai --auth auth.json --model-backend codex --model gpt-5.5 --model-timeout 120 --workspace /tmp/mew-m6-13-live-gpt55-2 --json --report /tmp/mew-m6-13-live-gpt55-2-report.json`,
+  `uv run ruff check src/mew/dogfood.py tests/test_dogfood.py`,
+  and `git diff --check` passed for the final normal work-path close proof.
+  Earlier supporting validation:
   `uv run pytest -q tests/test_memory.py -k 'reasoning_trace' --no-testmon`,
   `uv run pytest -q tests/test_dogfood.py -k 'm6_13_deliberation_internalization or m6_13_live_provider or scenario_choices' --no-testmon`,
   `uv run pytest -q tests/test_work_session.py -k 'compact_active_memory_preserves_reasoning_trace_provenance' --no-testmon`,

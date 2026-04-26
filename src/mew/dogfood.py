@@ -2993,6 +2993,132 @@ def validate_m6_13_internalization_review_artifact(
     }
 
 
+def run_m6_13_tiny_batch_through_work_approval(
+    workspace,
+    state,
+    live_session,
+    *,
+    later_task_id,
+    planned,
+    planned_action,
+    allowed_write_roots,
+    verify_command,
+):
+    from . import commands as commands_module
+
+    reconcile_next_ids(state)
+    write_json_file(workspace / STATE_FILE, state)
+    args = SimpleNamespace(
+        task_id=later_task_id,
+        allow_read=["."],
+        allow_write=allowed_write_roots,
+        allow_verify=True,
+        verify_command=verify_command,
+        verify_cwd=".",
+        verify_timeout=60,
+        allow_unpaired_source_edit=False,
+        approval_mode="",
+        progress=False,
+        json=True,
+    )
+    old_cwd = os.getcwd()
+    os.chdir(workspace)
+    try:
+        batch_step = commands_module.run_work_batch_action(
+            live_session.get("id"),
+            later_task_id,
+            1,
+            planned,
+            planned_action,
+            args,
+            None,
+        )
+        approval_code, approval_data = commands_module._apply_work_approval_batch(
+            args,
+            batch_step.get("pending_approval_ids") or [],
+        )
+    finally:
+        os.chdir(old_cwd)
+
+    approvals = approval_data.get("approved") or []
+    applied_tool_calls = [
+        (approval.get("tool_call") or {})
+        for approval in approvals
+        if isinstance(approval, dict)
+    ]
+    applied_results = [
+        call.get("result") or {}
+        for call in applied_tool_calls
+        if isinstance(call, dict)
+    ]
+    verification_records = [
+        result.get("verification") or {}
+        for result in applied_results
+        if isinstance(result.get("verification"), dict)
+    ]
+    verification_text = "\n".join(
+        f"{record.get('stdout') or ''}\n{record.get('stderr') or ''}"
+        for record in verification_records
+    )
+    verification_test_counts = [
+        int(match.group(1))
+        for match in re.finditer(r"Ran\s+(\d+)\s+tests?", verification_text)
+    ]
+    verification_test_count = max(verification_test_counts) if verification_test_counts else 0
+    verification_exit_codes = [
+        result.get("verification_exit_code")
+        for result in applied_results
+        if "verification_exit_code" in result
+    ]
+    workspace_resolved = workspace.resolve()
+
+    def compact_path(value):
+        try:
+            return str(Path(value or "").resolve().relative_to(workspace_resolved))
+        except (OSError, ValueError):
+            return str(value or "")
+
+    source_text = read_text_file(workspace / "src/mew/patch_draft.py")
+    test_text = read_text_file(workspace / "tests/test_patch_draft.py")
+    return {
+        "ok": (
+            batch_step.get("status") == "completed"
+            and bool(batch_step.get("pending_approval_ids"))
+            and approval_code == 0
+            and approval_data.get("count") == len(batch_step.get("pending_approval_ids") or [])
+            and bool(verification_exit_codes)
+            and verification_exit_codes[-1] == 0
+            and verification_test_count >= 1
+            and "return 42" in source_text
+            and "meaning(), 42" in test_text
+        ),
+        "execution_path": "run_work_batch_action->_apply_work_approval_batch",
+        "batch_status": batch_step.get("status") or "",
+        "batch_error": batch_step.get("error") or "",
+        "pending_approval_ids": batch_step.get("pending_approval_ids") or [],
+        "approval_exit_code": approval_code,
+        "approval_count": approval_data.get("count") or 0,
+        "approval_statuses": [
+            (approval.get("approved_tool_call") or {}).get("approval_status") or ""
+            for approval in approvals
+            if isinstance(approval, dict)
+        ],
+        "applied_paths": [
+            compact_path(result.get("path") or "")
+            for result in applied_results
+            if result.get("path")
+        ],
+        "deferred_verification_count": sum(
+            1 for result in applied_results if result.get("verification_deferred") is True
+        ),
+        "verification_command": verify_command,
+        "verification_exit_codes": verification_exit_codes,
+        "verification_test_count": verification_test_count,
+        "final_source_verification_exit_code": verification_exit_codes[-1] if verification_exit_codes else None,
+        "files_reflect_patch": "return 42" in source_text and "meaning(), 42" in test_text,
+    }
+
+
 def run_m6_13_deliberation_internalization_scenario(
     workspace,
     env=None,
@@ -3254,19 +3380,44 @@ def run_m6_13_deliberation_internalization_scenario(
     }
     patch_scenario_path = PATCH_DRAFT_FIXTURE_ROOT / "paired_src_test_happy" / "scenario.json"
     patch_scenario = json.loads(patch_scenario_path.read_text(encoding="utf-8"))
+    live_file_texts = {}
     for path, payload in (patch_scenario.get("live_files") or {}).items():
         live_path = workspace / path
         live_path.parent.mkdir(parents=True, exist_ok=True)
-        live_path.write_text(payload.get("text") or "", encoding="utf-8")
+        text = payload.get("text") or ""
+        if path == "tests/test_patch_draft.py":
+            text = (
+                "import importlib.util\n"
+                "import unittest\n"
+                "from pathlib import Path\n"
+                "\n"
+                "spec = importlib.util.spec_from_file_location(\n"
+                '    "patch_draft_fixture", Path("src/mew/patch_draft.py")\n'
+                ")\n"
+                "patch_draft_fixture = importlib.util.module_from_spec(spec)\n"
+                "assert spec.loader is not None\n"
+                "spec.loader.exec_module(patch_draft_fixture)\n"
+                "\n"
+                "class PatchDraftFixtureTests(unittest.TestCase):\n"
+                "    def test_meaning(self):\n"
+                "        self.assertEqual(patch_draft_fixture.meaning(), 41)\n"
+            )
+        live_path.write_text(text, encoding="utf-8")
+        live_file_texts[path] = text
     target_paths = list((patch_scenario.get("todo") or {}).get("source", {}).get("target_paths") or [])
     later_task = next((item for item in state["tasks"] if item.get("id") == later_task_id), {})
     live_session, _created = create_work_session(state, later_task)
     live_session["tool_calls"] = []
-    for index, path in enumerate(target_paths, start=1):
+    for path in target_paths:
         window = ((patch_scenario.get("cached_windows") or {}).get(path) or {}).copy()
+        if path in live_file_texts:
+            window["text"] = live_file_texts[path]
+            window["line_start"] = 1
+            window["line_end"] = max(1, len(live_file_texts[path].splitlines()))
+            window["context_truncated"] = False
         live_session["tool_calls"].append(
             {
-                "id": index,
+                "id": next_id(state, "work_tool_call"),
                 "tool": "read_file",
                 "status": "completed",
                 "parameters": {
@@ -3370,6 +3521,17 @@ def run_m6_13_deliberation_internalization_scenario(
         ),
         {},
     )
+    tiny_verify_command = f"{sys.executable} -m unittest discover -s tests -p test_patch_draft.py"
+    tiny_execution = run_m6_13_tiny_batch_through_work_approval(
+        workspace,
+        state,
+        live_session,
+        later_task_id=later_task_id,
+        planned=planned,
+        planned_action=planned_action,
+        allowed_write_roots=patch_scenario.get("allowed_write_roots") or ["."],
+        verify_command=tiny_verify_command,
+    )
     tiny_bundle_path = workspace / tiny_bundle_ref
     tiny_bundle_path.parent.mkdir(parents=True, exist_ok=True)
     tiny_bundle = {
@@ -3390,6 +3552,18 @@ def run_m6_13_deliberation_internalization_scenario(
         or "",
         "tiny_write_ready_draft_exit_stage": planned_metrics.get("tiny_write_ready_draft_exit_stage") or "",
         "tiny_write_ready_draft_error": planned_metrics.get("tiny_write_ready_draft_error") or "",
+        "applied": bool(tiny_execution.get("ok")),
+        "applied_paths": tiny_execution.get("applied_paths") or [],
+        "apply_errors": [tiny_execution.get("batch_error")] if tiny_execution.get("batch_error") else [],
+        "execution_path": tiny_execution.get("execution_path") or "",
+        "pending_approval_ids": tiny_execution.get("pending_approval_ids") or [],
+        "approval_statuses": tiny_execution.get("approval_statuses") or [],
+        "approval_count": tiny_execution.get("approval_count") or 0,
+        "deferred_verification_count": tiny_execution.get("deferred_verification_count") or 0,
+        "verify_command": tiny_execution.get("verification_command") or "",
+        "verify_exit_code": tiny_execution.get("final_source_verification_exit_code"),
+        "verified": tiny_execution.get("ok") is True,
+        "normal_work_execution": tiny_execution,
         "live_tiny_decision_kind": (
             str((observed_live_tiny_decisions[-1] if observed_live_tiny_decisions else {}).get("kind") or "")
             if live_provider
@@ -3426,9 +3600,16 @@ def run_m6_13_deliberation_internalization_scenario(
         and tiny_bundle["reviewer_confirmed_trace_shortened_deliberation"] is True
         and tiny_bundle["deliberation_invoked"] is False
         and tiny_bundle["planned_action_type"] == "batch"
+        and tiny_bundle["applied"] is True
+        and tiny_bundle["verified"] is True
+        and tiny_bundle["approval_count"] == len(tiny_bundle["pending_approval_ids"]) == 2
+        and tiny_bundle["deferred_verification_count"] == 1
+        and (tiny_bundle["normal_work_execution"] or {}).get("final_source_verification_exit_code") == 0
+        and int((tiny_bundle["normal_work_execution"] or {}).get("verification_test_count") or 0) >= 1
+        and (tiny_bundle["normal_work_execution"] or {}).get("files_reflect_patch") is True
     )
-    close_blockers = [
-        "later same-shape task proves validated tiny patch planning, not an applied and verified tiny-only solve",
+    close_blockers = [] if full_contract_cycle_proven else [
+        "later same-shape task must be applied and verified by tiny without re-invoking deliberation",
     ]
     trace_rel = str(Path(STATE_DIR) / "durable" / "m6_13-deliberation-internalization-trace.json")
     trace_path = workspace / trace_rel
@@ -3445,7 +3626,7 @@ def run_m6_13_deliberation_internalization_scenario(
         "later_same_shape_task_id": later_task_id,
         "same_shape_key": same_shape_key,
         "evidence_class": "live_provider_internalization_contract" if live_provider else "contract_fixture",
-        "close_evidence": False,
+        "close_evidence": full_contract_cycle_proven,
         "contract_cycle_proven": full_contract_cycle_proven,
         "ranked_recall_event": ranked_recall_event,
         "active_memory_recall_event": {
@@ -3564,12 +3745,23 @@ def run_m6_13_deliberation_internalization_scenario(
         and tiny_bundle["planned_action_type"] == "batch"
         and tiny_bundle["tiny_write_ready_draft_outcome"] == "succeeded"
         and tiny_bundle["patch_draft_compiler_artifact_kind"] == "patch_draft"
+        and tiny_bundle["applied"] is True
+        and tiny_bundle["verified"] is True
+        and tiny_bundle["execution_path"] == "run_work_batch_action->_apply_work_approval_batch"
+        and tiny_bundle["approval_count"] == len(tiny_bundle["pending_approval_ids"]) == 2
+        and tiny_bundle["deferred_verification_count"] == 1
+        and (tiny_bundle["normal_work_execution"] or {}).get("final_source_verification_exit_code") == 0
+        and int((tiny_bundle["normal_work_execution"] or {}).get("verification_test_count") or 0) >= 1
+        and (tiny_bundle["normal_work_execution"] or {}).get("files_reflect_patch") is True
         and tiny_bundle["prompt_has_trace"] is True
         and tiny_bundle["prompt_has_source_lane"] is True
         and tiny_bundle["prompt_has_same_shape_key"] is True
         and tiny_bundle["reviewer_confirmed_trace_shortened_deliberation"] is True,
         observed=tiny_bundle,
-        expected="tiny planning path receives trace provenance and produces a validated paired patch draft",
+        expected=(
+            "tiny planning path receives trace provenance, previews a paired batch through the normal work path, "
+            "then approval applies it and runs the configured verifier"
+        ),
     )
     _scenario_check(
         checks,
@@ -3577,15 +3769,15 @@ def run_m6_13_deliberation_internalization_scenario(
         trace_file_data == trace
         and trace_file_data.get("evidence_class")
         == ("live_provider_internalization_contract" if live_provider else "contract_fixture")
-        and trace_file_data.get("close_evidence") is False
+        and trace_file_data.get("close_evidence") is True
         and trace_file_data.get("contract_cycle_proven") is True
-        and trace_file_data.get("close_blockers")
+        and not trace_file_data.get("close_blockers")
         and trace_file_data.get("ranked_recall_event", {}).get("returned") is True
         and trace_file_data.get("active_memory_recall_event", {}).get("returned") is True
         and trace_file_data.get("adapted_memory_event", {}).get("injected") is True
         and trace_file_data.get("later_task_deliberation_invoked") is False,
         observed={"trace_path": trace_rel, "trace": trace_file_data},
-        expected="deterministic contract trace records internalization progress and explicit close blockers",
+        expected="deterministic contract trace records a complete internalization cycle while close audit remains separate",
     )
 
     report = _scenario_report("m6_13-deliberation-internalization", workspace, commands, checks)

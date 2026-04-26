@@ -680,6 +680,7 @@ class DogfoodTests(unittest.TestCase):
             artifacts = scenario["artifacts"]
             trace = artifacts["trace"]
             check_names = {item["name"] for item in scenario["checks"]}
+            workspace = Path(args.workspace)
 
             self.assertEqual(report["status"], "pass")
             self.assertEqual(scenario["name"], "m6_13-deliberation-internalization")
@@ -691,11 +692,11 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(artifacts["later_same_shape_task_id"], 61302)
             self.assertEqual(artifacts["tiny_provider_mode"], "deterministic_fake")
             self.assertEqual(trace["evidence_class"], "contract_fixture")
-            self.assertFalse(trace["close_evidence"])
+            self.assertTrue(trace["close_evidence"])
             self.assertTrue(trace["contract_cycle_proven"])
             self.assertEqual(trace["tiny_provider_mode"], "deterministic_fake")
             self.assertEqual(trace["original_blocker_code"], "review_rejected")
-            self.assertTrue(trace["known_limitations"])
+            self.assertFalse(trace["known_limitations"])
             self.assertEqual(trace["ranked_recall_event"]["ranker"]["name"], "m6_9-ranked-recall")
             self.assertTrue(trace["ranked_recall_event"]["returned"])
             self.assertGreaterEqual(trace["ranked_recall_event"]["rank"], 1)
@@ -707,10 +708,18 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(trace["reasoning_trace_ledger_ref"], ".mew/durable/memory/reasoning_trace.jsonl")
             self.assertTrue(trace["reviewer_confirmed_trace_shortened_deliberation"])
             self.assertFalse(trace["later_task_deliberation_invoked"])
-            self.assertEqual(
-                trace["close_blockers"],
-                ["later same-shape task proves validated tiny patch planning, not an applied and verified tiny-only solve"],
+            self.assertFalse(trace["close_blockers"])
+            tiny_bundle = json.loads(
+                (workspace / artifacts["trace"]["tiny_lane_replay_bundle_ref"]).read_text(encoding="utf-8")
             )
+            normal_execution = tiny_bundle["normal_work_execution"]
+            self.assertEqual(tiny_bundle["execution_path"], "run_work_batch_action->_apply_work_approval_batch")
+            self.assertEqual(tiny_bundle["approval_count"], 2)
+            self.assertEqual(tiny_bundle["deferred_verification_count"], 1)
+            self.assertEqual(tiny_bundle["applied_paths"], ["tests/test_patch_draft.py", "src/mew/patch_draft.py"])
+            self.assertEqual(normal_execution["final_source_verification_exit_code"], 0)
+            self.assertGreaterEqual(normal_execution["verification_test_count"], 1)
+            self.assertTrue(normal_execution["files_reflect_patch"])
             self.assertIn(
                 "m6_13_deliberation_internalization_writes_reviewed_trace_with_provenance",
                 check_names,
@@ -785,7 +794,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(observed_auth, [("codex", None)])
             self.assertEqual(artifacts["tiny_provider_mode"], "live_provider")
             self.assertEqual(artifacts["trace"]["evidence_class"], "live_provider_internalization_contract")
-            self.assertFalse(artifacts["trace"]["close_evidence"])
+            self.assertTrue(artifacts["trace"]["close_evidence"])
             self.assertTrue(artifacts["trace"]["contract_cycle_proven"])
 
     def test_run_dogfood_m6_13_live_provider_requires_deliberation_result(self):

@@ -1,83 +1,18 @@
 # M6.13 Close-Readiness Audit (2026-04-26)
 
-Recommendation: NOT_CLOSE_READY.
+Recommendation: SUPERSEDED.
 
-This audit records the current M6.13 Phase 3 internalization state after the
-live-provider dogfood proof was strengthened. It is intentionally not a close
-gate.
+This file is intentionally short because the earlier not-close readiness audit
+is no longer current. It captured the state before the final normal
+work-path apply/verify proof landed.
 
-## Evidence Now Available
+Current decision: M6.13 is closed by
+`docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`.
 
-- `m6_13-deliberation-internalization` records a deliberation-assisted hard
-  task, a distilled `source_lane=deliberation` reasoning trace, and a later
-  same-shape tiny-lane planning attempt.
-- The scenario now emits and consumes a reviewer decision artifact under
-  `.mew/durable/review/`; mismatched decisions fail validation before the
-  artifact can count as approval evidence.
-- `mew memory --active --task-id` emits observable M6.9 ranked recall
-  metadata: ranker name, score, rank, score components, matched terms, and top
-  entry ids. The v1 scorer includes recency, importance, relevance, symbol
-  overlap, and task-shape similarity.
-- The M6.13 dogfood trace records `contract_cycle_proven=true` when the
-  deliberation result, trace write, ranked recall, and tiny patch-draft reuse
-  contract all pass.
-- The deterministic proof and live `gpt-5.5` proof both pass.
+Historical note:
 
-## Why This Is Not Close Evidence Yet
-
-M6.13's close gate requires a full internalization cycle:
-
-1. deliberation solves or materially advances a hard task
-2. reviewer approval writes a `source_lane=deliberation` reasoning trace
-3. a later same-shape task retrieves the trace through M6.9 ranked recall
-4. the later task is solved by tiny without re-invoking deliberation
-5. reviewer evidence confirms the trace shortened or avoided deliberation
-
-The current artifact proves the contract shape, but it still records
-`close_evidence=false` for one reason:
-
-- The later same-shape task proves validated tiny patch planning, not an
-  applied and verified tiny-only solve.
-
-## Reviewer Check
-
-Codex-ultra reviewed the first `close_evidence=true` attempt and rejected it
-as overclaimed. After revision, the same reviewer approved the current shape:
-
-- `close_evidence=false`
-- `contract_cycle_proven=true`
-- explicit close blockers instead of overclaimed close proof
-- explicit `close_blockers`
-
-Reviewer session: `019dc96d-a73d-7762-baa4-6af2430c61b9`.
-
-After that review, two blockers were reduced further:
-
-- scored active recall was replaced with a real `m6_9-ranked-recall` event
-- reviewer approval is now consumed from the durable review artifact instead
-  of trusted as an in-memory object
-
-This does not close M6.13 by itself because the later-task proof is still
-validated patch planning, not an applied and verified tiny-only solve.
-
-## Accepted Validation
-
-- `uv run pytest -q tests/test_dogfood.py -k 'm6_13_deliberation_internalization or m6_13_live_provider or scenario_choices' --no-testmon`
-- `uv run pytest -q tests/test_memory.py -k 'memory_active or reasoning_trace' --no-testmon`
-- `uv run pytest -q tests/test_work_session.py -k 'active_memory or write_ready_tiny or compact_active_memory_preserves_reasoning_trace_provenance' --no-testmon`
-- `uv run pytest -q tests/test_dogfood.py --no-testmon`
-- `uv run python -m mew dogfood --scenario m6_13-deliberation-internalization --json`
-- `uv run python -m mew dogfood --scenario m6_13-deliberation-internalization --ai --auth auth.json --model gpt-5.5 --model-timeout 180 --json`
-- `uv run python -m mew dogfood --scenario m6_13-deliberation-internalization --ai --model gpt-5.5 --model-timeout 180 --json`
-- `uv run ruff check src/mew/work_session.py src/mew/dogfood.py tests/test_dogfood.py tests/test_memory.py`
-- `git diff --check`
-
-## Next Close Tasks
-
-The next M6.13 work should close the remaining recorded blocker:
-
-1. Extend the later same-shape proof from validated tiny patch planning to an
-   applied and verified tiny-only solve.
-
-Do not mark M6.13 done until this is resolved or the close gate is
-explicitly rewritten.
+- The earlier readiness audit correctly rejected a `close_evidence=true`
+  overclaim where the later tiny solve was harness-applied and string-checked.
+- The final close proof replaced that with `run_work_batch_action` preview,
+  normal approval-batch apply, and a real unittest verifier.
+- Keep this file only as a pointer for readers following the decision history.
