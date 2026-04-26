@@ -405,6 +405,108 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(state.get("agent_runs") or [], [])
         self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
 
+    def test_task_propose_next_attaches_calibration_evidence_refs_to_memory_signal_refs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                os.makedirs("proof-artifacts")
+                with open(os.path.join("proof-artifacts", "m6_11_calibration_ledger.jsonl"), "w", encoding="utf-8") as handle:
+                    handle.write("{}\n")
+
+                class FakeRow:
+                    row_ref = "m6_14:evaluator-1"
+
+                    def text_field(self, name):
+                        fields = {
+                            "reviewer_decision": "accepted_as_no_bundle_measurement_process_gap_evidence",
+                            "countedness": "counted_fix_first_blocker",
+                        }
+                        return fields.get(name, "")
+
+                fake_item = type("FakeCalibrationItem", (), {})()
+                fake_item.row = FakeRow()
+                fake_item.row_ref = fake_item.row.row_ref
+                fake_item.archetype = "measurement_process_gap"
+                fake_summary = type("FakeCalibrationSummary", (), {})()
+                fake_summary.classifier_version = "m6_12.v0"
+                fake_summary.counts = {"measurement_process_gap": 1}
+                fake_summary.rows = (fake_item,)
+
+                with patch.object(commands_module, "summarize_calibration_ledger", return_value=fake_summary) as summarize:
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                    previous = json.loads(stdout.getvalue())["task"]
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                    candidate = json.loads(stdout.getvalue())["task"]
+
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                    state = commands_module.load_state()
+                summarize.assert_called()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        expected_refs = [
+            {
+                "kind": "calibration_evaluator_evidence",
+                "source": "proof-artifacts/m6_11_calibration_ledger.jsonl",
+                "row_ref": "m6_14:evaluator-1",
+                "classifier_version": "m6_12.v0",
+                "archetype": "measurement_process_gap",
+                "reviewer_decision": "accepted_as_no_bundle_measurement_process_gap_evidence",
+                "countedness": "counted_fix_first_blocker",
+            }
+        ]
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(proposal["memory_signal_refs"], expected_refs)
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["proposal"]["memory_signal_refs"], expected_refs)
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_leaves_calibration_evidence_refs_empty_without_rows(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                os.makedirs("proof-artifacts")
+                with open(os.path.join("proof-artifacts", "m6_11_calibration_ledger.jsonl"), "w", encoding="utf-8") as handle:
+                    handle.write("{}\n")
+                fake_summary = type("FakeCalibrationSummary", (), {})()
+                fake_summary.classifier_version = "m6_12.v0"
+                fake_summary.counts = {}
+                fake_summary.rows = ()
+
+                with patch.object(commands_module, "summarize_calibration_ledger", return_value=fake_summary) as summarize:
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                    previous = json.loads(stdout.getvalue())["task"]
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                    candidate = json.loads(stdout.getvalue())["task"]
+
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                    state = commands_module.load_state()
+                summarize.assert_called()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(proposal["memory_signal_refs"], [])
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["proposal"]["memory_signal_refs"], [])
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
     def test_task_propose_next_attaches_bounded_preference_signal_refs_from_reviewer_history(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

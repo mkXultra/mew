@@ -517,6 +517,61 @@ def _task_selector_failure_cluster_reason():
     return ""
 
 
+_TASK_SELECTOR_CALIBRATION_EVIDENCE_REF_LIMIT = 3
+
+
+def _task_selector_calibration_evidence_refs():
+    ledger_path = Path("proof-artifacts") / "m6_11_calibration_ledger.jsonl"
+    if not ledger_path.exists():
+        return []
+    try:
+        summary = summarize_calibration_ledger(ledger_path)
+    except Exception:
+        return []
+    refs = []
+    classifier_version = getattr(summary, "classifier_version", "")
+    for item in getattr(summary, "rows", ()) or ():
+        row = getattr(item, "row", None)
+        row_ref = getattr(item, "row_ref", "") or getattr(row, "row_ref", "")
+        if not row_ref:
+            continue
+        ref = {
+            "kind": "calibration_evaluator_evidence",
+            "source": ledger_path.as_posix(),
+            "row_ref": str(row_ref),
+        }
+        if classifier_version:
+            ref["classifier_version"] = str(classifier_version)
+        archetype = getattr(item, "archetype", "")
+        if archetype:
+            ref["archetype"] = str(archetype)
+        text_field = getattr(row, "text_field", None)
+        if callable(text_field):
+            reviewer_decision = text_field("reviewer_decision")
+            countedness = text_field("countedness")
+            if reviewer_decision:
+                ref["reviewer_decision"] = clip_output(str(reviewer_decision), 120)
+            if countedness:
+                ref["countedness"] = clip_output(str(countedness), 120)
+        refs.append(ref)
+        if len(refs) >= _TASK_SELECTOR_CALIBRATION_EVIDENCE_REF_LIMIT:
+            break
+    return refs
+
+
+def _task_selector_attach_calibration_evidence_refs(proposal):
+    if not isinstance(proposal, dict) or proposal.get("blocked"):
+        return proposal
+    refs = _task_selector_calibration_evidence_refs()
+    if not refs:
+        return proposal
+    existing_refs = proposal.get("memory_signal_refs")
+    if not isinstance(existing_refs, list):
+        existing_refs = []
+    proposal["memory_signal_refs"] = existing_refs + refs
+    return proposal
+
+
 _TASK_SELECTOR_PREFERENCE_SIGNAL_REF_LIMIT = 3
 
 
@@ -985,6 +1040,7 @@ def cmd_task_propose_next(args):
             if error:
                 print(error, file=sys.stderr)
                 return exit_code
+            _task_selector_attach_calibration_evidence_refs(proposal)
             _record_task_selector_proposal(state, proposal)
             save_state(state)
     else:
@@ -993,6 +1049,7 @@ def cmd_task_propose_next(args):
         if error:
             print(error, file=sys.stderr)
             return exit_code
+        _task_selector_attach_calibration_evidence_refs(proposal)
 
     if getattr(args, "json", False):
         print(json.dumps(proposal, ensure_ascii=False, indent=2))

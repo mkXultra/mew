@@ -120,6 +120,24 @@ Current M6.8.5 evidence:
   `preference_signal_refs`; proposal `#18` was approved and executed to
   supervised handoff `#9` for task `#642`. A first candidate title containing a
   forbidden governance surface word was correctly blocked before retitling.
+- Task `#642` / session `#630` added the third read-only selector intelligence
+  signal. Non-blocked `mew task propose-next` proposals now attach bounded
+  calibration/evaluator evidence rows as `memory_signal_refs` from the real
+  `summarize_calibration_ledger("proof-artifacts/m6_11_calibration_ledger.jsonl")`
+  output. Missing evidence leaves `memory_signal_refs` empty; blocked proposals
+  still skip signal attachment.
+- #642 mew-first note: #630 initially spent too many read turns and needed a
+  reviewer steer to draft from cached anchors, but the final paired source/test
+  patch was authored by mew and applied after approval. Count this as
+  `success_mew_first_with_reviewer_steer`; no supervisor product edit.
+- #642 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py tests/test_commands.py`,
+  and `git diff --check`.
+- #642 dogfood evidence: `mew task propose-next 642 --candidate-task-id 643
+  --record --json` produced `memory_signal_refs`, `failure_cluster_reason`, and
+  `preference_signal_refs`; proposal `#19` was approved and executed to
+  supervised handoff `#10` for task `#643`.
 
 Closed M6.8 evidence:
 
