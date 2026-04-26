@@ -546,6 +546,39 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(len(state["outbox"]), 1)
         self.assertIsNone(state["outbox"][0]["read_at"])
 
+    def test_signal_observed_surfaces_passive_reviewer_visible_observation(self):
+        state = default_state()
+        original_tasks = list(state["tasks"])
+        add_event(
+            state,
+            "signal_observed",
+            "signals",
+            {
+                "source": "hn",
+                "summary": "New matching story found.",
+                "reason_for_use": "Matches the configured project signal.",
+            },
+        )
+
+        processed = process_events(
+            state,
+            "passive_tick",
+            create_internal_event=False,
+            allow_task_execution=False,
+        )
+
+        self.assertEqual(processed, 1)
+        self.assertEqual(state["tasks"], original_tasks)
+        self.assertEqual(len(state["outbox"]), 1)
+        message = state["outbox"][0]
+        self.assertIsNone(message["read_at"])
+        self.assertIn("signal-observed", message["text"])
+        self.assertIn("source=hn", message["text"])
+        self.assertIn("summary=New matching story found.", message["text"])
+        self.assertIn("reason_for_use=Matches the configured project signal.", message["text"])
+        self.assertIn("./mew signals disable hn", message["text"])
+        self.assertIn("noticed, not acted", message["text"])
+
     def test_wait_for_user_does_not_duplicate_question_attention(self):
         state = default_state()
         first = add_event(state, "passive_tick", "test")

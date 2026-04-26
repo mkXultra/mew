@@ -121,6 +121,20 @@ Current M7 evidence:
   `git diff --check`. Codex-ultra review
   `019dcc19-8fa5-72c3-b88c-7030398e3cc1` initially failed the pre-network
   budget gate, then passed after the fix.
+- Task `#684` added the first deterministic passive surface for queued inbound
+  signal evidence. A `signal_observed` event now produces one unread
+  reviewer-visible `send_message` that says mew noticed but did not act,
+  includes source, summary, `reason_for_use`, and an explicit
+  `./mew signals disable <source>` command, and does not mutate tasks or
+  roadmap state. Mew session `#674` first drifted into reflex-observation
+  metadata, then produced the core signal path after reviewer steer; supervisor
+  cleanup removed residual wrong-target reflex changes. Count as mixed/product
+  progress after steer, not clean autonomy credit. Validation passed:
+  `uv run python -m unittest tests.test_commands tests.test_autonomy
+  tests.test_signals tests.test_signal_fetch`, `uv run ruff check
+  src/mew/agent.py tests/test_autonomy.py`, and `git diff --check`.
+  Codex-ultra review `019dcc36-658f-72b0-8371-f24eae6a863e` returned
+  `STATUS: pass`.
 
 M6.17 close evidence:
 

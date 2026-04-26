@@ -3081,6 +3081,49 @@ def next_unprocessed_event(state, event_type=None):
             return event
     return None
 
+def signal_observed_source_name(event):
+    payload = event.get("payload") or {}
+    source = str(payload.get("source") or event.get("source") or "unknown").strip()
+    if source.startswith("signal:"):
+        source = source.split(":", 1)[1].strip()
+    return source or "unknown"
+
+def passive_signal_observed_plan(event):
+    if event.get("type") != "signal_observed":
+        return None
+    payload = event.get("payload") or {}
+    source = signal_observed_source_name(event)
+    summary = str(payload.get("summary") or "Signal observed.").strip()
+    reason_for_use = str(payload.get("reason_for_use") or "No reason_for_use provided.").strip()
+    disable_command = str(payload.get("disable_command") or f"./mew signals disable {source}").strip()
+    text = (
+        "signal-observed noticed, not acted: "
+        f"source={source}; summary={summary}; reason_for_use={reason_for_use}; "
+        f"disable with `{disable_command}`."
+    )
+    decision_plan = {
+        "summary": "Noticed signal_observed event without acting.",
+        "decisions": [
+            {
+                "type": "send_message",
+                "message_type": "info",
+                "text": text,
+            }
+        ],
+    }
+    action_plan = {
+        "summary": "Surface passive signal observation for reviewer.",
+        "actions": [
+            {
+                "type": "send_message",
+                "message_type": "info",
+                "text": text,
+            }
+        ],
+    }
+    return decision_plan, action_plan
+
+
 def plan_event(
     state,
     event,
@@ -3110,6 +3153,10 @@ def plan_event(
     trace_model=False,
     max_reflex_rounds=0,
 ):
+    passive_signal_plan = passive_signal_observed_plan(event)
+    if passive_signal_plan is not None:
+        return passive_signal_plan
+
     prompt_context = build_context(
         state,
         event,
