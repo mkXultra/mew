@@ -16,16 +16,25 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP3 Implementation-Lane Evidence Cohort | `done` | Five side-project attempts are recorded; failures are classified and rescue edits remain zero. |
 | SP4 Optional Research Digest Slice | `done` | Static fixture research digest landed with deterministic ranking, README usage, stdout, and output-file tests. |
 | SP5 Feed M6.16 | `done` | The side-project cohort is summarized into a measured M6.16 hardening recommendation and now includes the SP4 extension row. |
+| SP6 Mew State Companion Export | `not_started` | Next planned slice: render a mew-state-like fixture into a companion state brief without live `.mew` access. |
+| SP7 Multi-Fixture Companion Bundles | `not_started` | Planned after SP6: combine several explicit local fixtures into one deterministic companion bundle. |
+| SP8 Multi-Day Companion Archive | `not_started` | Planned after SP7: render a fixture-backed archive/index of companion outputs by day and surface. |
+| SP9 Issue and Dogfood Ledger Digest | `not_started` | Planned after SP8: summarize fixture-backed dogfood rows and `[side-pj]` issue summaries for reader-facing evidence. |
+| SP10 Companion Export Contract | `not_started` | Planned after SP9: document and test the stable local input/output contract without importing core mew. |
+| SP11 Second Side-Project Gate | `not_started` | Planned final gate: decide whether to continue this project, start a second side project, or pause side-project work. |
 
 ## Active Focus
 
-Active side-project focus: **current roadmap complete**.
+Active side-project focus: **SP6 Mew State Companion Export**.
 
 Current target:
 
-- keep the `mew-companion-log` cohort as closed evidence for M6.16
-- choose the next side-project roadmap extension before starting another
-  implementation slice
+- extend `mew-companion-log` with state-oriented companion output while keeping
+  all implementation inside `experiments/mew-companion-log`
+- use mew-state-like fixture JSON only; do not read live `.mew` state and do
+  not edit core mew
+- use SP6-SP11 as the next side-project roadmap arc before considering a
+  second isolated side project
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
 - preserve the current operating model for any future side-project cohort:
@@ -152,21 +161,23 @@ Current target:
 
 ## Missing Proof
 
-- SP1, SP2, SP3, SP4, and SP5 are closed for the current
-  `mew-companion-log` roadmap.
-- No open milestone remains in `SIDE_PROJECT_ROADMAP.md`; continuing side-pj
-  work now needs a roadmap extension or a second isolated side project.
+- SP1, SP2, SP3, SP4, and SP5 are closed for the first `mew-companion-log`
+  cohort.
+- SP6 has not started. It still needs a bounded task, mew-first implementation,
+  focused verifier, local report, ledger row, and status update.
+- SP7-SP11 are planned but intentionally wait for SP6 evidence.
 
 ## Next Action
 
-Choose the next side-project extension:
+Start SP6:
 
-1. either extend `mew-companion-log` with a new SP6 milestone, such as
-   multi-fixture digest bundles or a lightweight package/entrypoint polish
-2. or start a second isolated side project with the same current-repo `./mew`
-   operator model
-3. keep recording every bounded attempt in the side-project dogfood ledger
-   with rescue edits and failure classes explicit
+1. define task `#6` for a fixture-driven `--mode state-brief` or equivalent
+   under `experiments/mew-companion-log`
+2. run current-repo `./mew` mew-first with `--model gpt-5.5`, using
+   `--allow-read experiments/mew-companion-log` and
+   `--allow-write experiments/mew-companion-log`
+3. require README usage, stdout proof, output-file proof, focused tests, local
+   report, ledger row, and issue extraction for any reusable polish finding
 
 ## Non-Goals
 
@@ -175,8 +186,9 @@ Choose the next side-project extension:
 - do treat Codex CLI operating mew as `operator`, not `implementer`
 - do not make GitHub issues for normal progress; create one `[side-pj]` issue
   only when mew cannot implement after bounded operator steering or a real
-  problem needs main-side action
+  problem needs main-side action, or when a reusable M6.16 polish finding is
+  visible in the ledger
 - do not change core mew unless the side project exposes a classified M6.14
   repair blocker or a later M6.16 measured hardening slice
-- do not start GUI, Tauri, screen capture, TTS, or network-heavy side projects
-  before the implementation-lane evidence cohort exists
+- do not read live `.mew` state, import `src/mew/**`, or start GUI, Tauri,
+  screen capture, TTS, or network-heavy side projects in this roadmap arc
