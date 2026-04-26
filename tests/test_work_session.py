@@ -9689,6 +9689,61 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_write_ready_active_fast_path_honors_read_file_recovery_cues(self):
+        from mew.work_loop import _work_write_ready_explicit_refresh_before_tiny_draft
+
+        target_paths = ["src/mew/commands.py", "tests/test_commands.py"]
+        context = {
+            "work_session": {
+                "resume": {
+                    "pending_steer": {
+                        "text": (
+                            "Recover missing exact source text. First read "
+                            "src/mew/commands.py lines 1030-1060 to capture the attach calls, "
+                            "and read_file tests/test_commands.py line_start=510 line_count=80."
+                        )
+                    },
+                    "active_work_todo": {
+                        "source": {
+                            "target_paths": target_paths,
+                        },
+                    },
+                },
+            },
+            "guidance": "",
+        }
+        fast_path = {
+            "active": True,
+            "reason": "paired_cached_windows_edit_ready",
+            "recent_windows": [
+                {"path": "src/mew/commands.py", "line_start": 459, "line_end": 978},
+                {"path": "tests/test_commands.py", "line_start": 403, "line_end": 922},
+            ],
+        }
+
+        refresh = _work_write_ready_explicit_refresh_before_tiny_draft(context, fast_path)
+
+        self.assertEqual(refresh["action"]["type"], "batch")
+        self.assertEqual(
+            refresh["action"]["tools"],
+            [
+                {
+                    "type": "read_file",
+                    "path": "src/mew/commands.py",
+                    "line_start": 1030,
+                    "line_count": 31,
+                    "reason": "refresh explicitly requested write-ready cached window",
+                },
+                {
+                    "type": "read_file",
+                    "path": "tests/test_commands.py",
+                    "line_start": 510,
+                    "line_count": 80,
+                    "reason": "refresh explicitly requested write-ready cached window",
+                },
+            ],
+        )
+
     def test_write_ready_preflight_block_does_not_search_path_stem_refresh_cues(self):
         from mew.work_loop import (
             _work_write_ready_fast_path_details,

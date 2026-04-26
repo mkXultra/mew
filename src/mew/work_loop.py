@@ -3593,11 +3593,12 @@ def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
         r"(?P<start>\d{1,7})\s*(?:-|\.{2}|:|to)\s*(?P<end>\d{1,7})",
         re.IGNORECASE,
     )
+    not_path_chunk = rf"(?:(?!{path_pattern}).)"
     line_start_count_pattern = re.compile(
         rf"(?P<path>{path_pattern})"
-        r"(?P<body>.{0,160}?)"
+        rf"(?P<body>{not_path_chunk}{{0,160}}?)"
         r"\b(?:line[_ -]?start|start[_ -]?line)\s*(?:=|:)?\s*(?P<start>\d{1,7})"
-        r"(?P<middle>.{0,160}?)"
+        rf"(?P<middle>{not_path_chunk}{{0,160}}?)"
         r"\b(?:line[_ -]?count|count)\s*(?:=|:)?\s*(?P<count>\d{1,5})",
         re.IGNORECASE | re.DOTALL,
     )
@@ -3628,17 +3629,17 @@ def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
             }
         )
 
+    candidates = []
     for match in line_start_count_pattern.finditer(text):
-        add_action(
-            match.group("path").strip().strip("`'\""),
-            match.group("start"),
-            match.group("count"),
+        candidates.append(
+            (
+                match.start(),
+                match.group("path").strip().strip("`'\""),
+                match.group("start"),
+                match.group("count"),
+            )
         )
-        if len(actions) >= 5:
-            break
     for match in span_pattern.finditer(text):
-        if len(actions) >= 5:
-            break
         raw_path = match.group("path").strip().strip("`'\"")
         try:
             line_start = int(match.group("start"))
@@ -3648,7 +3649,11 @@ def _work_write_ready_explicit_refresh_read_actions(context, target_paths):
         if line_start <= 0 or line_end < line_start:
             continue
         line_count = line_end - line_start + 1
+        candidates.append((match.start(), raw_path, line_start, line_count))
+    for _, raw_path, line_start, line_count in sorted(candidates, key=lambda item: item[0]):
         add_action(raw_path, line_start, line_count)
+        if len(actions) >= 5:
+            break
     if actions:
         return actions
     return _work_write_ready_explicit_refresh_search_actions(text, allowed_paths, work_session)
@@ -4231,6 +4236,11 @@ def _work_write_ready_guidance_requests_refresh_before_draft(context, resume):
             "don't draft",
             "no draft",
             "just cache",
+            "read_file",
+            "first read",
+            "read exact",
+            "exact source text",
+            "recover missing exact",
             "before any patch attempt",
             "before any patch",
         )
