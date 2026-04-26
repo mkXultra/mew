@@ -413,6 +413,163 @@ class CommandTests(unittest.TestCase):
         expected_state.pop("selector_proposals", None)
         self.assertEqual(state_without_records, expected_state)
 
+    def test_task_approve_proposal_cli_records_reviewer_decision_without_dispatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "propose-next", str(previous["id"]), "--record", "--json"]), 0)
+                state_before = commands_module.load_state()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "approve-proposal", "1", "--reason", "looks safe", "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        record = json.loads(stdout.getvalue())
+        self.assertEqual(record["id"], 1)
+        self.assertEqual(record["status"], "approved")
+        self.assertEqual(record["reviewer_decision"], "approved")
+        self.assertEqual(record["reviewer_reason"], "looks safe")
+        self.assertTrue(record["reviewed_at"])
+        self.assertEqual(record["updated_at"], record["reviewed_at"])
+        self.assertEqual(state_after["selector_proposals"][0], record)
+        self.assertEqual(state_after.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state_after["tasks"]], ["ready", "ready"])
+        state_without_records = dict(state_after)
+        state_without_records.pop("selector_proposals", None)
+        expected_state = dict(state_before)
+        expected_state.pop("selector_proposals", None)
+        self.assertEqual(state_without_records, expected_state)
+
+    def test_task_reject_proposal_cli_records_reviewer_decision_on_blocked_record(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "roadmap-status update", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "propose-next",
+                                str(previous["id"]),
+                                "--candidate-task-id",
+                                str(candidate["id"]),
+                                "--record",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                state_before = commands_module.load_state()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "reject-proposal", "1", "--reason", "governance blocked", "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        record = json.loads(stdout.getvalue())
+        self.assertEqual(record["status"], "rejected")
+        self.assertEqual(record["reviewer_decision"], "rejected")
+        self.assertEqual(record["reviewer_reason"], "governance blocked")
+        self.assertTrue(record["proposal"]["blocked"])
+        self.assertTrue(record["proposal"]["governance_violation"])
+        self.assertEqual(state_after["selector_proposals"][0], record)
+        self.assertEqual(state_after.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state_after["tasks"]], ["ready", "ready"])
+        state_without_records = dict(state_after)
+        state_without_records.pop("selector_proposals", None)
+        expected_state = dict(state_before)
+        expected_state.pop("selector_proposals", None)
+        self.assertEqual(state_without_records, expected_state)
+
+    def test_task_approve_proposal_cli_missing_proposal_leaves_state_unchanged(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                state_before = commands_module.load_state()
+                stderr = StringIO()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    with patch("sys.stderr", stderr):
+                        code = main(["task", "approve-proposal", "99", "--reason", "missing", "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("selector proposal not found: 99", stderr.getvalue())
+        self.assertEqual(state_after, state_before)
+
+    def test_task_approve_proposal_cli_refuses_blocked_record_without_mutation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "roadmap-status update", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "propose-next",
+                                str(previous["id"]),
+                                "--candidate-task-id",
+                                str(candidate["id"]),
+                                "--record",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                state_before = commands_module.load_state()
+                self.assertEqual(state_before["selector_proposals"][0]["status"], "blocked")
+                stderr = StringIO()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    with patch("sys.stderr", stderr):
+                        code = main(["task", "approve-proposal", "1", "--reason", "override", "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("selector proposal 1 is blocked and cannot be approved", stderr.getvalue())
+        self.assertEqual(state_after, state_before)
+
     def test_do_uses_supervised_work_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

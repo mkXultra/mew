@@ -168,6 +168,25 @@ Current M6.8 evidence:
 - Post-#632 dogfood `mew task propose-next 632 --record --json` skipped stale
   governance task `#388` and returned `no safe selector candidate found`
   instead of proposing the blocked task.
+- Task `#633` / session `#619` landed reviewer-visible selector approval and
+  rejection recording mew-first. `mew task approve-proposal <id>` and `mew task
+  reject-proposal <id>` update existing `selector_proposals` records with
+  `reviewer_decision`, `reviewer_reason`, `reviewed_at`, `updated_at`, and a
+  terminal `status` without dispatching the proposed task or mutating tasks.
+- #633 mew-first note: two proposed patches were rejected before approval. The
+  first bypassed the CLI by calling command helpers directly from tests. The
+  second added CLI wiring but allowed approving blocked governance proposals,
+  which would weaken the M6.8 scope fence. After reviewer steer, mew produced
+  the accepted CLI/source/test patch with no supervisor product edit.
+- #633 scope-fence dogfood: `mew task approve-proposal 4 --reason ... --json`
+  recorded reviewer approval for the safe `#632 -> #633` proposal, `mew task
+  approve-proposal 1 --reason ... --json` rejected approval of the blocked
+  governance proposal, and `mew task reject-proposal 1 --reason ... --json`
+  recorded the reviewer rejection for the blocked candidate.
+- #633 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
+  tests/test_commands.py`, and `git diff --check`.
 
 M6.8 is done when:
 

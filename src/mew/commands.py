@@ -559,6 +559,67 @@ def _record_task_selector_proposal(state, proposal):
     return record
 
 
+def _find_task_selector_proposal_record(state, proposal_id):
+    for record in state.get("selector_proposals") or []:
+        if str(record.get("id")) == str(proposal_id):
+            return record
+    return None
+
+
+def _format_task_selector_proposal_record(record):
+    keys = [
+        "id",
+        "previous_task_id",
+        "proposed_task_id",
+        "status",
+        "reviewer_decision",
+        "reviewer_reason",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    ]
+    return "\n".join(f"{key}: {_task_selector_display_value(record.get(key))}" for key in keys)
+
+
+def _decide_task_selector_proposal(args, decision):
+    with state_lock():
+        state = load_state()
+        record = _find_task_selector_proposal_record(state, args.proposal_id)
+        if not record:
+            print(f"mew: selector proposal not found: {args.proposal_id}", file=sys.stderr)
+            return 1
+
+        proposal = record.get("proposal") or {}
+        if decision == "approved" and proposal.get("blocked"):
+            print(
+                f"mew: selector proposal {args.proposal_id} is blocked and cannot be approved",
+                file=sys.stderr,
+            )
+            return 1
+
+        timestamp = now_iso()
+        record["status"] = decision
+        record["reviewer_decision"] = decision
+        record["reviewer_reason"] = getattr(args, "reason", "") or ""
+        record["reviewed_at"] = timestamp
+        record["updated_at"] = timestamp
+        save_state(state)
+
+    if getattr(args, "json", False):
+        print(json.dumps(record, ensure_ascii=False, indent=2))
+    else:
+        print(_format_task_selector_proposal_record(record))
+    return 0
+
+
+def cmd_task_proposal_approve(args):
+    return _decide_task_selector_proposal(args, "approved")
+
+
+def cmd_task_proposal_reject(args):
+    return _decide_task_selector_proposal(args, "rejected")
+
+
 def _build_task_selector_next_proposal(state, args):
     previous_task = find_task(state, args.previous_task_id)
     if not previous_task:
