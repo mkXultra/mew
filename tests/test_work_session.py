@@ -7099,8 +7099,24 @@ class WorkSessionTests(unittest.TestCase):
                 verifier_prompt,
             )
 
+        def assert_rollback_repair_guidance(repair_prompt):
+            self.assertIn(
+                "When a rollback verifier failure has one small clear localized cause and the worktree is clean",
+                repair_prompt,
+            )
+            self.assertIn(
+                "center it on the failed assertion/output and target path",
+                repair_prompt,
+            )
+            self.assertIn(
+                "before switching to remember, checkpoint, or stop due pressure",
+                repair_prompt,
+            )
+
         assert_behavior_verifier_guidance(prompt)
         assert_behavior_verifier_guidance(fast_prompt)
+        assert_rollback_repair_guidance(prompt)
+        assert_rollback_repair_guidance(fast_prompt)
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
         self.assertEqual(
@@ -7113,6 +7129,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn('"kind": "patch_proposal|patch_blocker"', tiny_prompt)
         self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
         assert_behavior_verifier_guidance(tiny_prompt)
+        assert_rollback_repair_guidance(tiny_prompt)
         self.assertLess(len(tiny_prompt), len(fast_prompt))
 
     def test_tiny_write_ready_draft_context_carries_task_goal_terms(self):
@@ -29580,6 +29597,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("finish with a no-change summary", prompt)
         self.assertIn("prefer run_tests with that broader suggested verifier before finish", prompt)
         self.assertIn("If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user", prompt)
+        self.assertIn("When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure", prompt)
         self.assertIn("Include a compact working_memory object", prompt)
         self.assertIn("If more than one concrete step remains, keep working_memory.plan_items", prompt)
         self.assertIn("up to 3 remaining steps and prune completed items as work is completed", prompt)

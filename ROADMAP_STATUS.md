@@ -281,6 +281,26 @@ Current M6.16 evidence:
   `work_think_prompt or source_literal or behavior verifier` was a task-spec
   operator error, not a product regression. Codex-ultra re-review reported no
   findings after the write-ready and tiny-draft repair.
+- Task `#669` landed the GitHub issue `#5` scoped-verifier-repair slice as
+  supervisor-owned M6.16/M6.14 repair evidence after a partial mew-first
+  attempt. The normal, write-ready, and tiny-draft work prompts now tell the
+  implementation lane to keep one compact in-session repair when a rollback
+  verifier failure has one small clear localized cause and a clean worktree,
+  centering that repair on the failed assertion/output and target path before
+  switching to remember, checkpoint, or stop due pressure. Count this as
+  loop-substrate/product progress, not mew-first autonomy credit: mew session
+  `#652` authored the first normal-prompt patch, codex-ultra review session
+  `019dcace-ebe2-7422-98d9-553dc259e1b2` found missing write-ready/tiny
+  coverage, mew session `#653` added model-specific wording and then hit
+  `old_text_not_found`, and the supervisor repaired the final generic
+  three-surface prompt/test shape. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k 'verifier_failure or failed_patch_repair or work_think_prompt or write_ready_tiny_draft or write_ready' --no-testmon`,
+  `env -u MEW_CODEX_REASONING_EFFORT uv run python -m unittest tests.test_work_session.WorkSessionTests.test_work_ai_compact_live_forces_compact_prompt_context_on_high_risk_task tests.test_work_session.WorkSessionTests.test_work_session_steer_is_consumed_by_next_model_step`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`. The broader `uv run python -m unittest tests.test_work_session`
+  failure inside the mew run inherited `MEW_CODEX_REASONING_EFFORT=high` and is
+  not counted as a product regression. Codex-ultra re-review reported no
+  findings after the generic three-surface repair.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
