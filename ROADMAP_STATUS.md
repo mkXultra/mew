@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, replay lane reads, lane-attempt telemetry, and M6.13.2 side-project dogfood telemetry v0 landed. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, replay lane reads, lane-attempt telemetry, and mirror lane-scoped replay bundles landed. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
@@ -81,9 +81,6 @@ Current M6.13 target:
   deliberation write path
 - emit lane-attempt telemetry needed for future calibration economics routing,
   while keeping M6.13 v0 routing rule-based
-- add M6.13.2 side-project implementation dogfood telemetry v0 before the
-  side-project lane starts, because reply/chat logs are auxiliary evidence and
-  M6.16 needs structured implementation-lane data
 - defer broad refactoring until M6.16, except for narrow M6.14 repairs when
   the same reproducible mew-first failure class blocks M6.13 twice
 - bind deliberation attempts to explicit model, effort, timeout, budget, and
@@ -96,7 +93,7 @@ Current M6.13 target:
 
 Current M6.13 chain:
 
-`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof -> M6.13.2 side-project dogfood telemetry`
+`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
 
 Current M6.13 evidence:
 
@@ -128,6 +125,29 @@ Current M6.13 evidence:
   `uv run pytest -q tests/test_work_session.py --no-testmon`,
   `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
   `git diff --check`.
+- The current mirror-lane replay slice keeps tiny on the legacy replay path
+  while writing non-tiny lane bundles under
+  `.mew/replays/work-loop/<date>/session-<id>/lane-<name>/todo-<id>/...`.
+  Replay metadata now records additive lane reconstruction fields including
+  `lane_decision`, `lane_authoritative`, `lane_layout`,
+  `lane_write_capable`, and `lane_fallback_lane`.
+- The write-ready shadow bridge now carries `active_work_todo.lane` into the
+  patch-draft compiler replay environment, so a mirror-lane work todo can
+  record a non-authoritative lane-scoped bundle while leaving the outer
+  model-selected action unchanged. A replay-writer exception in the mirror
+  path is captured as compiler observation data and does not replace or fail
+  the outer action.
+- Mirror-lane validation passed:
+  `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,
+  `uv run pytest -q tests/test_proof_summary.py -k "lane_metadata" --no-testmon`,
+  `uv run pytest -q tests/test_work_replay.py tests/test_work_lanes.py --no-testmon`,
+  `uv run pytest -q tests/test_proof_summary.py -k "m6_11_replay_lane_metadata_defaults_and_counts or m6_11_calibration" --no-testmon`,
+  `uv run pytest -q tests/test_proof_summary.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "shadow_bridge_mirror_lane or shadow_bridge_records_validated_replay" --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "patch_draft_compiler_shadow_bridge" --no-testmon`,
+  `uv run pytest -q tests/test_work_replay.py tests/test_work_lanes.py tests/test_proof_summary.py --no-testmon`,
+  and
+  `uv run ruff check src/mew/work_loop.py src/mew/work_replay.py tests/test_work_session.py tests/test_work_replay.py tests/test_proof_summary.py`.
 - Mew-first accounting: `product_progress_supervisor_rescue`, not autonomy
   credit. Mew reached the correct lane-normalization direction after reviewer
   steer, but stalled in partial-apply/rollback plus cached-window recovery
@@ -680,12 +700,10 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof -> M6.13.2 side-project dogfood telemetry`
+`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
 
 Acceptable near-term work:
 
-- launch the first side-project dogfood task only after recording the attempt
-  through `mew side-dogfood template` / `append` / `report`
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
 - prove old sessions and existing replay bundles with absent lane metadata keep
@@ -699,10 +717,8 @@ Non-goals for the next session:
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
-- side-project implementation before M6.13.2 telemetry exists
-- treating Codex CLI implementation as mew-first autonomy credit; side-project
-  Codex CLI may operate mew, review, compare, or verify, but direct product
-  implementation is a separate role
+- side-project dogfood; it is user-controlled and outside the current mainline
+  M6.13 task selection unless a reproducible core blocker is reported
 - M7 inbound-signal work
 - raw deliberation transcript storage
 - broad refactors not tied to lane telemetry or a repeated M6.14 repair-class
@@ -713,6 +729,17 @@ Non-goals for the next session:
 
 Latest M6.13 source/test validation:
 
+- M6.13 mirror lane-scoped replay bundle slice:
+  `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,
+  `uv run pytest -q tests/test_proof_summary.py -k "lane_metadata" --no-testmon`,
+  `uv run pytest -q tests/test_work_replay.py tests/test_work_lanes.py --no-testmon`,
+  `uv run pytest -q tests/test_proof_summary.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "shadow_bridge_mirror_lane or shadow_bridge_records_validated_replay" --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "patch_draft_compiler_shadow_bridge" --no-testmon`,
+  `uv run pytest -q tests/test_work_replay.py tests/test_work_lanes.py tests/test_proof_summary.py --no-testmon`,
+  and
+  `uv run ruff check src/mew/work_loop.py src/mew/work_replay.py tests/test_work_session.py tests/test_work_replay.py tests/test_proof_summary.py`
+  passed.
 - M6.13.2 side-project dogfood telemetry v0:
   `uv run pytest -q tests/test_side_project_dogfood.py --no-testmon` passed,
   `uv run ruff check src/mew/side_project_dogfood.py src/mew/commands.py src/mew/cli.py tests/test_side_project_dogfood.py`

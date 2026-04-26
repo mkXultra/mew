@@ -4663,6 +4663,7 @@ def _write_ready_patch_draft_environment(
                 target_paths.append(normalized_path)
     todo = {
         "id": str(active_work_todo.get("id") or todo_id_override or "").strip(),
+        "lane": str(active_work_todo.get("lane") or "").strip() or "tiny",
         "source": {
             "target_paths": target_paths,
             "required_terms": _write_ready_task_goal_required_terms(context, resume),

@@ -146,8 +146,16 @@ class ProofSummaryTests(unittest.TestCase):
                 1,
                 "model_returned_non_schema",
             )
+            lane_scoped_report_root = (
+                replay_root
+                / "2026-04-22"
+                / "session-2"
+                / "lane-mirror"
+                / "todo-2"
+                / "turn-1"
+            )
             self._write_model_failure_bundle(
-                replay_root,
+                lane_scoped_report_root,
                 2,
                 "model_failed_timeout",
                 lane="mirror",
@@ -157,7 +165,7 @@ class ProofSummaryTests(unittest.TestCase):
                 replay_root / "attempt-1" / "replay_metadata.json"
             )
             model_failure_summary = _summarize_model_failure_bundle(
-                replay_root / "attempt-2" / "report.json"
+                lane_scoped_report_root / "attempt-2" / "report.json"
             )
             summary = summarize_m6_11_replay_calibration(replay_root)
 

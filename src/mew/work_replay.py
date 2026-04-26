@@ -6,7 +6,7 @@ import subprocess
 from .errors import CodexRefusalError, ModelBackendError, ModelRefusalError
 from .patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
 from .timeutil import now_date_iso, now_iso, parse_time
-from .work_lanes import get_work_todo_lane_view
+from .work_lanes import LANE_LAYOUT_LANE_SCOPED, get_work_todo_lane_view
 from .work_session import WORK_TODO_PHASE_STATUSES, build_work_session_resume
 
 
@@ -393,7 +393,25 @@ def _replay_lane_metadata(todo, *attempt_parts):
         "lane_role": lane_view.role,
         "lane_schema_version": 1,
         "lane_attempt_id": lane_attempt_id,
+        "lane_parent_attempt_id": "",
+        "lane_decision": "authoritative" if lane_view.authoritative else "shadow_only",
+        "lane_authoritative": lane_view.authoritative,
+        "lane_supported": lane_view.supported,
+        "lane_layout": lane_view.layout,
+        "lane_write_capable": lane_view.write_capable,
+        "lane_fallback_lane": lane_view.fallback_lane,
     }
+
+
+def _replay_base_dir(*, date_bucket, session_id, todo_id, lane_view, turn_id=None):
+    base = REPLAYS_ROOT / date_bucket / f"session-{session_id}"
+    if lane_view.layout == LANE_LAYOUT_LANE_SCOPED:
+        lane_dir = _sanitize_replay_path_component(lane_view.name)
+        base = base / f"lane-{lane_dir}"
+    base = base / f"todo-{todo_id}"
+    if turn_id is not None:
+        base = base / f"turn-{turn_id}"
+    return base
 
 
 def _build_resume_context(session, task):
@@ -430,16 +448,23 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
     if turn_id is None:
         return None
 
+    session_copy = deepcopy(session)
+    resume_context = _build_resume_context(session_copy, task=task)
+    active_work_todo = resume_context.get("active_work_todo") or session.get("active_work_todo") or {}
     date_bucket = _date_bucket_from_model_turn(model_turn)
     todo_dir = _todo_dir_name(session)
-    base = REPLAYS_ROOT / date_bucket / f"session-{session_id}" / f"todo-{todo_dir}" / f"turn-{turn_id}"
+    lane_view = get_work_todo_lane_view(active_work_todo)
+    base = _replay_base_dir(
+        date_bucket=date_bucket,
+        session_id=session_id,
+        todo_id=todo_dir,
+        lane_view=lane_view,
+        turn_id=turn_id,
+    )
     attempt = _next_attempt(base)
     report_path = base / f"attempt-{attempt}" / "report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
-    session_copy = deepcopy(session)
-    resume_context = _build_resume_context(session_copy, task=task)
-    active_work_todo = resume_context.get("active_work_todo") or session.get("active_work_todo") or {}
     model_metrics = model_turn.get("model_metrics") or {}
     failure = _failure_profile(exc, model_turn=model_turn)
 
@@ -521,7 +546,13 @@ def write_patch_draft_compiler_replay(
         return None
 
     date_bucket = now_date_iso()
-    base = REPLAYS_ROOT / date_bucket / f"session-{normalized_session_id}" / f"todo-{normalized_todo_id}"
+    lane_view = get_work_todo_lane_view(todo)
+    base = _replay_base_dir(
+        date_bucket=date_bucket,
+        session_id=normalized_session_id,
+        todo_id=normalized_todo_id,
+        lane_view=lane_view,
+    )
     attempt = _next_attempt(base)
     attempt_dir = base / f"attempt-{attempt}"
     attempt_dir.mkdir(parents=True, exist_ok=True)
