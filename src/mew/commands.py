@@ -6416,6 +6416,18 @@ def _work_rejection_frontier_drift_class(session, source_call, reason):
             result.get("diff"),
         )
     ).casefold()
+    synthetic_schema_markers = (
+        ("synthetic" in text and any(marker in text for marker in ("schema", "metadata", "constant", "field", "key"))),
+        ("invent" in text and any(marker in text for marker in ("schema", "metadata", "constant", "field", "key"))),
+        ("fake" in text and any(marker in text for marker in ("schema", "metadata", "constant", "field", "key"))),
+        (
+            ("hard-coded" in text or "hardcoded" in text or "hard coded" in text)
+            and any(marker in text for marker in ("metadata", "constant", "string", "field", "key"))
+        ),
+        "new proposal schema" in text,
+    )
+    if any(synthetic_schema_markers):
+        return "synthetic_schema_substitution"
     pairing = work_write_pairing_status(session, source_call)
     same_turn_test_edit = _work_rejection_frontier_has_same_turn_test_edit(session, source_call)
     explicit_unpaired_rejection = "unpaired" in text or "missing test" in text
@@ -6493,6 +6505,11 @@ def _work_rejection_frontier_policy(drift_class):
             "rejected_patch_family": "missing_focused_verifier",
             "stop_rule": "block implementation without a focused verifier; require a verifier command before approval",
             "next_action": "define and run the focused verifier before retrying the patch",
+        },
+        "synthetic_schema_substitution": {
+            "rejected_patch_family": "synthetic_schema_substitution",
+            "stop_rule": "block invented schemas and hard-coded metadata; require existing APIs, data paths, and named task fields",
+            "next_action": "replace the synthetic metadata patch with a scoped source/test edit that uses the real API and preserves the existing schema",
         },
         "reviewer_rejected_patch": {
             "rejected_patch_family": "reviewer_rejected_patch",

@@ -29133,6 +29133,40 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual([tool["type"] for tool in action["tools"]], ["read_file", "read_file"])
         self.assertEqual([tool["path"] for tool in action["tools"]], ["src/mew/dogfood.py", "tests/test_dogfood.py"])
 
+    def test_rejection_frontier_classifies_synthetic_schema_before_pairing(self):
+        from mew.commands import record_work_rejection_frontier
+
+        source_call = {
+            "id": 21,
+            "tool": "edit_file",
+            "status": "completed",
+            "parameters": {"path": "src/mew/commands.py"},
+            "result": {
+                "dry_run": True,
+                "changed": True,
+                "diff_preview": "+_TASK_SELECTOR_CALIBRATION_LEDGER = {'m6_11_calibration_ledger': {}}",
+            },
+        }
+        session = {
+            "id": 9,
+            "tool_calls": [source_call],
+        }
+
+        frontier = record_work_rejection_frontier(
+            session,
+            source_call,
+            (
+                "Rejected: patch invents m6_11_calibration_ledger fields and "
+                "hard-coded metadata strings instead of using summarize_calibration_ledger."
+            ),
+        )
+
+        self.assertEqual(frontier["drift_class"], "synthetic_schema_substitution")
+        self.assertEqual(frontier["rejected_patch_family"], "synthetic_schema_substitution")
+        self.assertIn("existing APIs", frontier["stop_rule"])
+        self.assertIn("real API", frontier["next_action"])
+        self.assertEqual(session["active_rejection_frontier"], frontier)
+
     def test_search_text_marks_truncated_when_more_matches_exist(self):
         from mew.read_tools import search_text, summarize_read_result
 
