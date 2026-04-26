@@ -156,11 +156,49 @@ def render_dream_learning(session: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_research_digest(data: dict[str, Any]) -> str:
+    """Render a deterministic ranked research digest from fixture data."""
+    digest = data.get("research_digest", {})
+    entries = digest.get("entries", [])
+    ranked_entries = sorted(
+        entries,
+        key=lambda entry: (-int(entry.get("score", 0)), str(entry.get("title", ""))),
+    )
+
+    lines = [f"# {digest.get('title', 'Research Digest')}"]
+    date = digest.get("date")
+    if date:
+        lines.extend(["", f"_Date: {date}_"])
+    summary = digest.get("summary")
+    if summary:
+        lines.extend(["", "## Summary", str(summary)])
+
+    lines.extend(["", "## Ranked Entries"])
+    for rank, entry in enumerate(ranked_entries, start=1):
+        title = entry.get("title", "Untitled research item")
+        source = entry.get("source", "unknown source")
+        score = entry.get("score", 0)
+        lines.append(f"{rank}. **{title}** _({source}, score {score})_")
+        reason = entry.get("reason")
+        if reason:
+            lines.append(f"   - Why: {reason}")
+        url = entry.get("url")
+        if url:
+            lines.append(f"   - URL: {url}")
+        tags = entry.get("tags", [])
+        if tags:
+            lines.append(f"   - Tags: {', '.join(str(tag) for tag in tags)}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 RENDERERS = {
     "report": render_report,
     "morning-journal": render_morning_journal,
     "evening-journal": render_evening_journal,
     "dream-learning": render_dream_learning,
+    "research-digest": render_research_digest,
 }
 
 

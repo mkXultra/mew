@@ -128,6 +128,39 @@ def test_render_dream_learning_snapshot() -> None:
     )
 
 
+def test_render_research_digest_snapshot() -> None:
+    sys.path.insert(0, str(ROOT))
+    try:
+        from companion_log import load_session, render_research_digest
+    finally:
+        sys.path.pop(0)
+
+    digest = render_research_digest(load_session(FIXTURE))
+
+    assert digest == (
+        "# Research Digest: SP4 static companion output\n"
+        "\n"
+        "_Date: 2026-04-26_\n"
+        "\n"
+        "## Summary\n"
+        "Fixture-backed digest of local research signals; no live feeds are fetched.\n"
+        "\n"
+        "## Ranked Entries\n"
+        "1. **Mew companion patterns** _(Local Notes, score 98)_\n"
+        "   - Why: Connects morning, evening, and dream surfaces into one companion loop.\n"
+        "   - URL: fixture://research/mew-companion-patterns\n"
+        "   - Tags: companion, fixtures\n"
+        "2. **Deterministic digest rendering** _(Test Journal, score 91)_\n"
+        "   - Why: Keeps ranking stable for snapshot-style tests and CLI review.\n"
+        "   - URL: fixture://research/deterministic-digest-rendering\n"
+        "   - Tags: testing, markdown\n"
+        "3. **Static feed safety** _(Experiment Brief, score 87)_\n"
+        "   - Why: Demonstrates a research/feed slice without live network dependency.\n"
+        "   - URL: fixture://research/static-feed-safety\n"
+        "   - Tags: offline, safety\n"
+    )
+
+
 def test_cli_prints_markdown_to_stdout() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(FIXTURE)],
@@ -183,6 +216,21 @@ def test_cli_prints_dream_learning_mode_to_stdout() -> None:
     assert result.stderr == ""
 
 
+def test_cli_prints_research_digest_mode_to_stdout() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(FIXTURE), "--mode", "research-digest"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.startswith("# Research Digest: SP4 static companion output")
+    assert "## Ranked Entries" in result.stdout
+    assert "1. **Mew companion patterns**" in result.stdout
+    assert "fixture://research/static-feed-safety" in result.stdout
+    assert result.stderr == ""
+
+
 def test_cli_writes_markdown_output_file(tmp_path: Path) -> None:
     output = tmp_path / "report.md"
 
@@ -198,6 +246,29 @@ def test_cli_writes_markdown_output_file(tmp_path: Path) -> None:
     assert "Run the focused pytest command for the side project." in written
 
 
+def test_cli_writes_research_digest_output_file(tmp_path: Path) -> None:
+    output = tmp_path / "research-digest.md"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(FIXTURE),
+            "--mode",
+            "research-digest",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    written = output.read_text(encoding="utf-8")
+    assert written.startswith("# Research Digest: SP4 static companion output")
+    assert "1. **Mew companion patterns**" in written
+
+
 def test_fixture_is_valid_json_object() -> None:
     data = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
@@ -207,3 +278,6 @@ def test_fixture_is_valid_json_object() -> None:
     assert isinstance(data["morning_journal"]["focus"], list)
     assert isinstance(data["evening_journal"], dict)
     assert isinstance(data["evening_journal"]["wins"], list)
+    assert isinstance(data["research_digest"], dict)
+    assert isinstance(data["research_digest"]["entries"], list)
+    assert data["research_digest"]["entries"][0]["url"].startswith("fixture://research/")

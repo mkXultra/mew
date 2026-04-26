@@ -12,7 +12,8 @@ Source:
 ## Cohort
 
 The first `mew-companion-log` side-project cohort reached the SP3 evidence
-gate with five recorded attempts:
+gate with five recorded attempts, then added one optional SP4 research-digest
+extension row:
 
 | Row | Task | Outcome | Failure Class | Rescue Edits |
 |---:|---:|---|---|---:|
@@ -21,17 +22,18 @@ gate with five recorded attempts:
 | 3 | 2 | `clean` | `none_observed` | 0 |
 | 4 | 3 | `clean` | `none_observed` | 0 |
 | 5 | 4 | `practical` | `readme_cli_test_followup_after_dream_learning` | 0 |
+| 6 | 5 | `practical` | `same_file_write_batch_guard_followup_before_research_digest` | 0 |
 
-Report metrics after row 5:
+Report metrics after row 6:
 
-- `rows_total=5`
-- `clean_or_practical=4`
-- `success_rate=0.8`
+- `rows_total=6`
+- `clean_or_practical=5`
+- `success_rate=0.833`
 - `failed=1`
 - `structural_repairs_required=1`
 - `rescue_edits_total=0`
-- `first_edit_latency_avg=30.5`
-- `read_turns_before_edit_avg=1.6`
+- `first_edit_latency_avg=49.4`
+- `read_turns_before_edit_avg=1.833`
 
 ## Observed Bottlenecks
 
@@ -63,10 +65,18 @@ Report metrics after row 5:
      scoped, and classified.
 
 5. First-edit latency was acceptable for this cohort.
-   - Evidence: average first-edit latency was `30.5s`, with average
-     read-turns-before-edit `1.6`.
+   - Evidence: average first-edit latency was `49.4s`, with average
+     read-turns-before-edit `1.833`.
    - M6.16 implication: the next measured improvement should target acceptance
      completeness before latency.
+
+6. Same-file write-batch ergonomics can still interrupt otherwise good work.
+   - Evidence: row 6 required a pre-edit follow-up because the first draft
+     proposed multiple `README.md` edits in one write batch. Mew collapsed the
+     hunks and finished without rescue edits.
+   - M6.16 implication: closeout hardening should also preserve or improve the
+     guidance that asks models to group same-file hunks before submitting a
+     write batch.
 
 ## Recommended M6.16 First Slice
 

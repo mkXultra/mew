@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "task_id": 5,
+  "session_id": 8,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP4 fixture-driven static research digest markdown output with deterministic ranking, CLI mode, README usage, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 125.0,
+  "read_turns_before_edit": 3.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_session.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode morning-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode evening-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode dream-learning",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode research-digest",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode research-digest --output /tmp/mew-companion-log-research.md",
+    "git diff --check"
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "same_file_write_batch_guard_followup_before_research_digest",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/follow/session-8.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/5-research-digest-practical.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented the SP4 static research digest surface using --model gpt-5.5. Codex acted as operator/reviewer/verifier only. One pre-edit follow-up was required because the first write batch proposed multiple README.md edits; mew collapsed same-file hunks and authored the final renderer, fixture data, README usage/output-file note, snapshot test, CLI stdout test, and output-file test. Focused pytest passed with 13 tests, all existing modes were manually verified, and no rescue edits were used."
+}

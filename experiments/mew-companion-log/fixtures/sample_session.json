@@ -64,5 +64,36 @@
       "Keep the next companion iteration isolated under experiments/mew-companion-log."
     ],
     "closing_prompt": "What quiet signal wants to become tomorrow's small experiment?"
+  },
+  "research_digest": {
+    "title": "Research Digest: SP4 static companion output",
+    "date": "2026-04-26",
+    "summary": "Fixture-backed digest of local research signals; no live feeds are fetched.",
+    "entries": [
+      {
+        "title": "Mew companion patterns",
+        "source": "Local Notes",
+        "url": "fixture://research/mew-companion-patterns",
+        "score": 98,
+        "reason": "Connects morning, evening, and dream surfaces into one companion loop.",
+        "tags": ["companion", "fixtures"]
+      },
+      {
+        "title": "Deterministic digest rendering",
+        "source": "Test Journal",
+        "url": "fixture://research/deterministic-digest-rendering",
+        "score": 91,
+        "reason": "Keeps ranking stable for snapshot-style tests and CLI review.",
+        "tags": ["testing", "markdown"]
+      },
+      {
+        "title": "Static feed safety",
+        "source": "Experiment Brief",
+        "url": "fixture://research/static-feed-safety",
+        "score": 87,
+        "reason": "Demonstrates a research/feed slice without live network dependency.",
+        "tags": ["offline", "safety"]
+      }
+    ]
   }
 }

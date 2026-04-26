@@ -14,18 +14,18 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP1 mew-companion-log Scaffold | `done` | Scaffold landed after issue #1 repair; mew-authored source, fixture, README, and tests pass. |
 | SP2 Journal and Dream Reports | `done` | Morning, evening, and dream/learning fixture-driven outputs landed with focused tests. |
 | SP3 Implementation-Lane Evidence Cohort | `done` | Five side-project attempts are recorded; failures are classified and rescue edits remain zero. |
-| SP4 Optional Research Digest Slice | `not_started` | Deferred; the first cohort already produced enough M6.16 implementation-lane evidence. |
-| SP5 Feed M6.16 | `done` | The five-row cohort is summarized into a measured M6.16 hardening recommendation. |
+| SP4 Optional Research Digest Slice | `done` | Static fixture research digest landed with deterministic ranking, README usage, stdout, and output-file tests. |
+| SP5 Feed M6.16 | `done` | The side-project cohort is summarized into a measured M6.16 hardening recommendation and now includes the SP4 extension row. |
 
 ## Active Focus
 
-Active side-project focus: **first cohort complete**.
+Active side-project focus: **current roadmap complete**.
 
 Current target:
 
-- keep the first `mew-companion-log` cohort as closed evidence for M6.16
-- return to the main roadmap unless the user explicitly asks for an optional
-  SP4 static research digest or another side-project cohort
+- keep the `mew-companion-log` cohort as closed evidence for M6.16
+- choose the next side-project roadmap extension before starting another
+  implementation slice
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
 - preserve the current operating model for any future side-project cohort:
@@ -40,8 +40,8 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
-  five `mew-companion-log` rows on 2026-04-26: `rows_total=5`, one `failed`,
-  two `practical`, two `clean`, `success_rate=0.8`,
+  six `mew-companion-log` rows on 2026-04-26: `rows_total=6`, one `failed`,
+  three `practical`, two `clean`, `success_rate=0.833`,
   `structural_repairs_required=1`, and `rescue_edits_total=0`.
 - `side-pj-mew-impl` skill exists at
   `.codex/skills/side-pj-mew-impl/SKILL.md`.
@@ -129,23 +129,44 @@ Current target:
   completeness because practical rows were caused by missing README/CLI/test
   acceptance proof, while first-edit latency was acceptable and structural
   failure already routed through M6.14.
+- Task `#5` / session `#8` added the optional SP4 static research digest with
+  Codex CLI as `operator` and mew as first implementer. Mew authored the
+  fixture-driven `--mode research-digest` renderer, deterministic ranking over
+  static fixture entries, README usage and output-file notes, snapshot test,
+  CLI stdout test, output-file test, and fixture shape assertions under
+  `experiments/mew-companion-log`.
+- A pre-edit operator follow-up was required because the first write batch
+  proposed multiple edits to `README.md`; mew collapsed same-file hunks and
+  authored the final patch without Codex product-code rescue.
+- Research digest local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/5-research-digest-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `6`;
+  outcome `practical`, failure class
+  `same_file_write_batch_guard_followup_before_research_digest`,
+  `rescue_edits=0`.
+- Research digest verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `13 passed`. The default report CLI, morning journal stdout,
+  evening journal stdout, dream/learning stdout, research digest stdout,
+  research digest `--output` path, and `git diff --check` were also verified.
 
 ## Missing Proof
 
-- SP1, SP2, SP3, and SP5 are closed for the first `mew-companion-log` cohort.
-- SP4 remains optional and deferred; it does not block M6.16 because the first
-  cohort already names measured implementation-lane bottlenecks.
+- SP1, SP2, SP3, SP4, and SP5 are closed for the current
+  `mew-companion-log` roadmap.
+- No open milestone remains in `SIDE_PROJECT_ROADMAP.md`; continuing side-pj
+  work now needs a roadmap extension or a second isolated side project.
 
 ## Next Action
 
-Return to the main roadmap:
+Choose the next side-project extension:
 
-1. keep `docs/M6_16_SIDE_PROJECT_DOGFOOD_SUMMARY_2026-04-26.md` as the M6.16
-   side-project input
-2. use implementation closeout completeness as the recommended first M6.16
-   hardening slice when M6.16 starts
-3. keep SP4 deferred unless the user asks for another side-project slice or
-   M6.16 needs more external implementation evidence
+1. either extend `mew-companion-log` with a new SP6 milestone, such as
+   multi-fixture digest bundles or a lightweight package/entrypoint polish
+2. or start a second isolated side project with the same current-repo `./mew`
+   operator model
+3. keep recording every bounded attempt in the side-project dogfood ledger
+   with rescue edits and failure classes explicit
 
 ## Non-Goals
 
