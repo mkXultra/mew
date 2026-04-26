@@ -2972,7 +2972,7 @@ def run_m6_13_deliberation_internalization_scenario(
     same_shape_key = "review_rejected:work_loop:paired-test:narrow-causal-repair"
     deliberation_bundle_ref = str(Path(STATE_DIR) / "durable" / "replay" / "deliberation" / "m6_13-hard.json")
     tiny_bundle_ref = str(Path(STATE_DIR) / "durable" / "replay" / "tiny" / "m6_13-later.json")
-    reviewer_decision_ref = "review-20260426-m6-13-internalization"
+    reviewer_decision_ref = str(Path(STATE_DIR) / "durable" / "review" / "m6_13-internalization-review.json")
     lane_attempt_id = "lane-deliberation-todo-61301-attempt-1"
     deliberation_provider_mode = "live_provider" if live_provider else "deterministic_fixture"
     tiny_provider_mode = "live_provider" if live_provider else "deterministic_fake"
@@ -3096,6 +3096,24 @@ def run_m6_13_deliberation_internalization_scenario(
         "raw_transcript_stored": False,
     }
     write_json_file(deliberation_bundle_path, deliberation_bundle)
+    reviewer_decision = {
+        "schema_version": 1,
+        "milestone": "M6.13",
+        "reviewer": "m6_13_dogfood_reviewer",
+        "decision": "approved",
+        "reasoning_trace_candidate": True,
+        "source_lane": "deliberation",
+        "source_lane_attempt_id": lane_attempt_id,
+        "source_blocker_code": "review_rejected",
+        "source_bundle_ref": deliberation_bundle_ref,
+        "same_shape_key": same_shape_key,
+        "deliberation_provider_mode": deliberation_provider_mode,
+        "raw_transcript_stored": False,
+        "approval_basis": "validated deliberation result is distilled into a reusable reasoning trace",
+    }
+    reviewer_decision_path = workspace / reviewer_decision_ref
+    reviewer_decision_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json_file(reviewer_decision_path, reviewer_decision)
 
     def run(args, timeout=30):
         result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
@@ -3162,7 +3180,8 @@ def run_m6_13_deliberation_internalization_scenario(
         ledger_entries = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines() if line]
     active_result = run(["memory", "--active", "--task-id", str(later_task_id), "--json"])
     active_data = _json_stdout(active_result)
-    items = (active_data.get("active_memory") or {}).get("items") or []
+    active_memory = active_data.get("active_memory") or {}
+    items = active_memory.get("items") or []
     matches = [
         item
         for item in items
@@ -3171,7 +3190,19 @@ def run_m6_13_deliberation_internalization_scenario(
         and item.get("source_lane") == "deliberation"
     ]
     recalled = bool(matches)
-    matched_terms = set(matches[0].get("matched_terms") or []) if matches else set()
+    matched_item = matches[0] if matches else {}
+    matched_terms = set(matched_item.get("matched_terms") or []) if matches else set()
+    scored_recall_event = {
+        "source": "mew memory --active --task-id",
+        "ranker": active_memory.get("ranker") or {},
+        "returned": recalled,
+        "entry_id": entry.get("id") or "",
+        "rank": matched_item.get("rank") if matches else None,
+        "score": matched_item.get("score") if matches else None,
+        "score_components": matched_item.get("score_components") or {},
+        "matched_terms": matched_item.get("matched_terms") or [],
+        "top_entry_ids": [item.get("id") for item in items[:5] if item.get("id")],
+    }
     patch_scenario_path = PATCH_DRAFT_FIXTURE_ROOT / "paired_src_test_happy" / "scenario.json"
     patch_scenario = json.loads(patch_scenario_path.read_text(encoding="utf-8"))
     for path, payload in (patch_scenario.get("live_files") or {}).items():
@@ -3328,6 +3359,26 @@ def run_m6_13_deliberation_internalization_scenario(
         and planned_action.get("type") == "batch",
     }
     write_json_file(tiny_bundle_path, tiny_bundle)
+    scored_recall_ok = (
+        recalled
+        and (scored_recall_event.get("ranker") or {}).get("name") == "active-memory-scored-recall"
+        and int(scored_recall_event.get("rank") or 0) >= 1
+        and bool((scored_recall_event.get("score_components") or {}).get("final"))
+    )
+    reviewer_approved = reviewer_decision.get("decision") == "approved" and reviewer_decision.get("raw_transcript_stored") is False
+    full_contract_cycle_proven = (
+        deliberation_bundle["result"] == "materially_advanced"
+        and reviewer_approved
+        and scored_recall_ok
+        and tiny_bundle["reviewer_confirmed_trace_shortened_deliberation"] is True
+        and tiny_bundle["deliberation_invoked"] is False
+        and tiny_bundle["planned_action_type"] == "batch"
+    )
+    close_blockers = [
+        "M6.9 ranked recall scorer with recency/importance/symbol-overlap/task-shape components is not the recall source yet",
+        "reviewer approval is a scenario artifact, not an independent reviewer decision consumed from outside the scenario",
+        "later same-shape task proves validated tiny patch planning, not an applied and verified tiny-only solve",
+    ]
     trace_rel = str(Path(STATE_DIR) / "durable" / "m6_13-deliberation-internalization-trace.json")
     trace_path = workspace / trace_rel
     trace = {
@@ -3344,26 +3395,33 @@ def run_m6_13_deliberation_internalization_scenario(
         "same_shape_key": same_shape_key,
         "evidence_class": "live_provider_internalization_contract" if live_provider else "contract_fixture",
         "close_evidence": False,
+        "contract_cycle_proven": full_contract_cycle_proven,
+        "scored_recall_event": scored_recall_event,
         "active_memory_recall_event": {
             "returned": recalled,
-            "matched_terms": matches[0].get("matched_terms") if matches else [],
+            "matched_terms": matched_item.get("matched_terms") if matches else [],
             "entry_id": entry.get("id") or "",
         },
         "adapted_memory_event": {
             "injected": recalled,
-            "source_lane": matches[0].get("source_lane") if matches else "",
-            "same_shape_key": matches[0].get("same_shape_key") if matches else "",
+            "source_lane": matched_item.get("source_lane") if matches else "",
+            "same_shape_key": matched_item.get("same_shape_key") if matches else "",
         },
         "tiny_lane_replay_bundle_ref": tiny_bundle_ref,
         "reviewer_decision_ref": reviewer_decision_ref,
+        "reviewer_decision": {
+            "ref": reviewer_decision_ref,
+            "decision": reviewer_decision.get("decision"),
+            "reasoning_trace_candidate": reviewer_decision.get("reasoning_trace_candidate"),
+        },
         "reviewer_confirmed_trace_shortened_deliberation": recalled,
         "later_task_deliberation_invoked": tiny_bundle["deliberation_invoked"],
         "reasoning_trace_ledger_ref": ledger_rel,
-        "known_limitations": [
-            "reviewer approval and the later same-shape task are still scenario fixtures, so this is not full close evidence"
-            if live_provider
-            else "tiny-lane planning path uses a deterministic fake model, not a live provider call",
-            "active-memory recall uses provenance-aware matching, not final M6.9 statistical ranked recall",
+        "known_limitations": close_blockers,
+        "close_blockers": close_blockers,
+        "evidence_notes": [
+            "live provider path used for deliberation and tiny draft" if live_provider else "deterministic fake tiny provider used",
+            "scored recall event comes from the general active-memory path, not a lane-local lookup",
         ],
         "tiny_provider_mode": tiny_provider_mode,
     }
@@ -3422,6 +3480,16 @@ def run_m6_13_deliberation_internalization_scenario(
     )
     _scenario_check(
         checks,
+        "m6_13_deliberation_internalization_records_scored_recall_event",
+        scored_recall_ok
+        and scored_recall_event.get("entry_id") == entry.get("id")
+        and scored_recall_event.get("rank") == matched_item.get("rank")
+        and {"review", "repair"}.issubset(set(scored_recall_event.get("matched_terms") or [])),
+        observed=scored_recall_event,
+        expected="later same-shape task retrieves the trace through the general active-memory scored recall path",
+    )
+    _scenario_check(
+        checks,
         "m6_13_deliberation_internalization_records_tiny_reuse_contract",
         tiny_bundle["result"] == "planned_patch"
         and tiny_bundle["provider_mode"] == tiny_provider_mode
@@ -3444,11 +3512,14 @@ def run_m6_13_deliberation_internalization_scenario(
         and trace_file_data.get("evidence_class")
         == ("live_provider_internalization_contract" if live_provider else "contract_fixture")
         and trace_file_data.get("close_evidence") is False
+        and trace_file_data.get("contract_cycle_proven") is True
+        and trace_file_data.get("close_blockers")
+        and trace_file_data.get("scored_recall_event", {}).get("returned") is True
         and trace_file_data.get("active_memory_recall_event", {}).get("returned") is True
         and trace_file_data.get("adapted_memory_event", {}).get("injected") is True
         and trace_file_data.get("later_task_deliberation_invoked") is False,
         observed={"trace_path": trace_rel, "trace": trace_file_data},
-        expected="deterministic contract trace records the internalization surface without claiming close evidence",
+        expected="deterministic contract trace records internalization progress and explicit close blockers",
     )
 
     report = _scenario_report("m6_13-deliberation-internalization", workspace, commands, checks)
