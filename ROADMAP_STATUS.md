@@ -235,6 +235,17 @@ Current M6.16 evidence:
   `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
   `git diff --check`. Codex-ultra re-review reported no findings after adding
   explicit pytest import/class-style coverage.
+- Task `#666` is a supervisor-owned M6.16/M6.14 repair from GitHub issue `#10`:
+  stale pending dry-run approvals are now suppressed once a later completed,
+  non-rolled-back same-path write is followed by a passing verifier. Rolled
+  back failed writes do not suppress the original pending approval. Count this
+  as loop-substrate/product progress, not mew-first autonomy credit: mew spent
+  the attempt budget reading anchors and then timed out before drafting. Valid
+  proof passed:
+  `uv run pytest -q tests/test_work_session.py -k "superseded or pending_approval or finish_blocked or rolled_back" --no-testmon`,
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
+  `git diff --check`. Codex-ultra re-review reported no findings after the
+  rolled-back-write regression was added.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

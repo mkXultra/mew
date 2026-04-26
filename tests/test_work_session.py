@@ -27811,6 +27811,121 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_resume_suppresses_stale_pending_approvals_after_corrected_verified_batch(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Corrected batch",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "written": False,
+                        "diff": "--- src/mew/pairing.py\n+++ src/mew/pairing.py\n@@\n-old\n+bad\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_pairing.py"},
+                    "result": {
+                        "path": "tests/test_pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "written": False,
+                        "diff": "--- tests/test_pairing.py\n+++ tests/test_pairing.py\n@@\n-old\n+bad\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_pairing.py"},
+                    "result": {
+                        "path": "tests/test_pairing.py",
+                        "dry_run": False,
+                        "changed": True,
+                        "written": True,
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": False,
+                        "changed": True,
+                        "written": True,
+                        "verification": {"exit_code": 0, "command": "uv run pytest -q tests/test_pairing.py"},
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["pending_approvals"], [])
+
+    def test_resume_keeps_pending_approval_after_rolled_back_same_path_write(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Rolled back batch",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "written": False,
+                        "diff": "--- src/mew/pairing.py\n+++ src/mew/pairing.py\n@@\n-old\n+bad\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": False,
+                        "changed": True,
+                        "written": True,
+                        "rolled_back": True,
+                        "verification": {"exit_code": 1, "command": "uv run pytest -q tests/test_pairing.py"},
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "parameters": {"command": "uv run pytest -q tests/test_other.py"},
+                    "result": {"command": "uv run pytest -q tests/test_other.py", "exit_code": 0},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual([approval["tool_call_id"] for approval in resume["pending_approvals"]], [1])
+
     def test_work_ai_batch_rejects_unpaired_mew_source_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

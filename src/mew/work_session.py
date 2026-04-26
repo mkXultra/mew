@@ -461,6 +461,45 @@ def latest_unresolved_failure(failures):
     return {}
 
 
+def _call_id_int(call) -> int:
+    try:
+        return int((call or {}).get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _work_call_has_passing_verification(call) -> bool:
+    result = (call or {}).get("result") or {}
+    verification = result.get("verification") or {}
+    if verification.get("exit_code") == 0 or result.get("verification_exit_code") == 0:
+        return True
+    return (call or {}).get("tool") == "run_tests" and result.get("exit_code") == 0
+
+
+def _pending_approval_superseded_by_verified_write(call, calls) -> bool:
+    path = work_call_path(call)
+    if not path:
+        return False
+    call_id = _call_id_int(call)
+    saw_later_same_path_write = False
+    for later in calls or []:
+        if _call_id_int(later) <= call_id:
+            continue
+        result = (later or {}).get("result") or {}
+        if (
+            (later or {}).get("tool") in WRITE_WORK_TOOLS
+            and (later or {}).get("status") == "completed"
+            and work_call_path(later) == path
+            and result.get("changed")
+            and result.get("written")
+            and not result.get("rolled_back")
+        ):
+            saw_later_same_path_write = True
+        if saw_later_same_path_write and _work_call_has_passing_verification(later):
+            return True
+    return False
+
+
 def format_work_failure_risk(failure, max_chars=260):
     if not failure:
         return ""
@@ -6365,6 +6404,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             and result.get("changed")
             and call.get("approval_status") not in NON_PENDING_APPROVAL_STATUSES
         ):
+            if _pending_approval_superseded_by_verified_write(call, calls):
+                continue
             tool_call_id = call.get("id")
             write_path = path or "."
             diff = result.get("diff") or ""
