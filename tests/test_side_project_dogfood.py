@@ -95,6 +95,7 @@ def test_append_and_summarize_side_project_dogfood_ledger(tmp_path: Path) -> Non
     assert summary["rows_total"] == 2
     assert summary["gate"]["clean_or_practical"] == 1
     assert summary["gate"]["rescue_edits_total"] == 2
+    assert summary["gate"]["codex_product_code_rescue_edits"] == 2
     assert summary["counts"]["codex_cli_used_as"] == {"operator": 1, "fallback": 1}
     assert summary["attempts"][0]["task_id"] == 703
     assert "Side-project dogfood telemetry" in text
@@ -104,6 +105,30 @@ def test_append_and_summarize_side_project_dogfood_ledger(tmp_path: Path) -> Non
 def test_normalize_rejects_unknown_codex_cli_role() -> None:
     with pytest.raises(ValueError, match="codex_cli_used_as must be one of"):
         normalize_side_project_dogfood_record(_record(codex_cli_used_as="author"))
+
+
+def test_normalize_rejects_non_numeric_rescue_edits_semantics() -> None:
+    with pytest.raises(ValueError, match="rescue_edits must be an integer"):
+        normalize_side_project_dogfood_record(_record(rescue_edits="verifier follow-up repair"))
+
+
+def test_normalize_rejects_non_integral_rescue_edits_float() -> None:
+    with pytest.raises(ValueError, match="rescue_edits must be an integer"):
+        normalize_side_project_dogfood_record(_record(rescue_edits=1.9))
+
+
+def test_side_dogfood_report_preserves_rescue_edits_semantics(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    append_side_project_dogfood_record(_record(rescue_edits=2), path=ledger)
+
+    summary = summarize_side_project_dogfood(path=ledger)
+    report = format_side_project_dogfood_report(summary)
+
+    assert summary["gate"]["rescue_edits_total"] == 2
+    assert summary["gate"]["codex_product_code_rescue_edits"] == 2
+    assert "rescue_edits_total=2" in report
+    assert "rescue_edits is a numeric Codex product-code rescue count" in report
+    assert "verifier follow-up" in report
 
 
 def test_side_dogfood_parser_and_append_command(tmp_path: Path, capsys) -> None:

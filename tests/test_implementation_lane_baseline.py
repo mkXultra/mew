@@ -71,6 +71,7 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
     assert summary["side_project"]["rows_total"] == 3
     assert summary["side_project"]["clean_or_practical"] == 1
     assert summary["side_project"]["rescue_rate"] == 0.667
+    assert summary["side_project"]["codex_product_code_rescue_edits"] == 2
     assert summary["recommended_first_bottleneck"]["name"] == "mew_first_rescue_partial"
 
     text = format_implementation_lane_baseline_report(summary)
@@ -80,7 +81,11 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
     assert "approval: rejected=2/5 rejection_rate=0.4" in text
     assert "verifier: failed=1/4 failure_rate=0.25" in text
     assert "first_edit_latency: count=3 median=12.0 p95=30.0 max=44.0" in text
-    assert "side_project: rows=3 success=1 success_rate=0.333 failed=1" in text
+    assert (
+        "side_project: rows=3 success=1 success_rate=0.333 failed=1 "
+        "structural_repairs=1 codex_product_code_rescue_edits=2 rescue_rate=0.667"
+        in text
+    )
     assert "recommended_first_bottleneck: mew_first_rescue_partial" in text
 
 

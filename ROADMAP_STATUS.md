@@ -370,6 +370,23 @@ Current M6.16 evidence:
   `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
   and `git diff --check`. Codex-ultra review session
   `019dcb2f-dcd3-79e1-b069-4919e7e21c6d` reported no findings.
+- Task `#674` landed the GitHub issue `#6` side-dogfood ledger-semantics
+  slice as practical mew-first evidence. `mew side-dogfood report` now states
+  that `rescue_edits` is a numeric Codex product-code rescue count and excludes
+  operator steering, reviewer rejection, verifier follow-up, and generic
+  repair. The implementation-lane baseline text labels the side-project
+  aggregate as `codex_product_code_rescue_edits`, while JSON keeps the
+  backward-compatible `rescue_edits_total` key and adds the same semantic alias.
+  Count this as practical mew-first without supervisor product-code rescue:
+  session `#659` authored the initial paired source/test patch and sibling
+  digest label; codex-ultra review session
+  `019dcb3e-a3f6-7423-ac91-981e1396c86c` found a non-integral float truncation
+  bug and missing machine-readable alias; session `#660` repaired both. Valid
+  proof passed:
+  `uv run pytest -q tests/test_side_project_dogfood.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/side_project_dogfood.py src/mew/implementation_lane_baseline.py tests/test_side_project_dogfood.py tests/test_implementation_lane_baseline.py`,
+  and `git diff --check`. Codex-ultra re-review reported no findings.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

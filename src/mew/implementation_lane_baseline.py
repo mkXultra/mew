@@ -134,7 +134,7 @@ def summarize_implementation_lane_baseline_from_summaries(
     side_gate = _mapping(side_project_summary.get("gate"))
     side_rows_total = _int(side_project_summary.get("rows_total"))
     side_success = _int(side_gate.get("clean_or_practical"))
-    side_rescue_edits = _int(side_gate.get("rescue_edits_total"))
+    side_rescue_edits = _int(side_gate.get("codex_product_code_rescue_edits", side_gate.get("rescue_edits_total")))
 
     summary: dict[str, Any] = {
         "kind": "implementation_lane_baseline",
@@ -175,6 +175,7 @@ def summarize_implementation_lane_baseline_from_summaries(
             "failed": _int(side_gate.get("failed")),
             "structural_repairs_required": _int(side_gate.get("structural_repairs_required")),
             "rescue_edits_total": side_rescue_edits,
+            "codex_product_code_rescue_edits": side_rescue_edits,
             "rescue_rate": _rate(side_rescue_edits, side_rows_total),
         },
     }
@@ -257,7 +258,7 @@ def format_implementation_lane_baseline_report(summary: Mapping[str, Any]) -> st
             f"success_rate={side_project.get('success_rate')} "
             f"failed={side_project.get('failed')} "
             f"structural_repairs={side_project.get('structural_repairs_required')} "
-            f"rescue_edits={side_project.get('rescue_edits_total')} "
+            f"codex_product_code_rescue_edits={side_project.get('rescue_edits_total')} "
             f"rescue_rate={side_project.get('rescue_rate')}"
         ),
         (
