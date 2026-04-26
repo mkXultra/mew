@@ -113,6 +113,15 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_implementation_lane_baseline.py tests/test_mew_first_calibration.py tests/test_metrics.py tests/test_side_project_dogfood.py --no-testmon`,
   `uv run ruff check src/mew/implementation_lane_baseline.py src/mew/commands.py src/mew/cli.py tests/test_implementation_lane_baseline.py`,
   `./mew metrics --implementation-lane --json`, and `git diff --check`.
+- Task `#657` landed the first M6.16 bottleneck-reduction slice against
+  closeout correctness: `same_surface_audit.status=noted` should not keep a
+  work session blocked at finish after the required sibling-surface audit has
+  been recorded. This is a supervisor-owned substrate fix, not mew-first
+  autonomy credit. Focused proof:
+  `uv run pytest -q tests/test_work_session.py -k 'finish_block or same_surface_audit' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py tests/test_commands.py -k 'finish or same_surface_audit or work_finish' --no-testmon`,
+  `uv run ruff check src/mew/commands.py tests/test_work_session.py`, and
+  `git diff --check`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
@@ -782,7 +791,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.16 -> implementation-lane baseline -> choose the first measured bottleneck`
+`M6.16 -> measured bottleneck: mew_first_rescue_partial -> reduce ordinary implementation-lane rescue/partial rate`
 
 Acceptable near-term work:
 

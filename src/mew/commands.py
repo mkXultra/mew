@@ -3307,7 +3307,8 @@ def apply_work_control_action(state, session, task, action):
                 finish_blockers.append("pending approval")
             if verification_confidence and not verification_confidence.get("finish_ready"):
                 finish_blockers.append("unverified source-edit verification")
-            if resume.get("same_surface_audit"):
+            same_surface_audit = resume.get("same_surface_audit") or {}
+            if same_surface_audit and same_surface_audit.get("status") != "noted":
                 finish_blockers.append("required same-surface audit")
             if finish_blockers:
                 blocked_note = f"finish blocked: {', '.join(finish_blockers)}"

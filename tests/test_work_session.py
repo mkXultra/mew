@@ -31329,6 +31329,47 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work session finish blocked", task["notes"])
                 self.assertNotIn("Work session finished:", task["notes"])
 
+    def test_work_finish_allows_completed_same_surface_audit(self):
+        from mew.commands import apply_work_control_action
+
+        session = {"id": 9, "status": "active"}
+        task = {"id": 15, "title": "Audit closeout", "status": "ready", "notes": ""}
+        state = {
+            "tasks": [task],
+            "questions": [],
+            "agent": {},
+            "memory": {"shallow": {}},
+            "knowledge": {"shallow": {}},
+        }
+        resume = {
+            "same_surface_audit": {
+                "status": "noted",
+                "reason": "src/mew source edits should inspect sibling code paths on the same surface before done",
+            }
+        }
+
+        with patch("mew.commands.build_work_session_resume", return_value=resume), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(
+                state,
+                session,
+                task,
+                {
+                    "type": "finish",
+                    "reason": "implemented and verified",
+                    "task_done": True,
+                    "completion_summary": "same-surface audit recorded",
+                },
+            )
+
+        close_session.assert_called_once_with(session)
+        self.assertEqual(task["status"], "done")
+        self.assertTrue(result["task_done"])
+        self.assertIn("Work session finished: implemented and verified", task["notes"])
+        self.assertIn("done: same-surface audit recorded", task["notes"])
+        self.assertNotIn("Work session finish blocked", task["notes"])
+
     def test_work_finish_note_prefers_summary_over_reason(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
