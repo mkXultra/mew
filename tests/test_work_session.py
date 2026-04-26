@@ -7098,6 +7098,10 @@ class WorkSessionTests(unittest.TestCase):
                 "unless the task explicitly requires a literal public string or security-sensitive marker",
                 verifier_prompt,
             )
+            self.assertIn("contract/docs-heavy slices", verifier_prompt)
+            self.assertIn("documented headings/surfaces", verifier_prompt)
+            self.assertIn("actual renderer or CLI output", verifier_prompt)
+            self.assertIn("file creation as proof", verifier_prompt)
             self.assertIn("watch, continuous, polling, listen", verifier_prompt)
             self.assertIn("bounded-loop or repeated-observation proof", verifier_prompt)
             self.assertIn("interval/interrupt handling or output-rewrite evidence", verifier_prompt)

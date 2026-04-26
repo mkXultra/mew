@@ -354,6 +354,22 @@ Current M6.16 evidence:
   `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
   and `git diff --check`. Codex-ultra review session
   `019dcb20-3fec-7043-b508-a3ec5e8ceac4` reported no findings.
+- Task `#673` landed the GitHub issue `#7` contract/docs-heading proof
+  guidance slice as practical mew-first evidence. The normal, write-ready,
+  and tiny-draft work prompts now tell the implementation lane that
+  contract/docs-heavy slices must compare documented headings/surfaces against
+  actual renderer or CLI output instead of treating file creation as proof.
+  Count this as practical mew-first without rescue edits: session `#658`
+  authored the paired source/test patch. The mew-run broad unittest verifier
+  initially failed two unrelated reasoning-effort tests, but the same full
+  module passed immediately when re-run outside the failed follow snapshot.
+  Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k 'contract or heading or behavior or verifier' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or write_ready_tiny_draft or write_ready or contract or heading or behavior or verifier' --no-testmon`,
+  `uv run python -m unittest tests.test_work_session`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check`. Codex-ultra review session
+  `019dcb2f-dcd3-79e1-b069-4919e7e21c6d` reported no findings.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
