@@ -632,6 +632,45 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_reasoning_trace_recall_reviewer_confirms_shortened_deliberation", check_names)
             self.assertIn("m6_9_reasoning_trace_recall_writes_deterministic_trace", check_names)
 
+    def test_run_dogfood_m6_13_deliberation_internalization_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_13-deliberation-internalization",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+            trace = artifacts["trace"]
+            check_names = {item["name"] for item in scenario["checks"]}
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_13-deliberation-internalization")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertIn("m6_13-deliberation-internalization: pass", text)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertTrue(artifacts["recalled"])
+            self.assertEqual(artifacts["hard_task_id"], 61301)
+            self.assertEqual(artifacts["later_same_shape_task_id"], 61302)
+            self.assertEqual(trace["evidence_class"], "contract_fixture")
+            self.assertFalse(trace["close_evidence"])
+            self.assertEqual(trace["original_blocker_code"], "review_rejected")
+            self.assertEqual(trace["adapted_memory_event"]["source_lane"], "deliberation")
+            self.assertEqual(trace["reasoning_trace_ledger_ref"], ".mew/durable/memory/reasoning_trace.jsonl")
+            self.assertTrue(trace["reviewer_confirmed_trace_shortened_deliberation"])
+            self.assertFalse(trace["later_task_deliberation_invoked"])
+            self.assertIn(
+                "m6_13_deliberation_internalization_writes_reviewed_trace_with_provenance",
+                check_names,
+            )
+            self.assertIn("m6_13_deliberation_internalization_appends_reasoning_trace_ledger", check_names)
+            self.assertIn("m6_13_deliberation_internalization_later_task_recalls_trace", check_names)
+            self.assertIn("m6_13_deliberation_internalization_records_tiny_reuse_contract", check_names)
+            self.assertIn("m6_13_deliberation_internalization_writes_deterministic_contract_trace", check_names)
+
     def test_run_dogfood_m6_9_repeated_task_recall_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

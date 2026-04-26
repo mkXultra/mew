@@ -1046,6 +1046,12 @@ class MemoryTests(unittest.TestCase):
                 self.assertEqual(data["entry"]["memory_kind"], "reasoning-trace")
                 self.assertEqual(data["entry"]["situation"], "choosing between polish and milestone proof")
                 self.assertEqual(data["entry"]["abstraction_level"], "deep")
+                ledger_path = Path(".mew/durable/memory/reasoning_trace.jsonl")
+                self.assertTrue(ledger_path.exists())
+                ledger = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
+                self.assertEqual(ledger[-1]["entry_id"], data["entry"]["id"])
+                self.assertEqual(ledger[-1]["memory_kind"], "reasoning-trace")
+                self.assertEqual(ledger[-1]["source_lane"], "")
 
                 with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(
@@ -1070,6 +1076,75 @@ class MemoryTests(unittest.TestCase):
                         1,
                     )
                 self.assertIn("--verdict", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_memory_add_requires_deliberation_reasoning_trace_provenance(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                base_args = [
+                    "memory",
+                    "--add",
+                    "Store deliberation-derived reasoning trace.",
+                    "--type",
+                    "project",
+                    "--kind",
+                    "reasoning-trace",
+                    "--name",
+                    "Deliberation trace",
+                    "--approved",
+                    "--situation",
+                    "review rejection needs a narrow causal repair",
+                    "--reasoning",
+                    "classify the rejection before editing so the tiny lane can draft the narrow fix",
+                    "--verdict",
+                    "record the blocker family and patch only that surface",
+                    "--abstraction-level",
+                    "deep",
+                    "--source-lane",
+                    "deliberation",
+                ]
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(base_args), 1)
+                self.assertIn("--source-lane-attempt-id", stderr.getvalue())
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                *base_args,
+                                "--source-lane-attempt-id",
+                                "lane-deliberation-todo-17-attempt-1",
+                                "--source-blocker-code",
+                                "review_rejected",
+                                "--source-bundle-ref",
+                                ".mew/durable/replay/deliberation/todo-17.json",
+                                "--same-shape-key",
+                                "review_rejected:work_loop:paired-test",
+                                "--reviewer-decision-ref",
+                                "review-20260426-delib-17",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                entry = data["entry"]
+                self.assertEqual(entry["source_lane"], "deliberation")
+                self.assertEqual(entry["source_blocker_code"], "review_rejected")
+                self.assertEqual(entry["same_shape_key"], "review_rejected:work_loop:paired-test")
+                self.assertEqual(
+                    entry["source_bundle_ref"],
+                    ".mew/durable/replay/deliberation/todo-17.json",
+                )
+                ledger_path = Path(".mew/durable/memory/reasoning_trace.jsonl")
+                ledger = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
+                self.assertEqual(ledger[-1]["entry_id"], entry["id"])
+                self.assertEqual(ledger[-1]["source_lane"], "deliberation")
+                self.assertEqual(ledger[-1]["source_lane_attempt_id"], "lane-deliberation-todo-17-attempt-1")
+                self.assertEqual(ledger[-1]["reviewer_decision_ref"], "review-20260426-delib-17")
             finally:
                 os.chdir(old_cwd)
 

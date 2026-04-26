@@ -1612,6 +1612,37 @@ def build_parser():
         help="abstraction level required for a reasoning-trace durable write",
     )
     memory_parser.add_argument(
+        "--source-lane",
+        dest="source_lane",
+        choices=("tiny", "mirror", "deliberation"),
+        help="optional lane provenance for a reasoning-trace durable write",
+    )
+    memory_parser.add_argument(
+        "--source-lane-attempt-id",
+        dest="source_lane_attempt_id",
+        help="lane attempt id required when --source-lane deliberation",
+    )
+    memory_parser.add_argument(
+        "--source-blocker-code",
+        dest="source_blocker_code",
+        help="blocker code required when --source-lane deliberation",
+    )
+    memory_parser.add_argument(
+        "--source-bundle-ref",
+        dest="source_bundle_ref",
+        help="bundle reference required when --source-lane deliberation",
+    )
+    memory_parser.add_argument(
+        "--same-shape-key",
+        dest="same_shape_key",
+        help="same-shape key required when --source-lane deliberation",
+    )
+    memory_parser.add_argument(
+        "--reviewer-decision-ref",
+        dest="reviewer_decision_ref",
+        help="reviewer decision reference required when --source-lane deliberation",
+    )
+    memory_parser.add_argument(
         "--kind",
         dest="memory_kind",
         choices=CODING_MEMORY_KINDS,

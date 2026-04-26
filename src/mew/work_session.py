@@ -611,6 +611,17 @@ def active_memory_match(entry, terms):
             entry.body,
             entry.memory_type,
             entry.scope,
+            entry.memory_kind,
+            entry.situation,
+            entry.reasoning,
+            entry.verdict,
+            entry.abstraction_level,
+            entry.source_lane,
+            entry.source_lane_attempt_id,
+            entry.source_blocker_code,
+            entry.source_bundle_ref,
+            entry.same_shape_key,
+            entry.reviewer_decision_ref,
         ]
     ).casefold()
     matched_terms = [term for term in terms if term in haystack]
