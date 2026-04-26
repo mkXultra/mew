@@ -1761,6 +1761,90 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_suggested_verify_command_for_call_path_prefers_pytest_style_tests(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text(
+                    "def test_command_behavior():\n"
+                    "    assert True\n",
+                    encoding="utf-8",
+                )
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                suggested = resume["suggested_verify_command"]
+
+                self.assertEqual(suggested["source_path"], "src/mew/commands.py")
+                self.assertEqual(suggested["test_path"], "tests/test_commands.py")
+                self.assertEqual(suggested["command"], "uv run pytest -q tests/test_commands.py --no-testmon")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_suggested_verify_command_for_call_path_prefers_pytest_import_style_tests(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text(
+                    "import pytest\n\n"
+                    "class TestCommandBehavior:\n"
+                    "    def test_value(self):\n"
+                    "        assert True\n",
+                    encoding="utf-8",
+                )
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                suggested = resume["suggested_verify_command"]
+
+                self.assertEqual(suggested["command"], "uv run pytest -q tests/test_commands.py --no-testmon")
+            finally:
+                os.chdir(old_cwd)
+
     def test_format_work_session_resume_surfaces_declared_write_scope(self):
         session = {
             "id": 3,

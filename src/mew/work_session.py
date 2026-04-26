@@ -3529,16 +3529,32 @@ def suggested_verify_command_for_call_path(source_path, *, hint_text=""):
     if not test_path or not Path(test_path).is_file():
         return {}
     test_module = Path(test_path).with_suffix("").as_posix().replace("/", ".")
+    if _test_path_prefers_pytest(test_path):
+        command = f"uv run pytest -q {Path(test_path).as_posix()} --no-testmon"
+    else:
+        command = f"uv run python -m unittest {test_module}"
     return {
         "source_path": source_path,
         "test_path": test_path,
-        "command": f"uv run python -m unittest {test_module}",
+        "command": command,
         "reason": (
             "mew source edit has an existing discovered test module"
             if discovered
             else "mew source edit has a matching test module"
         ),
     }
+
+
+def _test_path_prefers_pytest(test_path) -> bool:
+    try:
+        text = Path(test_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if re.search(r"(?m)^\s*class\s+\w+\([^)]*TestCase[^)]*\)\s*:", text):
+        return False
+    if re.search(r"(?m)^def\s+test_[A-Za-z0-9_]*\s*\(", text):
+        return True
+    return bool(re.search(r"(?m)^\s*(?:import\s+pytest|from\s+pytest\s+import|@pytest\.)", text))
 
 
 def suggested_verify_commands_for_calls(calls):

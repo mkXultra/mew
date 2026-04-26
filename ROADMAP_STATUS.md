@@ -223,6 +223,18 @@ Current M6.16 evidence:
   command was an invalid inferred verifier because this module contains pytest
   tests, not a product regression. Codex-ultra re-review reported no findings
   after adding explicit `follow-up #...` prefix coverage.
+- Task `#665` is a supervisor-owned M6.16/M6.14 repair from the invalid
+  inferred verifier observed during `#663`: `suggested_verify_command_for_call_path`
+  now prefers `uv run pytest -q <test_path> --no-testmon` for pytest-style
+  test files while preserving `uv run python -m unittest <module>` for
+  `unittest.TestCase` modules. Count this as loop-substrate/product progress,
+  not mew-first autonomy credit: mew hit repeated `task_goal_term_missing`
+  before drafting the patch. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k "suggested_verify_command or pytest_style or paired_source_verifier" --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "verify_command or verifier" --no-testmon`,
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
+  `git diff --check`. Codex-ultra re-review reported no findings after adding
+  explicit pytest import/class-style coverage.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
