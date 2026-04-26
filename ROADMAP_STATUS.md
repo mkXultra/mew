@@ -171,8 +171,16 @@ Current M6.13 evidence:
   same-shape task recalls it through provenance-aware active memory, and
   runs the tiny write-ready planning path with a deterministic fake model that
   receives the trace provenance in prompt context and emits a validated paired
-  patch draft with `deliberation_invoked=false`. This is a Phase 3 contract
-  surface, not yet a live-provider close proof.
+  patch draft with `deliberation_invoked=false`. The same scenario now supports
+  `--ai --auth <path>` live tiny-provider mode: it loads the configured model
+  auth, keeps the deliberation result as a deterministic fixture, and replaces
+  only the tiny draft call with a live provider. Validation passed with
+  `uv run python -m mew dogfood --scenario m6_13-deliberation-internalization --ai --auth auth.json --model gpt-5.5 --model-timeout 180 --json`,
+  producing `evidence_class=live_tiny_provider_contract`,
+  `tiny_provider_mode=live_provider`, and a validated paired patch draft while
+  keeping `close_evidence=false` until the remaining fixture/recall limitations
+  are closed. The same live path also passes with omitted `--auth`, preserving
+  backend auth defaults.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared

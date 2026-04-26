@@ -655,8 +655,10 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(artifacts["recalled"])
             self.assertEqual(artifacts["hard_task_id"], 61301)
             self.assertEqual(artifacts["later_same_shape_task_id"], 61302)
+            self.assertEqual(artifacts["tiny_provider_mode"], "deterministic_fake")
             self.assertEqual(trace["evidence_class"], "contract_fixture")
             self.assertFalse(trace["close_evidence"])
+            self.assertEqual(trace["tiny_provider_mode"], "deterministic_fake")
             self.assertEqual(trace["original_blocker_code"], "review_rejected")
             self.assertEqual(trace["adapted_memory_event"]["source_lane"], "deliberation")
             self.assertEqual(trace["reasoning_trace_ledger_ref"], ".mew/durable/memory/reasoning_trace.jsonl")
@@ -670,6 +672,57 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_13_deliberation_internalization_later_task_recalls_trace", check_names)
             self.assertIn("m6_13_deliberation_internalization_records_tiny_reuse_contract", check_names)
             self.assertIn("m6_13_deliberation_internalization_writes_deterministic_contract_trace", check_names)
+
+    def test_run_dogfood_m6_13_live_provider_uses_backend_auth_defaults(self):
+        observed_auth = []
+
+        def fake_load_model_auth(model_backend, auth_path=None):
+            observed_auth.append((model_backend, auth_path))
+            return {"access_token": "token"}
+
+        def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+            self.assertEqual(model_auth, {"access_token": "token"})
+            self.assertIn("Write-ready tiny draft lane is active.", prompt)
+            return {
+                "kind": "patch_proposal",
+                "summary": "increment the paired meaning value",
+                "files": [
+                    {
+                        "path": "src/mew/patch_draft.py",
+                        "edits": [{"old": "return 41", "new": "return 42"}],
+                    },
+                    {
+                        "path": "tests/test_patch_draft.py",
+                        "edits": [{"old": "meaning(), 41", "new": "meaning(), 42"}],
+                    },
+                ],
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_13-deliberation-internalization",
+                cleanup=False,
+                ai=True,
+                auth=None,
+                model_backend="",
+                model="",
+                base_url="",
+                model_timeout=60,
+            )
+
+            with patch("mew.dogfood.load_model_auth", side_effect=fake_load_model_auth):
+                with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                    report = run_dogfood_scenario(args)
+
+            scenario = report["scenarios"][0]
+            artifacts = scenario["artifacts"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(observed_auth, [("codex", None)])
+            self.assertEqual(artifacts["tiny_provider_mode"], "live_provider")
+            self.assertEqual(artifacts["trace"]["evidence_class"], "live_tiny_provider_contract")
+            self.assertFalse(artifacts["trace"]["close_evidence"])
 
     def test_run_dogfood_m6_9_repeated_task_recall_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

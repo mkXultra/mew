@@ -13020,7 +13020,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(planned["model_metrics"]["draft_prompt_contract_version"], "v2")
         self.assertGreater(planned["model_metrics"]["draft_prompt_static_chars"], 0)
         self.assertGreater(planned["model_metrics"]["draft_prompt_dynamic_chars"], 0)
-        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_prompt_contract_version"], "v3")
+        self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_prompt_contract_version"], "v4")
         self.assertTrue(planned["model_metrics"]["tiny_write_ready_draft_attempted"])
         self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_outcome"], "fallback")
         self.assertEqual(planned["model_metrics"]["tiny_write_ready_draft_fallback_reason"], "invalid_shape")
