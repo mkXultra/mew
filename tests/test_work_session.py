@@ -16684,6 +16684,66 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(_write_ready_window_text_is_structurally_complete(scenario_tuple_fragment))
         self.assertTrue(_write_ready_window_text_is_structurally_complete(dispatch_branch_fragment))
 
+    def test_write_ready_structural_allows_parser_statement_fragments(self):
+        from mew.work_loop import _write_ready_window_text_is_structurally_complete
+
+        parser_fragment = (
+            '    trace_parser = subparsers.add_parser("trace", help="show traces")\n'
+            '    trace_parser.add_argument("--limit", type=int, default=20)\n'
+            '    from .commands import cmd_task_propose_next\n'
+            '    propose_next_parser = task_subparsers.add_parser(\n'
+            '        "propose-next",\n'
+            '        help="propose the next bounded task without dispatching it",\n'
+            "    )\n"
+            '    propose_next_parser.add_argument("previous_task_id")\n'
+            "    propose_next_parser.set_defaults(func=cmd_task_propose_next)\n"
+            "    return parser\n"
+        )
+
+        self.assertTrue(_write_ready_window_text_is_structurally_complete(parser_fragment))
+
+    def test_write_ready_draft_window_can_narrow_parser_fragment_before_top_level_def(self):
+        from mew.work_loop import _write_ready_window_text_is_structurally_complete, _write_ready_window_with_draft_window
+
+        parser_lines = [
+            '    trace_parser = subparsers.add_parser("trace", help="show traces")\n',
+            '    trace_parser.add_argument("--limit", type=int, default=20)\n',
+            '    from .commands import cmd_task_propose_next\n',
+            '    propose_next_parser = task_subparsers.add_parser(\n',
+            '        "propose-next",\n',
+            '        help="propose the next bounded task without dispatching it",\n',
+            "    )\n",
+            '    propose_next_parser.add_argument("previous_task_id")\n',
+        ]
+        parser_lines.extend(
+            f'    propose_next_parser.add_argument("--flag-{index}", action="store_true")\n'
+            for index in range(80)
+        )
+        parser_lines.extend(
+            [
+                "    propose_next_parser.set_defaults(func=cmd_task_propose_next)\n",
+                "    return parser\n",
+            ]
+        )
+        text = "".join(parser_lines) + "\n\ndef main(argv=None):\n    return 0\n"
+        window = {
+            "path": "src/mew/cli.py",
+            "tool_call_id": 1,
+            "line_start": 100,
+            "line_end": 100 + len(text.splitlines()) - 1,
+            "text": text,
+            "context_truncated": False,
+        }
+
+        self.assertFalse(_write_ready_window_text_is_structurally_complete(text))
+        prepared = _write_ready_window_with_draft_window(window)
+
+        self.assertIn("draft_window", prepared)
+        draft_window = prepared["draft_window"]
+        self.assertEqual(draft_window["line_start"], 100)
+        self.assertEqual(draft_window["line_end"], 100 + len(parser_lines) - 1)
+        self.assertTrue(_write_ready_window_text_is_structurally_complete(draft_window["text"]))
+
     def test_build_work_session_resume_surfaces_draft_placeholders_and_prompt_cache_boundary(self):
         session = {
             "id": 1,

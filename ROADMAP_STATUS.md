@@ -116,6 +116,20 @@ Current M6.8 evidence:
   `uv run pytest -q tests/test_tasks.py tests/test_commands.py --no-testmon`,
   `uv run ruff check src/mew/tasks.py tests/test_tasks.py`, and
   `git diff --check`.
+- Starting task `#631` exposed a loop-substrate false negative rather than a
+  product-code failure: sessions `#616`/`#617` repeatedly stopped with
+  `cached_window_incomplete` because write-ready structural preflight could not
+  narrow a complete indented `build_parser()` parser-registration fragment in
+  `src/mew/cli.py`. This was repaired as M6.14 substrate work, not counted as
+  #631 autonomy credit. The structural gate now accepts complete indented
+  simple-statement sequences such as argparse registration blocks while still
+  rejecting one-line orphaned body fragments; the observed `cli.py:1707-1995`
+  window narrows to `1707-1960`.
+- #631 substrate repair validation passed: `uv run pytest -q
+  tests/test_work_session.py -k 'write_ready' --no-testmon`, `uv run pytest -q
+  tests/test_work_session.py tests/test_commands.py --no-testmon`, `uv run
+  ruff check src/mew/work_loop.py tests/test_work_session.py`, and `git diff
+  --check`.
 
 M6.8 is done when:
 

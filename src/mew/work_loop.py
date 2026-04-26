@@ -2365,7 +2365,9 @@ def _write_ready_window_structural_start_candidate(line):
         return False
     if not str(line or "")[0:1].isspace():
         return True
-    return stripped.startswith(("def ", "async def ", "@"))
+    if stripped.startswith(("def ", "async def ", "@")):
+        return True
+    return _write_ready_indented_simple_statement_start_line_is_allowed(stripped)
 
 
 def _write_ready_structural_window_for_draft(window):
@@ -2522,7 +2524,52 @@ def _write_ready_indented_statement_fragment_is_allowed(significant_lines):
         return True
     if _write_ready_literal_sequence_fragment_is_allowed(significant_lines, first_indent):
         return True
+    if _write_ready_indented_simple_statement_sequence_is_allowed(significant_lines, first_indent):
+        return True
     return False
+
+
+def _write_ready_indented_simple_statement_start_line_is_allowed(stripped):
+    stripped = str(stripped or "").strip()
+    if not stripped or stripped.startswith("#") or stripped.endswith(":"):
+        return False
+    if re.match(r"^[\]\)\}]+,?$", stripped):
+        return True
+    if stripped.startswith(("import ", "from ")):
+        return True
+    if re.match(r"[A-Za-z_][A-Za-z0-9_.]*(?:\s*:\s*[^=]+)?\s*(?:=|\+=|-=|\*=|/=|//=|%=|\|=|&=|\^=)", stripped):
+        return True
+    return bool(re.match(r"[A-Za-z_][A-Za-z0-9_.]*\s*\(", stripped))
+
+
+def _write_ready_indented_simple_statement_sequence_is_allowed(significant_lines, base_indent):
+    if not significant_lines:
+        return False
+    base_statement_indexes = []
+    for index, line in enumerate(significant_lines):
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+        if indent < base_indent:
+            return False
+        if indent > base_indent or stripped.startswith("#"):
+            continue
+        if stripped.startswith("return"):
+            if index == 0:
+                return False
+            base_statement_indexes.append(index)
+            continue
+        if not _write_ready_indented_simple_statement_start_line_is_allowed(stripped):
+            return False
+        base_statement_indexes.append(index)
+    if not base_statement_indexes:
+        return False
+    if len(base_statement_indexes) < 3:
+        return False
+    for index in base_statement_indexes:
+        stripped = significant_lines[index].lstrip()
+        if stripped.startswith("return") and index != base_statement_indexes[-1]:
+            return False
+    return True
 
 
 def _write_ready_literal_sequence_fragment_is_allowed(significant_lines, base_indent):
