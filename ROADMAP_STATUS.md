@@ -50,8 +50,8 @@ is tracked below.
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
-| 6.17 Resident Meta Loop / Lane Chooser | `in_progress` | Active supervisor milestone: propose reviewer-gated task and lane dispatch from roadmap, memory, and calibration metrics. |
-| 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
+| 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
+| 7. Senses: Inbound Signals | `in_progress` | Active milestone: convert existing signal gates/journaling/RSS foundation into useful audited inbound observations. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
 | 10. Multi-Agent Residence | `not_started` | Multi-model shared residence remains future work. |
@@ -59,34 +59,44 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.17 Resident Meta Loop / Lane Chooser**.
+Active work: **M7 Senses: Inbound Signals**.
 
-Why M6.17 is active:
+Why M7 is active:
 
-- M6.16 closed with residuals: the latest mew-first cohort is reliable enough
-  for a reviewer-gated supervisor to propose work without merely orchestrating
-  unreliable hands.
-- The next resident capability gap is task/lane dispatch: choosing when to use
-  the implementation lane, deliberation lane, repair lane, or human review gate
-  from roadmap state, memory, and calibration economics.
-- M6.17 must stay read-only or reviewer-gated in v0. It should propose, not
-  mutate, dispatch/roadmap/memory state without approval.
+- M6.17 closed the reviewer-gated resident meta-loop v0: mew can propose the
+  next task/lane or a safe next action without losing the active gate.
+- A resident that only rereads its own state is not meaningfully passive. The
+  next product gap is controlled inbound sensing: audited signals that let mew
+  notice the user's working world without becoming spam.
+- M7 already has foundation pieces, but the gate is not met until at least one
+  useful, provenance-backed unsolicited observation is produced from enabled
+  signal evidence.
 
-Current M6.17 target:
+Current M7 target:
 
-- build a compact, reviewer-visible meta-loop proposal surface
-- read roadmap status, mew-first/implementation-lane metrics, memory, task
-  state, active sessions, and user constraints
-- propose exactly one next task and lane dispatch with evidence, expected
-  value, fallback, verifier, and repair route
-- require reviewer approval before dispatch in v0
-- preserve M6.14 as the structural repair route
+- keep inbound sources explicitly gated and budgeted
+- journal signal provenance, source, timestamp, and reason-for-use
+- start with local file/git signals, then one non-file-system source behind an
+  explicit gate
+- distinguish "noticed" from "acted" in passive turns
+- make every unsolicited observation explainable and disableable
 
-Current M6.17 chain:
+Current M7 chain:
 
-`M6.17 -> reviewer-gated meta-loop proposal -> choose next task and lane dispatch from roadmap, memory, and calibration evidence`
+`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
 
-Current M6.17 evidence:
+Current M7 evidence:
+
+- Existing signal gates, journaling, and RSS/feed surfaces provide foundation,
+  but the M7 close proof is not yet present.
+- Next work should define the smallest enabled inbound source and proof window,
+  then produce or simulate one auditable passive observation.
+- Selector proposal `#26` chose task `#682` as the first M7 bounded task with
+  lane dispatch, calibration refs, failure cluster, and preference refs. This
+  proves the closed M6.17 lane chooser can hand off into M7 without falling
+  back to stale paused M6 work.
+
+M6.17 close evidence:
 
 - Task `#679` landed the first reviewer-visible lane-dispatch proposal slice as
   mixed mew-first plus supervisor review-fix evidence. Mew sessions `#668` and
@@ -117,11 +127,11 @@ Current M6.17 evidence:
   reviewer still sees the active native self-improve path when no safe bounded
   task candidate exists. Mew session `#671` authored the source/test patch and
   verification passed; the supervisor applied a tiny formatter follow-up so
-  normal candidate proposals do not show `next_action: null`. After marking
-  `#681` done, `./mew task propose-next 681 --json` returns a blocked
-  no-candidate proposal with `lane_dispatch` plus `next_action: ./mew
-  self-improve --start-session --focus 'Advance M6.17 Resident Meta Loop /
-  Lane Chooser'`. Validation passed: `uv run python -m unittest
+  normal candidate proposals do not show `next_action: null`. After M7 became
+  active, `./mew task propose-next 681 --json` returns a blocked no-candidate
+  proposal with `lane_dispatch` plus `next_action: ./mew self-improve
+  --start-session --focus 'Advance M7 Senses: Inbound Signals'`. Validation
+  passed: `uv run python -m unittest
   tests.test_commands`, `uv run ruff check src/mew/commands.py
   tests/test_commands.py`, and `git diff --check`. Codex-ultra review
   `019dcbe9-aae6-75d1-a17d-fb613f1ef4c3` returned `STATUS: pass`.
@@ -1171,18 +1181,16 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.17 -> reviewer-gated meta-loop proposal -> choose next task and lane dispatch from roadmap, memory, and calibration evidence`
+`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
 
 Acceptable near-term work:
 
-- build a compact read-only proposal surface for the resident meta loop
-- consume roadmap status, current tasks, active sessions, memory, and
-  implementation-lane/calibration metrics as evidence
-- propose exactly one next task, authoritative lane, helper lane if any,
-  verifier, fallback, repair route, budget, and expected-value rationale
-- require reviewer approval before dispatch or mutation in v0
-- route structural implementation failures to M6.14 instead of hiding them
-  behind supervisor edits
+- inventory existing signal gates, journals, and feed/RSS surfaces
+- define the smallest M7 proof source and opt-in gate
+- record signal provenance with source, timestamp, budget, and reason-for-use
+- produce one reviewer-visible passive observation from real or deterministic
+  fixture signal evidence
+- expose why the observation was made and how the source can be disabled
 
 Non-goals for the next session:
 
@@ -1190,14 +1198,29 @@ Non-goals for the next session:
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
-- M7 inbound-signal work
-- broad refactors not tied to the meta-loop proposal surface
-- direct roadmap/task/memory mutation by the meta loop without reviewer approval
-- polish not mapped to the M6.17 gate
+- broad refactors not tied to the first M7 inbound-signal proof
+- direct task/roadmap/memory mutation from inbound signals without reviewer approval
+- broad multi-source integrations before the first M7 proof source is selected
+- polish not mapped to the M7 gate
 
 ## Latest Validation
 
-Latest M6.16 source/test validation:
+Latest M6.17 source/test validation:
+
+- Task `#679` lane-dispatch proposal slice:
+  `uv run python -m unittest tests.test_tasks tests.test_commands`,
+  `uv run ruff check src/mew/tasks.py src/mew/commands.py tests/test_tasks.py tests/test_commands.py`,
+  and `git diff --check` passed.
+- Task `#680` active roadmap gate slice:
+  `uv run python -m unittest tests.test_brief`,
+  `uv run ruff check src/mew/brief.py tests/test_brief.py`, and
+  `git diff --check` passed.
+- Task `#681` no-candidate next-action fallback slice:
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/commands.py tests/test_commands.py`, and
+  `git diff --check` passed.
+
+Earlier M6.16 source/test validation:
 
 - Task `#678` first-edit latency budget slice:
   `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or first_edit_latency' --no-testmon`,

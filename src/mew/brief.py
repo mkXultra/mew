@@ -40,44 +40,56 @@ def _clean_roadmap_label(value):
     return " ".join(str(value or "").replace("*", "").replace("`", "").strip().split()).rstrip(".")
 
 
-def _leading_m6_token(value):
+def _leading_milestone_token(value):
     text = _clean_roadmap_label(value)
     if not text:
         return ""
     first = text.split()[0].strip(",:;()[]")
-    if not first.startswith("M6."):
+    if not first.startswith("M") or len(first) == 1 or not first[1].isdigit():
         return ""
+    major = []
+    index = 1
+    while index < len(first) and first[index].isdigit():
+        major.append(first[index])
+        index += 1
     minor = []
-    for char in first[3:]:
+    if index < len(first) and first[index] == ".":
+        index += 1
+    for char in first[index:]:
         if not char.isdigit():
             break
         minor.append(char)
-    if not minor:
-        return ""
-    return f"M6.{''.join(minor)}"
+    suffix = f".{''.join(minor)}" if minor else ""
+    return f"M{''.join(major)}{suffix}"
 
 
-def _m6_token_from_text(value):
+def _milestone_token_from_text(value):
     for raw_word in _clean_roadmap_label(value).split():
-        token = _leading_m6_token(raw_word)
+        token = _leading_milestone_token(raw_word)
         if token:
             return token
     return ""
 
 
-def _m6_token_minor(token):
+def _milestone_token_parts(token):
+    token = str(token or "")
+    if not token.startswith("M") or len(token) == 1:
+        return None
+    raw = token[1:].split(".", 1)
     try:
-        return int(str(token or "").split(".", 1)[1])
-    except (IndexError, TypeError, ValueError):
+        major = int(raw[0])
+        minor = int(raw[1]) if len(raw) > 1 else 0
+        return major, minor
+    except (TypeError, ValueError):
         return None
 
 
-def _older_m6_token(candidate, current):
-    candidate_minor = _m6_token_minor(candidate)
-    current_minor = _m6_token_minor(current)
-    if candidate_minor is None or current_minor is None:
+def _older_milestone_token(candidate, current):
+    candidate_parts = _milestone_token_parts(candidate)
+    current_parts = _milestone_token_parts(current)
+    if candidate_parts is None or current_parts is None:
         return False
-    return candidate_minor < current_minor
+    return candidate_parts < current_parts
 
 
 def active_roadmap_self_improve_focus(root=None):
@@ -95,7 +107,7 @@ def active_roadmap_self_improve_focus(root=None):
         if line.startswith("Active milestone:"):
             active = _clean_roadmap_label(line.split(":", 1)[1])
             break
-    if _m6_token_from_text(active):
+    if _milestone_token_from_text(active):
         return f"Advance {active}"
     if "Milestone 3" in active:
         return "Prove M3 persistent advantage in resident reentry"
@@ -1361,9 +1373,9 @@ def stale_paused_work_roadmap_focus(session, kind=None):
     if kind != "coding" or not (session.get("stop_request") or {}):
         return ""
     roadmap_focus = active_roadmap_self_improve_focus()
-    current_token = _m6_token_from_text(roadmap_focus)
-    paused_token = _leading_m6_token(session.get("title"))
-    if roadmap_focus and _older_m6_token(paused_token, current_token):
+    current_token = _milestone_token_from_text(roadmap_focus)
+    paused_token = _leading_milestone_token(session.get("title"))
+    if roadmap_focus and _older_milestone_token(paused_token, current_token):
         return roadmap_focus
     return ""
 
