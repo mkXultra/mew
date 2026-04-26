@@ -534,12 +534,35 @@ def _task_selector_no_candidate_response(previous_task, message):
     }
 
 
-def cmd_task_propose_next(args):
-    state = load_state()
+def _next_task_selector_proposal_id(state):
+    ids = []
+    for record in state.get("selector_proposals") or []:
+        try:
+            ids.append(int(record.get("id")))
+        except (TypeError, ValueError):
+            continue
+    return max(ids) + 1 if ids else 1
+
+
+def _record_task_selector_proposal(state, proposal):
+    timestamp = now_iso()
+    record = {
+        "id": _next_task_selector_proposal_id(state),
+        "previous_task_id": proposal.get("previous_task_id"),
+        "proposed_task_id": proposal.get("proposed_task_id"),
+        "proposal": dict(proposal),
+        "status": "blocked" if proposal.get("blocked") else "proposed",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    state.setdefault("selector_proposals", []).append(record)
+    return record
+
+
+def _build_task_selector_next_proposal(state, args):
     previous_task = find_task(state, args.previous_task_id)
     if not previous_task:
-        print(f"mew: task not found: {args.previous_task_id}", file=sys.stderr)
-        return 1
+        return None, 1, f"mew: task not found: {args.previous_task_id}"
 
     candidate_task = None
     message = ""
@@ -563,12 +586,7 @@ def cmd_task_propose_next(args):
             message = "no safe selector candidate found"
 
     if message:
-        proposal = _task_selector_no_candidate_response(previous_task, message)
-        if getattr(args, "json", False):
-            print(json.dumps(proposal, ensure_ascii=False, indent=2))
-        else:
-            print(format_task_selector_proposal(proposal))
-        return 1
+        return _task_selector_no_candidate_response(previous_task, message), 1, None
 
     selector_reason = (
         f"explicit candidate task #{candidate_task.get('id')} after previous task #{previous_task.get('id')}"
@@ -576,11 +594,31 @@ def cmd_task_propose_next(args):
         else f"first ready/todo coding task after previous task #{previous_task.get('id')}"
     )
     proposal = build_task_selector_proposal(previous_task, candidate_task, selector_reason)
+    return proposal, 1 if proposal.get("blocked") else 0, None
+
+
+def cmd_task_propose_next(args):
+    if getattr(args, "record", False):
+        with state_lock():
+            state = load_state()
+            proposal, exit_code, error = _build_task_selector_next_proposal(state, args)
+            if error:
+                print(error, file=sys.stderr)
+                return exit_code
+            _record_task_selector_proposal(state, proposal)
+            save_state(state)
+    else:
+        state = load_state()
+        proposal, exit_code, error = _build_task_selector_next_proposal(state, args)
+        if error:
+            print(error, file=sys.stderr)
+            return exit_code
+
     if getattr(args, "json", False):
         print(json.dumps(proposal, ensure_ascii=False, indent=2))
     else:
         print(format_task_selector_proposal(proposal))
-    return 1 if proposal.get("blocked") else 0
+    return exit_code
 
 
 def cmd_task_show(args):

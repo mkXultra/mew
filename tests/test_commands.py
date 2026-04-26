@@ -217,6 +217,115 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(proposal["governance_violation"])
         self.assertIn("ROADMAP_STATUS.md", proposal["blocked_reason"])
 
+    def test_task_propose_next_record_persists_proposed_selector_record(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                candidate = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        self.assertEqual(proposal["previous_task_id"], previous["id"])
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertFalse(proposal["blocked"])
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["id"], 1)
+        self.assertEqual(record["previous_task_id"], previous["id"])
+        self.assertEqual(record["proposed_task_id"], candidate["id"])
+        self.assertEqual(record["proposal"], proposal)
+        self.assertEqual(record["status"], "proposed")
+        self.assertTrue(record["created_at"])
+        self.assertEqual(record["updated_at"], record["created_at"])
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_record_persists_blocked_selector_record(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "roadmap-status update", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "task",
+                            "propose-next",
+                            str(previous["id"]),
+                            "--candidate-task-id",
+                            str(candidate["id"]),
+                            "--record",
+                            "--json",
+                        ]
+                    )
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        proposal = json.loads(stdout.getvalue())
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["previous_task_id"], previous["id"])
+        self.assertEqual(record["proposed_task_id"], candidate["id"])
+        self.assertEqual(record["proposal"], proposal)
+        self.assertEqual(record["status"], "blocked")
+        self.assertTrue(record["proposal"]["blocked"])
+        self.assertTrue(record["proposal"]["governance_violation"])
+        self.assertIn("ROADMAP_STATUS.md", record["proposal"]["blocked_reason"])
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_record_only_mutates_selector_records(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                state_before = commands_module.load_state()
+
+                with redirect_stdout(StringIO()):
+                    code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        records = state_after.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        state_without_records = dict(state_after)
+        state_without_records.pop("selector_proposals", None)
+        expected_state = dict(state_before)
+        expected_state.pop("selector_proposals", None)
+        self.assertEqual(state_without_records, expected_state)
+
     def test_do_uses_supervised_work_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

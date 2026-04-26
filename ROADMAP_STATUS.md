@@ -130,6 +130,23 @@ Current M6.8 evidence:
   tests/test_work_session.py tests/test_commands.py --no-testmon`, `uv run
   ruff check src/mew/work_loop.py tests/test_work_session.py`, and `git diff
   --check`.
+- Task `#631` / session `#617` then landed the durable selector-proposal
+  ledger slice mew-first after one reviewer rejection. `mew task propose-next
+  --record` now persists `selector_proposals` records without dispatching:
+  `id`, `previous_task_id`, `proposed_task_id`, original `proposal`, `status`
+  (`proposed` or `blocked`), `created_at`, and `updated_at`. The slice
+  intentionally does not add approve/reject commands or chained execution.
+- #631 mew-first note: the first proposed patch only added a cosmetic
+  `selector-proposal` output label and was rejected. After reviewer steer and
+  one model-timeout retry, mew produced the accepted source/CLI/test batch; no
+  supervisor product edit was used.
+- #631 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_commands.py tests/test_tasks.py
+  tests/test_work_session.py -k 'task_propose_next or write_ready'
+  --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
+  tests/test_commands.py src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`.
 
 M6.8 is done when:
 

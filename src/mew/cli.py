@@ -1832,6 +1832,7 @@ def build_parser():
     )
     propose_next_parser.add_argument("previous_task_id")
     propose_next_parser.add_argument("--candidate-task-id", help="specific candidate task to evaluate")
+    propose_next_parser.add_argument("--record", action="store_true", help="persist the selector proposal without dispatching")
     propose_next_parser.add_argument("--json", action="store_true", help="print the proposal as JSON")
     propose_next_parser.set_defaults(func=cmd_task_propose_next)
 
