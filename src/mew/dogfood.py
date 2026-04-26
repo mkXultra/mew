@@ -2952,6 +2952,47 @@ def run_m6_9_reasoning_trace_recall_scenario(workspace, env=None):
     return report
 
 
+def validate_m6_13_internalization_review_artifact(
+    workspace,
+    reviewer_decision_ref,
+    *,
+    lane_attempt_id,
+    source_bundle_ref,
+    same_shape_key,
+):
+    path = workspace / reviewer_decision_ref
+    try:
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "ok": False,
+            "ref": reviewer_decision_ref,
+            "artifact": {},
+            "errors": ["missing_or_invalid_review_artifact"],
+        }
+    expected = {
+        "decision": "approved",
+        "reasoning_trace_candidate": True,
+        "source_lane": "deliberation",
+        "source_lane_attempt_id": lane_attempt_id,
+        "source_blocker_code": "review_rejected",
+        "source_bundle_ref": source_bundle_ref,
+        "same_shape_key": same_shape_key,
+        "raw_transcript_stored": False,
+    }
+    errors = []
+    for key, value in expected.items():
+        if artifact.get(key) != value:
+            errors.append(f"{key}_mismatch")
+    return {
+        "ok": not errors,
+        "ref": reviewer_decision_ref,
+        "artifact": artifact,
+        "errors": errors,
+        "expected_keys": sorted(expected),
+    }
+
+
 def run_m6_13_deliberation_internalization_scenario(
     workspace,
     env=None,
@@ -3114,6 +3155,14 @@ def run_m6_13_deliberation_internalization_scenario(
     reviewer_decision_path = workspace / reviewer_decision_ref
     reviewer_decision_path.parent.mkdir(parents=True, exist_ok=True)
     write_json_file(reviewer_decision_path, reviewer_decision)
+    reviewer_decision_validation = validate_m6_13_internalization_review_artifact(
+        workspace,
+        reviewer_decision_ref,
+        lane_attempt_id=lane_attempt_id,
+        source_bundle_ref=deliberation_bundle_ref,
+        same_shape_key=same_shape_key,
+    )
+    consumed_reviewer_decision = reviewer_decision_validation.get("artifact") or {}
 
     def run(args, timeout=30):
         result = run_command(_scenario_command(*args), workspace, timeout=timeout, env=env)
@@ -3369,7 +3418,7 @@ def run_m6_13_deliberation_internalization_scenario(
             set((ranked_recall_event.get("score_components") or {}).keys())
         )
     )
-    reviewer_approved = reviewer_decision.get("decision") == "approved" and reviewer_decision.get("raw_transcript_stored") is False
+    reviewer_approved = reviewer_decision_validation.get("ok") is True
     full_contract_cycle_proven = (
         deliberation_bundle["result"] == "materially_advanced"
         and reviewer_approved
@@ -3379,7 +3428,6 @@ def run_m6_13_deliberation_internalization_scenario(
         and tiny_bundle["planned_action_type"] == "batch"
     )
     close_blockers = [
-        "reviewer approval is a scenario artifact, not an independent reviewer decision consumed from outside the scenario",
         "later same-shape task proves validated tiny patch planning, not an applied and verified tiny-only solve",
     ]
     trace_rel = str(Path(STATE_DIR) / "durable" / "m6_13-deliberation-internalization-trace.json")
@@ -3414,8 +3462,12 @@ def run_m6_13_deliberation_internalization_scenario(
         "reviewer_decision_ref": reviewer_decision_ref,
         "reviewer_decision": {
             "ref": reviewer_decision_ref,
-            "decision": reviewer_decision.get("decision"),
-            "reasoning_trace_candidate": reviewer_decision.get("reasoning_trace_candidate"),
+            "decision": consumed_reviewer_decision.get("decision"),
+            "reasoning_trace_candidate": consumed_reviewer_decision.get("reasoning_trace_candidate"),
+            "validation": {
+                "ok": reviewer_decision_validation.get("ok"),
+                "errors": reviewer_decision_validation.get("errors") or [],
+            },
         },
         "reviewer_confirmed_trace_shortened_deliberation": recalled,
         "later_task_deliberation_invoked": tiny_bundle["deliberation_invoked"],
@@ -3459,6 +3511,17 @@ def run_m6_13_deliberation_internalization_scenario(
         and entry.get("reviewer_decision_ref") == reviewer_decision_ref,
         observed={"exit_code": write_result.get("exit_code"), "entry": entry},
         expected="reviewer-approved reasoning trace persists deliberation provenance",
+    )
+    _scenario_check(
+        checks,
+        "m6_13_deliberation_internalization_consumes_reviewer_decision_artifact",
+        reviewer_decision_validation.get("ok") is True
+        and consumed_reviewer_decision.get("decision") == "approved"
+        and consumed_reviewer_decision.get("source_lane_attempt_id") == lane_attempt_id
+        and consumed_reviewer_decision.get("source_bundle_ref") == deliberation_bundle_ref
+        and consumed_reviewer_decision.get("same_shape_key") == same_shape_key,
+        observed=reviewer_decision_validation,
+        expected="internalization approval is consumed from the durable reviewer decision artifact",
     )
     _scenario_check(
         checks,

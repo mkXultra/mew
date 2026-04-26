@@ -39,6 +39,7 @@ from mew.dogfood import (
     summarize_dogfood_scenario_json,
     suppress_processed_injected_dropped_threads,
     tail_lines,
+    validate_m6_13_internalization_review_artifact,
     wait_for_active_agent_runs,
 )
 from mew.state import add_event, add_outbox_message, default_state
@@ -632,6 +633,39 @@ class DogfoodTests(unittest.TestCase):
             self.assertIn("m6_9_reasoning_trace_recall_reviewer_confirms_shortened_deliberation", check_names)
             self.assertIn("m6_9_reasoning_trace_recall_writes_deterministic_trace", check_names)
 
+    def test_validate_m6_13_internalization_review_artifact_rejects_mismatches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            ref = Path(STATE_DIR) / "durable" / "review" / "review.json"
+            path = workspace / ref
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "decision": "rejected",
+                        "reasoning_trace_candidate": True,
+                        "source_lane": "deliberation",
+                        "source_lane_attempt_id": "lane-1",
+                        "source_blocker_code": "review_rejected",
+                        "source_bundle_ref": ".mew/durable/replay/deliberation/hard.json",
+                        "same_shape_key": "shape-a",
+                        "raw_transcript_stored": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = validate_m6_13_internalization_review_artifact(
+                workspace,
+                str(ref),
+                lane_attempt_id="lane-1",
+                source_bundle_ref=".mew/durable/replay/deliberation/hard.json",
+                same_shape_key="shape-a",
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("decision_mismatch", result["errors"])
+
     def test_run_dogfood_m6_13_deliberation_internalization_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(
@@ -669,13 +703,19 @@ class DogfoodTests(unittest.TestCase):
             self.assertGreater(trace["ranked_recall_event"]["score_components"]["task_shape_similarity"], 0)
             self.assertEqual(trace["adapted_memory_event"]["source_lane"], "deliberation")
             self.assertEqual(trace["reviewer_decision"]["decision"], "approved")
+            self.assertTrue(trace["reviewer_decision"]["validation"]["ok"])
             self.assertEqual(trace["reasoning_trace_ledger_ref"], ".mew/durable/memory/reasoning_trace.jsonl")
             self.assertTrue(trace["reviewer_confirmed_trace_shortened_deliberation"])
             self.assertFalse(trace["later_task_deliberation_invoked"])
+            self.assertEqual(
+                trace["close_blockers"],
+                ["later same-shape task proves validated tiny patch planning, not an applied and verified tiny-only solve"],
+            )
             self.assertIn(
                 "m6_13_deliberation_internalization_writes_reviewed_trace_with_provenance",
                 check_names,
             )
+            self.assertIn("m6_13_deliberation_internalization_consumes_reviewer_decision_artifact", check_names)
             self.assertIn("m6_13_deliberation_internalization_appends_reasoning_trace_ledger", check_names)
             self.assertIn("m6_13_deliberation_internalization_later_task_recalls_trace", check_names)
             self.assertIn("m6_13_deliberation_internalization_records_ranked_recall_event", check_names)
