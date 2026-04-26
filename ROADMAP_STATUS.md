@@ -192,8 +192,8 @@ Current M6.16 evidence:
   `./mew metrics --implementation-lane --json`, and `git diff --check`.
   Codex-ultra re-review reported no findings after confirming `#660` is in
   the mew-first attempt window and counted as a practical success.
-- Task `#663` exposed a new M6.16/M6.14 substrate blocker before product
-  editing: after a same-path positive `search_text` on
+- The first `#663` retry exposed a new M6.16/M6.14 substrate blocker before
+  product editing: after a same-path positive `search_text` on
   `src/mew/mew_first_calibration.py`, a later same-path zero-match
   `search_text` caused the broad-read guard to hard-fail a top-of-file
   `read_file` instead of reusing the positive search anchor. Task `#664`
@@ -205,6 +205,65 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_work_session.py -k 'broad_read_after_search_miss' --no-testmon`,
   `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
   `git diff --check`. Codex-ultra re-review reported no findings.
+- Task `#663` then landed as bounded mew-first implementation evidence for
+  M6.16 measurement quality after the `#664` blocker fix. It ignores narrative
+  metric/status bullets that merely mention a task id, while preserving real
+  attempt-entry prefixes such as `- Task #...`, `- follow-up #...`, and
+  `- #639 mew-first note`. Count this as `success_after_substrate_fix`: the
+  fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without product rescue edits after rejecting two
+  wrong-target drafts. Valid proof passed:
+  `uv run pytest -q tests/test_mew_first_calibration.py -k "narrative or attempt_window or substrate or success_after" --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_metrics.py -k 'narrative or attempt_window or substrate or success_after or mew_first or metrics' --no-testmon`,
+  `uv run ruff check src/mew/mew_first_calibration.py tests/test_mew_first_calibration.py`,
+  `./mew metrics --mew-first --limit 100 --json`,
+  `./mew metrics --implementation-lane --json`, and `git diff --check`.
+  The failed `uv run python -m unittest tests.test_mew_first_calibration`
+  command was an invalid inferred verifier because this module contains pytest
+  tests, not a product regression. Codex-ultra re-review reported no findings
+  after adding explicit `follow-up #...` prefix coverage.
+- Task `#665` is a supervisor-owned M6.16/M6.14 repair from the invalid
+  inferred verifier observed during `#663`: `suggested_verify_command_for_call_path`
+  now prefers `uv run pytest -q <test_path> --no-testmon` for pytest-style
+  test files while preserving `uv run python -m unittest <module>` for
+  `unittest.TestCase` modules. Count this as loop-substrate/product progress,
+  not mew-first autonomy credit: mew hit repeated `task_goal_term_missing`
+  before drafting the patch. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k "suggested_verify_command or pytest_style or paired_source_verifier" --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "verify_command or verifier" --no-testmon`,
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
+  `git diff --check`. Codex-ultra re-review reported no findings after adding
+  explicit pytest import/class-style coverage.
+- Task `#666` is a supervisor-owned M6.16/M6.14 repair from GitHub issue `#10`:
+  stale pending dry-run approvals are now suppressed once a later completed,
+  non-rolled-back same-path write is followed by a passing verifier. Rolled
+  back failed writes do not suppress the original pending approval. Count this
+  as loop-substrate/product progress, not mew-first autonomy credit: mew spent
+  the attempt budget reading anchors and then timed out before drafting. Valid
+  proof passed:
+  `uv run pytest -q tests/test_work_session.py -k "superseded or pending_approval or finish_blocked or rolled_back" --no-testmon`,
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
+  `git diff --check`. Codex-ultra re-review reported no findings after the
+  rolled-back-write regression was added.
+- Task `#667` landed the GitHub issue `#3` same-file write-batch ergonomics
+  slice as practical mew-first evidence. The work loop now collapses duplicate
+  same-path `edit_file` actions into one `edit_file_hunks` action before
+  enforcing the five-tool write-batch cap, while preserving rejection for
+  unsafe `write_file` duplicates and `replace_all=True` edit semantics. Count
+  this as practical mew-first without rescue edits: mew authored the source
+  and test patch, Codex-ultra first found two correctness issues, and reviewer
+  steer was needed for mew to repair both in the same session with no
+  supervisor product-code rescue. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k "same_path_write_edits or edit_file_hunks or paired_write_batch" --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`. The broad `uv run python -m unittest tests.test_work_session`
+  attempts are not counted as product regressions: inside the mew run they
+  inherited `MEW_CODEX_REASONING_EFFORT=high` and failed existing reasoning
+  expectation tests, and the manual env-cleared rerun hit an unrelated 0.21s
+  timing flake. Codex-ultra re-review session
+  `019dca8b-7797-7760-b628-100e80455aa5` reported no findings after the
+  reviewer fixes.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

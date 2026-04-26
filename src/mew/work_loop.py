@@ -6137,9 +6137,6 @@ def normalize_work_model_action(
             for candidate in sub_actions:
                 if candidate.get("type") in WRITE_WORK_TOOLS:
                     saw_write_tool = True
-                    if len(normalized_tools) >= 5:
-                        dropped_tool_count += 1
-                        continue
                     normalized_tools.append(candidate)
                     continue
                 if candidate.get("type") in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) and valid_batch_sub_action(candidate):
@@ -6153,15 +6150,16 @@ def normalize_work_model_action(
         if not normalized_tools:
             return {"type": "wait", "reason": "batch requires at least one read-only tool"}
         if saw_write_tool:
-            if dropped_tool_count:
-                return {
-                    "type": "wait",
-                    "reason": "write batch exceeds 5 tools; choose a narrower complete slice instead of dropping required sibling edits",
-                }
             if saw_non_write_tool:
                 return {
                     "type": "wait",
                     "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",
+                }
+            normalized_tools = collapse_same_path_edit_file_write_batch_tools(normalized_tools)
+            if dropped_tool_count or len(normalized_tools) > 5:
+                return {
+                    "type": "wait",
+                    "reason": "write batch exceeds 5 tools; choose a narrower complete slice instead of dropping required sibling edits",
                 }
             paired_reason = paired_write_batch_rejection_reason(
                 normalized_tools,
@@ -6409,12 +6407,55 @@ def duplicate_paired_write_batch_paths(tools):
     return duplicates
 
 
+def collapse_same_path_edit_file_write_batch_tools(tools):
+    copied_tools = [dict(tool) for tool in tools or []]
+    path_indexes = {}
+    for index, tool in enumerate(copied_tools):
+        path = _normalized_work_path(tool.get('path'))
+        if not path:
+            continue
+        path_indexes.setdefault(path, []).append(index)
+    duplicate_paths = [path for path, indexes in path_indexes.items() if len(indexes) > 1]
+    if not duplicate_paths:
+        return copied_tools
+    for path in duplicate_paths:
+        if not all(
+            copied_tools[index].get("type") == "edit_file"
+            and not copied_tools[index].get("replace_all")
+            for index in path_indexes[path]
+        ):
+            return copied_tools
+    normalized = []
+    collapsed_paths = set()
+    for tool in copied_tools:
+        path = _normalized_work_path(tool.get('path'))
+        if path in duplicate_paths:
+            if path in collapsed_paths:
+                continue
+            collapsed_tool = dict(tool)
+            collapsed_tool.pop('old', None)
+            collapsed_tool.pop('new', None)
+            collapsed_tool['type'] = 'edit_file_hunks'
+            collapsed_tool['edits'] = [
+                {'old': copied_tools[index]['old'], 'new': copied_tools[index]['new']}
+                for index in path_indexes[path]
+            ]
+            normalized.append(collapsed_tool)
+            collapsed_paths.add(path)
+            continue
+        normalized.append(tool)
+    return normalized
+
+
 def paired_write_batch_rejection_reason(tools, allowed_write_roots=None):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
         return "write batch requires at least two write/edit tools for a complete scoped slice"
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
         return "write batch contains an invalid write/edit tool; provide path and exact content or old/new hunks"
+    write_tools = collapse_same_path_edit_file_write_batch_tools(write_tools)
+    if len(write_tools) < 2:
+        return "write batch requires at least two write/edit tools for a complete scoped slice"
     duplicates = duplicate_paired_write_batch_paths(write_tools)
     if duplicates:
         return (
@@ -6465,6 +6506,9 @@ def normalize_paired_write_batch_tools(tools, allowed_write_roots=None):
     if len(write_tools) < 2:
         return []
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
+        return []
+    write_tools = collapse_same_path_edit_file_write_batch_tools(write_tools)
+    if len(write_tools) < 2:
         return []
     if duplicate_paired_write_batch_paths(write_tools):
         return []

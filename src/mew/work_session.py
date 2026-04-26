@@ -461,6 +461,45 @@ def latest_unresolved_failure(failures):
     return {}
 
 
+def _call_id_int(call) -> int:
+    try:
+        return int((call or {}).get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _work_call_has_passing_verification(call) -> bool:
+    result = (call or {}).get("result") or {}
+    verification = result.get("verification") or {}
+    if verification.get("exit_code") == 0 or result.get("verification_exit_code") == 0:
+        return True
+    return (call or {}).get("tool") == "run_tests" and result.get("exit_code") == 0
+
+
+def _pending_approval_superseded_by_verified_write(call, calls) -> bool:
+    path = work_call_path(call)
+    if not path:
+        return False
+    call_id = _call_id_int(call)
+    saw_later_same_path_write = False
+    for later in calls or []:
+        if _call_id_int(later) <= call_id:
+            continue
+        result = (later or {}).get("result") or {}
+        if (
+            (later or {}).get("tool") in WRITE_WORK_TOOLS
+            and (later or {}).get("status") == "completed"
+            and work_call_path(later) == path
+            and result.get("changed")
+            and result.get("written")
+            and not result.get("rolled_back")
+        ):
+            saw_later_same_path_write = True
+        if saw_later_same_path_write and _work_call_has_passing_verification(later):
+            return True
+    return False
+
+
 def format_work_failure_risk(failure, max_chars=260):
     if not failure:
         return ""
@@ -3529,16 +3568,32 @@ def suggested_verify_command_for_call_path(source_path, *, hint_text=""):
     if not test_path or not Path(test_path).is_file():
         return {}
     test_module = Path(test_path).with_suffix("").as_posix().replace("/", ".")
+    if _test_path_prefers_pytest(test_path):
+        command = f"uv run pytest -q {Path(test_path).as_posix()} --no-testmon"
+    else:
+        command = f"uv run python -m unittest {test_module}"
     return {
         "source_path": source_path,
         "test_path": test_path,
-        "command": f"uv run python -m unittest {test_module}",
+        "command": command,
         "reason": (
             "mew source edit has an existing discovered test module"
             if discovered
             else "mew source edit has a matching test module"
         ),
     }
+
+
+def _test_path_prefers_pytest(test_path) -> bool:
+    try:
+        text = Path(test_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if re.search(r"(?m)^\s*class\s+\w+\([^)]*TestCase[^)]*\)\s*:", text):
+        return False
+    if re.search(r"(?m)^def\s+test_[A-Za-z0-9_]*\s*\(", text):
+        return True
+    return bool(re.search(r"(?m)^\s*(?:import\s+pytest|from\s+pytest\s+import|@pytest\.)", text))
 
 
 def suggested_verify_commands_for_calls(calls):
@@ -6349,6 +6404,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             and result.get("changed")
             and call.get("approval_status") not in NON_PENDING_APPROVAL_STATUSES
         ):
+            if _pending_approval_superseded_by_verified_write(call, calls):
+                continue
             tool_call_id = call.get("id")
             write_path = path or "."
             diff = result.get("diff") or ""

@@ -201,6 +201,36 @@ def test_extract_mew_first_attempts_classifies_task_goal_and_synthetic_schema_su
     assert attempts[0].rejected_patch_family == "task_goal_substitution"
 
 
+def test_extract_mew_first_attempts_ignores_narrative_status_bullets_but_keeps_attempt_prefixes() -> None:
+    text = """
+### M6.16: Codex-Grade Implementation Lane
+
+- The supervisor-owned baseline surface adds a measurement-quality status note
+  after task `#659` so the metrics evidence stays visible. This is narrative
+  calibration context, not a mew-first attempt entry, even though it mentions
+  product progress and supervisor ownership.
+- #639 mew-first note landed a bounded implementation evidence slice. The
+  fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+- Task `#660` then landed as bounded mew-first implementation evidence for
+  M6.16 measurement quality after the `#661` and `#662` blocker fixes. Count
+  this as `success_after_substrate_fix`: the fresh mew-first session drafted
+  the paired source/test patch and the supervisor approved without product
+  rescue edits; a reviewer steer was needed only to replace an invalid task
+  verifier. Valid proof passed.
+- follow-up `#664` landed a bounded mew-first implementation evidence slice.
+  The fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+"""
+
+    attempts = extract_mew_first_attempts(text, limit=10)
+
+    assert [attempt.task_id for attempt in attempts] == [639, 660, 664]
+    assert attempts[0].result_class == "clean_mew_first"
+    assert attempts[1].result_class == "practical_mew_first"
+    assert attempts[2].result_class == "clean_mew_first"
+
+
 def test_metrics_parser_accepts_mew_first_calibration_flags() -> None:
     args = build_parser().parse_args(["metrics", "--mew-first", "--source-file", "status.md", "--json"])
 

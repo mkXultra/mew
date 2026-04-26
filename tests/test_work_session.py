@@ -1761,6 +1761,90 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_suggested_verify_command_for_call_path_prefers_pytest_style_tests(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text(
+                    "def test_command_behavior():\n"
+                    "    assert True\n",
+                    encoding="utf-8",
+                )
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                suggested = resume["suggested_verify_command"]
+
+                self.assertEqual(suggested["source_path"], "src/mew/commands.py")
+                self.assertEqual(suggested["test_path"], "tests/test_commands.py")
+                self.assertEqual(suggested["command"], "uv run pytest -q tests/test_commands.py --no-testmon")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_suggested_verify_command_for_call_path_prefers_pytest_import_style_tests(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("tests").mkdir()
+                Path("tests/test_commands.py").write_text(
+                    "import pytest\n\n"
+                    "class TestCommandBehavior:\n"
+                    "    def test_value(self):\n"
+                    "        assert True\n",
+                    encoding="utf-8",
+                )
+                session = {
+                    "id": 3,
+                    "task_id": 9,
+                    "status": "active",
+                    "title": "Verifier hint",
+                    "tool_calls": [
+                        {
+                            "id": 3,
+                            "tool": "edit_file",
+                            "status": "completed",
+                            "parameters": {"path": "src/mew/commands.py"},
+                            "result": {
+                                "path": "src/mew/commands.py",
+                                "dry_run": False,
+                                "changed": True,
+                                "written": True,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                suggested = resume["suggested_verify_command"]
+
+                self.assertEqual(suggested["command"], "uv run pytest -q tests/test_commands.py --no-testmon")
+            finally:
+                os.chdir(old_cwd)
+
     def test_format_work_session_resume_surfaces_declared_write_scope(self):
         session = {
             "id": 3,
@@ -27727,6 +27811,121 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_resume_suppresses_stale_pending_approvals_after_corrected_verified_batch(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Corrected batch",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "written": False,
+                        "diff": "--- src/mew/pairing.py\n+++ src/mew/pairing.py\n@@\n-old\n+bad\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_pairing.py"},
+                    "result": {
+                        "path": "tests/test_pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "written": False,
+                        "diff": "--- tests/test_pairing.py\n+++ tests/test_pairing.py\n@@\n-old\n+bad\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_pairing.py"},
+                    "result": {
+                        "path": "tests/test_pairing.py",
+                        "dry_run": False,
+                        "changed": True,
+                        "written": True,
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": False,
+                        "changed": True,
+                        "written": True,
+                        "verification": {"exit_code": 0, "command": "uv run pytest -q tests/test_pairing.py"},
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["pending_approvals"], [])
+
+    def test_resume_keeps_pending_approval_after_rolled_back_same_path_write(self):
+        session = {
+            "id": 3,
+            "task_id": 9,
+            "status": "active",
+            "title": "Rolled back batch",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "written": False,
+                        "diff": "--- src/mew/pairing.py\n+++ src/mew/pairing.py\n@@\n-old\n+bad\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "src/mew/pairing.py"},
+                    "result": {
+                        "path": "src/mew/pairing.py",
+                        "dry_run": False,
+                        "changed": True,
+                        "written": True,
+                        "rolled_back": True,
+                        "verification": {"exit_code": 1, "command": "uv run pytest -q tests/test_pairing.py"},
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "parameters": {"command": "uv run pytest -q tests/test_other.py"},
+                    "result": {"command": "uv run pytest -q tests/test_other.py", "exit_code": 0},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual([approval["tool_call_id"] for approval in resume["pending_approvals"]], [1])
+
     def test_work_ai_batch_rejects_unpaired_mew_source_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -29583,7 +29782,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("write batch exceeds 5 tools", action["reason"])
         self.assertIn("narrower complete slice", action["reason"])
 
-    def test_work_model_batch_refuses_same_path_write_edits(self):
+    def test_work_model_batch_collapses_same_path_write_edits(self):
         from mew.work_loop import normalize_work_model_action
 
         action = normalize_work_model_action(
@@ -29594,8 +29793,78 @@ class WorkSessionTests(unittest.TestCase):
                         {"type": "edit_file", "path": "tests/test_alpha.py", "old": "assert old", "new": "assert new"},
                         {"type": "edit_file", "path": "src/mew/alpha.py", "old": "VALUE = 'old'", "new": "VALUE = 'new'"},
                         {"type": "edit_file", "path": "src/mew/alpha.py", "old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "EXTRA = 'old'", "new": "EXTRA = 'new'"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "FINAL = 'old'", "new": "FINAL = 'new'"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "CLEANUP = 'old'", "new": "CLEANUP = 'new'"},
                     ],
-                    "reason": "preview paired edits with two source hunks",
+                    "reason": "preview paired edits with five source hunks",
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(len(action["tools"]), 2)
+        self.assertNotIn("truncated_tools", action)
+        self.assertEqual(action["tools"][1]["type"], "edit_file_hunks")
+        self.assertEqual(action["tools"][1]["path"], "src/mew/alpha.py")
+        self.assertEqual(
+            action["tools"][1]["edits"],
+            [
+                {"old": "VALUE = 'old'", "new": "VALUE = 'new'"},
+                {"old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                {"old": "EXTRA = 'old'", "new": "EXTRA = 'new'"},
+                {"old": "FINAL = 'old'", "new": "FINAL = 'new'"},
+                {"old": "CLEANUP = 'old'", "new": "CLEANUP = 'new'"},
+            ],
+        )
+        self.assertTrue(action["tools"][0]["dry_run"])
+        self.assertTrue(action["tools"][1]["dry_run"])
+
+    def test_work_model_batch_refuses_same_path_write_edits_with_write_file(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                'action': {
+                    'type': 'batch',
+                    'tools': [
+                        {'type': 'edit_file', 'path': 'tests/test_alpha.py', 'old': 'assert old', 'new': 'assert new'},
+                        {'type': 'write_file', 'path': 'src/mew/alpha.py', 'content': 'VALUE = 1'},
+                        {'type': 'edit_file', 'path': 'src/mew/alpha.py', 'old': "VALUE = 'old'", 'new': "VALUE = 'new'"},
+                    ],
+                    'reason': 'preview paired edits with unsafe mixed source writes',
+                },
+            }
+        )
+
+        self.assertEqual(action['type'], 'wait')
+        self.assertIn('at most one write/edit per file path', action['reason'])
+        self.assertIn('edit_file or edit_file_hunks for src/mew/alpha.py', action['reason'])
+
+    def test_work_model_batch_refuses_same_path_write_edits_with_replace_all(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {"type": "edit_file", "path": "tests/test_alpha.py", "old": "assert old", "new": "assert new"},
+                        {
+                            "type": "edit_file",
+                            "path": "src/mew/alpha.py",
+                            "old": "VALUE = 'old'",
+                            "new": "VALUE = 'new'",
+                            "replace_all": True,
+                        },
+                        {
+                            "type": "edit_file",
+                            "path": "src/mew/alpha.py",
+                            "old": "VALUE = 'also old'",
+                            "new": "VALUE = 'also new'",
+                        },
+                    ],
+                    "reason": "preview paired edits with unsafe replace_all source writes",
                 },
             }
         )
