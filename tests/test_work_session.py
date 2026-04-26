@@ -781,6 +781,24 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(blocker.get("line_start"), 5)
         self.assertEqual(blocker.get("line_end"), 10)
 
+    def test_active_work_todo_lane_normalizes_tiny_default_and_preserves_explicit_strings(self):
+        base_todo = {
+            "id": "todo-1-1",
+            "status": "drafting",
+            "source": {"plan_item": "Draft the lane foundation"},
+        }
+        cases = [
+            ("missing lane", {}, "tiny"),
+            ("empty lane", {"lane": ""}, "tiny"),
+            ("explicit mirror lane", {"lane": "mirror"}, "mirror"),
+            ("unknown lane", {"lane": "experimental"}, "experimental"),
+        ]
+        for label, overrides, expected_lane in cases:
+            with self.subTest(label=label):
+                todo = {**base_todo, **overrides}
+                normalized = _normalize_active_work_todo(todo)
+                self.assertEqual(normalized["lane"], expected_lane)
+
     def test_work_session_resume_compresses_prior_think(self):
         task = {"id": 1, "title": "Compressed think", "status": "ready", "kind": "coding", "notes": ""}
         turns = []

@@ -5123,9 +5123,11 @@ def _normalize_active_work_todo(todo):
             }
         )
     attempts = todo.get("attempts") if isinstance(todo.get("attempts"), dict) else {}
+    lane = str(todo.get("lane") or "").strip()
     normalized = {
         "id": str(todo.get("id") or "").strip(),
         "status": status,
+        "lane": lane or "tiny",
         "source": {
             "plan_item": str(source.get("plan_item") or "").strip(),
             "target_paths": _coerce_working_memory_target_paths(source.get("target_paths") or []),

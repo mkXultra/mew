@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | Active after M6.8.5 close; start with additive lane foundation and unchanged tiny behavior. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | First additive WorkTodo lane-default slice landed; next prove lane registry and mirror compatibility. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
@@ -86,6 +86,24 @@ Current M6.13 target:
 Current M6.13 chain:
 
 `M6.13 -> additive lane foundation -> preserve tiny behavior while adding lane metadata`
+
+Current M6.13 evidence:
+
+- Task `#647` / session `#634` landed the first additive WorkTodo lane field
+  on `_normalize_active_work_todo`: missing or empty lane normalizes to
+  `tiny`, while explicit strings such as `mirror` and unknown future lane names
+  are preserved. Existing active-todo id/status/source/attempts/error behavior
+  remains unchanged.
+- Validation passed for the #647 source/test slice:
+  `uv run pytest -q tests/test_work_session.py -k 'active_work_todo or lane' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py --no-testmon`,
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
+  `git diff --check`.
+- Mew-first accounting: `product_progress_supervisor_rescue`, not autonomy
+  credit. Mew reached the correct lane-normalization direction after reviewer
+  steer, but stalled in partial-apply/rollback plus cached-window recovery
+  before the final source repair. Treat another repeat as an M6.14 repair
+  signal.
 
 Current M6.8.5 close evidence:
 
@@ -517,15 +535,19 @@ Non-goals for the next session:
 
 ## Latest Validation
 
-Latest committed code baseline: `d22d09c Surface selector preferences in work
-resume`.
+Latest M6.13 source/test validation:
 
-Current uncommitted change: M6.8.5 close-gate audit and roadmap-status focus
-switch to M6.13. No source/test code changed after `d22d09c`.
-
-Observed in this cleanup session:
-
+- task `#647` / session `#634`: additive WorkTodo lane normalization
+- `uv run pytest -q tests/test_work_session.py -k 'active_work_todo or lane' --no-testmon`
+  passed
+- `uv run pytest -q tests/test_work_session.py --no-testmon` passed
+- `uv run ruff check src/mew/work_session.py tests/test_work_session.py`
+  passed
 - `git diff --check` passed
+
+Latest milestone-close validation:
+
+- M6.8.5 close audit passed via `docs/M6_8_5_CLOSE_GATE_AUDIT_2026-04-26.md`
 - detailed pre-compression `ROADMAP_STATUS.md` was archived to
   `docs/archive/ROADMAP_STATUS_detailed_2026-04-26.md`
 
