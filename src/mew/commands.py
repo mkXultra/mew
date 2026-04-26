@@ -139,6 +139,13 @@ from .self_memory import (
     render_self_memory_markdown,
     write_self_memory_report,
 )
+from .side_project_dogfood import (
+    DEFAULT_LEDGER_PATH as DEFAULT_SIDE_PROJECT_DOGFOOD_LEDGER_PATH,
+    append_side_project_dogfood_record,
+    dogfood_record_template,
+    format_side_project_dogfood_report,
+    summarize_side_project_dogfood,
+)
 from .signals import (
     disable_signal_source,
     enable_signal_source,
@@ -11172,6 +11179,52 @@ def cmd_metrics(args):
         return 0
     print(format_observation_metrics(data))
     return 0
+
+def cmd_side_dogfood(args):
+    action = getattr(args, "side_dogfood_action", None) or "report"
+    if action == "template":
+        print(json.dumps(dogfood_record_template(), ensure_ascii=False, indent=2))
+        return 0
+    if action == "append":
+        source = getattr(args, "input", None)
+        if not source:
+            print("mew: side-dogfood append requires --input", file=sys.stderr)
+            return 2
+        if source == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with Path(source).open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        ledger = getattr(args, "ledger", None) or DEFAULT_SIDE_PROJECT_DOGFOOD_LEDGER_PATH
+        row = append_side_project_dogfood_record(payload, path=ledger)
+        result = {
+            "kind": "side_project_dogfood_append",
+            "ledger_path": str(ledger),
+            "line_number": row.line_number,
+            "row_ref": row.row_ref,
+            "record": dict(row.data),
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(
+                "appended side-project dogfood record "
+                f"line={row.line_number} ledger={ledger} "
+                f"task=#{row.field('task_id')} outcome={row.text_field('outcome')}"
+            )
+        return 0
+    if action == "report":
+        data = summarize_side_project_dogfood(
+            path=getattr(args, "ledger", None) or DEFAULT_SIDE_PROJECT_DOGFOOD_LEDGER_PATH,
+            limit=getattr(args, "limit", None) or 10,
+        )
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(format_side_project_dogfood_report(data))
+        return 0
+    print(f"mew: unknown side-dogfood action: {action}", file=sys.stderr)
+    return 2
 
 def cmd_passive_bundle(args):
     if args.json and args.show:

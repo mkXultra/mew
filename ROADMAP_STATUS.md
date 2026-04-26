@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, replay lane reads, and lane-attempt telemetry v0 landed; next add M6.13.2 side-project dogfood telemetry before side-project implementation starts. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, replay lane reads, lane-attempt telemetry, and M6.13.2 side-project dogfood telemetry v0 landed. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
@@ -108,6 +108,13 @@ Current M6.13 evidence:
   structural failure. It also records the non-goals: no side-project
   implementation, EV routing, automatic Codex CLI integration, implementation
   lane refactor, or M6.13 close in this slice.
+- M6.13.2 implementation landed a side-project dogfood ledger/report surface:
+  `src/mew/side_project_dogfood.py`, `mew side-dogfood template`,
+  `mew side-dogfood append`, and `mew side-dogfood report`. The default
+  ledger path is `proof-artifacts/side_project_dogfood_ledger.jsonl`. This is
+  ready for the first side-project dogfood task; Codex CLI implementation must
+  be recorded via `codex_cli_used_as` and does not count as mew-first autonomy
+  credit.
 
 - Task `#647` / session `#634` landed the first additive WorkTodo lane field
   on `_normalize_active_work_todo`: missing or empty lane normalizes to
@@ -583,6 +590,7 @@ should be additive and low-risk:
 - add M6.13.2 side-project implementation dogfood telemetry before launching
   the side-project dogfood lane, so the first external implementation attempts
   produce structured M6.16 evidence instead of only reply/chat history
+  (**landed in M6.13.2 v0**)
 
 Planned future milestones:
 
@@ -674,9 +682,8 @@ The next implementation task should map to this chain:
 
 Acceptable near-term work:
 
-- implement M6.13.2 side-project dogfood telemetry v0: JSONL schema,
-  reader/writer or append helper, report surface, task report template, and
-  focused tests
+- launch the first side-project dogfood task only after recording the attempt
+  through `mew side-dogfood template` / `append` / `report`
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
 - prove old sessions and existing replay bundles with absent lane metadata keep
@@ -703,6 +710,12 @@ Non-goals for the next session:
 
 Latest M6.13 source/test validation:
 
+- M6.13.2 side-project dogfood telemetry v0:
+  `uv run pytest -q tests/test_side_project_dogfood.py --no-testmon` passed,
+  `uv run ruff check src/mew/side_project_dogfood.py src/mew/commands.py src/mew/cli.py tests/test_side_project_dogfood.py`
+  passed, `./mew side-dogfood template` printed the appendable schema, and
+  `./mew side-dogfood report --json` returned an empty valid report for the
+  default ledger.
 - task `#650` / session `#638`: replay metadata lane provenance/defaulting
 - task `#652`: M6.14 fast-path required-term stopword repair
 - `uv run pytest -q tests/test_work_replay.py --no-testmon` passed

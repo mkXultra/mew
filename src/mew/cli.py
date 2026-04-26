@@ -64,6 +64,7 @@ from .commands import (
     cmd_self_memory,
     cmd_self_show,
     cmd_session,
+    cmd_side_dogfood,
     cmd_signals,
     cmd_snapshot,
     cmd_start,
@@ -693,6 +694,33 @@ def build_parser():
     )
     metrics_parser.add_argument("--json", action="store_true", help="print structured JSON")
     metrics_parser.set_defaults(func=cmd_metrics)
+
+    side_dogfood_parser = subparsers.add_parser(
+        "side-dogfood",
+        help="record and report side-project implementation dogfood telemetry",
+    )
+    side_dogfood_subparsers = side_dogfood_parser.add_subparsers(dest="side_dogfood_action")
+    side_dogfood_report = side_dogfood_subparsers.add_parser("report", help="summarize the dogfood ledger")
+    side_dogfood_report.add_argument(
+        "--ledger",
+        default="proof-artifacts/side_project_dogfood_ledger.jsonl",
+        help="side-project dogfood JSONL ledger path",
+    )
+    side_dogfood_report.add_argument("--limit", type=int, default=10, help="maximum recent attempts to show")
+    side_dogfood_report.add_argument("--json", action="store_true", help="print structured JSON")
+    side_dogfood_report.set_defaults(func=cmd_side_dogfood)
+    side_dogfood_template = side_dogfood_subparsers.add_parser("template", help="print an appendable JSON record")
+    side_dogfood_template.set_defaults(func=cmd_side_dogfood)
+    side_dogfood_append = side_dogfood_subparsers.add_parser("append", help="append one JSON record to the ledger")
+    side_dogfood_append.add_argument("--input", required=True, help="JSON record path, or '-' for stdin")
+    side_dogfood_append.add_argument(
+        "--ledger",
+        default="proof-artifacts/side_project_dogfood_ledger.jsonl",
+        help="side-project dogfood JSONL ledger path",
+    )
+    side_dogfood_append.add_argument("--json", action="store_true", help="print structured JSON")
+    side_dogfood_append.set_defaults(func=cmd_side_dogfood)
+    side_dogfood_parser.set_defaults(func=cmd_side_dogfood, side_dogfood_action="report")
 
     context_parser = subparsers.add_parser("context", help="show resident prompt context diagnostics")
     context_parser.add_argument(
