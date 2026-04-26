@@ -21,7 +21,7 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
                 "clean_or_practical_successes": 2,
                 "success_rate": 0.4,
                 "success_gap": 3,
-                "gate_blocking_task_ids": [11, 12],
+                "gate_blocking_task_ids": [11, 12, 11, 13, 12],
                 "gate_blocker_result_class_counts": {"partial_mew_first": 1, "supervisor_owned": 1},
             },
             "counts": {
@@ -62,6 +62,7 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
     assert summary["mew_first"]["supervisor_rescue_count"] == 2
     assert summary["mew_first"]["rescue_partial_count"] == 3
     assert summary["mew_first"]["rescue_partial_rate"] == 0.6
+    assert summary["mew_first"]["gate_blocking_task_ids"] == [11, 12, 13]
     assert summary["mew_first"]["failure_classes"]["result_class"]["supervisor_owned"] == 1
     assert summary["mew_first"]["failure_classes"]["drift_class"] == {"wrong_target_substitution": 1}
     assert summary["approval"] == {"total": 5, "rejected": 2, "rejection_rate": 0.4}

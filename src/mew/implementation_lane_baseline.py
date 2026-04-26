@@ -37,6 +37,19 @@ def _rate(numerator: int | float | None, denominator: int | float | None) -> flo
     return round(float(numerator) / float(denominator), 3)
 
 
+def _dedupe_preserving_order(values: Any) -> list[Any]:
+    if not isinstance(values, list):
+        return []
+    deduped: list[Any] = []
+    seen: set[Any] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
 def _first_edit_latency(observation_metrics: Mapping[str, Any]) -> dict[str, Any]:
     self_hosting = _mapping(observation_metrics.get("self_hosting"))
     first_edit = _mapping(self_hosting.get("first_edit_proposal_seconds"))
@@ -135,7 +148,7 @@ def summarize_implementation_lane_baseline_from_summaries(
             "supervisor_rescue_count": supervisor_rescue_count,
             "rescue_partial_count": rescue_partial_count,
             "rescue_partial_rate": _rate(rescue_partial_count, attempts_total),
-            "gate_blocking_task_ids": mew_first_gate.get("gate_blocking_task_ids") or [],
+            "gate_blocking_task_ids": _dedupe_preserving_order(mew_first_gate.get("gate_blocking_task_ids")),
             "failure_classes": {
                 "result_class": dict(result_counts),
                 "gate_blocker_result_class": dict(gate_blocker_counts),
