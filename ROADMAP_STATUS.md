@@ -321,6 +321,22 @@ Current M6.16 evidence:
   `019dcaf1-2534-7a12-8812-e6927b62d586` first found stale supersession and
   empty-diff-key issues, then re-review reported no findings after both
   regressions were covered.
+- Task `#671` landed the GitHub issue `#11` side-dogfood append-validation
+  slice as practical mew-first evidence. `mew side-dogfood validate --input
+  ... [--json]` now validates one local side-project dogfood report against the
+  canonical append schema without mutating the ledger, so side-project
+  closeout can catch descriptive/non-appendable reports before finish. Count
+  this as practical mew-first without rescue edits: session `#655` authored
+  the source/CLI/test patch, codex-ultra review session
+  `019dcb09-266b-7a22-8db7-9eead609e51b` found a missing-input `OSError`
+  path, and mew session `#656` repaired it with a focused regression. Valid
+  proof passed:
+  `uv run pytest -q tests/test_side_project_dogfood.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run python -m unittest tests.test_commands tests.test_work_deliberation_cli`,
+  `uv run ruff check src/mew/cli.py src/mew/commands.py tests/test_side_project_dogfood.py`,
+  and `git diff --check`. Codex-ultra re-review reported no findings after
+  the missing-input regression.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

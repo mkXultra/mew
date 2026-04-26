@@ -720,6 +720,13 @@ def build_parser():
     side_dogfood_report.set_defaults(func=cmd_side_dogfood)
     side_dogfood_template = side_dogfood_subparsers.add_parser("template", help="print an appendable JSON record")
     side_dogfood_template.set_defaults(func=cmd_side_dogfood)
+    side_dogfood_validate = side_dogfood_subparsers.add_parser(
+        "validate",
+        help="validate one JSON record without appending to the ledger",
+    )
+    side_dogfood_validate.add_argument("--input", required=True, help="JSON record path, or '-' for stdin")
+    side_dogfood_validate.add_argument("--json", action="store_true", help="print structured JSON")
+    side_dogfood_validate.set_defaults(func=cmd_side_dogfood)
     side_dogfood_append = side_dogfood_subparsers.add_parser("append", help="append one JSON record to the ledger")
     side_dogfood_append.add_argument("--input", required=True, help="JSON record path, or '-' for stdin")
     side_dogfood_append.add_argument(

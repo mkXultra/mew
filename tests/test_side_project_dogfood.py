@@ -146,3 +146,76 @@ def test_side_dogfood_report_command_handles_missing_ledger(capsys) -> None:
 
     assert output["kind"] == "side_project_dogfood"
     assert output["rows_total"] == 0
+
+
+def test_side_dogfood_validate_command_accepts_canonical_record_without_ledger_mutation(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    payload = tmp_path / "record.json"
+    payload.write_text(json.dumps(_record()), encoding="utf-8")
+
+    args = build_parser().parse_args(
+        [
+            "side-dogfood",
+            "validate",
+            "--input",
+            str(payload),
+            "--json",
+        ]
+    )
+
+    assert args.side_dogfood_action == "validate"
+    assert args.func(args) == 0
+    output = json.loads(capsys.readouterr().out)
+
+    assert output["kind"] == "side_project_dogfood_validation"
+    assert output["valid"] is True
+    assert output["record"]["task_id"] == 701
+    assert not (tmp_path / "proof-artifacts" / "side_project_dogfood_ledger.jsonl").exists()
+
+
+def test_side_dogfood_validate_command_rejects_descriptive_report_missing_fields(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    payload = tmp_path / "descriptive-report.json"
+    payload.write_text(
+        json.dumps({"summary": "Implemented the side project.", "outcome": "practical"}),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["side-dogfood", "validate", "--input", str(payload)])
+
+    assert args.func(args) == 1
+    captured = capsys.readouterr()
+
+    assert "missing required side-project dogfood field(s)" in captured.err
+    assert "task_id" in captured.err
+    assert not (tmp_path / "proof-artifacts" / "side_project_dogfood_ledger.jsonl").exists()
+
+
+def test_side_dogfood_validate_command_reports_missing_input_without_traceback(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    missing_payload = tmp_path / "missing-record.json"
+
+    args = build_parser().parse_args(
+        ["side-dogfood", "validate", "--input", str(missing_payload)]
+    )
+
+    assert args.func(args) == 1
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert "mew: side-dogfood validate failed:" in captured.err
+    assert "missing-record.json" in captured.err
+    assert "Traceback" not in captured.err
+    assert not (tmp_path / "proof-artifacts" / "side_project_dogfood_ledger.jsonl").exists()

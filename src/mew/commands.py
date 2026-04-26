@@ -11263,6 +11263,35 @@ def cmd_side_dogfood(args):
     if action == "template":
         print(json.dumps(dogfood_record_template(), ensure_ascii=False, indent=2))
         return 0
+    if action == "validate":
+        source = getattr(args, "input", None)
+        if not source:
+            print("mew: side-dogfood validate requires --input", file=sys.stderr)
+            return 2
+        from .side_project_dogfood import normalize_side_project_dogfood_record
+
+        try:
+            if source == "-":
+                payload = json.load(sys.stdin)
+            else:
+                with Path(source).open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            if not isinstance(payload, dict):
+                raise ValueError("expected JSON object")
+            normalized = normalize_side_project_dogfood_record(payload)
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            print(f"mew: side-dogfood validate failed: {exc}", file=sys.stderr)
+            return 1
+        result = {
+            "kind": "side_project_dogfood_validation",
+            "valid": True,
+            "record": normalized,
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print("side-project dogfood record is valid")
+        return 0
     if action == "append":
         source = getattr(args, "input", None)
         if not source:
