@@ -10,5 +10,22 @@
   "next_steps": [
     "Run the focused pytest command for the side project.",
     "Iterate on the report shape after the first scaffold lands."
-  ]
+  ],
+  "morning_journal": {
+    "title": "Morning Journal: SP2 companion output",
+    "date": "2026-04-26",
+    "intention": "Make the first journal surface feel calm, fixture-driven, and easy to verify.",
+    "gratitude": [
+      "A small isolated experiment keeps product iteration safe.",
+      "Snapshot tests can document the markdown shape."
+    ],
+    "focus": [
+      "Preserve the existing companion report CLI behavior.",
+      "Add a morning journal mode backed by fixture JSON."
+    ],
+    "blockers": [
+      "Avoid touching core mew source files."
+    ],
+    "closing_prompt": "What is the one gentle next action that would make today successful?"
+  }
 }

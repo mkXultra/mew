@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "task_id": 2,
+  "session_id": 4,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP2 fixture-driven morning journal markdown output with CLI mode, fixture data, README usage, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 43.0,
+  "read_turns_before_edit": 2.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_session.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode morning-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode morning-journal --output /tmp/mew-companion-log-morning.md"
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "clean",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/4",
+    "experiments/mew-companion-log/.mew-dogfood/reports/2-morning-journal-clean.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented the first SP2 morning journal surface using --model gpt-5.5. Codex acted as operator/reviewer/verifier only. The default companion report behavior was preserved, --mode morning-journal renders fixture-driven markdown, README usage was updated, focused tests passed, and no rescue edits were used."
+}

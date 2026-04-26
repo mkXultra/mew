@@ -12,8 +12,8 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 |---|---|---|
 | SP0 Dogfood Harness Ready | `done` | Roadmap, status, `side-pj-mew-impl` skill, and M6.13.2 telemetry CLI are ready. |
 | SP1 mew-companion-log Scaffold | `done` | Scaffold landed after issue #1 repair; mew-authored source, fixture, README, and tests pass. |
-| SP2 Journal and Dream Reports | `not_started` | Companion report surfaces are next. |
-| SP3 Implementation-Lane Evidence Cohort | `not_started` | Needs at least five recorded side-project attempts. |
+| SP2 Journal and Dream Reports | `in_progress` | Morning journal output landed clean; evening and dream/learning surfaces remain. |
+| SP3 Implementation-Lane Evidence Cohort | `not_started` | Needs at least five recorded side-project attempts; current ledger rows: 3. |
 | SP4 Optional Research Digest Slice | `not_started` | Deferred until SP1-SP3 produce useful evidence. |
 | SP5 Feed M6.16 | `not_started` | Waits for enough side-project telemetry to name core implementation-lane bottlenecks. |
 
@@ -45,8 +45,8 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
-  two `mew-companion-log` rows on 2026-04-26: `rows_total=2`, one `failed`,
-  one `practical`, `structural_repairs_required=1`, and
+  three `mew-companion-log` rows on 2026-04-26: `rows_total=3`, one `failed`,
+  one `practical`, one `clean`, `structural_repairs_required=1`, and
   `rescue_edits_total=0`.
 - `side-pj-mew-impl` skill exists at
   `.codex/skills/side-pj-mew-impl/SKILL.md`.
@@ -86,17 +86,33 @@ Current target:
   returned `4 passed`.
 - README usage commands were manually verified with
   `UV_CACHE_DIR=.uv-cache uv run python ...` for stdout and `--output`.
+- Task `#2` / session `#4` added the first SP2 surface with Codex CLI as
+  `operator` and mew as first implementer. Mew authored the fixture-driven
+  `--mode morning-journal` renderer, updated fixture data, README usage, and
+  snapshot-style tests under `experiments/mew-companion-log`.
+- Morning journal local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/2-morning-journal-clean.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `3`;
+  outcome `clean`, failure class `none_observed`, `rescue_edits=0`.
+- Morning journal verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `6 passed`. The default report CLI, morning journal stdout, and
+  morning journal `--output` path were also verified.
 
 ## Missing Proof
 
-- SP2 journal/dream report surfaces do not exist yet.
-- SP3 still needs at least five recorded side-project attempts.
+- SP2 evening journal output does not exist yet.
+- SP2 dream/learning output does not exist yet.
+- SP2 still needs at least one more bounded mew-first implementation attempt
+  before close, plus the remaining surfaces.
+- SP3 still needs at least five recorded side-project attempts; current ledger
+  rows: 3.
 
 ## Next Action
 
-Start SP2:
+Continue SP2:
 
-1. define one bounded journal or dream report task under
+1. define one bounded evening journal report task under
    `experiments/mew-companion-log`
 2. run current-repo `./mew` mew-first with `--model gpt-5.5`
 3. keep Codex CLI as `operator` / `reviewer` / `verifier`, not product-code
