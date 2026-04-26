@@ -204,6 +204,25 @@ Current M6.8 evidence:
   --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
   --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
   tests/test_commands.py`, and `git diff --check`.
+- Task `#635` / session `#621` landed the approved selector handoff slice
+  mew-first. Approved `mew task execute-proposal <id>` now persists a
+  `selector_execution_attempts` record with `status=handoff_ready`,
+  `proposal_id`, `proposed_task_id`, reviewer approval metadata,
+  `next_command`, and `auto_run=false`; it prints the reviewer-visible
+  `./mew work <task-id> --start-session` handoff command and still does not
+  dispatch model work or mutate tasks.
+- #635 mew-first note: one patch was rejected for omitting the required
+  `next_command` handoff evidence, and a later edit attempt hit the known
+  duplicated-adjacent-context guard. After reviewer steer, mew produced the
+  accepted source/test pair with no supervisor product edit.
+- #635 dogfood: `mew task execute-proposal 7 --json` recorded
+  `status=handoff_ready`, `proposed_task_id=635`, the original reviewer
+  approval metadata, `next_command="./mew work 635 --start-session"`, and
+  `auto_run=false`.
+- #635 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
+  tests/test_commands.py`, and `git diff --check`.
 
 M6.8 is done when:
 
@@ -305,17 +324,15 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.8 -> supervised selector contract -> bounded task proposal with reviewer approval`
+`M6.8 -> supervised selector contract -> chained proof run with approved handoff`
 
 Acceptable near-term work:
 
-- create the first M6.8 bounded task for selector proposal output
-- implement the smallest safe selector proposal surface
+- run the M6.8 proof chain from an approved selector handoff
 - preserve optional signal refs for M6.8.5, but do not implement
   curriculum/habit/preference selector policy in M6.8 core
-- add tests that reject selector-owned roadmap-status, milestone-close, or
-  governance edits
-- prove reviewer approval is required before chained execution
+- prove three consecutive bounded mew-first iterations can be selected,
+  approved, handed off, and reviewed without supervisor product edits
 
 Non-goals for the next session:
 
@@ -329,11 +346,11 @@ Non-goals for the next session:
 
 ## Latest Validation
 
-Latest committed code baseline: `be318a6 Add M6.8 selector proposal CLI`.
+Latest committed code baseline: `1353578 Guard selector proposal execution`.
 
-Current uncommitted change: M6.8 selector target-surface false-positive repair
-in `src/mew/tasks.py` and `tests/test_tasks.py`; validation listed above under
-task `#630`.
+Current uncommitted change: M6.8 approved selector handoff v0 in
+`src/mew/commands.py`, `tests/test_commands.py`, and this roadmap status file;
+validation listed above under task `#635`.
 
 Observed in this cleanup session:
 
@@ -341,7 +358,8 @@ Observed in this cleanup session:
 - detailed pre-compression `ROADMAP_STATUS.md` was archived to
   `docs/archive/ROADMAP_STATUS_detailed_2026-04-26.md`
 
-Behavioral validation was not rerun because no source/test code changed.
+Behavioral validation for the active source/test change is listed above under
+task `#635`.
 
 ## Maintenance Rule
 

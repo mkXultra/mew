@@ -652,6 +652,26 @@ def _record_task_selector_execution_rejection(state, proposal_id, proposed_task_
     return record
 
 
+def _record_task_selector_execution_handoff(state, proposal_record, proposed_task_id):
+    timestamp = now_iso()
+    next_command = f"./mew work {proposed_task_id} --start-session"
+    record = {
+        "id": _next_task_selector_execution_attempt_id(state),
+        "proposal_id": _task_selector_execution_proposal_id_value(proposal_record.get("id")),
+        "proposed_task_id": proposed_task_id,
+        "status": "handoff_ready",
+        "approval_status": proposal_record.get("status"),
+        "reviewer_decision": proposal_record.get("reviewer_decision"),
+        "reviewer_reason": proposal_record.get("reviewer_reason", ""),
+        "reviewed_at": proposal_record.get("reviewed_at"),
+        "timestamp": timestamp,
+        "next_command": next_command,
+        "auto_run": False,
+    }
+    state.setdefault("selector_execution_attempts", []).append(record)
+    return record
+
+
 def _finish_task_selector_execution_rejection(args, attempt, message):
     if getattr(args, "json", False):
         print(json.dumps(attempt, ensure_ascii=False, indent=2))
@@ -707,11 +727,16 @@ def cmd_task_proposal_execute(args):
                 f"mew: selector proposal {args.proposal_id} is not approved for execution",
             )
 
+        attempt = _record_task_selector_execution_handoff(state, record, proposed_task_id)
+        save_state(state)
+
+    if getattr(args, "json", False):
+        print(json.dumps(attempt, ensure_ascii=False, indent=2))
     print(
-        "mew: selector proposal execution is not implemented in this safe v0; no task was dispatched",
+        f"mew: selector proposal {args.proposal_id} supervised handoff ready; next command: {attempt['next_command']}",
         file=sys.stderr,
     )
-    return 1
+    return 0
 
 
 def _build_task_selector_next_proposal(state, args):
