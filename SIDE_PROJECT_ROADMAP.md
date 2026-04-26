@@ -306,3 +306,21 @@ Done when:
 - README examples show safe dry-run and live macOS usage
 - the side-project dogfood ledger summarizes the full mew-ghost arc and any
   reusable implementation-lane polish findings
+
+### SP16: mew-ghost Watch Mode
+
+Make the ghost useful as a continuously updating presence surface while keeping
+the same permission and execution boundaries.
+
+Done when:
+
+- CLI watch mode can repeatedly print the current presence state until
+  interrupted, with a bounded `--watch-count` path for tests
+- HTML watch mode can repeatedly rewrite an output file for browser display,
+  with the rendered page safely refreshing or otherwise showing fresh state
+- watch mode keeps `--live-active-window` as the only live macOS probe opt-in
+- watch mode never executes launcher commands unless `--execute-launchers` is
+  also explicitly supplied
+- tests cover bounded CLI watch output, bounded HTML output, interval handling,
+  dry-run launcher safety, and no real `mew` subprocess execution
+- README examples show safe CLI and HTML watch usage

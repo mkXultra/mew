@@ -26,12 +26,13 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP13 mew-ghost Live macOS Probe Integration | `done` | Live probe integration landed practical: explicit `--live-active-window` opt-in, injectable `osascript` runner/provider, structured fallbacks, README usage, output proof, and hermetic tests are in place. |
 | SP14 mew-ghost Presence Loop | `done` | Presence loop landed practical: deterministic idle/attentive/coding/waiting/blocked classification, bounded refresh snapshots, README refresh contract, output proof, and focused tests are in place. |
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
+| SP16 mew-ghost Watch Mode | `planned` | Next slice: add bounded CLI/HTML watch mode so `idle`/`attentive`/`coding`/`waiting`/`blocked` presence can update continuously without background monitoring or implicit launcher execution. |
 
 ## Active Focus
 
-Active side-project focus: **SP15 mew-ghost Launcher Contract complete**.
+Active side-project focus: **SP16 mew-ghost Watch Mode**.
 
-Current state:
+Current target:
 
 - keep `mew-ghost` isolated under `experiments/mew-ghost`
 - `mew chat` and `mew code` are represented as explicit command arrays
@@ -39,6 +40,12 @@ Current state:
   `execution.status: "dry_run"`
 - direct launcher execution is gated behind explicit `--execute-launchers`;
   automated tests use an injected runner and do not spawn real `mew`
+- add `--watch` style behavior for CLI and HTML so presence can update
+  continuously until interrupted
+- include a bounded watch path such as `--watch-count` so tests do not rely on
+  infinite loops
+- keep HTML watch output safe for browser display, either by atomic rewrite
+  plus page refresh metadata or an equivalent local refresh contract
 - live macOS probing remains explicit through `--live-active-window`
 - preserve the bounded deterministic presence loop without background
   monitoring or hidden capture
@@ -52,12 +59,11 @@ Current state:
   evidence, not an active side-project blocker
 - route the repeated stale failed-approval cleanup pattern as open issue `#10`
   evidence for M6.16 implementation-lane hardening
+- route the SP15 report-schema closeout gap as open issue `#11` evidence for
+  M6.16 implementation-lane hardening
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
-- no further `mew-ghost` side-project milestone is currently planned after
-  SP15; the next step is to decide whether to add another side-project arc or
-  feed the accumulated evidence into M6.16/M9/M11.
 
 ## Evidence
 
@@ -407,7 +413,7 @@ Current state:
 - SP13 is closed for the second `mew-ghost` cohort.
 - SP14 is closed for the second `mew-ghost` cohort.
 - SP15 is closed for the second `mew-ghost` cohort.
-- No planned side-project milestone remains after SP15.
+- SP16 has not started; continuous CLI/HTML watch behavior is not yet defined.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -416,14 +422,17 @@ Current state:
 
 ## Next Action
 
-Complete SP15 closeout:
+Start SP16 with mew as first implementer:
 
-1. mark task `#15` done
-2. commit the SP15 implementation, local report, ledger row, and this status
-   update
-3. then decide the next side-project direction: add another isolated arc, add
-   post-SP15 `mew-ghost` milestones, or pause side-project implementation and
-   feed rows `13` through `16` into M6.16/M9/M11 planning.
+1. create a coding task for `mew-ghost` SP16
+2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
+   with `--model gpt-5.5`
+3. allow writes only under `experiments/mew-ghost`
+4. add bounded CLI and HTML watch mode while preserving live probe opt-in and
+   dry-run launcher safety
+5. verify with
+   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+6. write a canonical local side-dogfood report and append it to the ledger
 
 ## Non-Goals
 
