@@ -23,20 +23,22 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP10 Companion Export Contract | `done` | Export contract landed practical: local schema examples, documented markdown surfaces for every mode, README pointer, and all-mode output-file compatibility tests are in place. |
 | SP11 Second Side-Project Gate | `done` | Gate landed practical: the recommendation is to pause new side-project work and feed SP6-SP10 evidence into core M6.16/M9/M11 before starting a second isolated side project. |
 | SP12 mew-ghost macOS Shell Scaffold | `done` | Scaffold landed practical: isolated `experiments/mew-ghost` shell, permission-safe macOS probe contract, deterministic HTML/state rendering, dry-run `mew chat`/`mew code` intents, README usage, local report, and focused tests are in place. |
-| SP13 mew-ghost Live macOS Probe Integration | `planned` | Next slice: add explicit opt-in live macOS probing while preserving structured permission/platform fallback and hermetic tests. |
-| SP14 mew-ghost Presence Loop | `not_started` | Deferred until probe/state contract exists. |
+| SP13 mew-ghost Live macOS Probe Integration | `done` | Live probe integration landed practical: explicit `--live-active-window` opt-in, injectable `osascript` runner/provider, structured fallbacks, README usage, output proof, and hermetic tests are in place. |
+| SP14 mew-ghost Presence Loop | `planned` | Next slice: add a bounded deterministic refresh/presence loop on top of the SP13 probe/state contract. |
 | SP15 mew-ghost Launcher Contract | `not_started` | Deferred until visual presence and command-intent surfaces are stable. |
 
 ## Active Focus
 
-Active side-project focus: **SP13 mew-ghost Live macOS Probe Integration**.
+Active side-project focus: **SP14 mew-ghost Presence Loop**.
 
 Current target:
 
 - keep `mew-ghost` isolated under `experiments/mew-ghost`
-- add live macOS probing only through an explicit opt-in command or mode
+- keep live macOS probing explicit through `--live-active-window`
+- add a bounded deterministic presence loop over the existing state renderer
+  without background monitoring or hidden capture
 - preserve structured fallback for missing `osascript`, non-macOS platforms,
-  permission denial, empty probe results, and timeouts
+  permission denial, empty probe results, malformed output, and timeouts
 - focused verifier remains:
   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
 - keep `mew-companion-log` stable as the local fixture-tested companion surface
@@ -307,32 +309,59 @@ Current target:
   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
   returned `8 passed`. The state CLI, HTML `--output` path, rendered HTML
   content check, and `git diff --check` were also verified.
+- Task `#13` / session `#26` added the SP13 explicit live macOS probe
+  integration with Codex CLI as `operator` and mew as first implementer. The
+  first resume attempt hit `HTTP 401 token_expired` with the default local
+  auth before product edits; retrying with `--auth /Users/mk/.codex/auth.json`
+  allowed the same session to continue. Mew authored the opt-in
+  `--live-active-window` path, injectable `osascript` runner/provider,
+  structured fallback reasons, README usage, and hermetic tests under
+  `experiments/mew-ghost`.
+- The first SP13 write batch failed the focused verifier because one stale test
+  assertion still expected `mew-ghost.sp12.v1`; mew repaired in the same
+  session and the corrected batch passed. Operator rejected three stale
+  approvals from the failed batch after the corrected batch had already applied.
+- mew-ghost SP13 local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/13-live-macos-probe-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `14`;
+  outcome `practical`, failure class
+  `stale_failed_approval_cleanup_after_live_probe_verifier_repair`,
+  `rescue_edits=0`.
+- mew-ghost SP13 verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+  returned `13 passed`. Default state CLI, explicit live opt-in state CLI,
+  HTML `--output`, state `--output`, rendered HTML content checks,
+  `git diff --check`, and scoped no-core/no-live-state coupling searches were
+  also verified.
+- Reusable polish issue opened:
+  `https://github.com/mkXultra/mew/issues/10`.
 
 ## Missing Proof
 
 - SP1 through SP11 are closed for the first `mew-companion-log` cohort.
 - SP12 is closed for the second `mew-ghost` cohort.
-- SP13 has not started; no explicit live macOS `osascript` probe exists yet.
+- SP13 is closed for the second `mew-ghost` cohort.
+- SP14 has not started; no bounded presence refresh loop exists yet.
 - Open `[side-pj]` implementation-lane polish issues remain M6.16 input and do
   not block the isolated `mew-ghost` scaffold unless the same failure repeats.
 
 ## Next Action
 
-Start SP13 with mew as first implementer:
+Start SP14 with mew as first implementer:
 
-1. create a coding task for `mew-ghost` SP13
+1. create a coding task for `mew-ghost` SP14
 2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
    with `--model gpt-5.5`
 3. allow writes only under `experiments/mew-ghost`
-4. implement an explicit opt-in live macOS probe path while keeping tests
-   hermetic through injected providers or subprocess fakes
+4. implement a bounded presence loop that can render multiple deterministic
+   state snapshots without background monitoring
 5. verify with
    `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
 6. write a local side-dogfood report before appending to the canonical ledger
 
 ## Non-Goals
 
-- do not implement outside `experiments/mew-ghost` for SP12
+- do not implement outside `experiments/mew-ghost` for the `mew-ghost` arc
 - do not treat Codex CLI implementation as mew-first autonomy credit
 - do treat Codex CLI operating mew as `operator`, not `implementer`
 - do not make GitHub issues for normal progress; create one `[side-pj]` issue
@@ -342,5 +371,5 @@ Start SP13 with mew as first implementer:
 - do not change core mew unless the side project exposes a classified M6.14
   repair blocker or a later M6.16 measured hardening slice
 - do not read live `.mew` state, import `src/mew/**`, use screen capture,
-  keystroke monitoring, TTS, network-heavy services, or native packaging in
-  SP12
+  keystroke monitoring, TTS, network-heavy services, background monitoring, or
+  native packaging in the `mew-ghost` arc

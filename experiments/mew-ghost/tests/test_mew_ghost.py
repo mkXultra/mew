@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,7 +10,7 @@ README_PATH = ROOT / "README.md"
 GHOST_PATH = ROOT / "ghost.py"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_ghost_state.json"
 
-spec = importlib.util.spec_from_file_location("mew_ghost_sp12", GHOST_PATH)
+spec = importlib.util.spec_from_file_location("mew_ghost_sp13", GHOST_PATH)
 ghost = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(ghost)
@@ -25,12 +26,12 @@ def test_fixture_builds_deterministic_state_and_html() -> None:
 
     assert state_one == state_two
     assert html_one == html_two
-    assert state_one["schema_version"] == "mew-ghost.sp12.v1"
+    assert state_one["schema_version"] == "mew-ghost.sp13.v1"
     assert state_one["active_window"]["status"] == "available"
     assert state_one["active_window"]["active_app"] == "Visual Studio Code"
     assert "Ghost is watching VS Code without screen capture." in html_one
     assert "Writing the SP12 scaffold" in html_one
-    assert "mew-ghost.sp12.v1" in html_one
+    assert "mew-ghost.sp13.v1" in html_one
 
 
 def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
@@ -44,7 +45,7 @@ def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
 
     assert calls == []
     assert unavailable == {
-        "schema_version": "mew-ghost.sp12.v1",
+        "schema_version": "mew-ghost.sp13.v1",
         "status": "unavailable",
         "reason": "requires_macos",
         "platform": "Linux",
@@ -55,7 +56,7 @@ def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
 
     deferred = ghost.probe_active_window(platform_name="Darwin")
     assert deferred["status"] == "unavailable"
-    assert deferred["reason"] == "sp12_live_probe_deferred"
+    assert deferred["reason"] == "live_probe_not_requested"
     assert deferred["requires_permission"] is True
 
 
@@ -88,6 +89,110 @@ def test_probe_contract_accepts_injected_success_provider() -> None:
     assert observed["window_title"] == "mew work 12"
 
 
+def _completed_process(
+    *,
+    stdout: str = "",
+    stderr: str = "",
+    returncode: int = 0,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["osascript"],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
+def test_live_osascript_provider_parses_injected_runner_success() -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        return _completed_process(stdout="Terminal\tmew work 13\n")
+
+    provider = ghost.make_macos_osascript_probe_provider(
+        runner=runner,
+        osascript_path="/usr/bin/osascript",
+        timeout_seconds=0.5,
+    )
+    observed = ghost.probe_active_window(provider, platform_name="Darwin")
+
+    assert observed["status"] == "available"
+    assert observed["reason"] is None
+    assert observed["active_app"] == "Terminal"
+    assert observed["window_title"] == "mew work 13"
+    assert calls[0][0] == ["/usr/bin/osascript", "-e", ghost.ACTIVE_WINDOW_OSASCRIPT]
+    assert calls[0][1]["timeout"] == 0.5
+
+
+def test_live_probe_reports_missing_osascript_without_calling_runner() -> None:
+    calls: list[str] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append("called")
+        return _completed_process(stdout="Terminal\tmew work 13\n")
+
+    provider = ghost.make_macos_osascript_probe_provider(
+        runner=runner,
+        which=lambda name: None,
+    )
+    observed = ghost.probe_active_window(provider, platform_name="Darwin")
+
+    assert calls == []
+    assert observed["status"] == "unavailable"
+    assert observed["reason"] == "missing_osascript"
+    assert observed["requires_permission"] is True
+
+
+def test_live_probe_reports_permission_denied_from_osascript_stderr() -> None:
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return _completed_process(
+            returncode=1,
+            stderr="Not authorized to send Apple events to System Events",
+        )
+
+    provider = ghost.make_macos_osascript_probe_provider(
+        runner=runner,
+        osascript_path="/usr/bin/osascript",
+    )
+    observed = ghost.probe_active_window(provider, platform_name="Darwin")
+
+    assert observed["status"] == "permission_denied"
+    assert observed["reason"] == "accessibility_permission_denied"
+    assert observed["active_app"] is None
+    assert observed["window_title"] is None
+
+
+def test_live_probe_reports_empty_malformed_and_timeout_results() -> None:
+    empty_provider = ghost.make_macos_osascript_probe_provider(
+        runner=lambda command, **kwargs: _completed_process(stdout="\n"),
+        osascript_path="/usr/bin/osascript",
+    )
+    malformed_provider = ghost.make_macos_osascript_probe_provider(
+        runner=lambda command, **kwargs: _completed_process(stdout="Terminal only\n"),
+        osascript_path="/usr/bin/osascript",
+    )
+
+    def timeout_runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
+
+    timeout_provider = ghost.make_macos_osascript_probe_provider(
+        runner=timeout_runner,
+        osascript_path="/usr/bin/osascript",
+    )
+
+    empty = ghost.probe_active_window(empty_provider, platform_name="Darwin")
+    malformed = ghost.probe_active_window(malformed_provider, platform_name="Darwin")
+    timed_out = ghost.probe_active_window(timeout_provider, platform_name="Darwin")
+
+    assert empty["status"] == "unavailable"
+    assert empty["reason"] == "empty_probe_result"
+    assert malformed["status"] == "unavailable"
+    assert malformed["reason"] == "malformed_probe_result"
+    assert timed_out["status"] == "unavailable"
+    assert timed_out["reason"] == "osascript_timeout"
+
+
 def test_launcher_intents_are_dry_run_chat_and_code_only() -> None:
     intents = ghost.build_launcher_intents()
 
@@ -115,9 +220,26 @@ def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
     state = json.loads(state_output.read_text(encoding="utf-8"))
 
     assert html.startswith("<!doctype html>")
-    assert "<title>mew-ghost SP12 shell</title>" in html
+    assert "<title>mew-ghost SP13 shell</title>" in html
     assert state["fixture_name"] == "sample_ghost_state"
     assert state["launch_intents"][0]["command"] == ["mew", "chat"]
+
+
+def test_cli_live_opt_in_uses_injected_provider_for_stdout(capsys) -> None:
+    assert ghost.main(
+        ["--fixture", str(FIXTURE_PATH), "--format", "state", "--live-active-window"],
+        live_probe_provider=lambda: {
+            "active_app": "Safari",
+            "window_title": "mew-ghost notes",
+            "requires_permission": True,
+        },
+    ) == 0
+
+    state = json.loads(capsys.readouterr().out)
+
+    assert state["active_window"]["status"] == "available"
+    assert state["active_window"]["active_app"] == "Safari"
+    assert state["launch_intents"][0]["dry_run"] is True
 
 
 def test_readme_usage_prefers_uv_run_python_commands() -> None:
@@ -131,6 +253,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     assert usage_lines == [
         "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html",
         "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state",
+        "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window",
     ]
     assert all(not line.startswith("python experiments/mew-ghost/ghost.py") for line in usage_lines)
 
@@ -143,3 +266,5 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert "src.mew" not in source
     assert "Path(\".mew\")" not in source
     assert "screen capture" in source
+    assert "hidden monitoring" in source
+    assert "--live-active-window" in source

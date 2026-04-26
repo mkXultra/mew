@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "task_id": 13,
+  "session_id": 26,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Add explicit opt-in live macOS active-window probing to mew-ghost while preserving fixture-safe default rendering, dry-run launcher intents, structured fallbacks, README usage, and hermetic tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 147.8,
+  "read_turns_before_edit": 3.0,
+  "files_changed": [
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/13-live-macos-probe-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "git diff --check",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost-sp13.html",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --output /tmp/mew-ghost-sp13-state.json",
+    "rg -n \"mew-ghost SP13 shell|mew-ghost.sp13.v1|mew chat|mew code\" /tmp/mew-ghost-sp13.html",
+    "jq '.schema_version, .active_window.status, .launch_intents[0].command' /tmp/mew-ghost-sp13-state.json"
+  ],
+  "reviewer_rejections": 3,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "stale_failed_approval_cleanup_after_live_probe_verifier_repair",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/26/snapshot.json",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/13-live-macos-probe-practical.json",
+    "/tmp/mew-ghost-sp13.html",
+    "/tmp/mew-ghost-sp13-state.json",
+    "https://github.com/mkXultra/mew/issues/10"
+  ],
+  "commit": "",
+  "notes": "SP13 was implemented by mew in session #26 with --model gpt-5.5 and write scope limited to experiments/mew-ghost. The first resumed run used the default local auth and failed with HTTP 401 token_expired before product edits; retrying with --auth /Users/mk/.codex/auth.json allowed the session to continue. Mew's first write batch #295-#297 reached the right source/test/docs shape but the focused verifier failed because one stale test assertion still expected mew-ghost.sp12.v1. Mew repaired in the same session with corrected batch #302-#304; auto-approval #305-#307 applied the corrected product files and the focused verifier passed 13 tests. Operator rejected stale approvals #295-#297 after the corrected batch was already applied. No Codex product-code rescue edits were made. A reusable M6.16 polish issue was opened as #10 because stale failed approvals remained pending and caused finish to record pending-approval state after the corrected verifier pass. The real live macOS Accessibility state was intentionally not asserted as a required pass condition; live behavior is opt-in and hermetically covered through injected providers/runners."
+}
