@@ -22,6 +22,7 @@ CODING_MEMORY_KINDS = (
 FRONTMATTER_DELIMITER = "+++"
 MAX_DESCRIPTION_CHARS = 240
 VETO_LOG_FILENAME = "vetoes.jsonl"
+REASONING_TRACE_LEDGER = "reasoning_trace.jsonl"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,12 @@ class MemoryEntry:
     reasoning: str = ""
     verdict: str = ""
     abstraction_level: str = ""
+    source_lane: str = ""
+    source_lane_attempt_id: str = ""
+    source_blocker_code: str = ""
+    source_bundle_ref: str = ""
+    same_shape_key: str = ""
+    reviewer_decision_ref: str = ""
     path: Path | None = None
 
 
@@ -84,6 +91,12 @@ class FileMemoryBackend:
         reasoning: str = "",
         verdict: str = "",
         abstraction_level: str = "",
+        source_lane: str = "",
+        source_lane_attempt_id: str = "",
+        source_blocker_code: str = "",
+        source_bundle_ref: str = "",
+        same_shape_key: str = "",
+        reviewer_decision_ref: str = "",
     ) -> MemoryEntry:
         scope = normalize_scope(scope)
         memory_type = normalize_memory_type(memory_type)
@@ -108,6 +121,12 @@ class FileMemoryBackend:
             reasoning,
             verdict,
             abstraction_level,
+            source_lane,
+            source_lane_attempt_id,
+            source_blocker_code,
+            source_bundle_ref,
+            same_shape_key,
+            reviewer_decision_ref,
         ) = validate_write_gate(
             memory_type=memory_type,
             memory_kind=memory_kind,
@@ -127,6 +146,12 @@ class FileMemoryBackend:
             reasoning=reasoning,
             verdict=verdict,
             abstraction_level=abstraction_level,
+            source_lane=source_lane,
+            source_lane_attempt_id=source_lane_attempt_id,
+            source_blocker_code=source_blocker_code,
+            source_bundle_ref=source_bundle_ref,
+            same_shape_key=same_shape_key,
+            reviewer_decision_ref=reviewer_decision_ref,
         )
         created_at = created_at or now_iso()
         name = normalize_text(name) or first_line(body) or "Untitled memory"
@@ -160,10 +185,43 @@ class FileMemoryBackend:
             reasoning=reasoning,
             verdict=verdict,
             abstraction_level=abstraction_level,
+            source_lane=source_lane,
+            source_lane_attempt_id=source_lane_attempt_id,
+            source_blocker_code=source_blocker_code,
+            source_bundle_ref=source_bundle_ref,
+            same_shape_key=same_shape_key,
+            reviewer_decision_ref=reviewer_decision_ref,
             path=path,
         )
         path.write_text(render_memory_entry(entry), encoding="utf-8")
+        if entry.memory_type == "project" and entry.memory_kind == "reasoning-trace":
+            self._append_reasoning_trace_ledger(entry)
         return entry
+
+    def _reasoning_trace_ledger_path(self) -> Path:
+        return self.base_dir / STATE_DIR / "durable" / "memory" / REASONING_TRACE_LEDGER
+
+    def _append_reasoning_trace_ledger(self, entry: MemoryEntry) -> None:
+        payload = {
+            "schema_version": 1,
+            "entry_id": entry.id,
+            "memory_kind": entry.memory_kind,
+            "situation": entry.situation,
+            "reasoning": entry.reasoning,
+            "verdict": entry.verdict,
+            "abstraction_level": entry.abstraction_level,
+            "source_lane": entry.source_lane,
+            "source_lane_attempt_id": entry.source_lane_attempt_id,
+            "source_blocker_code": entry.source_blocker_code,
+            "source_bundle_ref": entry.source_bundle_ref,
+            "same_shape_key": entry.same_shape_key,
+            "reviewer_decision_ref": entry.reviewer_decision_ref,
+            "created_at": entry.created_at,
+        }
+        path = self._reasoning_trace_ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def entries(self) -> list[MemoryEntry]:
         if not self.root.exists():
@@ -361,7 +419,36 @@ def validate_write_gate(
     reasoning: str = "",
     verdict: str = "",
     abstraction_level: str = "",
-) -> tuple[bool, str, str, str, str, str, str, str, str, str, str, bool, str, str, str, str]:
+    source_lane: str = "",
+    source_lane_attempt_id: str = "",
+    source_blocker_code: str = "",
+    source_bundle_ref: str = "",
+    same_shape_key: str = "",
+    reviewer_decision_ref: str = "",
+) -> tuple[
+    bool,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    bool,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+    str,
+]:
     normalized_why = normalize_text(why)
     normalized_how = normalize_text(how_to_apply)
     normalized_rationale = normalize_text(rationale)
@@ -376,6 +463,12 @@ def validate_write_gate(
     normalized_reasoning = normalize_text(reasoning)
     normalized_verdict = normalize_text(verdict)
     normalized_abstraction_level = normalize_text(abstraction_level).casefold()
+    normalized_source_lane = normalize_text(source_lane).casefold()
+    normalized_source_lane_attempt_id = normalize_text(source_lane_attempt_id)
+    normalized_source_blocker_code = normalize_text(source_blocker_code)
+    normalized_source_bundle_ref = normalize_text(source_bundle_ref)
+    normalized_same_shape_key = normalize_text(same_shape_key)
+    normalized_reviewer_decision_ref = normalize_text(reviewer_decision_ref)
     if memory_type != "project" or not memory_kind:
         return (
             bool(approved),
@@ -394,6 +487,12 @@ def validate_write_gate(
             normalized_reasoning,
             normalized_verdict,
             normalized_abstraction_level,
+            normalized_source_lane,
+            normalized_source_lane_attempt_id,
+            normalized_source_blocker_code,
+            normalized_source_bundle_ref,
+            normalized_same_shape_key,
+            normalized_reviewer_decision_ref,
         )
     if memory_kind == "reviewer-steering":
         if not approved:
@@ -438,6 +537,19 @@ def validate_write_gate(
             raise ValueError("reasoning-trace writes require --verdict")
         if normalized_abstraction_level not in {"shallow", "deep"}:
             raise ValueError("reasoning-trace writes require --abstraction-level shallow|deep")
+        if normalized_source_lane and normalized_source_lane not in {"tiny", "mirror", "deliberation"}:
+            raise ValueError("reasoning-trace --source-lane must be one of: tiny, mirror, deliberation")
+        if normalized_source_lane == "deliberation":
+            if not normalized_source_lane_attempt_id:
+                raise ValueError("deliberation reasoning-trace writes require --source-lane-attempt-id")
+            if not normalized_source_blocker_code:
+                raise ValueError("deliberation reasoning-trace writes require --source-blocker-code")
+            if not normalized_source_bundle_ref:
+                raise ValueError("deliberation reasoning-trace writes require --source-bundle-ref")
+            if not normalized_same_shape_key:
+                raise ValueError("deliberation reasoning-trace writes require --same-shape-key")
+            if not normalized_reviewer_decision_ref:
+                raise ValueError("deliberation reasoning-trace writes require --reviewer-decision-ref")
     return (
         bool(approved),
         normalized_why,
@@ -455,6 +567,12 @@ def validate_write_gate(
         normalized_reasoning,
         normalized_verdict,
         normalized_abstraction_level,
+        normalized_source_lane,
+        normalized_source_lane_attempt_id,
+        normalized_source_blocker_code,
+        normalized_source_bundle_ref,
+        normalized_same_shape_key,
+        normalized_reviewer_decision_ref,
     )
 
 
@@ -551,6 +669,18 @@ def render_memory_entry(entry: MemoryEntry) -> str:
         fields["verdict"] = entry.verdict
     if entry.abstraction_level:
         fields["abstraction_level"] = entry.abstraction_level
+    if entry.source_lane:
+        fields["source_lane"] = entry.source_lane
+    if entry.source_lane_attempt_id:
+        fields["source_lane_attempt_id"] = entry.source_lane_attempt_id
+    if entry.source_blocker_code:
+        fields["source_blocker_code"] = entry.source_blocker_code
+    if entry.source_bundle_ref:
+        fields["source_bundle_ref"] = entry.source_bundle_ref
+    if entry.same_shape_key:
+        fields["same_shape_key"] = entry.same_shape_key
+    if entry.reviewer_decision_ref:
+        fields["reviewer_decision_ref"] = entry.reviewer_decision_ref
     lines = [FRONTMATTER_DELIMITER]
     for key, value in fields.items():
         lines.append(f"{key} = {quote_frontmatter(value)}")
@@ -616,6 +746,12 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
     reasoning = normalize_text(metadata.get("reasoning"))
     verdict = normalize_text(metadata.get("verdict"))
     abstraction_level = normalize_text(metadata.get("abstraction_level"))
+    source_lane = normalize_text(metadata.get("source_lane"))
+    source_lane_attempt_id = normalize_text(metadata.get("source_lane_attempt_id"))
+    source_blocker_code = normalize_text(metadata.get("source_blocker_code"))
+    source_bundle_ref = normalize_text(metadata.get("source_bundle_ref"))
+    same_shape_key = normalize_text(metadata.get("same_shape_key"))
+    reviewer_decision_ref = normalize_text(metadata.get("reviewer_decision_ref"))
     if root:
         memory_id = normalize_text(metadata.get("id")) or path.relative_to(root).with_suffix("").as_posix()
     else:
@@ -645,6 +781,12 @@ def read_memory_entry(path: Path, *, root: Path | None = None) -> MemoryEntry | 
         reasoning=reasoning,
         verdict=verdict,
         abstraction_level=abstraction_level,
+        source_lane=source_lane,
+        source_lane_attempt_id=source_lane_attempt_id,
+        source_blocker_code=source_blocker_code,
+        source_bundle_ref=source_bundle_ref,
+        same_shape_key=same_shape_key,
+        reviewer_decision_ref=reviewer_decision_ref,
         path=path,
     )
 
@@ -675,6 +817,12 @@ def memory_entry_matches(entry: MemoryEntry, query: str) -> bool:
             entry.reasoning,
             entry.verdict,
             entry.abstraction_level,
+            entry.source_lane,
+            entry.source_lane_attempt_id,
+            entry.source_blocker_code,
+            entry.source_bundle_ref,
+            entry.same_shape_key,
+            entry.reviewer_decision_ref,
             "true" if entry.focused_test_green else "",
         ]
     ).casefold()
@@ -715,6 +863,12 @@ def entry_to_dict(entry: MemoryEntry, *, veto: dict[str, str] | None = None) -> 
         "reasoning": entry.reasoning,
         "verdict": entry.verdict,
         "abstraction_level": entry.abstraction_level,
+        "source_lane": entry.source_lane,
+        "source_lane_attempt_id": entry.source_lane_attempt_id,
+        "source_blocker_code": entry.source_blocker_code,
+        "source_bundle_ref": entry.source_bundle_ref,
+        "same_shape_key": entry.same_shape_key,
+        "reviewer_decision_ref": entry.reviewer_decision_ref,
     }
     if entry.path:
         data["path"] = str(entry.path)

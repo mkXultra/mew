@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, mirror lane-scoped replay bundles, and deliberation preflight/budget primitives landed. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, mirror bundles, deliberation controls, and Phase 3 internalization proof surface landed. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone; first side-project dogfood cohort now names implementation closeout completeness as the initial measured target. |
@@ -165,6 +165,20 @@ Current M6.13 evidence:
   Command-boundary tests now prove that `cmd_work_ai` persists reviewer
   commanded traces, automatic eligible traces, and no-auto fallback traces
   while still calling the tiny lane after the fallback.
+- The current Phase 3 internalization slice extends approved
+  `reasoning-trace` memory with additive lane provenance
+  (`source_lane`, lane attempt id, blocker code, bundle ref, same-shape key,
+  and reviewer decision ref). Existing M6.9 reasoning traces remain valid, but
+  `source_lane=deliberation` now requires the provenance needed to reconstruct
+  the internalization proof. Approved reasoning traces also append to
+  `.mew/durable/memory/reasoning_trace.jsonl`, preserving the M6.9/M6.13
+  durable ledger slot. A deterministic dogfood scenario records a hard
+  deliberation-assisted task, writes the reviewed trace, proves a later
+  same-shape task recalls it through provenance-aware active memory, and
+  runs the tiny write-ready planning path with a deterministic fake model that
+  receives the trace provenance in prompt context and emits a validated paired
+  patch draft with `deliberation_invoked=false`. This is a Phase 3 contract
+  surface, not yet a live-provider close proof.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
@@ -740,7 +754,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> deliberation Phase 2 -> live reviewer-command and automatic eligible attempt proof`
+`M6.13 -> Phase 3 internalization close gap -> convert deterministic proof into close-gate evidence`
 
 Acceptable near-term work:
 
@@ -749,6 +763,9 @@ Acceptable near-term work:
 - prove the deliberation call boundary with one reviewer-commanded attempt,
   one automatic eligible attempt, and one deliberate fallback while preserving
   tiny fallback
+- tighten the M6.13 close evidence so Phase 2 command-boundary proof and Phase
+  3 internalization proof are both reconstructable from status, tests, and
+  deterministic dogfood artifacts
 - prove old sessions and existing replay bundles with absent lane metadata keep
   tiny-compatible behavior at their read/report boundary
 - wire the minimal lane-attempt telemetry helper into future lane attempts only
@@ -790,6 +807,14 @@ Latest M6.13 source/test validation:
 - M6.13 deliberation live-control slice:
   `uv run pytest -q tests/test_deliberation.py tests/test_work_deliberation_loop.py tests/test_work_deliberation_cli.py --no-testmon`,
   `uv run ruff check src/mew/deliberation.py src/mew/work_loop.py src/mew/commands.py src/mew/cli.py tests/test_deliberation.py tests/test_work_deliberation_loop.py tests/test_work_deliberation_cli.py`,
+  and `git diff --check` passed.
+- M6.13 Phase 3 internalization proof slice:
+  `uv run pytest -q tests/test_memory.py -k 'reasoning_trace' --no-testmon`,
+  `uv run pytest -q tests/test_dogfood.py -k 'm6_13_deliberation_internalization or scenario_choices' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'compact_active_memory_preserves_reasoning_trace_provenance' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'write_ready_tiny or write_ready_fast_path or compact_active_memory_preserves_reasoning_trace_provenance' --no-testmon`,
+  `uv run python -m mew dogfood --scenario m6_13-deliberation-internalization --json`,
+  `uv run ruff check src/mew/typed_memory.py src/mew/work_session.py src/mew/work_loop.py src/mew/commands.py src/mew/cli.py src/mew/dogfood.py tests/test_memory.py tests/test_dogfood.py tests/test_work_session.py`,
   and `git diff --check` passed.
 - M6.14 side-project write-scope repair from GitHub issue `#1`:
   `uv run pytest -q tests/test_work_write_scope.py --no-testmon`,

@@ -13121,6 +13121,18 @@ def _format_memory_entry_show(item):
         lines.append(f"verdict: {item.get('verdict')}")
     if item.get("abstraction_level"):
         lines.append(f"abstraction_level: {item.get('abstraction_level')}")
+    if item.get("source_lane"):
+        lines.append(f"source_lane: {item.get('source_lane')}")
+    if item.get("source_lane_attempt_id"):
+        lines.append(f"source_lane_attempt_id: {item.get('source_lane_attempt_id')}")
+    if item.get("source_blocker_code"):
+        lines.append(f"source_blocker_code: {item.get('source_blocker_code')}")
+    if item.get("source_bundle_ref"):
+        lines.append(f"source_bundle_ref: {item.get('source_bundle_ref')}")
+    if item.get("same_shape_key"):
+        lines.append(f"same_shape_key: {item.get('same_shape_key')}")
+    if item.get("reviewer_decision_ref"):
+        lines.append(f"reviewer_decision_ref: {item.get('reviewer_decision_ref')}")
     if item.get("vetoed"):
         lines.append("vetoed: yes")
         lines.append(f"veto_reason: {item.get('veto_reason') or ''}")
@@ -13343,6 +13355,12 @@ def cmd_memory(args):
                     reasoning=args.reasoning or "",
                     verdict=args.verdict or "",
                     abstraction_level=args.abstraction_level or "",
+                    source_lane=args.source_lane or "",
+                    source_lane_attempt_id=args.source_lane_attempt_id or "",
+                    source_blocker_code=args.source_blocker_code or "",
+                    source_bundle_ref=args.source_bundle_ref or "",
+                    same_shape_key=args.same_shape_key or "",
+                    reviewer_decision_ref=args.reviewer_decision_ref or "",
                 )
             except ValueError as exc:
                 print(f"mew: {exc}", file=sys.stderr)
