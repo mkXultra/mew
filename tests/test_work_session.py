@@ -7098,6 +7098,10 @@ class WorkSessionTests(unittest.TestCase):
                 "unless the task explicitly requires a literal public string or security-sensitive marker",
                 verifier_prompt,
             )
+            self.assertIn("watch, continuous, polling, listen", verifier_prompt)
+            self.assertIn("bounded-loop or repeated-observation proof", verifier_prompt)
+            self.assertIn("interval/interrupt handling or output-rewrite evidence", verifier_prompt)
+            self.assertIn("do not accept internal mode flags alone", verifier_prompt)
 
         def assert_rollback_repair_guidance(repair_prompt):
             self.assertIn(

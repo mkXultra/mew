@@ -337,6 +337,23 @@ Current M6.16 evidence:
   `uv run ruff check src/mew/cli.py src/mew/commands.py tests/test_side_project_dogfood.py`,
   and `git diff --check`. Codex-ultra re-review reported no findings after
   the missing-input regression.
+- Task `#672` landed the GitHub issue `#12` watch/continuous-mode verifier
+  guidance slice as practical mew-first evidence. The normal, write-ready,
+  and tiny-draft work prompts now tell the implementation lane that tasks
+  involving watch, continuous, polling, listen, or other repeated modes must
+  include bounded-loop or repeated-observation proof of external behavior, plus
+  interval/interrupt handling or output-rewrite evidence where relevant, and
+  must not accept internal mode flags alone. Count this as practical
+  mew-first without rescue edits: session `#657` authored the paired
+  source/test patch, hit one stale `old_text_not_found` draft, then repaired
+  the same proposal after reviewer steer to retry exact anchors. Valid proof
+  passed:
+  `uv run pytest -q tests/test_work_session.py -k 'watch or continuous or behavior or verifier' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or write_ready_tiny_draft or write_ready or behavior or verifier' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check`. Codex-ultra review session
+  `019dcb20-3fec-7043-b508-a3ec5e8ceac4` reported no findings.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
