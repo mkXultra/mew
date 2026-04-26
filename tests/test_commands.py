@@ -507,6 +507,127 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(state.get("agent_runs") or [], [])
         self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
 
+    def test_task_propose_next_leaves_habit_template_refs_empty_without_repeated_evidence(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                candidate = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(proposal["memory_signal_refs"], [])
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["proposal"]["memory_signal_refs"], [])
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_attaches_habit_template_refs_to_non_record_and_record_proposals(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "Improve selector template alpha", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                prior_candidate = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "Improve selector template beta", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+                state = commands_module.load_state()
+                for task in state["tasks"]:
+                    if task["id"] == prior_candidate["id"]:
+                        task["status"] = "done"
+                state["selector_proposals"] = [
+                    {
+                        "id": 1,
+                        "previous_task_id": previous["id"],
+                        "proposed_task_id": prior_candidate["id"],
+                        "status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "worked before",
+                        "proposal": {
+                            "blocked": False,
+                            "selector_reason": "same template worked before",
+                            "proposed_task_id": prior_candidate["id"],
+                        },
+                    }
+                ]
+                state["selector_execution_attempts"] = [
+                    {
+                        "id": 1,
+                        "proposal_id": 1,
+                        "proposed_task_id": prior_candidate["id"],
+                        "status": "handoff_ready",
+                        "approval_status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "worked before",
+                        "next_command": f"./mew work {prior_candidate['id']} --start-session",
+                        "auto_run": False,
+                    }
+                ]
+                commands_module.save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    non_record_code = main(["task", "propose-next", str(previous["id"]), "--json"])
+                non_record_proposal = json.loads(stdout.getvalue())
+                state_after_non_record = commands_module.load_state()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    record_code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                record_proposal = json.loads(stdout.getvalue())
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        expected_refs = [
+            {
+                "kind": "selector_habit_template",
+                "proposal_id": 1,
+                "proposed_task_id": prior_candidate["id"],
+                "task_template": "coding:improve-selector",
+                "outcome": "handoff_ready",
+                "attempt_id": 1,
+                "reviewer_decision": "approved",
+            }
+        ]
+        self.assertEqual(non_record_code, 0)
+        self.assertEqual(record_code, 0)
+        self.assertEqual(non_record_proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(record_proposal["proposed_task_id"], candidate["id"])
+        self.assertTrue(non_record_proposal["approval_required"])
+        self.assertTrue(record_proposal["approval_required"])
+        self.assertEqual(non_record_proposal["memory_signal_refs"], expected_refs)
+        self.assertEqual(record_proposal["memory_signal_refs"], expected_refs)
+        self.assertEqual(len(state_after_non_record.get("selector_proposals") or []), 1)
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[-1]["proposal"]["memory_signal_refs"], expected_refs)
+        self.assertEqual(len(state.get("selector_execution_attempts") or []), 1)
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "done", "ready"])
+
     def test_task_propose_next_attaches_bounded_preference_signal_refs_from_reviewer_history(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -572,6 +572,117 @@ def _task_selector_attach_calibration_evidence_refs(proposal):
     return proposal
 
 
+_TASK_SELECTOR_HABIT_TEMPLATE_REF_LIMIT = 3
+
+
+def _task_selector_habit_task_template(task):
+    if not isinstance(task, dict):
+        return ""
+    kind = task_kind(task)
+    title = str(task.get("title") or "").lower()
+    tokens = []
+    current = []
+    for char in title:
+        if char.isalnum():
+            current.append(char)
+        elif current:
+            token = "".join(current)
+            if len(token) > 2:
+                tokens.append(token)
+            current = []
+    if current:
+        token = "".join(current)
+        if len(token) > 2:
+            tokens.append(token)
+    if not kind or len(tokens) < 2:
+        return ""
+    return f"{kind}:{'-'.join(tokens[:2])}"
+
+
+def _task_selector_habit_template_refs(state, proposal):
+    if not isinstance(state, dict) or not isinstance(proposal, dict):
+        return []
+    current_task_id = proposal.get("proposed_task_id")
+    current_template = _task_selector_habit_task_template(find_task(state, current_task_id))
+    if not current_template:
+        return []
+    attempts = state.get("selector_execution_attempts") or []
+    if not isinstance(attempts, list):
+        return []
+    attempts_by_proposal = {}
+    for attempt in attempts:
+        if not isinstance(attempt, dict):
+            continue
+        proposal_id = attempt.get("proposal_id")
+        if proposal_id is None:
+            continue
+        attempts_by_proposal.setdefault(str(proposal_id), []).append(attempt)
+    records = state.get("selector_proposals") or []
+    if not isinstance(records, list):
+        return []
+    refs = []
+    for record in reversed(records):
+        if not isinstance(record, dict):
+            continue
+        record_proposal = record.get("proposal") or {}
+        if not isinstance(record_proposal, dict):
+            record_proposal = {}
+        if record.get("status") == "blocked" or record_proposal.get("blocked"):
+            continue
+        proposal_id = record.get("id")
+        if proposal_id is None:
+            continue
+        record_task_id = record.get("proposed_task_id")
+        if record_task_id is None:
+            record_task_id = record_proposal.get("proposed_task_id")
+        if record_task_id is None or record_task_id == current_task_id:
+            continue
+        if _task_selector_habit_task_template(find_task(state, record_task_id)) != current_template:
+            continue
+        outcome_attempt = None
+        for attempt in reversed(attempts_by_proposal.get(str(proposal_id), [])):
+            if attempt.get("status") in ("handoff_ready", "rejected"):
+                outcome_attempt = attempt
+                break
+        if not outcome_attempt:
+            continue
+        ref = {
+            "kind": "selector_habit_template",
+            "proposal_id": proposal_id,
+            "proposed_task_id": record_task_id,
+            "task_template": current_template,
+            "outcome": str(outcome_attempt.get("status") or ""),
+        }
+        attempt_id = outcome_attempt.get("id")
+        if attempt_id is not None:
+            ref["attempt_id"] = attempt_id
+        reviewer_decision = (
+            outcome_attempt.get("reviewer_decision")
+            or record.get("reviewer_decision")
+            or outcome_attempt.get("approval_status")
+            or record.get("status")
+        )
+        if reviewer_decision:
+            ref["reviewer_decision"] = str(reviewer_decision)
+        refs.append(ref)
+        if len(refs) >= _TASK_SELECTOR_HABIT_TEMPLATE_REF_LIMIT:
+            break
+    return refs
+
+
+def _task_selector_attach_habit_template_refs(proposal, state):
+    if not isinstance(proposal, dict) or proposal.get("blocked"):
+        return proposal
+    refs = _task_selector_habit_template_refs(state, proposal)
+    if not refs:
+        return proposal
+    existing_refs = proposal.get("memory_signal_refs")
+    if not isinstance(existing_refs, list):
+        existing_refs = []
+    proposal["memory_signal_refs"] = existing_refs + refs
+    return proposal
+
+
 _TASK_SELECTOR_PREFERENCE_SIGNAL_REF_LIMIT = 3
 
 
@@ -1040,6 +1151,7 @@ def cmd_task_propose_next(args):
             if error:
                 print(error, file=sys.stderr)
                 return exit_code
+            _task_selector_attach_habit_template_refs(proposal, state)
             _task_selector_attach_calibration_evidence_refs(proposal)
             _record_task_selector_proposal(state, proposal)
             save_state(state)
@@ -1049,6 +1161,7 @@ def cmd_task_propose_next(args):
         if error:
             print(error, file=sys.stderr)
             return exit_code
+        _task_selector_attach_habit_template_refs(proposal, state)
         _task_selector_attach_calibration_evidence_refs(proposal)
 
     if getattr(args, "json", False):

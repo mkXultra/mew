@@ -138,6 +138,24 @@ Current M6.8.5 evidence:
   --record --json` produced `memory_signal_refs`, `failure_cluster_reason`, and
   `preference_signal_refs`; proposal `#19` was approved and executed to
   supervised handoff `#10` for task `#643`.
+- Task `#643` / session `#631` added the fourth read-only selector intelligence
+  signal. Non-blocked `mew task propose-next` proposals now attach bounded
+  `selector_habit_template` entries into existing `memory_signal_refs` from
+  real `selector_proposals`, `selector_execution_attempts`, and tasks, for both
+  non-record and `--record` output. Missing repeated evidence leaves
+  `memory_signal_refs` empty; no new top-level proposal field was added.
+- #643 mew-first note: #631 first drifted into a rejected
+  `selector_governance_tags` synthetic schema, then produced a close but
+  record-only habit patch. M6.14 repair task `#644` landed write-ready recovery
+  cues in commit `161180b`, so explicit `read_file` / `first read` /
+  `exact source text` recovery guidance triggered the needed exact read instead
+  of another wait. The retried paired source/test patch was authored by mew and
+  applied after reviewer approval. Count this as `success_after_substrate_fix`;
+  no supervisor product patch.
+- #643 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py tests/test_commands.py`,
+  and `git diff --check`.
 
 Closed M6.8 evidence:
 
