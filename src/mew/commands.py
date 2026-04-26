@@ -679,6 +679,59 @@ def _finish_task_selector_execution_rejection(args, attempt, message):
     return 1
 
 
+def _task_selector_recent_handoffs(proposals, attempts, limit=5):
+    proposals_by_id = {}
+    for proposal_record in proposals:
+        proposal_id = _task_selector_execution_proposal_id_value(proposal_record.get("id"))
+        proposals_by_id[proposal_id] = proposal_record
+
+    handoffs = []
+    for attempt in reversed(attempts):
+        if attempt.get("status") != "handoff_ready":
+            continue
+        proposal_id = _task_selector_execution_proposal_id_value(attempt.get("proposal_id"))
+        proposal_record = proposals_by_id.get(proposal_id)
+        if not proposal_record:
+            continue
+        approval_status = attempt.get("approval_status") or proposal_record.get("status")
+        reviewer_decision = attempt.get("reviewer_decision") or proposal_record.get("reviewer_decision")
+        if approval_status != "approved" and reviewer_decision != "approved":
+            continue
+        proposal = proposal_record.get("proposal") or {}
+        if not isinstance(proposal, dict):
+            proposal = {}
+        selector_reason = (
+            proposal_record.get("selector_reason")
+            or proposal.get("selector_reason")
+            or proposal.get("selection_reason")
+            or proposal.get("reason")
+            or ""
+        )
+        reviewer_reason = attempt.get("reviewer_reason")
+        if reviewer_reason is None:
+            reviewer_reason = proposal_record.get("reviewer_reason", "")
+        proposed_task_id = attempt.get("proposed_task_id")
+        if proposed_task_id is None:
+            proposed_task_id = proposal_record.get("proposed_task_id")
+        handoffs.append(
+            {
+                "proposal_id": proposal_id,
+                "previous_task_id": proposal_record.get("previous_task_id"),
+                "proposed_task_id": proposed_task_id,
+                "selector_reason": selector_reason,
+                "approval_status": approval_status,
+                "reviewer_decision": reviewer_decision,
+                "reviewer_reason": reviewer_reason,
+                "reviewed_at": attempt.get("reviewed_at") or proposal_record.get("reviewed_at"),
+                "next_command": attempt.get("next_command"),
+                "timestamp": attempt.get("timestamp"),
+            }
+        )
+        if len(handoffs) >= limit:
+            break
+    return handoffs
+
+
 def task_selector_chain_status(state):
     proposals = list(state.get("selector_proposals") or [])
     attempts = list(state.get("selector_execution_attempts") or [])
@@ -697,6 +750,7 @@ def task_selector_chain_status(state):
         },
         "latest_proposal": proposals[-1] if proposals else None,
         "latest_attempt": attempts[-1] if attempts else None,
+        "recent_handoffs": _task_selector_recent_handoffs(proposals, attempts),
     }
 
 
@@ -715,6 +769,10 @@ def _format_task_selector_chain_status(status):
             lines.append(f"{key}: null")
         else:
             lines.append(f"{key}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}")
+    lines.append(
+        "recent_handoffs: "
+        f"{json.dumps(status.get('recent_handoffs') or [], ensure_ascii=False, sort_keys=True)}"
+    )
     return "\n".join(lines)
 
 

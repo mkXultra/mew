@@ -427,7 +427,10 @@ class CommandTests(unittest.TestCase):
                         "previous_task_id": 1,
                         "proposed_task_id": 2,
                         "status": "approved",
-                        "proposal": {"blocked": False},
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "looks safe",
+                        "reviewed_at": "2026-04-26T00:00:00Z",
+                        "proposal": {"blocked": False, "selector_reason": "candidate is ready"},
                     },
                     {
                         "id": 2,
@@ -443,6 +446,12 @@ class CommandTests(unittest.TestCase):
                         "proposal_id": 1,
                         "proposed_task_id": 2,
                         "status": "handoff_ready",
+                        "approval_status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "looks safe",
+                        "reviewed_at": "2026-04-26T00:00:00Z",
+                        "timestamp": "2026-04-26T00:01:00Z",
+                        "next_command": "./mew work 2 --start-session",
                         "auto_run": False,
                     },
                     {
@@ -476,6 +485,23 @@ class CommandTests(unittest.TestCase):
         )
         self.assertEqual(status["latest_proposal"], state_before["selector_proposals"][-1])
         self.assertEqual(status["latest_attempt"], state_before["selector_execution_attempts"][-1])
+        self.assertEqual(
+            status["recent_handoffs"],
+            [
+                {
+                    "proposal_id": 1,
+                    "previous_task_id": 1,
+                    "proposed_task_id": 2,
+                    "selector_reason": "candidate is ready",
+                    "approval_status": "approved",
+                    "reviewer_decision": "approved",
+                    "reviewer_reason": "looks safe",
+                    "reviewed_at": "2026-04-26T00:00:00Z",
+                    "next_command": "./mew work 2 --start-session",
+                    "timestamp": "2026-04-26T00:01:00Z",
+                }
+            ],
+        )
         self.assertEqual(state_after, state_before)
 
     def test_task_approve_proposal_cli_records_reviewer_decision_without_dispatch(self):

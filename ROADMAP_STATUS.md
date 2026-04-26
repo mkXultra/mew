@@ -238,6 +238,22 @@ Current M6.8 evidence:
   --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
   --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
   tests/test_commands.py`, and `git diff --check`.
+- Task `#637` / session `#623` continued the auto-selected handoff chain from
+  proposal `#11`. The reviewer approved `#636 -> #637`, `execute-proposal`
+  recorded `handoff_ready`, and mew extended `mew task selector-status` with a
+  joined `recent_handoffs` list for close-gate auditing.
+- #637 exposes each recent approved handoff with `proposal_id`,
+  `previous_task_id`, `proposed_task_id`, `selector_reason`, reviewer metadata,
+  `next_command`, and timestamp. This keeps proof evidence read-only and avoids
+  M6.8.5 selector intelligence or dispatch behavior.
+- #637 dogfood: `mew task selector-status --json` reported
+  `approved_handoffs=3`, `rejected_attempts=2`, and recent handoffs for
+  proposal `#11` (`#636 -> #637`), proposal `#9` (`#635 -> #636`), and
+  proposal `#7` (`#634 -> #635`).
+- #637 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
+  tests/test_commands.py`, and `git diff --check`.
 
 M6.8 is done when:
 
@@ -361,11 +377,11 @@ Non-goals for the next session:
 
 ## Latest Validation
 
-Latest committed code baseline: `c4b2f57 Record selector handoff attempts`.
+Latest committed code baseline: `6267516 Summarize selector chain status`.
 
-Current uncommitted change: M6.8 selector proof status CLI v0 in
-`src/mew/commands.py`, `src/mew/cli.py`, `tests/test_commands.py`, and this
-roadmap status file; validation listed above under task `#636`.
+Current uncommitted change: M6.8 selector recent handoff chain v0 in
+`src/mew/commands.py`, `tests/test_commands.py`, and this roadmap status file;
+validation listed above under task `#637`.
 
 Observed in this cleanup session:
 
@@ -374,7 +390,7 @@ Observed in this cleanup session:
   `docs/archive/ROADMAP_STATUS_detailed_2026-04-26.md`
 
 Behavioral validation for the active source/test change is listed above under
-task `#636`.
+task `#637`.
 
 ## Maintenance Rule
 
