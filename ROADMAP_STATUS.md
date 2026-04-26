@@ -41,12 +41,12 @@ is tracked below.
 | 6.6 Coding Competence: Codex CLI Parity | `done` | Bootstrap, comparator slots, and frozen Codex CLI side-by-side batch passed with recorded caveats. |
 | 6.7 Supervised Self-Hosting Loop | `done` | Reviewer-gated supervised iterations, reentry, and detached close-watch satisfied the gate. |
 | 6.8 Task Chaining: Supervised Self-Selection | `done` | Close gate passed via `docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`. |
-| 6.8.5 Selector Intelligence and Curriculum Integration | `in_progress` | Failure, preference, calibration, habit-template, compiled-runner, and preference draft-prep refs landed; close audit pending. |
+| 6.8.5 Selector Intelligence and Curriculum Integration | `done` | Close gate passed via `docs/M6_8_5_CLOSE_GATE_AUDIT_2026-04-26.md`. |
 | 6.9 Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`; Phase 4 moved to M6.8.5. |
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `not_started` | Deferred until M6.8.5 or direct hard-blocker evidence shows it would shorten work. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | Active after M6.8.5 close; start with additive lane foundation and unchanged tiny behavior. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
@@ -57,27 +57,37 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.8.5 Selector Intelligence and Curriculum Integration**.
+Active work: **M6.13 High-Effort Deliberation Lane**.
 
-Why M6.8.5 is active:
+Why M6.13 is active:
 
-- M6.8 closed the safe reviewer-approved task handoff contract.
-- M6.9 Phase 4 curriculum/habit/preference work was deliberately deferred
-  until that contract existed, and now belongs here.
-- The current resident capability gap is task quality: mew can chain safe
-  bounded tasks, but selection is still shallow and mostly depends on prepared
-  ready tasks.
+- M6.8.5 closed the selector intelligence gate and the prior M6.13 deferral
+  trigger has fired.
+- M6.9 durable memory and M6.11 loop stabilization are usable, but hard
+  work-loop blockers still need an explicit, bounded escalation lane.
+- The next resident capability gap is controlled high-effort reasoning: mew
+  should be able to ask for it, account for it, fall back safely, and
+  internalize useful results without making it the default path.
 
-Current M6.8.5 target:
+Current M6.13 target:
 
-- use the closed M6.8 selector ledger as the approval/scope substrate
-- add read-only selector intelligence signals from failure clusters,
-  preference evidence, and reviewer history
-- keep reviewer approval mandatory before handoff execution
-- keep selector-owned output away from roadmap-status, milestone-close, and
-  governance files
+- keep the existing tiny lane authoritative and backward compatible
+- add lane metadata and a lane registry without changing tiny behavior
+- prove mirror-lane identity/bundles as non-authoritative before any
+  deliberation write path
+- bind deliberation attempts to explicit model, effort, timeout, budget, and
+  schema contracts
+- allow deliberation only for reviewer-commanded or eligible semantic blockers,
+  with fallback to tiny on refusal, timeout, budget, validation, or review
+  failure
+- convert useful deliberation output into reviewed M6.9 reasoning traces,
+  never raw transcript storage
 
-Current M6.8.5 evidence:
+Current M6.13 chain:
+
+`M6.13 -> additive lane foundation -> preserve tiny behavior while adding lane metadata`
+
+Current M6.8.5 close evidence:
 
 - Task `#639` / session `#627` landed the first read-only selector
   intelligence signal after bounded M6.14 substrate repair. Non-blocked
@@ -397,28 +407,28 @@ M6.8 is done when:
 M6.8 close result: **done**. The recorded audit is
 `docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`.
 
+M6.8.5 close result: **done**. The recorded audit is
+`docs/M6_8_5_CLOSE_GATE_AUDIT_2026-04-26.md`.
+
 ## Next Milestone
 
-Current scheduled milestone: **M6.8.5 Selector Intelligence and Curriculum
-Integration**.
+Current scheduled milestone: **M6.13 High-Effort Deliberation Lane**.
 
-M6.8.5 absorbs M6.9 Phase 4. Do not reopen M6.9 just to implement these:
+M6.13 starts now because the M6.8.5 deferral trigger has fired. The first slice
+should be additive and low-risk:
 
-- failure-clustered curriculum
-- preference-store retrieval from reviewer diffs
-- habit compilation v0
-- read-only M6.12/M6.14 selector evidence
-- selector traces that explain why a task was chosen
-
-M6.8.5 may now start because M6.8 core proved the safe chained approval loop.
+- introduce lane state/registry with `tiny` as the legacy default
+- prove old sessions and replay bundles normalize to tiny without migration
+- prove a mirror lane can record non-authoritative lane identity/bundles
+  without changing tiny-lane behavior
 
 ## Post-Close Deferred Ledger
 
 | Origin | Deferred Item | Trigger / Timing | Recommended Home | Blocks Current? |
 |---|---|---|---|---|
-| M6.9 Phase 4 | Failure-clustered curriculum | After M6.8 core selector can propose, approve, reject, and continue a chain | M6.8.5 Phase 1 | Not M6.8 core; yes for intelligent chaining |
-| M6.9 Phase 4 | Preference-store retrieval from reviewer diffs | After selector traces can carry `preference_signal_refs` and draft preparation has a bounded injection point | M6.8.5 Phase 2 | No |
-| M6.9 Phase 4 | Habit compilation v0 | After repeated task-template evidence identifies stable candidates with low variance | M6.8.5 Phase 3 | No |
+| M6.9 Phase 4 | Failure-clustered curriculum | Closed by M6.8.5 task `#639` | M6.8.5 done | No |
+| M6.9 Phase 4 | Preference-store retrieval from reviewer diffs | Closed by M6.8.5 tasks `#641` and `#646` | M6.8.5 done | No |
+| M6.9 Phase 4 | Habit compilation v0 | Closed by M6.8.5 tasks `#643` and `#645` | M6.8.5 done | No |
 | M6.10 | Explorer D1 / read-only exploration reducer | Only if M6.8 or M6.8.5 evidence shows read-only exploration churn is a measured blocker again | M6.10 follow-up or M6.8.5 helper slice | No |
 | M6.11 | Full concurrent / streaming executor | After selector/curriculum proof shows measured idle or concurrency pain while loop attribution is stable | Later execution milestone | No |
 | M6.11 | MemoryExplore protocol full freeze/replay and agentization | Keep read-only provider for now; full agentization waits until a second planner will not obscure loop failures | M10 or later memory/explorer milestone | No |
@@ -485,32 +495,33 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.8.5 -> selector intelligence -> read-only failure-cluster signal v0`
+`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
 
 Acceptable near-term work:
 
-- add the smallest read-only selector signal that helps mew choose better
-  bounded tasks without changing the M6.8 approval contract
-- start with failure-cluster evidence because it already exists in M6.12/M6.14
-  surfaces and can be attached as `failure_cluster_reason`
-- keep all selector execution reviewer-approved; no auto-dispatch
+- create the smallest mew-first task that adds lane metadata with `tiny` as the
+  default
+- prove old sessions and existing replay bundles remain compatible
+- add mirror-lane recording as non-authoritative evidence only after tiny
+  compatibility is proven
 
 Non-goals for the next session:
 
 - autonomous execution or auto-merge
-- M6.13 deliberation lane
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
 - M7 inbound-signal work
-- broad refactors or polish not mapped to the M6.8.5 gate
+- raw deliberation transcript storage
+- broad refactors or polish not mapped to the M6.13 gate
 
 ## Latest Validation
 
-Latest committed code baseline: `ab73636 Summarize selector proof streak`.
+Latest committed code baseline: `d22d09c Surface selector preferences in work
+resume`.
 
-Current uncommitted change: M6.8 close-gate audit and roadmap-status focus
-switch to M6.8.5. No source/test code changed after `ab73636`.
+Current uncommitted change: M6.8.5 close-gate audit and roadmap-status focus
+switch to M6.13. No source/test code changed after `d22d09c`.
 
 Observed in this cleanup session:
 
@@ -518,8 +529,8 @@ Observed in this cleanup session:
 - detailed pre-compression `ROADMAP_STATUS.md` was archived to
   `docs/archive/ROADMAP_STATUS_detailed_2026-04-26.md`
 
-Behavioral validation for the latest source/test change is listed above under
-task `#638`; this closeout edit is documentation/status only.
+Behavioral validation for the latest source/test changes is listed above under
+tasks `#639` through `#646`; this closeout edit is documentation/status only.
 
 ## Maintenance Rule
 
