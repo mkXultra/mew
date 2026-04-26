@@ -337,6 +337,17 @@ def _proposal_search_text(proposal):
     return "\n".join(pieces).casefold()
 
 
+def _required_term_variants(term):
+    normalized = str(term or "").strip().casefold()
+    if not normalized:
+        return []
+    variants = {normalized}
+    if "-" in normalized or "_" in normalized:
+        variants.add(normalized.replace("-", "_"))
+        variants.add(normalized.replace("_", "-"))
+    return sorted(variants)
+
+
 def _validate_required_terms(todo, proposal):
     required_terms = list(((todo.get("source") or {}).get("required_terms") or []))
     if not required_terms:
@@ -345,7 +356,8 @@ def _validate_required_terms(todo, proposal):
     missing = [
         term
         for term in required_terms
-        if str(term or "").strip() and str(term or "").strip().casefold() not in proposal_text
+        if str(term or "").strip()
+        and not any(variant in proposal_text for variant in _required_term_variants(term))
     ]
     if not missing:
         return {}

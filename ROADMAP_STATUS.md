@@ -196,6 +196,18 @@ Current M6.13 evidence:
   `uv run pytest -q tests/test_work_session.py -k "broad_read_after_search_miss_guard_reuses_latest_same_path_window or work_session_runs_read_only_tools_and_journals_results" --no-testmon`,
   `uv run ruff check src/mew/work_session.py src/mew/commands.py tests/test_work_session.py`, and
   `git diff --check`.
+- While retrying `#653`, required-term validation exposed one more bounded
+  M6.14 repair: natural-language task wording used `proof-summary`, while the
+  scoped Python source and tests naturally use `proof_summary`. Task `#655`
+  repaired required-term validation to accept hyphen/underscore spelling
+  variants without weakening genuinely missing anchors. This is direct Codex
+  substrate repair, not mew-first autonomy credit; retry target remains
+  task `#653`.
+- #655 validation passed:
+  `uv run pytest -q tests/test_patch_draft.py -k "required_term or task_goal_terms" --no-testmon`,
+  `uv run pytest -q tests/test_patch_draft.py --no-testmon`,
+  `uv run ruff check src/mew/patch_draft.py tests/test_patch_draft.py`, and
+  `git diff --check`.
 - Resident architecture framing was recorded in
   `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`. Claude Ultra and
   Codex Ultra both reviewed the direction as `approve_with_changes`; the
