@@ -1028,6 +1028,8 @@ def _work_deliberation_preflight_decision(
     model,
     timeout,
     guidance="",
+    deliberation_requested=False,
+    auto_deliberation=True,
 ):
     work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
     resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
@@ -1062,7 +1064,8 @@ def _work_deliberation_preflight_decision(
             "max_attempts_per_todo": WORK_DELIBERATION_MAX_ATTEMPTS_PER_TODO,
             "attempts_used": len(previous_attempts),
         },
-        reviewer_commanded=_work_deliberation_reviewer_commanded(guidance),
+        reviewer_commanded=bool(deliberation_requested) or _work_deliberation_reviewer_commanded(guidance),
+        auto_deliberation_enabled=bool(auto_deliberation),
         task_shape=_work_deliberation_task_shape((context or {}).get("task") or {}, guidance=guidance),
         repeated=draft_attempts > 1,
         refusal_classified=blocker_code == "model_returned_refusal" and bool(blocker.get("detail")),
@@ -1128,6 +1131,8 @@ def _attempt_work_deliberation_lane(
     model_backend,
     timeout,
     guidance="",
+    deliberation_requested=False,
+    auto_deliberation=True,
     progress=None,
     current_time="",
 ):
@@ -1137,6 +1142,8 @@ def _attempt_work_deliberation_lane(
         model=model,
         timeout=timeout,
         guidance=guidance,
+        deliberation_requested=deliberation_requested,
+        auto_deliberation=auto_deliberation,
     )
     if not decision:
         return {}
@@ -6561,6 +6568,8 @@ def plan_work_model_turn(
     progress_model_deltas=True,
     pre_model_metrics_sink=None,
     compact_live=False,
+    deliberation_requested=False,
+    auto_deliberation=True,
 ):
     current_time = now_iso()
     capabilities = {
@@ -6675,6 +6684,8 @@ def plan_work_model_turn(
         model_backend=model_backend,
         timeout=timeout,
         guidance=guidance,
+        deliberation_requested=deliberation_requested,
+        auto_deliberation=auto_deliberation,
         progress=progress,
         current_time=current_time,
     )

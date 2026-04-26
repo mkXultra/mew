@@ -151,6 +151,11 @@ Current M6.13 evidence:
   budget, or state-limit cases record fallback trace data and leave tiny
   available. `cmd_work_ai` now persists the returned session trace patch
   through `apply_work_session_trace_patch`.
+- The current deliberation control slice adds explicit work-loop controls for
+  the live proof: `--deliberate` requests a reviewer-commanded deliberation
+  attempt, and `--no-auto-deliberation` disables automatic escalation for the
+  run without blocking explicit reviewer commands. This makes the next proof
+  commands observable instead of relying only on free-text guidance markers.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
@@ -769,6 +774,10 @@ Latest M6.13 source/test validation:
   `uv run pytest -q tests/test_work_session.py -k 'deliberation or active_work_todo or lane' --no-testmon`,
   `uv run pytest -q tests/test_work_session.py -k 'plan_work_model_turn' --no-testmon`,
   `uv run ruff check src/mew/work_loop.py src/mew/work_session.py src/mew/commands.py tests/test_work_deliberation_loop.py`,
+  and `git diff --check` passed.
+- M6.13 deliberation live-control slice:
+  `uv run pytest -q tests/test_deliberation.py tests/test_work_deliberation_loop.py tests/test_work_deliberation_cli.py --no-testmon`,
+  `uv run ruff check src/mew/deliberation.py src/mew/work_loop.py src/mew/commands.py src/mew/cli.py tests/test_deliberation.py tests/test_work_deliberation_loop.py tests/test_work_deliberation_cli.py`,
   and `git diff --check` passed.
 - M6.14 side-project write-scope repair from GitHub issue `#1`:
   `uv run pytest -q tests/test_work_write_scope.py --no-testmon`,

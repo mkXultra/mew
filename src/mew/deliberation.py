@@ -222,6 +222,7 @@ def _blocker_is_eligible(
     blocker_code: str,
     *,
     reviewer_commanded: bool,
+    auto_deliberation_enabled: bool,
     task_shape: str,
     repeated: bool,
     refusal_classified: bool,
@@ -241,6 +242,9 @@ def _blocker_is_eligible(
             return False, "schema_retry_required"
         return True, "reviewer_commanded"
 
+    if not auto_deliberation_enabled:
+        return False, "auto_deliberation_disabled"
+
     if blocker_code in AUTOMATIC_ELIGIBLE_BLOCKER_CODES:
         return True, "automatic_eligible"
     if blocker_code == "no_material_change" and (repeated or task_shape in ABSTRACT_TASK_SHAPES):
@@ -259,6 +263,7 @@ def evaluate_deliberation_request(
     binding: Mapping[str, object] | None,
     budget: Mapping[str, object] | None,
     reviewer_commanded: bool = False,
+    auto_deliberation_enabled: bool = True,
     task_shape: str = "",
     repeated: bool = False,
     refusal_classified: bool = False,
@@ -317,6 +322,7 @@ def evaluate_deliberation_request(
     eligible, eligibility_reason = _blocker_is_eligible(
         code,
         reviewer_commanded=bool(reviewer_commanded),
+        auto_deliberation_enabled=bool(auto_deliberation_enabled),
         task_shape=task_shape,
         repeated=bool(repeated),
         refusal_classified=bool(refusal_classified),

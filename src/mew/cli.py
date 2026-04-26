@@ -1153,6 +1153,16 @@ def build_parser():
         help="ACT phase mode for --ai; default is deterministic in --live and model otherwise",
     )
     work_parser.add_argument("--work-guidance", help="extra guidance for --ai work mode")
+    work_parser.add_argument(
+        "--deliberate",
+        action="store_true",
+        help="request one bounded deliberation-lane attempt for an eligible active blocker",
+    )
+    work_parser.add_argument(
+        "--no-auto-deliberation",
+        action="store_true",
+        help="disable automatic deliberation escalation for this work run; explicit --deliberate still obeys budget",
+    )
     work_parser.add_argument("--progress", action="store_true", help="stream work progress and command output lines to stderr")
     work_parser.add_argument("--quiet", action="store_true", help="suppress default work progress lines unless --progress is set")
     work_parser.add_argument("--stream-model", action="store_true", help="stream model text deltas to progress output when supported")
