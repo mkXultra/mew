@@ -122,6 +122,21 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_work_session.py tests/test_commands.py -k 'finish or same_surface_audit or work_finish' --no-testmon`,
   `uv run ruff check src/mew/commands.py tests/test_work_session.py`, and
   `git diff --check`.
+- Task `#658` attempted the side-project issue `#2` closeout-completeness
+  prompt slice mew-first. Session `#644` produced two rejected paired dry-run
+  attempts: the first edited the write-ready tiny draft prompt with
+  side-project-specific wording, and the retry still substituted
+  side-pj/internal-plumbing anti-schema wording instead of finish/closeout
+  evidence. Count this as `product_progress_supervisor_rescue` with no
+  autonomy credit. The supervisor-owned bounded patch adds normal
+  `build_work_think_prompt` guidance requiring user-facing implementation
+  tasks to account for acceptance criteria, README/usage docs, CLI
+  stdout/output-file behavior, tests run, and unverified modes before finish.
+  Focused proof:
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py tests/test_commands.py -k 'work_think_prompt or finish or same_surface_audit or work_finish' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
