@@ -28,7 +28,7 @@ def _record(**overrides: object) -> dict[str, object]:
             "branch_or_worktree": "../mew-side-companion",
             "task_summary": "Add journal markdown scaffold.",
             "task_kind": "coding",
-            "codex_cli_used_as": "reviewer",
+            "codex_cli_used_as": "operator",
             "first_edit_latency": 12.25,
             "read_turns_before_edit": 3,
             "files_changed": ["src/mew_companion_log/journal.py"],
@@ -68,6 +68,7 @@ def test_template_contains_required_measurement_fields() -> None:
         "commit",
     ):
         assert field in template
+    assert template["codex_cli_used_as"] == "operator"
 
 
 def test_append_and_summarize_side_project_dogfood_ledger(tmp_path: Path) -> None:
@@ -94,7 +95,7 @@ def test_append_and_summarize_side_project_dogfood_ledger(tmp_path: Path) -> Non
     assert summary["rows_total"] == 2
     assert summary["gate"]["clean_or_practical"] == 1
     assert summary["gate"]["rescue_edits_total"] == 2
-    assert summary["counts"]["codex_cli_used_as"] == {"reviewer": 1, "fallback": 1}
+    assert summary["counts"]["codex_cli_used_as"] == {"operator": 1, "fallback": 1}
     assert summary["attempts"][0]["task_id"] == 703
     assert "Side-project dogfood telemetry" in text
     assert "failure_class: cached_window_integrity=1 none_observed=1" in text

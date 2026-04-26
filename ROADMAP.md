@@ -872,7 +872,8 @@ Done when:
   does not require EV-based automatic routing in v0
 - side-project dogfood can record a mew-first implementation attempt with
   task/session id, side project, worktree or branch, Codex CLI role
-  (`reviewer`, `comparator`, `verifier`, `fallback`, or `implementer`),
+  (`operator`, `reviewer`, `comparator`, `verifier`, `fallback`, or
+  `implementer`),
   first-edit latency, read turns before edit, files changed, tests run,
   reviewer rejections, verifier failures, rescue edits, outcome, failure
   class, repair requirement, proof artifacts, and commit
@@ -908,8 +909,8 @@ Architecture boundary:
 - M6.13.2 does not build the side project, choose EV routing, auto-integrate
   Codex CLI, or harden the implementation lane. It only installs the
   measurement contract. Side-project implementation remains mew-first, while
-  Codex CLI/Codex is recorded separately as reviewer, comparator, verifier,
-  fallback, or implementer.
+  Codex CLI/Codex is recorded separately as operator, reviewer, comparator,
+  verifier, fallback, or implementer.
 
 ## Milestone 6.14: Mew-First Failure Repair Ledger
 

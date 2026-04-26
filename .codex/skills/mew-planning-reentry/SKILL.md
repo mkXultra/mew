@@ -40,7 +40,8 @@ When deciding what to do next, apply this order:
 4. Durable project decisions in mew memory and project docs such as
    `docs/ADOPT_FROM_REFERENCES.md`.
 5. Current active task/session state and the latest context checkpoint.
-6. `mew focus`, latest friction, and recent model recommendations.
+6. Open side-project problem issues, if side-project dogfood is active.
+7. `mew focus`, latest friction, and recent model recommendations.
 
 Do not let a fresh active task, latest checkpoint, or external model comment override the session charter unless the user explicitly changed direction.
 Do not let `mew focus` or an attractive recent suggestion override the active
@@ -51,6 +52,12 @@ Do not treat a checkpoint, a commit boundary, or a clean worktree as a reason
 to return control to the user during a long session.
 If the latest meaningful event was a git commit, run `mew-post-commit-check`
 before deciding whether to report or continue.
+If side-project dogfood is active, check the side-project problem issue queue
+before selecting a new task. These issues are exceptions, not normal progress:
+only open issues with the `[side-pj]` title prefix should affect reentry, and
+they should interrupt the current milestone only when they point to a core mew
+blocker, an M6.14 repair candidate, or M6.16 implementation-lane evidence that
+must be collected now.
 Do not emit user-visible commentary/status updates during a long session unless
 the saved output gate explicitly allows reporting. Commentary counts as
 returning control.
@@ -73,6 +80,18 @@ git status --short
 sed -n '1,120p' ROADMAP.md
 sed -n '1,140p' ROADMAP_STATUS.md
 ```
+
+If side-project implementation dogfood is active, also inspect the local status
+and open problem issues before selecting the next task:
+
+```bash
+sed -n '1,180p' SIDE_PROJECT_ROADMAP_STATUS.md
+./mew side-dogfood report --json
+gh issue list --state open --search "[side-pj] in:title" --json number,title,url,updatedAt
+```
+
+If `gh` is unavailable or offline, continue with local status and record that
+the issue queue was not checked.
 
 If these do not explain deferred structural work, add a targeted project-memory search:
 
@@ -117,6 +136,9 @@ Summarize only:
   task closes
 - next safest action
 - the one-line chain `milestone -> criterion -> task`
+- side-project issue queue status when side-project dogfood is active:
+  no open problem issue, issue checked but unavailable, or issue number(s) that
+  require M6.14/M6.16/main-side action
 - output gate: whether this is an internal checkpoint or a user-visible report
 - remaining long-session budget and the next allowed report trigger
 

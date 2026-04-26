@@ -112,9 +112,11 @@ Current M6.13 evidence:
   `src/mew/side_project_dogfood.py`, `mew side-dogfood template`,
   `mew side-dogfood append`, and `mew side-dogfood report`. The default
   ledger path is `proof-artifacts/side_project_dogfood_ledger.jsonl`. This is
-  ready for the first side-project dogfood task; Codex CLI implementation must
-  be recorded via `codex_cli_used_as` and does not count as mew-first autonomy
-  credit.
+  ready for the first side-project dogfood task; side-project Codex CLI should
+  normally be recorded as `operator` when it drives mew from the side-project
+  directory. Direct Codex CLI implementation must be recorded via
+  `codex_cli_used_as` as `implementer` or `fallback` and does not count as
+  mew-first autonomy credit.
 
 - Task `#647` / session `#634` landed the first additive WorkTodo lane field
   on `_normalize_active_work_todo`: missing or empty lane normalizes to
@@ -698,8 +700,9 @@ Non-goals for the next session:
 - memory explore agentization
 - provider-specific prompt caching
 - side-project implementation before M6.13.2 telemetry exists
-- automatic Codex CLI integration or treating Codex CLI implementation as
-  mew-first autonomy credit
+- treating Codex CLI implementation as mew-first autonomy credit; side-project
+  Codex CLI may operate mew, review, compare, or verify, but direct product
+  implementation is a separate role
 - M7 inbound-signal work
 - raw deliberation transcript storage
 - broad refactors not tied to lane telemetry or a repeated M6.14 repair-class

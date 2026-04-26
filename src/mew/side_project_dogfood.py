@@ -14,6 +14,7 @@ SCHEMA_VERSION = 1
 CODEX_CLI_ROLES = frozenset(
     {
         "reviewer",
+        "operator",
         "comparator",
         "verifier",
         "fallback",
@@ -80,7 +81,7 @@ def dogfood_record_template() -> dict[str, Any]:
         "branch_or_worktree": "../mew-side-companion",
         "task_summary": "Implement one bounded side-project slice.",
         "task_kind": "coding",
-        "codex_cli_used_as": "reviewer",
+        "codex_cli_used_as": "operator",
         "first_edit_latency": None,
         "read_turns_before_edit": None,
         "files_changed": [],
