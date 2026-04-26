@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "task_id": 1,
+  "session_id": 3,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "SP1 scaffold mew-companion-log with README, fixture-driven markdown CLI, fixture, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 17.0,
+  "read_turns_before_edit": 1.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_session.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --output /tmp/mew-companion-log-report.md"
+  ],
+  "reviewer_rejections": 2,
+  "verifier_failures": 2,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "readme_command_polish_after_successful_scaffold",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/1",
+    ".mew/sessions/2",
+    ".mew/sessions/3",
+    "experiments/mew-companion-log/.mew-dogfood/reports/1-scaffold-practical-after-write-scope-repair.json",
+    "https://github.com/mkXultra/mew/issues/1"
+  ],
+  "commit": "",
+  "notes": "Issue #1 closed after origin/main repair. The retry used --model gpt-5.5 and current-repo ./mew only. Mew authored the scaffold and subsequent README reviewer fixes. Codex acted as operator/reviewer/verifier only. Final focused tests and README usage commands pass with repo-local UV_CACHE_DIR and --no-testmon. No Codex product rescue edits were used."
+}

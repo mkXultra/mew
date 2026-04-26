@@ -1,0 +1,14 @@
+{
+  "id": "sp1-sample",
+  "title": "SP1 scaffold mew-companion-log",
+  "status": "in-progress",
+  "goal": "Create an isolated companion log scaffold under experiments/mew-companion-log.",
+  "highlights": [
+    "Confirmed the side project stays outside core mew source files.",
+    "Rendered a fixture-driven markdown report with minimal Python dependencies."
+  ],
+  "next_steps": [
+    "Run the focused pytest command for the side project.",
+    "Iterate on the report shape after the first scaffold lands."
+  ]
+}
