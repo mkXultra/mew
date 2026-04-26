@@ -1275,6 +1275,24 @@ def _read_file_is_broad(parameters):
     return offset in (None, 0)
 
 
+def _search_anchor_replacement_parameters(path, search_call, requested_parameters):
+    search_result = (search_call or {}).get("result") or {}
+    line = _search_result_first_match_line(search_result)
+    if line is None:
+        return {}
+    line_start = max(1, line - 5)
+    replacement_parameters = dict(requested_parameters or {})
+    replacement_parameters["path"] = path
+    replacement_parameters["line_start"] = line_start
+    replacement_parameters["line_count"] = 80
+    replacement_parameters.pop("offset", None)
+    requested_max_chars = _optional_clamped_int_work_parameter(replacement_parameters, "max_chars", 1, 1_000_000)
+    if requested_max_chars is not None:
+        replacement_parameters["max_chars"] = requested_max_chars
+    replacement_parameters["reason"] = "use latest positive search_text anchor after later zero-match search"
+    return replacement_parameters
+
+
 def broad_read_after_search_miss_guard(session, tool, parameters, *, task=None):
     if not isinstance(session, dict) or tool != "read_file":
         return {}
@@ -1303,6 +1321,17 @@ def broad_read_after_search_miss_guard(session, tool, parameters, *, task=None):
     search_result = latest_search.get("result") or {}
     if search_result.get("matches"):
         return {}
+
+    latest_positive_search = None
+    for call in reversed(calls):
+        if not isinstance(call, dict) or call.get("tool") != "search_text" or call.get("status") != "completed":
+            continue
+        if _working_memory_target_path_text(work_call_path(call)) != path:
+            continue
+        result = call.get("result") or {}
+        if result.get("matches"):
+            latest_positive_search = call
+            break
 
     latest_window = None
     latest_window_call = None
@@ -1334,6 +1363,20 @@ def broad_read_after_search_miss_guard(session, tool, parameters, *, task=None):
         if max_chars_candidates:
             replacement_parameters["max_chars"] = max(max_chars_candidates)
         replacement_parameters["reason"] = "reuse latest cached window after zero-match search instead of broad read"
+    elif latest_positive_search is not None:
+        replacement_parameters = _search_anchor_replacement_parameters(path, latest_positive_search, parameters)
+        if replacement_parameters:
+            suggested_next = (
+                f"read_file path={path} "
+                f"line_start={replacement_parameters['line_start']} "
+                f"line_count={replacement_parameters['line_count']}"
+            )
+        else:
+            suggested_next = (
+                f"search_text path={path} query={query}"
+                if query
+                else f"search_text path={path} query=<symbol-or-literal>"
+            )
     else:
         suggested_next = (
             f"search_text path={path} query={query}" if query else f"search_text path={path} query=<symbol-or-literal>"
@@ -2958,24 +3001,22 @@ def build_low_yield_observation_warnings(calls, *, threshold=3, limit=3):
 
 def _search_result_first_match_line(result):
     matches = (result or {}).get("matches") or []
-    if not matches:
-        return None
-    first = matches[0]
-    if isinstance(first, dict):
-        for key in ("line", "line_start"):
-            value = first.get(key)
-            try:
-                if value is not None:
-                    return int(value)
-            except (TypeError, ValueError):
-                continue
-    if isinstance(first, str):
-        parts = first.split(":", 2)
-        if len(parts) >= 2:
-            try:
-                return int(parts[1])
-            except (TypeError, ValueError):
-                pass
+    for match in matches:
+        if isinstance(match, dict):
+            for key in ("line", "line_start"):
+                value = match.get(key)
+                try:
+                    if value is not None:
+                        return max(1, int(value))
+                except (TypeError, ValueError):
+                    continue
+        if isinstance(match, str):
+            parts = match.split(":", 2)
+            if len(parts) >= 2:
+                try:
+                    return max(1, int(parts[1]))
+                except (TypeError, ValueError):
+                    continue
     return None
 
 
