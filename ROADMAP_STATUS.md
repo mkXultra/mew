@@ -154,6 +154,18 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py tests/test_metrics.py -k 'task_goal or implementation_lane or metrics' --no-testmon`,
   `uv run ruff check src/mew/commands.py src/mew/work_loop.py tests/test_work_session.py tests/test_work_rejection_frontier.py`,
   and `git diff --check`.
+- Task `#661` is a follow-on supervisor-owned M6.16/M6.14 repair from task
+  `#660` / session `#645`: after switching `mew work` to
+  `~/.codex/auth.json`, the model got past the expired `auth.pro.json` token
+  but write-ready tiny draft blocked on `task_goal_term_missing` for
+  `ROADMAP_STATUS`. The repair adds `roadmap_status` to the evidence-source
+  required-term stopwords and extends the focused evidence-source test so
+  document names do not become mandatory patch anchors. This is substrate
+  progress only; retry `#660` mew-first after commit. Focused proof:
+  `uv run pytest -q tests/test_work_session.py -k evidence_source_scope_terms --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py tests/test_work_rejection_frontier.py -k 'evidence_source_scope_terms or task_goal_substitution or required_terms' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

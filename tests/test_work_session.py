@@ -6993,7 +6993,7 @@ class WorkSessionTests(unittest.TestCase):
         context["task"]["description"] = (
             "M6.16 implementation-lane bottleneck reduction from side-pj issue #2. "
             "Strengthen finish guidance for CLI stdout/output-file behavior. "
-            "Keep this prompt-only and test-only."
+            "ROADMAP_STATUS is only evidence. Keep this prompt-only and test-only."
         )
         context["guidance"] = "Draft the paired source/test patch. Do not add side-pj-specific wording."
 
@@ -7004,6 +7004,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("side-project", required_terms)
         self.assertNotIn("implementation-lane", required_terms)
         self.assertNotIn("prompt-only", required_terms)
+        self.assertNotIn("ROADMAP_STATUS", required_terms)
         self.assertNotIn("test-only", required_terms)
         self.assertIn("user-facing", required_terms)
         self.assertIn("output-file", required_terms)

@@ -111,6 +111,7 @@ WORK_TASK_GOAL_TERM_STOPWORDS = {
     "github-issue",
     "implementation-lane",
     "prompt-only",
+    "roadmap_status",
     "side-pj",
     "side-project",
     "test-only",
