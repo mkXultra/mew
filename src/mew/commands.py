@@ -517,6 +517,38 @@ def _task_selector_failure_cluster_reason():
     return ""
 
 
+_TASK_SELECTOR_PREFERENCE_SIGNAL_REF_LIMIT = 3
+
+
+def _task_selector_preference_signal_refs(state):
+    records = state.get("selector_proposals") or []
+    if not isinstance(records, list):
+        return []
+    refs = []
+    for record in reversed(records):
+        if not isinstance(record, dict):
+            continue
+        proposal_id = record.get("id")
+        if proposal_id is None:
+            continue
+        decision = record.get("reviewer_decision")
+        if decision not in ("approved", "rejected"):
+            continue
+        reason = record.get("reviewer_reason")
+        if not reason:
+            continue
+        refs.append(
+            {
+                "proposal_id": proposal_id,
+                "decision": decision,
+                "reason": clip_output(str(reason), 160),
+            }
+        )
+        if len(refs) >= _TASK_SELECTOR_PREFERENCE_SIGNAL_REF_LIMIT:
+            break
+    return refs
+
+
 def format_task_selector_proposal(proposal):
     keys = [
         "previous_task_id",
@@ -919,6 +951,7 @@ def _build_task_selector_next_proposal(state, args):
         )
         proposal = build_task_selector_proposal(previous_task, candidate_task, selector_reason)
         if not proposal.get("blocked"):
+            proposal["preference_signal_refs"] = _task_selector_preference_signal_refs(state)
             failure_cluster_reason = _task_selector_failure_cluster_reason()
             if failure_cluster_reason:
                 proposal["failure_cluster_reason"] = failure_cluster_reason
@@ -935,6 +968,7 @@ def _build_task_selector_next_proposal(state, args):
         proposal = build_task_selector_proposal(previous_task, task, selector_reason)
         if proposal.get("blocked"):
             continue
+        proposal["preference_signal_refs"] = _task_selector_preference_signal_refs(state)
         failure_cluster_reason = _task_selector_failure_cluster_reason()
         if failure_cluster_reason:
             proposal["failure_cluster_reason"] = failure_cluster_reason

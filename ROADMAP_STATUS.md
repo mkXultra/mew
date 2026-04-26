@@ -101,6 +101,25 @@ Current M6.8.5 evidence:
   --record --json` produced `failure_cluster_reason:
   preflight_gap:9 from proof-artifacts/m6_11_calibration_ledger.jsonl` while
   keeping `approval_required=true`, `blocked=false`, and no auto-dispatch.
+- Task `#641` / session `#629` added the second read-only selector
+  intelligence signal. Non-blocked `mew task propose-next` proposals now attach
+  bounded `preference_signal_refs` from existing selector reviewer history
+  (`reviewer_decision` + `reviewer_reason`) so the next reviewer sees compact
+  preference evidence without opening raw state.
+- #641 mew-first note: session `#628` first drifted toward the previous
+  `failure_cluster_reason` target, and #629 needed reviewer steering for a
+  stale `src/mew/task_selector.py` path plus one rejected non-ASCII truncation
+  draft. The final paired source/test patch was authored by mew and applied
+  after reviewer approval; count this as `success_mew_first_with_reviewer_revisions`.
+- #641 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py tests/test_commands.py`,
+  and `git diff --check`.
+- #641 dogfood evidence: `mew task propose-next 641 --candidate-task-id 642
+  --record --json` produced both `failure_cluster_reason` and three
+  `preference_signal_refs`; proposal `#18` was approved and executed to
+  supervised handoff `#9` for task `#642`. A first candidate title containing a
+  forbidden governance surface word was correctly blocked before retitling.
 
 Closed M6.8 evidence:
 

@@ -397,9 +397,87 @@ class CommandTests(unittest.TestCase):
         proposal = json.loads(stdout.getvalue())
         self.assertEqual(proposal["proposed_task_id"], candidate["id"])
         self.assertEqual(proposal["failure_cluster_reason"], "")
+        self.assertEqual(proposal["preference_signal_refs"], [])
         records = state.get("selector_proposals") or []
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["proposal"]["failure_cluster_reason"], "")
+        self.assertEqual(records[0]["proposal"]["preference_signal_refs"], [])
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_attaches_bounded_preference_signal_refs_from_reviewer_history(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                candidate = json.loads(stdout.getvalue())["task"]
+                long_reason = "needs narrower selector evidence " * 12
+                state = commands_module.load_state()
+                state["selector_proposals"] = [
+                    {
+                        "id": 1,
+                        "status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "first approved",
+                    },
+                    {
+                        "id": 2,
+                        "status": "rejected",
+                        "reviewer_decision": "rejected",
+                        "reviewer_reason": "second rejected",
+                    },
+                    {
+                        "id": 3,
+                        "status": "proposed",
+                        "reviewer_decision": "",
+                        "reviewer_reason": "not reviewed",
+                    },
+                    {
+                        "id": 4,
+                        "status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": long_reason,
+                    },
+                    {
+                        "id": 5,
+                        "status": "rejected",
+                        "reviewer_decision": "rejected",
+                        "reviewer_reason": "",
+                    },
+                    {
+                        "id": 6,
+                        "status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "latest approved",
+                    },
+                ]
+                commands_module.save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        expected_refs = [
+            {"proposal_id": 6, "decision": "approved", "reason": "latest approved"},
+            {"proposal_id": 4, "decision": "approved", "reason": commands_module.clip_output(long_reason, 160)},
+            {"proposal_id": 2, "decision": "rejected", "reason": "second rejected"},
+        ]
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(proposal["preference_signal_refs"], expected_refs)
+        self.assertIn("output truncated", proposal["preference_signal_refs"][1]["reason"])
+        self.assertTrue(all(ord(ch) < 128 for ch in proposal["preference_signal_refs"][1]["reason"]))
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 7)
+        self.assertEqual(records[-1]["proposal"]["preference_signal_refs"], expected_refs)
         self.assertEqual(state.get("agent_runs") or [], [])
         self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
 
