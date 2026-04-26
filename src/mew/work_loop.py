@@ -86,7 +86,7 @@ WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS = 120.0
 WORK_DELIBERATION_REASONING_EFFORT = "high"
 WORK_DELIBERATION_MAX_ATTEMPTS_PER_TODO = 1
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
-WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
+WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v4"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT_ENV = "MEW_WRITE_READY_TINY_DRAFT_REASONING_EFFORT"
 WORK_WRITE_READY_RECENT_WINDOWS_PER_TARGET_PATH = 3
@@ -6043,6 +6043,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "Return only JSON. Do not use markdown.\n"
         "Write-ready tiny draft lane is active.\n"
         "Return exactly one patch artifact for the active scoped implementation slice.\n"
+        "Do not return work action JSON; top-level kind must be patch_proposal or patch_blocker, not action/tools.\n"
         "Allowed kinds are patch_proposal or patch_blocker.\n"
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts for patch content.\n"
         "If active_memory is present, use it only as distilled reasoning guidance for choosing the narrow patch shape; do not read memory files or copy memory metadata into code.\n"
