@@ -169,6 +169,7 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertIn("2026-04-22", str(second_path))
                 self.assertIn(f"session-{session_id}", first_path.parts)
                 self.assertIn(f"todo-{todo_id}", first_path.parts)
+                self.assertNotIn("lane-tiny", first_path.parts)
                 self.assertIn("attempt-1", str(first_path))
                 self.assertIn("attempt-2", str(second_path))
 
@@ -208,7 +209,11 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                         )
 
                 self.assertTrue(metadata_path)
-                base_dir = Path(metadata_path).parent
+                metadata_file = Path(metadata_path)
+                self.assertIn("lane-mirror", metadata_file.parts)
+                self.assertIn(f"session-{session_id}", metadata_file.parts)
+                self.assertIn(f"todo-{todo_id}", metadata_file.parts)
+                base_dir = metadata_file.parent
                 self.assertEqual(json.loads((base_dir / "todo.json").read_text(encoding="utf-8")), todo)
                 self.assertEqual(
                     json.loads((base_dir / "proposal.json").read_text(encoding="utf-8")),
@@ -241,6 +246,13 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(metadata["lane_role"], lane_view.role)
                 self.assertEqual(metadata["lane_schema_version"], 1)
                 self.assertEqual(metadata["lane_attempt_id"], f"{session_id}:{todo_id}:1")
+                self.assertEqual(metadata["lane_parent_attempt_id"], "")
+                self.assertEqual(metadata["lane_decision"], "shadow_only")
+                self.assertFalse(metadata["lane_authoritative"])
+                self.assertTrue(metadata["lane_supported"])
+                self.assertEqual(metadata["lane_layout"], "lane_scoped")
+                self.assertFalse(metadata["lane_write_capable"])
+                self.assertEqual(metadata["lane_fallback_lane"], "tiny")
                 self.assertTrue(metadata["calibration_counted"])
                 self.assertEqual(metadata["calibration_exclusion_reason"], "")
                 self.assertEqual(metadata["attempt"], 1)
@@ -303,6 +315,57 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(empty_metadata["lane_role"], tiny_lane_view.role)
                 self.assertEqual(empty_metadata["lane_schema_version"], 1)
                 self.assertEqual(empty_metadata["lane_attempt_id"], f"{session_id}:{todo_id}:2")
+                self.assertEqual(empty_metadata["lane_decision"], "authoritative")
+                self.assertTrue(empty_metadata["lane_authoritative"])
+                self.assertEqual(empty_metadata["lane_layout"], "legacy")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_model_failure_replay_uses_lane_scoped_path_for_mirror(self):
+        session = {
+            "id": "s-12",
+            "task_id": "task-12",
+            "active_work_todo": {"id": "todo-12-1", "lane": "mirror"},
+        }
+        model_turn = {
+            "id": "78",
+            "started_at": "2026-04-22T09:00:00Z",
+            "finished_at": "2026-04-22T09:01:00Z",
+            "model_metrics": {"write_ready_fast_path": True},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                    report_path = write_work_model_failure_replay(
+                        session=session,
+                        model_turn=model_turn,
+                        exc=RuntimeError("boom"),
+                    )
+
+                self.assertTrue(report_path)
+                report_file = Path(report_path)
+                self.assertIn("2026-04-22", report_file.parts)
+                self.assertIn("session-s-12", report_file.parts)
+                self.assertIn("lane-mirror", report_file.parts)
+                self.assertIn("todo-todo-12-1", report_file.parts)
+                self.assertIn("turn-78", report_file.parts)
+                self.assertEqual(report_file.parent.name, "attempt-1")
+
+                report = json.loads(report_file.read_text(encoding="utf-8"))
+                self.assertEqual(report["lane"], "mirror")
+                self.assertEqual(report["lane_role"], "mirror")
+                self.assertEqual(report["lane_schema_version"], 1)
+                self.assertEqual(report["lane_attempt_id"], "s-12:78:1")
+                self.assertEqual(report["lane_parent_attempt_id"], "")
+                self.assertEqual(report["lane_decision"], "shadow_only")
+                self.assertFalse(report["lane_authoritative"])
+                self.assertTrue(report["lane_supported"])
+                self.assertEqual(report["lane_layout"], "lane_scoped")
+                self.assertFalse(report["lane_write_capable"])
+                self.assertEqual(report["lane_fallback_lane"], "tiny")
             finally:
                 os.chdir(old_cwd)
 
