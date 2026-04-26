@@ -3594,6 +3594,15 @@ def finish_broad_read_after_search_miss_guard(state, session, tool, parameters, 
     )
 
 
+def broad_read_guard_replacement_parameters(guard):
+    if not isinstance(guard, dict):
+        return {}
+    parameters = guard.get("replacement_parameters")
+    if not isinstance(parameters, dict) or not parameters:
+        return {}
+    return dict(parameters)
+
+
 BATCH_READ_WORK_TOOLS = READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS
 BATCH_WRITE_WORK_TOOLS = WRITE_WORK_TOOLS
 
@@ -3769,6 +3778,10 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             task = work_session_task(state, session)
             broad_read_guard = broad_read_after_search_miss_guard(session, action_type, parameters, task=task)
             repeat_guard = {}
+            replacement_parameters = broad_read_guard_replacement_parameters(broad_read_guard)
+            if replacement_parameters:
+                parameters = replacement_parameters
+                broad_read_guard = {}
             if broad_read_guard:
                 tool_call = finish_broad_read_after_search_miss_guard(
                     state,
@@ -5582,6 +5595,13 @@ def cmd_work_ai(args):
                 turn["coerced_dry_run_reason"] = "paired_test_steer"
             broad_read_guard = broad_read_after_search_miss_guard(session, action_type, parameters, task=task)
             repeat_guard = {}
+            replacement_parameters = broad_read_guard_replacement_parameters(broad_read_guard)
+            if replacement_parameters:
+                parameters = replacement_parameters
+                action = dict(action)
+                action.update(parameters)
+                action["type"] = action_type
+                broad_read_guard = {}
             if broad_read_guard:
                 tool_call = finish_broad_read_after_search_miss_guard(
                     state,

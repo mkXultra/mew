@@ -1194,6 +1194,7 @@ def broad_read_after_search_miss_guard(session, tool, parameters, *, task=None):
         return {}
 
     latest_window = None
+    latest_window_call = None
     for call in reversed(calls):
         if not isinstance(call, dict) or call.get("tool") != "read_file" or call.get("status") != "completed":
             continue
@@ -1201,12 +1202,27 @@ def broad_read_after_search_miss_guard(session, tool, parameters, *, task=None):
             continue
         latest_window = _read_file_call_line_window(call)
         if latest_window is not None:
+            latest_window_call = call
             break
 
     query = search_result.get("query") or (latest_search.get("parameters") or {}).get("query") or ""
+    replacement_parameters = {}
     if latest_window is not None:
         line_start, line_end = latest_window
-        suggested_next = f"read_file path={path} line_start={line_start} line_count={line_end - line_start + 1}"
+        line_count = line_end - line_start + 1
+        suggested_next = f"read_file path={path} line_start={line_start} line_count={line_count}"
+        replacement_parameters = dict(parameters)
+        replacement_parameters["path"] = path
+        replacement_parameters["line_start"] = line_start
+        replacement_parameters["line_count"] = line_count
+        replacement_parameters.pop("offset", None)
+        latest_parameters = (latest_window_call or {}).get("parameters") or {}
+        requested_max_chars = _optional_clamped_int_work_parameter(parameters, "max_chars", 1, 1_000_000)
+        latest_max_chars = _optional_clamped_int_work_parameter(latest_parameters, "max_chars", 1, 1_000_000)
+        max_chars_candidates = [item for item in (requested_max_chars, latest_max_chars) if item is not None]
+        if max_chars_candidates:
+            replacement_parameters["max_chars"] = max(max_chars_candidates)
+        replacement_parameters["reason"] = "reuse latest cached window after zero-match search instead of broad read"
     else:
         suggested_next = (
             f"search_text path={path} query={query}" if query else f"search_text path={path} query=<symbol-or-literal>"
@@ -1226,6 +1242,7 @@ def broad_read_after_search_miss_guard(session, tool, parameters, *, task=None):
         "guard_reason": (
             "reuse the last exact window or reformulate the search instead of restarting from the top of the file"
         ),
+        "replacement_parameters": replacement_parameters,
     }
 
 

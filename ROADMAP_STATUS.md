@@ -182,6 +182,20 @@ Current M6.13 evidence:
   `uv run pytest -q tests/test_work_session.py -k "write_ready or required_terms" --no-testmon`,
   `uv run ruff check src/mew/work_replay.py src/mew/work_loop.py tests/test_work_replay.py tests/test_work_session.py`, and
   `git diff --check`.
+- Task `#653` / session `#639` exposed another bounded M6.14 repair-class
+  blocker while attempting the proof-summary read/report lane slice: after
+  complete cached windows existed, the model requested a broad `read_file` on a
+  path whose latest same-path `search_text` had zero matches, and the
+  broad-read guard failed the step instead of coercing to the known cached
+  line-window. Task `#654` repaired that loop substrate by attaching safe
+  replacement parameters to the broad-read guard and executing the narrowed
+  cached-window read when available. This is direct Codex substrate repair, not
+  mew-first autonomy credit; retry target remains task `#653`.
+- #654 validation passed:
+  `uv run pytest -q tests/test_work_session.py -k "broad_read_after_search_miss_guard or write_ready" --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "broad_read_after_search_miss_guard_reuses_latest_same_path_window or work_session_runs_read_only_tools_and_journals_results" --no-testmon`,
+  `uv run ruff check src/mew/work_session.py src/mew/commands.py tests/test_work_session.py`, and
+  `git diff --check`.
 - Resident architecture framing was recorded in
   `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`. Claude Ultra and
   Codex Ultra both reviewed the direction as `approve_with_changes`; the

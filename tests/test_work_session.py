@@ -17,6 +17,7 @@ from unittest.mock import patch
 from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
+    broad_read_guard_replacement_parameters,
     format_work_cli_controls,
     format_work_cockpit_controls,
     format_work_live_step_result,
@@ -4210,6 +4211,15 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(
             guard["suggested_next"],
             "read_file path=src/mew/work_session.py line_start=3200 line_count=26",
+        )
+        self.assertEqual(
+            broad_read_guard_replacement_parameters(guard),
+            {
+                "path": "src/mew/work_session.py",
+                "line_start": 3200,
+                "line_count": 26,
+                "reason": "reuse latest cached window after zero-match search instead of broad read",
+            },
         )
         self.assertIn("latest search_text for this target path returned zero matches", guard["message"])
 
