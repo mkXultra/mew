@@ -84,11 +84,21 @@ def _task_id(block: str) -> int | None:
     return int(match.group(1) or match.group(2))
 
 
+def _has_attempt_entry_prefix(block: str) -> bool:
+    first_line = next((line for line in block.splitlines() if line.strip()), "")
+    first_line = _norm(first_line)
+    return (
+        re.match(r"^- (?:task|follow-up) `?#\d+`?(?:\s|$)", first_line) is not None
+        or re.match(r"^- #\d+(?:\s|$)", first_line) is not None
+        or re.match(r"^- retry after `?#\d+`?(?:\s|$)", first_line) is not None
+    )
+
+
 def _is_attempt_block(block: str) -> bool:
     lowered = _norm(block)
     if "substrate repair" in lowered or "write-ready refresh repair" in lowered:
         return False
-    if "task `#" not in lowered and "follow-up `#" not in lowered and "retry after" not in lowered:
+    if not _has_attempt_entry_prefix(block):
         return False
     return any(
         marker in lowered

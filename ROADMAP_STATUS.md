@@ -192,8 +192,8 @@ Current M6.16 evidence:
   `./mew metrics --implementation-lane --json`, and `git diff --check`.
   Codex-ultra re-review reported no findings after confirming `#660` is in
   the mew-first attempt window and counted as a practical success.
-- Task `#663` exposed a new M6.16/M6.14 substrate blocker before product
-  editing: after a same-path positive `search_text` on
+- The first `#663` retry exposed a new M6.16/M6.14 substrate blocker before
+  product editing: after a same-path positive `search_text` on
   `src/mew/mew_first_calibration.py`, a later same-path zero-match
   `search_text` caused the broad-read guard to hard-fail a top-of-file
   `read_file` instead of reusing the positive search anchor. Task `#664`
@@ -205,6 +205,24 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_work_session.py -k 'broad_read_after_search_miss' --no-testmon`,
   `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
   `git diff --check`. Codex-ultra re-review reported no findings.
+- Task `#663` then landed as bounded mew-first implementation evidence for
+  M6.16 measurement quality after the `#664` blocker fix. It ignores narrative
+  metric/status bullets that merely mention a task id, while preserving real
+  attempt-entry prefixes such as `- Task #...`, `- follow-up #...`, and
+  `- #639 mew-first note`. Count this as `success_after_substrate_fix`: the
+  fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without product rescue edits after rejecting two
+  wrong-target drafts. Valid proof passed:
+  `uv run pytest -q tests/test_mew_first_calibration.py -k "narrative or attempt_window or substrate or success_after" --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_metrics.py -k 'narrative or attempt_window or substrate or success_after or mew_first or metrics' --no-testmon`,
+  `uv run ruff check src/mew/mew_first_calibration.py tests/test_mew_first_calibration.py`,
+  `./mew metrics --mew-first --limit 100 --json`,
+  `./mew metrics --implementation-lane --json`, and `git diff --check`.
+  The failed `uv run python -m unittest tests.test_mew_first_calibration`
+  command was an invalid inferred verifier because this module contains pytest
+  tests, not a product regression. Codex-ultra re-review reported no findings
+  after adding explicit `follow-up #...` prefix coverage.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
