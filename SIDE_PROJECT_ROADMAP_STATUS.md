@@ -19,21 +19,22 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP6 Mew State Companion Export | `done` | State-brief mode landed clean: static mew-state-like fixture, README usage, stdout/output-file behavior, and focused tests are in place without live `.mew` access. |
 | SP7 Multi-Fixture Companion Bundles | `done` | Bundle mode landed practical: static manifest, deterministic grouping/order, missing-fixture behavior, README usage, stdout/output-file proof, and focused tests are in place. |
 | SP8 Multi-Day Companion Archive | `done` | Archive-index mode landed practical: static multi-day fixture, day/surface/next-action grouping, empty-day behavior, README usage, stdout/output-file proof, and focused tests are in place. |
-| SP9 Issue and Dogfood Ledger Digest | `not_started` | Next planned slice: summarize fixture-backed dogfood rows and `[side-pj]` issue summaries for reader-facing evidence. |
-| SP10 Companion Export Contract | `not_started` | Planned after SP9: document and test the stable local input/output contract without importing core mew. |
+| SP9 Issue and Dogfood Ledger Digest | `done` | Dogfood-digest mode landed practical: static dogfood rows, `[side-pj]` issue summaries, outcome/failure-class/rescue-edits grouping, README usage, stdout/output-file proof, and focused tests are in place. |
+| SP10 Companion Export Contract | `not_started` | Next planned slice: document and test the stable local input/output contract without importing core mew. |
 | SP11 Second Side-Project Gate | `not_started` | Planned final gate: decide whether to continue this project, start a second side project, or pause side-project work. |
 
 ## Active Focus
 
-Active side-project focus: **SP9 Issue and Dogfood Ledger Digest**.
+Active side-project focus: **SP10 Companion Export Contract**.
 
 Current target:
 
-- extend `mew-companion-log` with a deterministic dogfood digest that summarizes
-  fixture-backed side-project ledger rows and `[side-pj]` issue summaries while
-  keeping all implementation inside `experiments/mew-companion-log`
-- use static fixture data only; do not query GitHub live from the side-project
-  CLI, do not read live `.mew` state, and do not edit core mew
+- document the stable local input/output contract for all
+  `mew-companion-log` modes, including report, journal, dream, research,
+  state, bundle, archive, and dogfood surfaces
+- keep schema examples local to `experiments/mew-companion-log`; do not query
+  GitHub live from the side-project CLI, do not read live `.mew` state, and do
+  not edit core mew
 - use SP6-SP11 as the next side-project roadmap arc before considering a
   second isolated side project
 - route the already-fixed structural write-scope blocker as closed issue `#1`
@@ -50,8 +51,8 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
-  six `mew-companion-log` rows on 2026-04-26: `rows_total=6`, one `failed`,
-  three `practical`, two `clean`, `success_rate=0.833`,
+  ten `mew-companion-log` rows on 2026-04-26: `rows_total=10`, one `failed`,
+  six `practical`, three `clean`, `success_rate=0.9`,
   `structural_repairs_required=1`, and `rescue_edits_total=0`.
 - `side-pj-mew-impl` skill exists at
   `.codex/skills/side-pj-mew-impl/SKILL.md`.
@@ -217,27 +218,53 @@ Current target:
   search were also verified.
 - Reusable polish issue opened:
   `https://github.com/mkXultra/mew/issues/5`.
+- Task `#9` / sessions `#13` through `#17` added the SP9 issue and dogfood
+  ledger digest with Codex CLI as `operator` and mew as first implementer.
+  Session `#13` stopped before product edits after a duplicated-context edit
+  failure and same-file write-batch wait, so Codex restarted fresh. Session
+  `#14` authored the final `--mode dogfood-digest` renderer, static dogfood
+  digest fixture, README usage/output-file examples, failure-class grouping
+  tests, issue-link rendering tests, stdout/output-file tests, and fixture
+  shape assertions under `experiments/mew-companion-log`. Reviewer follow-up in
+  sessions `#15` through `#17` was required to preserve canonical
+  `rescue_edits` semantics and align static issue summaries with real side-pj
+  issue `#4` and `#5`.
+- Dogfood digest local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/9-dogfood-digest-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `10`;
+  outcome `practical`, failure class
+  `dogfood_digest_ledger_semantics_repair_after_write_batch_retries`,
+  `rescue_edits=0`.
+- Dogfood digest verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `30 passed`. Dogfood-digest stdout, dogfood-digest `--output`,
+  `git diff --check`, and a scoped no-core/no-live/no-network/no-crawl coupling
+  search were also verified.
+- Reusable polish issue opened:
+  `https://github.com/mkXultra/mew/issues/6`.
 
 ## Missing Proof
 
-- SP1, SP2, SP3, SP4, SP5, SP6, SP7, and SP8 are closed for the first `mew-companion-log`
-  cohort.
-- SP9 has not started. It still needs a bounded task, mew-first implementation,
-  focused verifier, local report, ledger row, and status update.
-- SP10-SP11 are planned but intentionally wait for SP9 evidence.
+- SP1, SP2, SP3, SP4, SP5, SP6, SP7, SP8, and SP9 are closed for the first
+  `mew-companion-log` cohort.
+- SP10 has not started. It still needs a bounded task, mew-first
+  implementation, focused verifier, local report, ledger row, and status
+  update.
+- SP11 is planned but intentionally waits for SP10 evidence.
 
 ## Next Action
 
-Start SP9:
+Start SP10:
 
-1. define task `#9` for a fixture-driven dogfood digest mode under
+1. define task `#10` for a companion export contract under
    `experiments/mew-companion-log`
 2. run current-repo `./mew` mew-first with `--model gpt-5.5`, using
    `--allow-read experiments/mew-companion-log` and
    `--allow-write experiments/mew-companion-log`
-3. require outcome/failure-class/rescue-edit grouping, issue-link rendering,
-   README usage, stdout proof, output-file proof, focused tests, local report,
-   ledger row, and issue extraction for any reusable polish finding
+3. require documented input fixture schema and output markdown contract for
+   all companion-log modes, local examples, tests proving every documented mode
+   still renders and writes output files, local report, ledger row, and issue
+   extraction for any reusable polish finding
 
 ## Non-Goals
 

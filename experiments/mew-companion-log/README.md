@@ -61,19 +61,26 @@ Render the SP8 multi-day archive index from its static manifest:
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_archive.json --mode archive-index
 ```
 
+Render the SP9 dogfood digest from static side-project dogfood rows and `[side-pj]` issue summaries:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_dogfood_digest.json --mode dogfood-digest
+```
+
 Write markdown to a file:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --output report.md
 ```
 
-The output-file contract also works for alternate modes, including the static research digest, SP6 state brief, SP7 bundle, and SP8 archive index:
+The output-file contract also works for alternate modes, including the static research digest, SP6 state brief, SP7 bundle, SP8 archive index, and SP9 dogfood digest:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode research-digest --output research-digest.md
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_mew_state.json --mode state-brief --output state-brief.md
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_bundle.json --mode bundle --output companion-bundle.md
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_archive.json --mode archive-index --output companion-archive-index.md
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_dogfood_digest.json --mode dogfood-digest --output dogfood-digest.md
 ```
 
 ## Verify
@@ -84,4 +91,4 @@ Run the focused side-project tests:
 UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py
 ```
 
-The script uses only the Python standard library. The research digest uses only static fixture data, the state brief uses only `fixtures/sample_mew_state.json` rather than live `.mew` state, the bundle mode reads only explicit local fixture paths declared by `fixtures/sample_bundle.json`, and the archive index reads only `fixtures/sample_archive.json` while listing explicit archived fixture paths.
+The script uses only the Python standard library. The research digest uses only static fixture data, the state brief uses only `fixtures/sample_mew_state.json` rather than live `.mew` state, the bundle mode reads only explicit local fixture paths declared by `fixtures/sample_bundle.json`, the archive index reads only `fixtures/sample_archive.json` while listing explicit archived fixture paths, and the dogfood digest reads only `fixtures/sample_dogfood_digest.json` while summarizing static dogfood rows and `[side-pj]` issue summaries.

@@ -11,6 +11,7 @@ FIXTURE = ROOT / "fixtures" / "sample_session.json"
 STATE_FIXTURE = ROOT / "fixtures" / "sample_mew_state.json"
 BUNDLE_FIXTURE = ROOT / "fixtures" / "sample_bundle.json"
 ARCHIVE_FIXTURE = ROOT / "fixtures" / "sample_archive.json"
+DOGFOOD_DIGEST_FIXTURE = ROOT / "fixtures" / "sample_dogfood_digest.json"
 
 
 def test_render_report_from_fixture_module_import() -> None:
@@ -554,6 +555,98 @@ def test_archive_fixture_is_valid_json_object() -> None:
             assert not Path(entry["fixture"]).is_absolute()
             assert isinstance(entry["next_action"], dict)
             assert "label" in entry["next_action"]
+
+
+def test_render_dogfood_digest_groups_failure_classes_and_links_issues() -> None:
+    sys.path.insert(0, str(ROOT))
+    try:
+        from companion_log import load_session, render_dogfood_digest
+    finally:
+        sys.path.pop(0)
+
+    digest = render_dogfood_digest(load_session(DOGFOOD_DIGEST_FIXTURE))
+
+    assert digest.startswith("# Dogfood Digest: SP9 side-project dogfood digest")
+    assert "- completed: 2" in digest
+    assert "- completed-with-resume-repair: 1" in digest
+    assert "- completed-with-test-followup: 1" in digest
+    assert "rescued" not in digest
+    assert digest.index("### context-drift") < digest.index("### verifier-gap")
+    assert "- Rows: 2" in digest
+    assert "  - rescue_edits: 1" not in digest
+    assert "- rescue_edits_total: 0" in digest
+    assert "  - SP9 retry after stopped session: 1" not in digest
+    assert "  - Dogfood digest output-file coverage: 1" not in digest
+    assert "Rescue edit:" not in digest
+    assert "- [#4](https://github.com/mkXultra/mew/issues/4) [side-pj] M6.16 rejected-batch retry can accumulate context until timeout" in digest
+    assert "- [#5](https://github.com/mkXultra/mew/issues/5) [side-pj] M6.16 scoped verifier repairs should not require fresh sessions" in digest
+    assert "Importing src/mew or reading live .mew state from the experiment remains blocked." in digest
+    assert "Tighten resume guidance when a session stops before product edits." in digest
+
+
+def test_cli_prints_dogfood_digest_mode_to_stdout() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(DOGFOOD_DIGEST_FIXTURE), "--mode", "dogfood-digest"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.startswith("# Dogfood Digest: SP9 side-project dogfood digest")
+    assert "## Failure Classes" in result.stdout
+    assert "## [side-pj] Issues" in result.stdout
+    assert "# Companion Archive Index:" not in result.stdout
+    assert result.stderr == ""
+
+
+def test_cli_writes_dogfood_digest_output_file(tmp_path: Path) -> None:
+    output = tmp_path / "dogfood-digest.md"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(DOGFOOD_DIGEST_FIXTURE),
+            "--mode",
+            "dogfood-digest",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    written = output.read_text(encoding="utf-8")
+    assert written.startswith("# Dogfood Digest: SP9 side-project dogfood digest")
+    assert "## Rescue Edits" in written
+    assert "- rescue_edits_total: 0" in written
+    assert "https://github.com/mkXultra/mew/issues/4" in written
+
+
+def test_dogfood_digest_fixture_shape_is_static_and_explicit() -> None:
+    data = json.loads(DOGFOOD_DIGEST_FIXTURE.read_text(encoding="utf-8"))
+
+    assert data["id"] == "sp9-sample-dogfood-digest"
+    assert isinstance(data["dogfood_rows"], list)
+    assert isinstance(data["side_pj_issues"], list)
+    assert isinstance(data["product_progress"], list)
+    assert isinstance(data["blockers"], list)
+    assert isinstance(data["m6_16_polish_candidates"], list)
+    required_row = {"id", "label", "outcome", "failure_class", "evidence", "rescue_edits"}
+    for row in data["dogfood_rows"]:
+        assert required_row <= set(row)
+        assert isinstance(row["rescue_edits"], int)
+        assert row["rescue_edits"] == 0
+        assert "rescue_edit" not in row
+        assert row["outcome"] != "rescued"
+        assert "live" not in row.get("fixture_source", "static")
+    required_issue = {"number", "title", "url", "status", "summary"}
+    assert {issue["number"] for issue in data["side_pj_issues"]} == {4, 5}
+    for issue in data["side_pj_issues"]:
+        assert required_issue <= set(issue)
+        assert "[side-pj]" in issue["title"]
+        assert issue["url"].startswith("https://github.com/mkXultra/mew/issues/")
 
 
 def test_cli_bundle_missing_fixture_error_is_deterministic(tmp_path: Path) -> None:

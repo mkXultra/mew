@@ -391,6 +391,118 @@ def render_archive_index(manifest: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _issue_link(issue: dict[str, Any]) -> str:
+    number = issue.get("number")
+    url = issue.get("url")
+    title = str(issue.get("title") or "Untitled issue")
+    if number and url:
+        return f"[#{number}]({url}) {title}"
+    if number:
+        return f"#{number} {title}"
+    if url:
+        return f"[{title}]({url})"
+    return title
+
+
+def render_dogfood_digest(manifest: dict[str, Any]) -> str:
+    """Render a deterministic side-project dogfood digest from static fixture data."""
+    title = manifest.get("title") or manifest.get("id") or "Dogfood Digest"
+    rows = _as_list(manifest.get("dogfood_rows"))
+    issues = _as_list(manifest.get("side_pj_issues"))
+
+    outcome_counts: dict[str, int] = {}
+    failure_classes: dict[str, list[dict[str, Any]]] = {}
+    rescue_edits_total = 0
+    rescue_edit_rows: list[tuple[str, int]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("dogfood rows must be objects")
+        outcome = str(row.get("outcome") or "unknown")
+        outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+        failure_class = str(row.get("failure_class") or "none")
+        failure_classes.setdefault(failure_class, []).append(row)
+        rescue_edits = int(row.get("rescue_edits") or 0)
+        rescue_edits_total += rescue_edits
+        if rescue_edits > 0:
+            label = str(row.get("label") or row.get("id") or "dogfood row")
+            rescue_edit_rows.append((label, rescue_edits))
+
+    lines = [f"# Dogfood Digest: {title}"]
+    date = manifest.get("date")
+    if date:
+        lines.extend(["", f"_Date: {date}_"])
+    summary = manifest.get("summary")
+    if summary:
+        lines.extend(["", "## Summary", str(summary)])
+
+    lines.extend(["", "## Outcomes"])
+    for outcome in sorted(outcome_counts):
+        lines.append(f"- {outcome}: {outcome_counts[outcome]}")
+    if not outcome_counts:
+        lines.append("- No dogfood rows captured.")
+
+    lines.extend(["", "## Failure Classes"])
+    for failure_class in sorted(failure_classes):
+        class_rows = failure_classes[failure_class]
+        lines.extend(["", f"### {failure_class}"])
+        lines.append(f"- Rows: {len(class_rows)}")
+        for row in sorted(class_rows, key=lambda item: str(item.get("id") or "")):
+            label = str(row.get("label") or row.get("id") or "dogfood row")
+            outcome = str(row.get("outcome") or "unknown")
+            evidence = str(row.get("evidence") or "")
+            lines.append(f"- **{label}** — {outcome}")
+            if evidence:
+                lines.append(f"  - Evidence: {evidence}")
+            rescue_edits = int(row.get("rescue_edits") or 0)
+            if rescue_edits > 0:
+                lines.append(f"  - rescue_edits: {rescue_edits}")
+
+    lines.extend(["", "## Rescue Edits"])
+    lines.append(f"- rescue_edits_total: {rescue_edits_total}")
+    if rescue_edit_rows:
+        lines.append("- Rows with rescue_edits > 0:")
+        for label, rescue_edits in sorted(rescue_edit_rows):
+            lines.append(f"  - {label}: {rescue_edits}")
+    else:
+        lines.append("- No rows with rescue_edits > 0.")
+
+    lines.extend(["", "## Product Progress"])
+    for item in _as_list(manifest.get("product_progress")):
+        lines.append(f"- {item}")
+    if not _as_list(manifest.get("product_progress")):
+        lines.append("- No product progress recorded.")
+
+    lines.extend(["", "## Blockers"])
+    for item in _as_list(manifest.get("blockers")):
+        lines.append(f"- {item}")
+    if not _as_list(manifest.get("blockers")):
+        lines.append("- No blockers recorded.")
+
+    lines.extend(["", "## M6.16 Polish Candidates"])
+    for item in _as_list(manifest.get("m6_16_polish_candidates")):
+        lines.append(f"- {item}")
+    if not _as_list(manifest.get("m6_16_polish_candidates")):
+        lines.append("- No M6.16 polish candidates recorded.")
+
+    lines.extend(["", "## [side-pj] Issues"])
+    normalized_issues: list[dict[str, Any]] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            raise ValueError("side-pj issues must be objects")
+        normalized_issues.append(issue)
+    for issue in sorted(normalized_issues, key=lambda item: (int(item.get("number") or 0), str(item.get("title") or ""))):
+        status = str(issue.get("status") or "unknown")
+        summary = str(issue.get("summary") or "")
+        lines.append(f"- {_issue_link(issue)} — {status}")
+        if summary:
+            lines.append(f"  - Summary: {summary}")
+    if not normalized_issues:
+        lines.append("- No [side-pj] issues recorded.")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 RENDERERS = {
     "report": render_report,
     "morning-journal": render_morning_journal,
@@ -400,6 +512,7 @@ RENDERERS = {
     "state-brief": render_state_brief,
     "bundle": render_bundle,
     "archive-index": render_archive_index,
+    "dogfood-digest": render_dogfood_digest,
 }
 
 

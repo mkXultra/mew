@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "task_id": 9,
+  "session_id": 17,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP9 fixture-driven dogfood digest output with static dogfood rows, static [side-pj] issue summaries, outcome/failure-class/rescue-edits grouping, README usage, stdout/output-file behavior, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 75.0,
+  "read_turns_before_edit": 4.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_dogfood_digest.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_dogfood_digest.json --mode dogfood-digest",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_dogfood_digest.json --mode dogfood-digest --output /tmp/mew-companion-log-dogfood-digest.md",
+    "git diff --check",
+    "rg -n \"from src|import src|src/mew|\\\\.mew|requests|urllib|os\\\\.walk|rglob\\\\(|glob\\\\(\" experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/tests/test_companion_log.py experiments/mew-companion-log/README.md experiments/mew-companion-log/fixtures/sample_dogfood_digest.json"
+  ],
+  "reviewer_rejections": 6,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "dogfood_digest_ledger_semantics_repair_after_write_batch_retries",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/follow/session-13.json",
+    ".mew/follow/session-14.json",
+    ".mew/follow/session-15.json",
+    ".mew/follow/session-16.json",
+    ".mew/follow/session-17.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/9-dogfood-digest-practical.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented SP9 with --model gpt-5.5 under experiments/mew-companion-log only. Session #13 stopped before product edits after a duplicated-context edit failure and same-file write-batch wait; Codex closed it and restarted fresh. Session #14 authored the initial dogfood-digest renderer, static fixture, README usage/output examples, and focused tests with 30 passing tests. Reviewer follow-up was needed because the first fixture conflated operator steering with ledger rescue_edits semantics and used generic issue URLs/titles. Sessions #15-#17 repaired the fixture and tests so rescue_edits remains numeric and zero for the sample, issue #4/#5 static summaries match their actual side-project polish topics, and the focused verifier plus stdout/output-file checks pass. No Codex product-code rescue was used."
+}

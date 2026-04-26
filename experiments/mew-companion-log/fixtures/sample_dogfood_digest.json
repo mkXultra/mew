@@ -1,0 +1,72 @@
+{
+  "id": "sp9-sample-dogfood-digest",
+  "title": "SP9 side-project dogfood digest",
+  "date": "2026-04-26",
+  "summary": "Static dogfood digest for reviewing side-project implementation loops without live GitHub, live .mew state, or core mew imports.",
+  "dogfood_rows": [
+    {
+      "id": "sp9-row-1",
+      "label": "SP8 archive-index closeout",
+      "outcome": "completed",
+      "failure_class": "none",
+      "fixture_source": "static",
+      "evidence": "Archive index mode, README usage, and focused tests were completed before SP9 started.",
+      "rescue_edits": 0
+    },
+    {
+      "id": "sp9-row-2",
+      "label": "SP9 retry after stopped session",
+      "outcome": "completed-with-resume-repair",
+      "failure_class": "context-drift",
+      "fixture_source": "static",
+      "evidence": "The prior session stopped before product edits, so the retry refreshed exact anchors instead of trusting stale notes.",
+      "rescue_edits": 0
+    },
+    {
+      "id": "sp9-row-3",
+      "label": "Dogfood digest output-file coverage",
+      "outcome": "completed-with-test-followup",
+      "failure_class": "verifier-gap",
+      "fixture_source": "static",
+      "evidence": "The mode is only complete when stdout and --output behavior are both covered by focused tests.",
+      "rescue_edits": 0
+    },
+    {
+      "id": "sp9-row-4",
+      "label": "Static issue summary rendering",
+      "outcome": "completed",
+      "failure_class": "none",
+      "fixture_source": "static",
+      "evidence": "Issue summaries are represented as fixture rows with deterministic links rather than live GitHub queries.",
+      "rescue_edits": 0
+    }
+  ],
+  "product_progress": [
+    "SP6 state brief, SP7 bundle, and SP8 archive index provide stable companion surfaces for side-project review.",
+    "SP9 adds a dogfood digest lane that makes outcomes, failure classes, rescue_edits counts, and issue follow-up visible in one deterministic markdown report."
+  ],
+  "blockers": [
+    "Importing src/mew or reading live .mew state from the experiment remains blocked.",
+    "Live GitHub issue lookup is intentionally out of scope for this fixture-driven mode."
+  ],
+  "m6_16_polish_candidates": [
+    "Tighten resume guidance when a session stops before product edits.",
+    "Make output-file coverage a standard checklist item for new companion-log modes."
+  ],
+  "side_pj_issues": [
+    {
+      "number": 4,
+      "title": "[side-pj] M6.16 rejected-batch retry can accumulate context until timeout",
+      "url": "https://github.com/mkXultra/mew/issues/4",
+      "status": "ready-for-review",
+      "summary": "Track the rejected-batch retry failure mode where accumulated context can grow until the session times out."
+    },
+    {
+      "number": 5,
+      "title": "[side-pj] M6.16 scoped verifier repairs should not require fresh sessions",
+      "url": "https://github.com/mkXultra/mew/issues/5",
+      "status": "candidate",
+      "summary": "Track scoped verifier repair loops that currently require fresh sessions instead of continuing in place."
+    }
+  ]
+}
