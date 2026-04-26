@@ -78,9 +78,51 @@ def render_morning_journal(session: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_evening_journal(session: dict[str, Any]) -> str:
+    """Return a fixture-driven evening journal markdown surface."""
+    journal = session.get("evening_journal", {})
+    if journal is None:
+        journal = {}
+    if not isinstance(journal, dict):
+        raise ValueError("evening_journal must be an object when provided")
+
+    title = journal.get("title") or f"Evening Journal: {session.get('title') or session.get('id') or 'Untitled session'}"
+    date = journal.get("date")
+    reflection = journal.get("reflection")
+    wins = _as_list(journal.get("wins"))
+    learned = _as_list(journal.get("learned"))
+    release = _as_list(journal.get("release"))
+    tomorrow = _as_list(journal.get("tomorrow"))
+    closing_prompt = journal.get("closing_prompt")
+
+    lines = [f"# {title}"]
+    if date:
+        lines.extend(["", f"_Date: {date}_"])
+    if reflection:
+        lines.extend(["", "## Reflection", str(reflection)])
+    if wins:
+        lines.extend(["", "## Wins"])
+        lines.extend(f"- {item}" for item in wins)
+    if learned:
+        lines.extend(["", "## Learned"])
+        lines.extend(f"- {item}" for item in learned)
+    if release:
+        lines.extend(["", "## Release"])
+        lines.extend(f"- {item}" for item in release)
+    if tomorrow:
+        lines.extend(["", "## Tomorrow"])
+        lines.extend(f"- {item}" for item in tomorrow)
+    if closing_prompt:
+        lines.extend(["", "## Companion Prompt", str(closing_prompt)])
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 RENDERERS = {
     "report": render_report,
     "morning-journal": render_morning_journal,
+    "evening-journal": render_evening_journal,
 }
 
 

@@ -59,6 +59,41 @@ def test_render_morning_journal_snapshot() -> None:
     )
 
 
+def test_render_evening_journal_snapshot() -> None:
+    sys.path.insert(0, str(ROOT))
+    try:
+        from companion_log import load_session, render_evening_journal
+    finally:
+        sys.path.pop(0)
+
+    journal = render_evening_journal(load_session(FIXTURE))
+
+    assert journal == (
+        "# Evening Journal: SP2 companion output\n"
+        "\n"
+        "_Date: 2026-04-26_\n"
+        "\n"
+        "## Reflection\n"
+        "The companion log experiment now has room for both planning the day and closing it gently.\n"
+        "\n"
+        "## Wins\n"
+        "- Kept the journal surface fixture-driven and easy to snapshot.\n"
+        "- Preserved the existing report and morning journal behavior.\n"
+        "\n"
+        "## Learned\n"
+        "- A small CLI mode can make a second surface discoverable without changing the default report.\n"
+        "\n"
+        "## Release\n"
+        "- No need to solve every future companion prompt in this scaffold.\n"
+        "\n"
+        "## Tomorrow\n"
+        "- Run the focused pytest command after reviewing the markdown shape.\n"
+        "\n"
+        "## Companion Prompt\n"
+        "What should be acknowledged before setting the work down for the night?\n"
+    )
+
+
 def test_cli_prints_markdown_to_stdout() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(FIXTURE)],
@@ -86,6 +121,20 @@ def test_cli_prints_morning_journal_mode_to_stdout() -> None:
     assert result.stderr == ""
 
 
+def test_cli_prints_evening_journal_mode_to_stdout() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(FIXTURE), "--mode", "evening-journal"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.startswith("# Evening Journal: SP2 companion output")
+    assert "## Tomorrow" in result.stdout
+    assert "setting the work down for the night" in result.stdout
+    assert result.stderr == ""
+
+
 def test_cli_writes_markdown_output_file(tmp_path: Path) -> None:
     output = tmp_path / "report.md"
 
@@ -108,3 +157,5 @@ def test_fixture_is_valid_json_object() -> None:
     assert isinstance(data["highlights"], list)
     assert isinstance(data["morning_journal"], dict)
     assert isinstance(data["morning_journal"]["focus"], list)
+    assert isinstance(data["evening_journal"], dict)
+    assert isinstance(data["evening_journal"]["wins"], list)
