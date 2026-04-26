@@ -144,6 +144,13 @@ Current M6.13 evidence:
   and cost events to session trace state, exposes those fields through
   `build_work_session_resume`, and validates the v1 `deliberation_result`
   contract before any raw model output can influence the tiny lane.
+- The current work-loop call-boundary slice wires those deliberation primitives
+  into `plan_work_model_turn` as a read-only lane attempt. Eligible blockers
+  can make one explicitly bound high-effort call; validated results stop as
+  reviewer-visible `result_ready` waits, while timeout, non-schema, validation,
+  budget, or state-limit cases record fallback trace data and leave tiny
+  available. `cmd_work_ai` now persists the returned session trace patch
+  through `apply_work_session_trace_patch`.
 - Mirror-lane validation passed:
   `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,
   `uv run pytest -q tests/test_proof_summary.py -k "lane_metadata" --no-testmon`,
@@ -707,14 +714,15 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> deliberation Phase 2 -> work-loop call wiring with explicit binding/budget/fallback`
+`M6.13 -> deliberation Phase 2 -> live reviewer-command and automatic eligible attempt proof`
 
 Acceptable near-term work:
 
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
-- wire the deliberation preflight primitives into the work loop only after the
-  model-call boundary can preserve tiny fallback on timeout/refusal/non-schema
+- prove the deliberation call boundary with one reviewer-commanded attempt,
+  one automatic eligible attempt, and one deliberate fallback while preserving
+  tiny fallback
 - prove old sessions and existing replay bundles with absent lane metadata keep
   tiny-compatible behavior at their read/report boundary
 - wire the minimal lane-attempt telemetry helper into future lane attempts only
@@ -746,6 +754,13 @@ Latest M6.13 source/test validation:
   and
   `uv run ruff check src/mew/deliberation.py src/mew/work_session.py tests/test_deliberation.py tests/test_work_session.py`
   passed.
+- M6.13 deliberation work-loop call-boundary slice:
+  `uv run pytest -q tests/test_work_deliberation_loop.py --no-testmon`,
+  `uv run pytest -q tests/test_deliberation.py tests/test_work_deliberation_loop.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'deliberation or active_work_todo or lane' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'plan_work_model_turn' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py src/mew/work_session.py src/mew/commands.py tests/test_work_deliberation_loop.py`,
+  and `git diff --check` passed.
 - M6.13 mirror lane-scoped replay bundle slice:
   `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,
   `uv run pytest -q tests/test_proof_summary.py -k "lane_metadata" --no-testmon`,

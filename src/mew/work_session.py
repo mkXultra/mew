@@ -1736,6 +1736,67 @@ def update_work_model_turn_plan(state, session_id, turn_id, decision_plan, actio
     return turn
 
 
+def apply_work_session_trace_patch(session, trace_patch):
+    if not isinstance(session, dict) or not isinstance(trace_patch, dict):
+        return False
+    changed = False
+    attempt = trace_patch.get("attempt") if isinstance(trace_patch.get("attempt"), dict) else {}
+    if attempt:
+        lane_attempt_id = str(attempt.get("lane_attempt_id") or "").strip()
+        attempts = session.setdefault("deliberation_attempts", [])
+        if not isinstance(attempts, list):
+            attempts = []
+            session["deliberation_attempts"] = attempts
+        already_recorded = lane_attempt_id and any(
+            isinstance(item, dict)
+            and str(item.get("lane_attempt_id") or "").strip() == lane_attempt_id
+            for item in attempts
+        )
+        if not already_recorded:
+            attempts.append(dict(attempt))
+            changed = True
+
+    cost_events = trace_patch.get("cost_events") if isinstance(trace_patch.get("cost_events"), list) else []
+    if cost_events:
+        existing = session.setdefault("deliberation_cost_events", [])
+        if not isinstance(existing, list):
+            existing = []
+            session["deliberation_cost_events"] = existing
+        seen = {
+            (
+                str(item.get("event") or ""),
+                str(item.get("lane_attempt_id") or ""),
+                str(item.get("reason") or ""),
+                str(item.get("created_at") or ""),
+            )
+            for item in existing
+            if isinstance(item, dict)
+        }
+        for event in cost_events:
+            if not isinstance(event, dict):
+                continue
+            key = (
+                str(event.get("event") or ""),
+                str(event.get("lane_attempt_id") or ""),
+                str(event.get("reason") or ""),
+                str(event.get("created_at") or ""),
+            )
+            if key in seen:
+                continue
+            existing.append(dict(event))
+            seen.add(key)
+            changed = True
+
+    latest = trace_patch.get("latest_result") if isinstance(trace_patch.get("latest_result"), dict) else {}
+    if latest:
+        session["latest_deliberation_result"] = dict(latest)
+        changed = True
+
+    if changed:
+        session["updated_at"] = now_iso()
+    return changed
+
+
 def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=""):
     session = find_work_session(state, session_id)
     turn = find_work_model_turn(session, turn_id)

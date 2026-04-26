@@ -11,6 +11,13 @@ import tokenize
 
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
+from .deliberation import (
+    DELIBERATION_RESULT_SCHEMA_CONTRACT,
+    build_deliberation_attempt_record,
+    build_deliberation_fallback_event,
+    evaluate_deliberation_request,
+    validate_deliberation_result,
+)
 from .errors import MewError, ModelBackendError
 from .patch_draft import (
     PATCH_BLOCKER_RECOVERY_ACTIONS,
@@ -75,6 +82,9 @@ WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
 WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
+WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS = 120.0
+WORK_DELIBERATION_REASONING_EFFORT = "high"
+WORK_DELIBERATION_MAX_ATTEMPTS_PER_TODO = 1
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
@@ -911,6 +921,381 @@ def _work_loop_model_metrics_have_patch_replay_or_artifact(model_metrics):
         str(metrics.get("tiny_write_ready_draft_compiler_artifact_kind") or "").strip(),
     }
     return bool(artifact_kinds & {"patch_draft", "patch_blocker"})
+
+
+def _work_deliberation_reviewer_commanded(guidance):
+    lowered = str(guidance or "").casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "deliberation",
+            "deliberate",
+            "high-effort",
+            "high effort",
+            "escalate",
+            "deep reasoning",
+        )
+    )
+
+
+def _work_deliberation_task_shape(task, guidance=""):
+    text = "\n".join(
+        str(part or "")
+        for part in (
+            (task or {}).get("title") if isinstance(task, dict) else "",
+            (task or {}).get("description") if isinstance(task, dict) else "",
+            guidance,
+        )
+        if str(part or "").strip()
+    ).casefold()
+    if any(marker in text for marker in ("cross-file", "cross file", "multi-file", "multi file")):
+        return "cross_file"
+    if any(marker in text for marker in ("design", "architecture", "policy", "roadmap")):
+        return "design"
+    if any(marker in text for marker in ("abstract", "conceptual", "strategy")):
+        return "abstract"
+    return ""
+
+
+def _work_deliberation_attempts_for_todo(resume, todo_id, blocker_code):
+    attempts = (resume or {}).get("deliberation_attempts")
+    if not isinstance(attempts, list):
+        return []
+    todo_id = str(todo_id or "").strip()
+    blocker_code = str(blocker_code or "").strip()
+    return [
+        item
+        for item in attempts
+        if isinstance(item, dict)
+        and str(item.get("todo_id") or "").strip() == todo_id
+        and str(item.get("blocker_code") or "").strip() == blocker_code
+    ]
+
+
+def _work_deliberation_trace_patch(decision, *, latest_result=None, fallback_event=None):
+    attempt = build_deliberation_attempt_record(decision)
+    cost_events = [
+        dict(event)
+        for event in ((decision or {}).get("cost_events") or [])
+        if isinstance(event, dict)
+    ]
+    if isinstance(fallback_event, dict) and fallback_event:
+        cost_events.append(dict(fallback_event))
+    if latest_result is None:
+        latest_result = {
+            "lane_attempt_id": attempt.get("lane_attempt_id") or "",
+            "status": "reserved" if attempt.get("allowed") else "fallback",
+            "reason": attempt.get("reason") or "",
+            "fallback_lane": attempt.get("fallback_lane") or "tiny",
+        }
+    return {
+        "attempt": attempt,
+        "cost_events": cost_events,
+        "latest_result": dict(latest_result or {}),
+    }
+
+
+def _work_deliberation_trace_metrics_from_patch(trace_patch):
+    attempt = (trace_patch or {}).get("attempt") if isinstance(trace_patch, dict) else {}
+    latest = (trace_patch or {}).get("latest_result") if isinstance(trace_patch, dict) else {}
+    return {
+        "attempted": bool((attempt or {}).get("allowed")),
+        "lane_attempt_id": (attempt or {}).get("lane_attempt_id") or "",
+        "todo_id": (attempt or {}).get("todo_id") or "",
+        "blocker_code": (attempt or {}).get("blocker_code") or "",
+        "status": (latest or {}).get("status") or "",
+        "reason": (latest or {}).get("reason") or (attempt or {}).get("reason") or "",
+        "fallback_lane": (latest or {}).get("fallback_lane") or (attempt or {}).get("fallback_lane") or "tiny",
+        "requested_model": (attempt or {}).get("requested_model") or "",
+        "effective_model": (attempt or {}).get("effective_model") or "",
+        "effective_effort": (attempt or {}).get("effective_effort") or "",
+        "timeout_seconds": (attempt or {}).get("timeout_seconds") or 0,
+    }
+
+
+def _work_plan_with_session_trace_patch(result, trace_patch):
+    if not trace_patch:
+        return result
+    planned = dict(result or {})
+    planned["session_trace_patch"] = trace_patch
+    return planned
+
+
+def _work_deliberation_preflight_decision(
+    context,
+    *,
+    model_backend,
+    model,
+    timeout,
+    guidance="",
+):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
+    active_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    if not active_todo:
+        return {}
+    blocker = active_todo.get("blocker") if isinstance(active_todo.get("blocker"), dict) else {}
+    blocker_code = str(blocker.get("code") or "").strip()
+    if not blocker_code:
+        return {}
+    todo_id = str(active_todo.get("id") or "").strip()
+    previous_attempts = _work_deliberation_attempts_for_todo(resume, todo_id, blocker_code)
+    if previous_attempts:
+        return {}
+    attempts = active_todo.get("attempts") if isinstance(active_todo.get("attempts"), dict) else {}
+    try:
+        draft_attempts = int(attempts.get("draft") or 0)
+    except (TypeError, ValueError):
+        draft_attempts = 0
+    deliberation_timeout = max(float(timeout or 0), WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS)
+    return evaluate_deliberation_request(
+        todo=active_todo,
+        blocker_code=blocker_code,
+        binding={
+            "backend": model_backend,
+            "model": model,
+            "requested_effort": WORK_DELIBERATION_REASONING_EFFORT,
+            "timeout_seconds": deliberation_timeout,
+            "schema_contract": DELIBERATION_RESULT_SCHEMA_CONTRACT,
+        },
+        budget={
+            "max_attempts_per_todo": WORK_DELIBERATION_MAX_ATTEMPTS_PER_TODO,
+            "attempts_used": len(previous_attempts),
+        },
+        reviewer_commanded=_work_deliberation_reviewer_commanded(guidance),
+        task_shape=_work_deliberation_task_shape((context or {}).get("task") or {}, guidance=guidance),
+        repeated=draft_attempts > 1,
+        refusal_classified=blocker_code == "model_returned_refusal" and bool(blocker.get("detail")),
+        created_at=(context or {}).get("current_time") or "",
+    )
+
+
+def build_work_deliberation_prompt(context, decision):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
+    active_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    blocker = active_todo.get("blocker") if isinstance(active_todo.get("blocker"), dict) else {}
+    focused_context = {
+        "task": (context or {}).get("task") or {},
+        "active_work_todo": {
+            "id": active_todo.get("id") or "",
+            "lane": active_todo.get("lane") or "tiny",
+            "status": active_todo.get("status") or "",
+            "source": active_todo.get("source") or {},
+            "attempts": active_todo.get("attempts") or {},
+            "blocker": blocker,
+        },
+        "deliberation_request": {
+            "lane_attempt_id": (decision or {}).get("lane_attempt_id") or "",
+            "reason": (decision or {}).get("reason") or "",
+            "budget_snapshot": (decision or {}).get("budget_snapshot") or {},
+            "schema_contract": DELIBERATION_RESULT_SCHEMA_CONTRACT,
+        },
+        "recent_decisions": list((resume or {}).get("recent_decisions") or [])[-3:],
+        "working_memory": (resume or {}).get("working_memory") or {},
+        "failed_patch_repair": (resume or {}).get("failed_patch_repair") or {},
+    }
+    return (
+        "You are the read-only deliberation lane for mew work mode.\n"
+        "Return only JSON. Do not use markdown.\n"
+        "You do not write files, execute tools, approve changes, or replace the tiny implementation lane.\n"
+        "Analyze the active blocker and produce a compact strategy that a reviewer can inspect.\n"
+        "Do not include hidden chain-of-thought or raw transcript. Use a distilled reasoning_summary only.\n"
+        "Schema:\n"
+        "{\n"
+        '  "kind": "deliberation_result",\n'
+        '  "schema_version": 1,\n'
+        f'  "todo_id": "{(decision or {}).get("todo_id") or ""}",\n'
+        '  "lane": "deliberation",\n'
+        f'  "blocker_code": "{(decision or {}).get("blocker_code") or ""}",\n'
+        '  "decision": "propose_patch_strategy|decline_escalation|needs_state_refresh",\n'
+        '  "situation": "short task and blocker summary",\n'
+        '  "reasoning_summary": "distilled reasoning, no raw hidden transcript",\n'
+        '  "recommended_next": "retry_tiny|refresh_state|ask_reviewer|finish_blocked",\n'
+        '  "expected_trace_candidate": true,\n'
+        '  "confidence": "low|medium|high"\n'
+        "}\n\n"
+        f"FocusedContext JSON:\n{json.dumps(focused_context, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _attempt_work_deliberation_lane(
+    *,
+    context,
+    model_auth,
+    model,
+    base_url,
+    model_backend,
+    timeout,
+    guidance="",
+    progress=None,
+    current_time="",
+):
+    decision = _work_deliberation_preflight_decision(
+        context,
+        model_backend=model_backend,
+        model=model,
+        timeout=timeout,
+        guidance=guidance,
+    )
+    if not decision:
+        return {}
+
+    trace_patch = _work_deliberation_trace_patch(decision)
+    result = {
+        "status": "preflight_blocked",
+        "decision": decision,
+        "trace_patch": trace_patch,
+        "metrics": _work_deliberation_trace_metrics_from_patch(trace_patch),
+    }
+    if not decision.get("allowed"):
+        return result
+
+    prompt = build_work_deliberation_prompt(context, decision)
+    started = time.monotonic()
+    try:
+        with codex_reasoning_effort_scope(
+            ((decision.get("binding") or {}).get("effective_effort") or WORK_DELIBERATION_REASONING_EFFORT)
+        ):
+            payload = call_model_json_with_retries(
+                model_backend,
+                model_auth,
+                prompt,
+                model,
+                base_url,
+                (decision.get("binding") or {}).get("timeout_seconds") or timeout,
+                log_prefix=(
+                    f"{current_time}: work_deliberation {model_backend} "
+                    f"session={((context or {}).get('work_session') or {}).get('id')}"
+                ),
+            )
+    except Exception as exc:
+        fallback_reason = "timeout" if _work_model_error_looks_like_timeout(exc) else "model_error"
+        fallback_event = build_deliberation_fallback_event(
+            reason=fallback_reason,
+            todo_id=decision.get("todo_id") or "",
+            blocker_code=decision.get("blocker_code") or "",
+            lane_attempt_id=decision.get("lane_attempt_id") or "",
+            created_at=current_time,
+        )
+        trace_patch = _work_deliberation_trace_patch(
+            decision,
+            fallback_event=fallback_event,
+            latest_result={
+                "lane_attempt_id": decision.get("lane_attempt_id") or "",
+                "status": "fallback",
+                "reason": fallback_reason,
+                "fallback_lane": "tiny",
+            },
+        )
+        metrics = _work_deliberation_trace_metrics_from_patch(trace_patch)
+        metrics.update(
+            {
+                "prompt_chars": len(prompt),
+                "elapsed_seconds": _round_seconds(time.monotonic() - started),
+                "error": clip_output(str(exc), 500),
+            }
+        )
+        if progress:
+            progress(
+                f"session #{((context or {}).get('work_session') or {}).get('id')}: "
+                f"DELIBERATION fallback reason={fallback_reason}"
+            )
+        return {
+            "status": "fallback",
+            "decision": decision,
+            "trace_patch": trace_patch,
+            "metrics": metrics,
+        }
+
+    validation = validate_deliberation_result(
+        payload,
+        todo_id=decision.get("todo_id") or "",
+        blocker_code=decision.get("blocker_code") or "",
+    )
+    if not validation.get("ok"):
+        fallback_reason = str(validation.get("reason") or "validation_failed")
+        fallback_event = build_deliberation_fallback_event(
+            reason=fallback_reason,
+            todo_id=decision.get("todo_id") or "",
+            blocker_code=decision.get("blocker_code") or "",
+            lane_attempt_id=decision.get("lane_attempt_id") or "",
+            created_at=current_time,
+        )
+        trace_patch = _work_deliberation_trace_patch(
+            decision,
+            fallback_event=fallback_event,
+            latest_result={
+                "lane_attempt_id": decision.get("lane_attempt_id") or "",
+                "status": "fallback",
+                "reason": fallback_reason,
+                "fallback_lane": "tiny",
+                "invalid_fields": validation.get("invalid_fields") or [],
+            },
+        )
+        metrics = _work_deliberation_trace_metrics_from_patch(trace_patch)
+        metrics.update(
+            {
+                "prompt_chars": len(prompt),
+                "elapsed_seconds": _round_seconds(time.monotonic() - started),
+                "invalid_fields": validation.get("invalid_fields") or [],
+            }
+        )
+        if progress:
+            progress(
+                f"session #{((context or {}).get('work_session') or {}).get('id')}: "
+                f"DELIBERATION fallback reason={fallback_reason}"
+            )
+        return {
+            "status": "fallback",
+            "decision": decision,
+            "trace_patch": trace_patch,
+            "metrics": metrics,
+            "validation": validation,
+        }
+
+    latest_result = {
+        "lane_attempt_id": decision.get("lane_attempt_id") or "",
+        "status": "result_ready",
+        "reason": decision.get("reason") or "",
+        "fallback_lane": "tiny",
+        "result": validation.get("result") or {},
+    }
+    trace_patch = _work_deliberation_trace_patch(decision, latest_result=latest_result)
+    metrics = _work_deliberation_trace_metrics_from_patch(trace_patch)
+    metrics.update(
+        {
+            "prompt_chars": len(prompt),
+            "elapsed_seconds": _round_seconds(time.monotonic() - started),
+            "result_decision": (validation.get("result") or {}).get("decision") or "",
+            "recommended_next": (validation.get("result") or {}).get("recommended_next") or "",
+            "expected_trace_candidate": bool((validation.get("result") or {}).get("expected_trace_candidate")),
+        }
+    )
+    action = {
+        "type": "wait",
+        "reason": "deliberation result ready for reviewer approval before internalization",
+        "summary": (validation.get("result") or {}).get("reasoning_summary") or "",
+    }
+    if progress:
+        progress(f"session #{((context or {}).get('work_session') or {}).get('id')}: DELIBERATION ok")
+    return {
+        "status": "result_ready",
+        "decision": decision,
+        "trace_patch": trace_patch,
+        "metrics": metrics,
+        "validation": validation,
+        "action": action,
+        "decision_plan": {
+            "summary": (validation.get("result") or {}).get("situation") or "deliberation result ready",
+            "deliberation_result": validation.get("result") or {},
+        },
+        "action_plan": {
+            "summary": (validation.get("result") or {}).get("reasoning_summary") or "deliberation result ready",
+            "action": action,
+            "act_mode": "deliberation",
+        },
+    }
 
 
 def _empty_patch_draft_compiler_observation():
@@ -6232,6 +6617,51 @@ def plan_work_model_turn(
         "write_ready_fast_path": bool(write_ready_fast_path.get("active")),
         "write_ready_fast_path_reason": write_ready_fast_path.get("reason") or "",
     }
+    session_trace_patch = {}
+    deliberation_result = _attempt_work_deliberation_lane(
+        context=context,
+        model_auth=model_auth,
+        model=model,
+        base_url=base_url,
+        model_backend=model_backend,
+        timeout=timeout,
+        guidance=guidance,
+        progress=progress,
+        current_time=current_time,
+    )
+    if deliberation_result:
+        session_trace_patch = deliberation_result.get("trace_patch") or {}
+        model_metrics["deliberation"] = deliberation_result.get("metrics") or {}
+        if deliberation_result.get("status") == "result_ready":
+            metrics = deliberation_result.get("metrics") or {}
+            model_metrics["think"] = {
+                "prompt_chars": metrics.get("prompt_chars") or 0,
+                "timeout_seconds": metrics.get("timeout_seconds") or WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS,
+                "elapsed_seconds": metrics.get("elapsed_seconds") or 0.0,
+            }
+            model_metrics["act"] = {
+                "prompt_chars": 0,
+                "elapsed_seconds": 0.0,
+                "mode": "deliberation",
+            }
+            model_metrics["total_model_seconds"] = _round_seconds(
+                (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
+                + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)
+            )
+            if pre_model_metrics_sink:
+                pre_model_metrics_sink(dict(model_metrics))
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": deliberation_result.get("decision_plan") or {},
+                    "action_plan": deliberation_result.get("action_plan") or {},
+                    "action": deliberation_result.get("action")
+                    or {"type": "wait", "reason": "deliberation result ready"},
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+                },
+                session_trace_patch,
+            )
     preflight_block = _work_write_ready_preflight_block(context, write_ready_fast_path)
     if preflight_block:
         preflight_blocker = (
@@ -6280,14 +6710,17 @@ def plan_work_model_turn(
             progress(
                 f"session #{session.get('id')}: preflight blocker {write_ready_fast_path.get('reason') or 'unknown'}"
             )
-        return {
-            "decision_plan": preflight_block.get("decision_plan") or {},
-            "action_plan": preflight_block.get("action_plan") or {},
-            "action": preflight_block.get("action") or {"type": "wait", "reason": "preflight blocker"},
-            "context": context,
-            "model_metrics": model_metrics,
-            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
-        }
+        return _work_plan_with_session_trace_patch(
+            {
+                "decision_plan": preflight_block.get("decision_plan") or {},
+                "action_plan": preflight_block.get("action_plan") or {},
+                "action": preflight_block.get("action") or {"type": "wait", "reason": "preflight blocker"},
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+            },
+            session_trace_patch,
+        )
     explicit_refresh_before_draft = _work_write_ready_explicit_refresh_before_tiny_draft(
         context,
         write_ready_fast_path,
@@ -6308,14 +6741,17 @@ def plan_work_model_turn(
             pre_model_metrics_sink(dict(model_metrics))
         if progress:
             progress(f"session #{session.get('id')}: explicit refresh before tiny draft")
-        return {
-            "decision_plan": explicit_refresh_before_draft.get("decision_plan") or {},
-            "action_plan": explicit_refresh_before_draft.get("action_plan") or {},
-            "action": explicit_refresh_before_draft.get("action") or {"type": "wait", "reason": "refresh unavailable"},
-            "context": context,
-            "model_metrics": model_metrics,
-            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
-        }
+        return _work_plan_with_session_trace_patch(
+            {
+                "decision_plan": explicit_refresh_before_draft.get("decision_plan") or {},
+                "action_plan": explicit_refresh_before_draft.get("action_plan") or {},
+                "action": explicit_refresh_before_draft.get("action") or {"type": "wait", "reason": "refresh unavailable"},
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+            },
+            session_trace_patch,
+        )
     rejection_frontier_recovery = (
         _work_rejection_frontier_recovery_action(context, write_ready_fast_path)
         if write_ready_fast_path.get("active")
@@ -6337,22 +6773,25 @@ def plan_work_model_turn(
             pre_model_metrics_sink(dict(model_metrics))
         if progress:
             progress(f"session #{session.get('id')}: rejection frontier recovery before redraft")
-        return {
-            "decision_plan": {
-                "summary": rejection_frontier_recovery.get("reason")
-                or "refresh exact context before redrafting after reviewer rejection",
-            },
-            "action_plan": {
-                "summary": rejection_frontier_recovery.get("reason")
-                or "refresh exact context before redrafting after reviewer rejection",
+        return _work_plan_with_session_trace_patch(
+            {
+                "decision_plan": {
+                    "summary": rejection_frontier_recovery.get("reason")
+                    or "refresh exact context before redrafting after reviewer rejection",
+                },
+                "action_plan": {
+                    "summary": rejection_frontier_recovery.get("reason")
+                    or "refresh exact context before redrafting after reviewer rejection",
+                    "action": rejection_frontier_recovery,
+                    "act_mode": "deterministic",
+                },
                 "action": rejection_frontier_recovery,
-                "act_mode": "deterministic",
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": {"phases": [], "chunks": 0, "chars": 0},
             },
-            "action": rejection_frontier_recovery,
-            "context": context,
-            "model_metrics": model_metrics,
-            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
-        }
+            session_trace_patch,
+        )
     if write_ready_fast_path.get("active"):
         draft_windows = (
             write_ready_fast_path.get("recent_windows")
@@ -6459,14 +6898,17 @@ def plan_work_model_turn(
                 )
             if progress:
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
-            return {
-                "decision_plan": tiny_result.get("decision_plan") or {},
-                "action_plan": action_plan,
-                "action": action,
-                "context": context,
-                "model_metrics": model_metrics,
-                "model_stream": compact_model_stream(stream_deltas),
-            }
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": tiny_result.get("decision_plan") or {},
+                    "action_plan": action_plan,
+                    "action": action,
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": compact_model_stream(stream_deltas),
+                },
+                session_trace_patch,
+            )
         if pre_model_metrics_sink:
             pre_model_metrics_sink(dict(model_metrics))
     think_started = time.monotonic()
@@ -6515,14 +6957,17 @@ def plan_work_model_turn(
                     f"session #{session.get('id')}: THINK timeout converted to write-ready blocker"
                 )
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
-            return {
-                "decision_plan": decision_plan,
-                "action_plan": action_plan,
-                "action": action,
-                "context": context,
-                "model_metrics": model_metrics,
-                "model_stream": compact_model_stream(stream_deltas),
-            }
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": decision_plan,
+                    "action_plan": action_plan,
+                    "action": action,
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": compact_model_stream(stream_deltas),
+                },
+                session_trace_patch,
+            )
         raise
     think_elapsed = time.monotonic() - think_started
     if progress:
@@ -6616,11 +7061,14 @@ def plan_work_model_turn(
     )
     if progress:
         progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
-    return {
-        "decision_plan": decision_plan,
-        "action_plan": action_plan,
-        "action": action,
-        "context": context,
-        "model_metrics": model_metrics,
-        "model_stream": compact_model_stream(stream_deltas),
-    }
+    return _work_plan_with_session_trace_patch(
+        {
+            "decision_plan": decision_plan,
+            "action_plan": action_plan,
+            "action": action,
+            "context": context,
+            "model_metrics": model_metrics,
+            "model_stream": compact_model_stream(stream_deltas),
+        },
+        session_trace_patch,
+    )

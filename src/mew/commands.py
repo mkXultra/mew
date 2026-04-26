@@ -265,6 +265,7 @@ from .work_session import (
     list_work_session_todos,
     mark_running_work_interrupted,
     mark_work_tool_call_interrupted,
+    apply_work_session_trace_patch,
     record_active_work_todo_executor_lifecycle,
     record_active_work_todo_executor_yield,
     APPROVAL_STATUS_INDETERMINATE,
@@ -5103,6 +5104,15 @@ def cmd_work_ai(args):
 
         action = planned.get("action") or {"type": "wait", "reason": "missing action"}
         action_type = action.get("type")
+        session_trace_patch = (
+            planned.get("session_trace_patch") if isinstance(planned.get("session_trace_patch"), dict) else {}
+        )
+        if session_trace_patch:
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                if apply_work_session_trace_patch(session, session_trace_patch):
+                    save_state(state)
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
