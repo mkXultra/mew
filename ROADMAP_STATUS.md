@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, mirror bundles, deliberation controls, and Phase 3 internalization proof surface landed. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, mirror bundles, deliberation controls, and Phase 3 internalization readiness proof landed; close blockers are explicit. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
@@ -182,6 +182,14 @@ Current M6.13 evidence:
   the remaining reviewer/later-task fixture and ranked-recall limitations are
   closed. The same live path also passes with omitted `--auth`, preserving
   backend auth defaults.
+- The current M6.13 close-readiness slice records the Phase 3 proof honestly:
+  active memory now emits scored recall rank metadata, the dogfood trace records
+  `contract_cycle_proven=true`, deterministic and live `gpt-5.5` proofs pass,
+  and `close_evidence=false` remains explicit. The readiness audit is
+  `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`. Current close blockers:
+  route the later-task proof through real M6.9 ranked recall, consume an
+  independent reviewer decision artifact, and extend the later tiny task from
+  validated patch planning to applied/verified tiny-only solve.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
@@ -754,7 +762,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> Phase 3 internalization close gap -> convert deterministic proof into close-gate evidence`
+`M6.13 -> Phase 3 internalization close gap -> close the ranked-recall / reviewer / tiny-solve blockers`
 
 Acceptable near-term work:
 
@@ -766,6 +774,10 @@ Acceptable near-term work:
 - tighten the M6.13 close evidence so Phase 2 command-boundary proof and Phase
   3 internalization proof are both reconstructable from status, tests, and
   deterministic dogfood artifacts
+- close exactly one readiness blocker from
+  `docs/M6_13_CLOSE_READINESS_AUDIT_2026-04-26.md`: real M6.9 ranked recall,
+  independent reviewer decision consumption, or applied/verified tiny-only
+  solve
 - prove old sessions and existing replay bundles with absent lane metadata keep
   tiny-compatible behavior at their read/report boundary
 - wire the minimal lane-attempt telemetry helper into future lane attempts only

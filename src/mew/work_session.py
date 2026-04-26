@@ -626,14 +626,21 @@ def active_memory_match(entry, terms):
     ).casefold()
     matched_terms = [term for term in terms if term in haystack]
     if entry.memory_type in ACTIVE_MEMORY_ALWAYS_TYPES:
-        score = 100 + len(matched_terms)
+        importance_score = 100
     elif entry.memory_type in ACTIVE_MEMORY_RELEVANT_TYPES and matched_terms:
-        score = 10 + len(matched_terms)
+        importance_score = 10
     else:
         return None
+    relevance_score = len(matched_terms)
+    score = importance_score + relevance_score
     reason = "always_include_user_memory" if entry.memory_type in ACTIVE_MEMORY_ALWAYS_TYPES else "matched_task_terms"
     return {
         "score": score,
+        "score_components": {
+            "importance": importance_score,
+            "relevance": relevance_score,
+            "final": score,
+        },
         "reason": reason,
         "matched_terms": matched_terms[:8],
     }
@@ -849,6 +856,12 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
     terms = active_memory_terms(session=session, task=task)
     result = {
         "source": ".mew/memory",
+        "ranker": {
+            "name": "active-memory-scored-recall",
+            "version": 1,
+            "sort": "score_desc_created_at_desc",
+            "components": ["importance", "relevance", "recency_tiebreaker"],
+        },
         "terms": terms,
         "items": [],
         "total": 0,
@@ -868,6 +881,7 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
             continue
         item = entry_to_dict(entry)
         item["score"] = match["score"]
+        item["score_components"] = match["score_components"]
         item["reason"] = match["reason"]
         item["matched_terms"] = match["matched_terms"]
         item["text"] = clip_output(item.get("text") or "", DEFAULT_ACTIVE_MEMORY_TEXT_MAX_CHARS)
@@ -877,6 +891,12 @@ def build_work_active_memory(session=None, task=None, limit=DEFAULT_ACTIVE_MEMOR
             continue
         scored.append(item)
     scored.sort(key=lambda item: (item.get("score") or 0, item.get("created_at") or ""), reverse=True)
+    for rank, item in enumerate(scored, start=1):
+        item["rank"] = rank
+        components = item.get("score_components") if isinstance(item.get("score_components"), dict) else {}
+        components["recency_tiebreaker"] = item.get("created_at") or ""
+        components["rank"] = rank
+        item["score_components"] = components
     result["total"] = len(scored)
     result["items"] = scored[:limit]
     result["truncated"] = len(scored) > len(result["items"])

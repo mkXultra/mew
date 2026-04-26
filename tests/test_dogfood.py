@@ -658,9 +658,15 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(artifacts["tiny_provider_mode"], "deterministic_fake")
             self.assertEqual(trace["evidence_class"], "contract_fixture")
             self.assertFalse(trace["close_evidence"])
+            self.assertTrue(trace["contract_cycle_proven"])
             self.assertEqual(trace["tiny_provider_mode"], "deterministic_fake")
             self.assertEqual(trace["original_blocker_code"], "review_rejected")
+            self.assertTrue(trace["known_limitations"])
+            self.assertEqual(trace["scored_recall_event"]["ranker"]["name"], "active-memory-scored-recall")
+            self.assertTrue(trace["scored_recall_event"]["returned"])
+            self.assertGreaterEqual(trace["scored_recall_event"]["rank"], 1)
             self.assertEqual(trace["adapted_memory_event"]["source_lane"], "deliberation")
+            self.assertEqual(trace["reviewer_decision"]["decision"], "approved")
             self.assertEqual(trace["reasoning_trace_ledger_ref"], ".mew/durable/memory/reasoning_trace.jsonl")
             self.assertTrue(trace["reviewer_confirmed_trace_shortened_deliberation"])
             self.assertFalse(trace["later_task_deliberation_invoked"])
@@ -670,6 +676,7 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertIn("m6_13_deliberation_internalization_appends_reasoning_trace_ledger", check_names)
             self.assertIn("m6_13_deliberation_internalization_later_task_recalls_trace", check_names)
+            self.assertIn("m6_13_deliberation_internalization_records_scored_recall_event", check_names)
             self.assertIn("m6_13_deliberation_internalization_records_tiny_reuse_contract", check_names)
             self.assertIn("m6_13_deliberation_internalization_writes_deterministic_contract_trace", check_names)
 
@@ -737,6 +744,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(artifacts["tiny_provider_mode"], "live_provider")
             self.assertEqual(artifacts["trace"]["evidence_class"], "live_provider_internalization_contract")
             self.assertFalse(artifacts["trace"]["close_evidence"])
+            self.assertTrue(artifacts["trace"]["contract_cycle_proven"])
 
     def test_run_dogfood_m6_13_live_provider_requires_deliberation_result(self):
         def fake_load_model_auth(model_backend, auth_path=None):
