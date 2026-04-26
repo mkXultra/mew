@@ -183,6 +183,69 @@ class WorkRejectionFrontierTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_reject_tool_classifies_explicit_task_goal_substitution_before_verifier_gap(self):
+        from mew.commands import record_work_rejection_frontier
+
+        source_call = {
+            "id": 31,
+            "tool": "edit_file",
+            "status": "completed",
+            "parameters": {"path": "src/mew/work_loop.py"},
+            "result": {
+                "dry_run": True,
+                "changed": True,
+                "diff_preview": "+ Add side-pj/internal-plumbing wording to the tiny draft prompt\n",
+            },
+        }
+        session = {
+            "id": 7,
+            "tool_calls": [source_call],
+        }
+
+        frontier = record_work_rejection_frontier(
+            session,
+            source_call,
+            (
+                "Rejected: repeated task_goal_substitution. Patch still does not "
+                "implement the requested closeout evidence guidance; it also has "
+                "a missing focused verifier."
+            ),
+        )
+
+        self.assertEqual(frontier["drift_class"], "task_goal_substitution")
+        self.assertEqual(frontier["rejected_patch_family"], "task_goal_substitution")
+        self.assertIn("requested task goal", frontier["stop_rule"])
+        self.assertIn("acceptance criteria", frontier["next_action"])
+        self.assertEqual(session["active_rejection_frontier"], frontier)
+
+    def test_reject_tool_classifies_task_goal_slash_substitution_wording(self):
+        from mew.commands import record_work_rejection_frontier
+
+        source_call = {
+            "id": 32,
+            "tool": "edit_file",
+            "status": "completed",
+            "parameters": {"path": "src/mew/commands.py"},
+            "result": {
+                "dry_run": True,
+                "changed": True,
+                "diff_preview": "+ Add nearby helper wording without requested task anchors\n",
+            },
+        }
+        session = {
+            "id": 8,
+            "tool_calls": [source_call],
+        }
+
+        frontier = record_work_rejection_frontier(
+            session,
+            source_call,
+            "task-goal/substitution fragility after rejection feedback; missing focused verifier",
+        )
+
+        self.assertEqual(frontier["drift_class"], "task_goal_substitution")
+        self.assertEqual(frontier["rejected_patch_family"], "task_goal_substitution")
+
 
 if __name__ == "__main__":
     unittest.main()

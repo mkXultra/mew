@@ -108,7 +108,10 @@ Current M6.16 evidence:
   `rescue_partial_count=9`, `approval.rejected=13/18`,
   `verifier.failed=0/75`, `first_edit_latency.p95=890.0`, empty
   side-project dogfood rows, and failure classes including
-  `task_goal_substitution` and `synthetic_schema_substitution`; it recommends
+  `task_goal_substitution` and `synthetic_schema_substitution`; after task
+  `#659`, the current output reports `attempts_total=15`,
+  `clean_or_practical_successes=3`, `rescue_partial_count=12`,
+  `approval.rejected=17/22`, `verifier.failed=0/74`, and still recommends
   `mew_first_rescue_partial` as the first bottleneck. Validation passed:
   `uv run pytest -q tests/test_implementation_lane_baseline.py tests/test_mew_first_calibration.py tests/test_metrics.py tests/test_side_project_dogfood.py --no-testmon`,
   `uv run ruff check src/mew/implementation_lane_baseline.py src/mew/commands.py src/mew/cli.py tests/test_implementation_lane_baseline.py`,
@@ -137,6 +140,20 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_work_session.py tests/test_commands.py -k 'work_think_prompt or finish or same_surface_audit or work_finish' --no-testmon`,
   `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
   `git diff --check`.
+- Task `#659` is a supervisor-owned M6.16/M6.14 repair slice from the `#658`
+  failure evidence. Rejection-frontier classification now preserves explicit
+  `task_goal_substitution` before it can be downgraded to
+  `missing_focused_verifier` or pairing recovery, and write-ready
+  `task_goal.required_terms` filters evidence-source/scope labels such as
+  `side-pj`, `side-project`, `implementation-lane`, `prompt-only`, and
+  `test-only` while retaining real task anchors such as `user-facing` and
+  `output-file`. This is loop-substrate/product progress, not mew-first
+  autonomy credit. Focused proof:
+  `uv run pytest -q tests/test_work_session.py tests/test_work_rejection_frontier.py -k 'evidence_source_scope_terms or task_goal_substitution or required_terms' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py tests/test_work_rejection_frontier.py -k 'rejection_frontier or write_ready or work_think_prompt' --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py tests/test_metrics.py -k 'task_goal or implementation_lane or metrics' --no-testmon`,
+  `uv run ruff check src/mew/commands.py src/mew/work_loop.py tests/test_work_session.py tests/test_work_rejection_frontier.py`,
+  and `git diff --check`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

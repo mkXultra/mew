@@ -6784,6 +6784,16 @@ def _work_rejection_frontier_drift_class(session, source_call, reason):
     )
     if any(synthetic_schema_markers):
         return "synthetic_schema_substitution"
+    if any(
+        marker in text
+        for marker in (
+            "task_goal_substitution",
+            "task goal substitution",
+            "task-goal substitution",
+            "task-goal/substitution",
+        )
+    ):
+        return "task_goal_substitution"
     pairing = work_write_pairing_status(session, source_call)
     same_turn_test_edit = _work_rejection_frontier_has_same_turn_test_edit(session, source_call)
     explicit_unpaired_rejection = "unpaired" in text or "missing test" in text
@@ -6866,6 +6876,11 @@ def _work_rejection_frontier_policy(drift_class):
             "rejected_patch_family": "synthetic_schema_substitution",
             "stop_rule": "block invented schemas and hard-coded metadata; require existing APIs, data paths, and named task fields",
             "next_action": "replace the synthetic metadata patch with a scoped source/test edit that uses the real API and preserves the existing schema",
+        },
+        "task_goal_substitution": {
+            "rejected_patch_family": "task_goal_substitution",
+            "stop_rule": "block patches that substitute evidence-source labels, nearby helpers, or easier wording for the requested task goal",
+            "next_action": "return to the explicit task acceptance criteria and draft only the scoped source/test patch that implements them",
         },
         "reviewer_rejected_patch": {
             "rejected_patch_family": "reviewer_rejected_patch",

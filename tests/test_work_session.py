@@ -6982,6 +6982,32 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(tiny_context["task_goal"]["required_terms"], [])
 
+    def test_tiny_write_ready_draft_context_ignores_evidence_source_scope_terms(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def meaning():\n    return 41\n",
+            test_text="def test_meaning():\n    assert meaning() == 41\n",
+        )
+        context["task"]["title"] = "M6.16 closeout evidence prompt for user-facing tasks"
+        context["task"]["description"] = (
+            "M6.16 implementation-lane bottleneck reduction from side-pj issue #2. "
+            "Strengthen finish guidance for CLI stdout/output-file behavior. "
+            "Keep this prompt-only and test-only."
+        )
+        context["guidance"] = "Draft the paired source/test patch. Do not add side-pj-specific wording."
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        required_terms = tiny_context["task_goal"]["required_terms"]
+
+        self.assertNotIn("side-pj", required_terms)
+        self.assertNotIn("side-project", required_terms)
+        self.assertNotIn("implementation-lane", required_terms)
+        self.assertNotIn("prompt-only", required_terms)
+        self.assertNotIn("test-only", required_terms)
+        self.assertIn("user-facing", required_terms)
+        self.assertIn("output-file", required_terms)
+
     def test_tiny_write_ready_draft_context_keeps_milestone_and_required_field_terms(self):
         from mew.work_loop import build_write_ready_tiny_draft_model_context
 

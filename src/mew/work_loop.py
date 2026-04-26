@@ -108,6 +108,12 @@ WORK_TASK_GOAL_TERM_RE = re.compile(r"\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+\b")
 WORK_TASK_GOAL_TERM_STOPWORDS = {
     "dry-run",
     "fast-path",
+    "github-issue",
+    "implementation-lane",
+    "prompt-only",
+    "side-pj",
+    "side-project",
+    "test-only",
     "write-ready",
 }
 WORK_TASK_GOAL_REQUIRED_TERMS_LIMIT = 10
