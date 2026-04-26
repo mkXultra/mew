@@ -22,19 +22,25 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP9 Issue and Dogfood Ledger Digest | `done` | Dogfood-digest mode landed practical: static dogfood rows, `[side-pj]` issue summaries, outcome/failure-class/rescue-edits grouping, README usage, stdout/output-file proof, and focused tests are in place. |
 | SP10 Companion Export Contract | `done` | Export contract landed practical: local schema examples, documented markdown surfaces for every mode, README pointer, and all-mode output-file compatibility tests are in place. |
 | SP11 Second Side-Project Gate | `done` | Gate landed practical: the recommendation is to pause new side-project work and feed SP6-SP10 evidence into core M6.16/M9/M11 before starting a second isolated side project. |
+| SP12 mew-ghost macOS Shell Scaffold | `planned` | User authorized a second side-project arc for a larger macOS presence dogfood loop; first slice must stay isolated and permission-safe. |
+| SP13 mew-ghost Live macOS Probe Integration | `not_started` | Deferred until SP12 establishes a tested scaffold and structured permission fallback. |
+| SP14 mew-ghost Presence Loop | `not_started` | Deferred until probe/state contract exists. |
+| SP15 mew-ghost Launcher Contract | `not_started` | Deferred until visual presence and command-intent surfaces are stable. |
 
 ## Active Focus
 
-Active side-project focus: **paused after SP11**.
+Active side-project focus: **SP12 mew-ghost macOS Shell Scaffold**.
 
 Current target:
 
-- feed SP6-SP10 side-project evidence into core M6.16/M9/M11 planning before
-  starting any second isolated side project
+- start `mew-ghost` as the second isolated side project under
+  `experiments/mew-ghost`
+- keep the first slice macOS-aware but permission-safe: no screen capture, no
+  hidden monitoring, and no live `.mew` state reads
+- focused verifier:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
 - keep `mew-companion-log` stable as the local fixture-tested companion surface
   set for future product planning and contract checks
-- use SP6-SP11 as the next side-project roadmap arc before considering a
-  second isolated side project
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
 - preserve the current operating model for any future side-project cohort:
@@ -283,25 +289,27 @@ Current target:
 ## Missing Proof
 
 - SP1 through SP11 are closed for the first `mew-companion-log` cohort.
-- No second side-project implementation is authorized by this roadmap state.
-- The remaining work is outside this side-project arc: consume the evidence in
-  core M6.16/M9/M11 planning and close or address the open `[side-pj]`
-  implementation-lane polish issues.
+- SP12 is open for `mew-ghost`, but no `experiments/mew-ghost` implementation
+  exists yet.
+- No `mew-ghost` side-dogfood ledger row exists yet.
+- Open `[side-pj]` implementation-lane polish issues remain M6.16 input and do
+  not block the isolated `mew-ghost` scaffold unless the same failure repeats.
 
 ## Next Action
 
-Pause side-project implementation and return evidence to core planning:
+Start SP12 with mew as first implementer:
 
-1. use `experiments/mew-companion-log/SECOND_SIDE_PROJECT_GATE.md` as the local
-   SP11 decision artifact
-2. use ledger rows `7` through `12` and issues `#4` through `#7` as M6.16
-   implementation-lane polish input
-3. do not start a second isolated side project until a future roadmap/status
-   update explicitly opens one
+1. create a coding task for `mew-ghost` SP12
+2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
+   with `--model gpt-5.5`
+3. allow writes only under `experiments/mew-ghost`
+4. verify with
+   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+5. write a local side-dogfood report before appending to the canonical ledger
 
 ## Non-Goals
 
-- do not implement the side project before SP0 is done
+- do not implement outside `experiments/mew-ghost` for SP12
 - do not treat Codex CLI implementation as mew-first autonomy credit
 - do treat Codex CLI operating mew as `operator`, not `implementer`
 - do not make GitHub issues for normal progress; create one `[side-pj]` issue
@@ -310,5 +318,6 @@ Pause side-project implementation and return evidence to core planning:
   visible in the ledger
 - do not change core mew unless the side project exposes a classified M6.14
   repair blocker or a later M6.16 measured hardening slice
-- do not read live `.mew` state, import `src/mew/**`, or start GUI, Tauri,
-  screen capture, TTS, or network-heavy side projects in this roadmap arc
+- do not read live `.mew` state, import `src/mew/**`, use screen capture,
+  keystroke monitoring, TTS, network-heavy services, or native packaging in
+  SP12

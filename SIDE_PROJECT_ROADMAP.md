@@ -225,3 +225,84 @@ Done when:
 - if a second side project is recommended, it has a name, target shape,
   non-goals, focused verifier, and first milestone
 - no implementation begins until the new roadmap/status entries are written
+
+## Second Project: mew-ghost
+
+`mew-ghost` is the second side project when the user explicitly wants a larger
+presence-oriented dogfood loop. It should stay isolated under
+`experiments/mew-ghost` and exercise macOS-adjacent product work without editing
+core mew.
+
+Target shape:
+
+- a small companion presence surface that can render beside editor/terminal work
+- macOS active app/window-title detection through opt-in OS APIs
+- graceful behavior when Accessibility permission is missing or the platform is
+  not macOS
+- a click/command contract that opens or prints `mew chat` / `mew code` launch
+  intents without invoking resident loops during tests
+- deterministic fixture tests for state mapping, macOS probe parsing, permission
+  fallback, launcher contract, and generated local UI output
+
+Non-goals for the first implementation arc:
+
+- no screen capture, keystroke logging, or hidden background monitoring
+- no live `.mew` state reads; use fixtures or explicit command output only
+- no core `src/mew/**` imports or core command promotion
+- no native app packaging until the fixture-tested shell and macOS probe
+  contract are stable
+
+### SP12: mew-ghost macOS Shell Scaffold
+
+Create the isolated side project with a permission-safe macOS probe and a
+deterministic visual shell.
+
+Done when:
+
+- `experiments/mew-ghost` has a README, Python entrypoint/modules, fixtures, and
+  focused tests
+- a command renders a local ghost state or HTML panel from a static fixture
+- a macOS probe command reports the active app/window title when available and a
+  structured permission/platform status when unavailable
+- launcher actions produce explicit `mew chat` / `mew code` command intents
+  without executing resident loops in tests
+- the focused verifier is
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+- the attempt leaves a local side-dogfood report under
+  `experiments/mew-ghost/.mew-dogfood/reports/`
+
+### SP13: mew-ghost Live macOS Probe Integration
+
+Connect the scaffold to an opt-in macOS active-window probe while keeping tests
+hermetic.
+
+Done when:
+
+- the live probe uses an explicit command such as `--macos-probe`
+- permission denied, missing `osascript`, timeout, and non-macOS cases are
+  surfaced as user-readable structured states
+- no probe runs unless the user invokes the probe command or opts into live mode
+- tests cover every fallback path without requiring Accessibility permission
+
+### SP14: mew-ghost Presence Loop
+
+Make the ghost feel present while staying local and deterministic.
+
+Done when:
+
+- the ghost maps app/window/task state into visual states such as idle,
+  attentive, coding, waiting, and blocked
+- the local UI output refresh contract is documented
+- fixture tests cover state transitions and stable rendered output
+
+### SP15: mew-ghost Launcher Contract
+
+Finish the side-project shell by defining safe launch behavior for mew actions.
+
+Done when:
+
+- `mew chat` and `mew code` intents are represented as explicit commands
+- direct execution remains opt-in and outside tests
+- README examples show safe dry-run and live macOS usage
+- the side-project dogfood ledger summarizes the full mew-ghost arc and any
+  reusable implementation-lane polish findings
