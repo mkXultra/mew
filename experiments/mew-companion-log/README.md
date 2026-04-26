@@ -5,10 +5,12 @@ An isolated experiment for rendering small markdown companion surfaces from a me
 ## Files
 
 - `companion_log.py` — standalone Python CLI/script that reads fixture JSON and renders markdown.
+- `CONTRACT.md` — stable local input/output contract for every documented companion export mode.
 - `fixtures/sample_session.json` — sample session data used by the report, morning journal, evening journal, dream/learning, and static research digest commands/tests.
 - `fixtures/sample_mew_state.json` — static mew-state-like sample used by the SP6 state brief; it is not loaded from live `.mew` state.
 - `fixtures/sample_bundle.json` — static SP7 manifest that combines explicit local fixtures and companion surfaces into one bundle.
 - `fixtures/sample_archive.json` — static SP8 multi-day archive manifest for indexing companion outputs without reading live state.
+- `fixtures/sample_dogfood_digest.json` — static SP9 dogfood digest fixture for local dogfood rows, reusable polish findings, and `[side-pj]` issue summaries.
 - `tests/test_companion_log.py` — focused pytest coverage for rendering, stdout, output-file writing, ordering/grouping, empty archive days, missing fixtures, and fixture shape.
 
 ## Usage

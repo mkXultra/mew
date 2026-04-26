@@ -439,6 +439,46 @@ def test_cli_writes_bundle_output_file(tmp_path: Path) -> None:
     assert "# Mew State Companion Brief: SP6 side-project loop" in written
 
 
+def test_cli_writes_every_documented_mode_output_file(tmp_path: Path) -> None:
+    mode_cases = [
+        ("report", "sample_session.json"),
+        ("morning-journal", "sample_session.json"),
+        ("evening-journal", "sample_session.json"),
+        ("dream-learning", "sample_session.json"),
+        ("research-digest", "sample_session.json"),
+        ("state-brief", "sample_mew_state.json"),
+        ("bundle", "sample_bundle.json"),
+        ("archive-index", "sample_archive.json"),
+        ("dogfood-digest", "sample_dogfood_digest.json"),
+    ]
+
+    for mode, fixture_name in mode_cases:
+        output = tmp_path / f"{mode}.md"
+        command = [
+            sys.executable,
+            str(SCRIPT),
+            str(ROOT / "fixtures" / fixture_name),
+            "--output",
+            str(output),
+        ]
+        if mode != "report":
+            command.extend(["--mode", mode])
+
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        written = output.read_text(encoding="utf-8")
+        assert output.is_file()
+        assert written.startswith("# ")
+        assert written.endswith("\n")
+        assert result.stdout == ""
+        assert result.stderr == ""
+
+
 def test_render_archive_index_snapshot() -> None:
     sys.path.insert(0, str(ROOT))
     try:
