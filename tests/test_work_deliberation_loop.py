@@ -66,11 +66,13 @@ class WorkDeliberationLoopTests(unittest.TestCase):
                 base_url="https://example.invalid",
                 model_backend="codex",
                 timeout=60,
+                deliberation_requested=True,
                 current_time="2026-04-26T09:30:00Z",
             )
 
         self.assertEqual(result["status"], "result_ready")
         self.assertEqual(result["action"]["type"], "wait")
+        self.assertEqual(result["decision"]["reason"], "reviewer_commanded")
         self.assertEqual(result["metrics"]["effective_model"], "gpt-5.5")
         self.assertEqual(result["metrics"]["effective_effort"], "high")
         call_model.assert_called_once()
@@ -109,6 +111,56 @@ class WorkDeliberationLoopTests(unittest.TestCase):
             "deliberation_fallback",
             [event["event"] for event in session["deliberation_cost_events"]],
         )
+
+    def test_no_auto_deliberation_blocks_automatic_and_does_not_call_model(self):
+        with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+            result = _attempt_work_deliberation_lane(
+                context=self._context(),
+                model_auth={"kind": "test"},
+                model="gpt-5.5",
+                base_url="https://example.invalid",
+                model_backend="codex",
+                timeout=60,
+                auto_deliberation=False,
+                current_time="2026-04-26T09:31:30Z",
+            )
+
+        self.assertEqual(result["status"], "preflight_blocked")
+        self.assertEqual(result["metrics"]["status"], "fallback")
+        self.assertEqual(result["metrics"]["reason"], "auto_deliberation_disabled")
+        call_model.assert_not_called()
+
+    def test_deliberate_overrides_disabled_auto_deliberation(self):
+        model_output = {
+            "kind": "deliberation_result",
+            "schema_version": 1,
+            "todo_id": "todo-17-1",
+            "lane": "deliberation",
+            "blocker_code": "review_rejected",
+            "decision": "propose_patch_strategy",
+            "situation": "The reviewer rejected a cross-file patch.",
+            "reasoning_summary": "Retry tiny with the reviewer invariant first.",
+            "recommended_next": "retry_tiny",
+            "expected_trace_candidate": True,
+            "confidence": "medium",
+        }
+
+        with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output) as call_model:
+            result = _attempt_work_deliberation_lane(
+                context=self._context(),
+                model_auth={"kind": "test"},
+                model="gpt-5.5",
+                base_url="https://example.invalid",
+                model_backend="codex",
+                timeout=60,
+                deliberation_requested=True,
+                auto_deliberation=False,
+                current_time="2026-04-26T09:31:45Z",
+            )
+
+        self.assertEqual(result["status"], "result_ready")
+        self.assertEqual(result["decision"]["reason"], "reviewer_commanded")
+        call_model.assert_called_once()
 
     def test_deliberation_lane_state_limited_blocker_does_not_call_model(self):
         with patch("mew.work_loop.call_model_json_with_retries") as call_model:

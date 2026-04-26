@@ -96,6 +96,29 @@ class DeliberationPolicyTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "automatic_eligible")
         self.assertEqual(decision["budget_snapshot"]["remaining"]["attempts"], 0)
 
+    def test_auto_deliberation_disabled_blocks_automatic_but_not_reviewer_command(self):
+        blocked = evaluate_deliberation_request(
+            todo={"id": "todo-18", "lane": "tiny"},
+            blocker_code="review_rejected",
+            binding=self._binding(),
+            budget={"max_attempts_per_todo": 1, "attempts_used": 0},
+            reviewer_commanded=False,
+            auto_deliberation_enabled=False,
+        )
+        self.assertFalse(blocked["allowed"])
+        self.assertEqual(blocked["reason"], "auto_deliberation_disabled")
+
+        commanded = evaluate_deliberation_request(
+            todo={"id": "todo-18", "lane": "tiny"},
+            blocker_code="review_rejected",
+            binding=self._binding(),
+            budget={"max_attempts_per_todo": 1, "attempts_used": 0},
+            reviewer_commanded=True,
+            auto_deliberation_enabled=False,
+        )
+        self.assertTrue(commanded["allowed"])
+        self.assertEqual(commanded["reason"], "reviewer_commanded")
+
     def test_policy_limit_blocks_even_when_reviewer_commanded(self):
         decision = evaluate_deliberation_request(
             todo={"id": "todo-19", "lane": "tiny"},

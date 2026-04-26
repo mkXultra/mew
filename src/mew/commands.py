@@ -5063,6 +5063,8 @@ def cmd_work_ai(args):
                 allow_verify=effective_args.allow_verify,
                 verify_command=effective_args.verify_command or "",
                 guidance=step_guidance,
+                deliberation_requested=bool(getattr(effective_args, "deliberate", False)),
+                auto_deliberation=not bool(getattr(effective_args, "no_auto_deliberation", False)),
                 progress=progress,
                 act_mode=getattr(effective_args, "act_mode", "model") or "model",
                 stream_model=bool(getattr(args, "stream_model", False)),
@@ -14519,6 +14521,8 @@ def _parse_chat_work_ai_args(parts):
         "max_steps": None,
         "act_mode": None,
         "work_guidance": "",
+        "deliberate": False,
+        "no_auto_deliberation": False,
         "progress": False,
         "live": False,
         "follow": False,
@@ -14589,6 +14593,14 @@ def _parse_chat_work_ai_args(parts):
             continue
         if token == "--allow-verify":
             args["allow_verify"] = True
+            index += 1
+            continue
+        if token == "--deliberate":
+            args["deliberate"] = True
+            index += 1
+            continue
+        if token == "--no-auto-deliberation":
+            args["no_auto_deliberation"] = True
             index += 1
             continue
         if token == "--progress":
