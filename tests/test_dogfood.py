@@ -682,6 +682,20 @@ class DogfoodTests(unittest.TestCase):
 
         def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
             self.assertEqual(model_auth, {"access_token": "token"})
+            if "read-only deliberation lane" in prompt:
+                return {
+                    "kind": "deliberation_result",
+                    "schema_version": 1,
+                    "todo_id": "todo-61301",
+                    "lane": "deliberation",
+                    "blocker_code": "review_rejected",
+                    "decision": "propose_patch_strategy",
+                    "situation": "review rejection needs a narrow causal repair in the work loop",
+                    "reasoning_summary": "classify the blocker family before drafting",
+                    "recommended_next": "retry_tiny",
+                    "expected_trace_candidate": True,
+                    "confidence": "high",
+                }
             self.assertIn("Write-ready tiny draft lane is active.", prompt)
             return {
                 "kind": "patch_proposal",
@@ -721,8 +735,56 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertEqual(observed_auth, [("codex", None)])
             self.assertEqual(artifacts["tiny_provider_mode"], "live_provider")
-            self.assertEqual(artifacts["trace"]["evidence_class"], "live_tiny_provider_contract")
+            self.assertEqual(artifacts["trace"]["evidence_class"], "live_provider_internalization_contract")
             self.assertFalse(artifacts["trace"]["close_evidence"])
+
+    def test_run_dogfood_m6_13_live_provider_requires_deliberation_result(self):
+        def fake_load_model_auth(model_backend, auth_path=None):
+            return {"access_token": "token"}
+
+        def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+            return {
+                "kind": "patch_proposal",
+                "summary": "increment the paired meaning value",
+                "files": [
+                    {
+                        "path": "src/mew/patch_draft.py",
+                        "edits": [{"old": "return 41", "new": "return 42"}],
+                    },
+                    {
+                        "path": "tests/test_patch_draft.py",
+                        "edits": [{"old": "meaning(), 41", "new": "meaning(), 42"}],
+                    },
+                ],
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_13-deliberation-internalization",
+                cleanup=False,
+                ai=True,
+                auth=None,
+                model_backend="",
+                model="",
+                base_url="",
+                model_timeout=60,
+            )
+
+            with patch("mew.dogfood.load_model_auth", side_effect=fake_load_model_auth):
+                with patch("mew.work_loop._attempt_work_deliberation_lane", return_value={}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        report = run_dogfood_scenario(args)
+
+            scenario = report["scenarios"][0]
+            failed = {item["name"]: item for item in scenario["checks"] if not item["passed"]}
+
+            self.assertEqual(report["status"], "fail")
+            self.assertIn("m6_13_deliberation_internalization_records_deliberation_result", failed)
+            self.assertEqual(
+                failed["m6_13_deliberation_internalization_records_deliberation_result"]["observed"]["status"],
+                "missing_live_result",
+            )
 
     def test_run_dogfood_m6_9_repeated_task_recall_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
