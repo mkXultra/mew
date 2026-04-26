@@ -405,6 +405,26 @@ Current M6.16 evidence:
   `11`, and reduce the measured rescue/partial count from `29` to `28`.
   Codex-ultra review session `019dcb59-5c67-7e12-9169-500867c5e80c` ended with
   `NO FINDINGS`.
+- Task `#676` landed an M6.16 measurement-window slice as practical
+  mew-first evidence. `extract_mew_first_attempts(limit=N)` now sorts attempt
+  records by descending task id before applying the limit, so recent cohort
+  metrics select the newest task ids instead of the oldest tail of
+  `ROADMAP_STATUS.md`; M6.16 headings are also recognized by the default
+  attempt-section list for fixture/doc compatibility. Session `#664` authored
+  the paired source/test patch. It hit one expected shell-permission stop while
+  trying to run `./mew metrics` from inside the work session, but no
+  supervisor product-code rescue was needed. Valid proof passed:
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/mew_first_calibration.py tests/test_mew_first_calibration.py`,
+  `git diff --check`,
+  `./mew metrics --mew-first --limit 10 --json`,
+  and `./mew metrics --implementation-lane --limit 20 --json`. Current
+  `--limit 10` now reports task window `#676 #675 #674 #673 #672 #671 #670
+  #669 #668 #667` and passes the gate at `8/10`; `--limit 20` reduces the
+  measured rescue/partial rate to `0.5`. Codex-ultra review session
+  `019dcb76-a4a1-7803-b29c-d9a888edae14` reported `NO FINDINGS`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

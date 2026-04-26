@@ -93,21 +93,22 @@ M6_16_CLEAN_NO_RESCUE_FIXTURE = """
 def test_extract_mew_first_attempts_skips_substrate_repairs_and_classifies_latest_10() -> None:
     attempts = extract_mew_first_attempts(M6_9_FIXTURE, limit=10)
 
-    assert [attempt.task_id for attempt in attempts] == [592, 593, 595, 596, 597, 598, 599, 600, 601, 602]
+    assert [attempt.task_id for attempt in attempts] == [602, 601, 600, 599, 598, 597, 596, 595, 593, 592]
     assert [attempt.result_class for attempt in attempts] == [
-        "partial_mew_first",
-        "practical_mew_first",
-        "clean_mew_first",
-        "clean_mew_first",
-        "practical_mew_first",
-        "supervisor_rescue",
-        "supervisor_rescue",
-        "supervisor_rescue",
-        "supervisor_owned",
         "supervisor_owned_or_unknown",
+        "supervisor_owned",
+        "supervisor_rescue",
+        "supervisor_rescue",
+        "supervisor_rescue",
+        "practical_mew_first",
+        "clean_mew_first",
+        "clean_mew_first",
+        "practical_mew_first",
+        "partial_mew_first",
     ]
-    assert attempts[7].drift_class == "generic_cleanup_substitution"
-    assert attempts[7].rejected_patch_family == "generic_cleanup"
+    attempt_by_task_id = {attempt.task_id: attempt for attempt in attempts}
+    assert attempt_by_task_id[600].drift_class == "generic_cleanup_substitution"
+    assert attempt_by_task_id[600].rejected_patch_family == "generic_cleanup"
 
 
 def test_reviewer_repaired_mew_first_without_supervisor_rescue_is_practical(tmp_path: Path) -> None:
@@ -161,8 +162,8 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
         "clean_or_practical_successes": 4,
         "success_gap": 3,
         "success_rate": 0.4,
-        "gate_success_task_ids": [593, 595, 596, 597],
-        "gate_blocking_task_ids": [592, 598, 599, 600, 601, 602],
+        "gate_success_task_ids": [597, 596, 595, 593],
+        "gate_blocking_task_ids": [602, 601, 600, 599, 598, 592],
         "gate_blocker_result_class_counts": {
             "partial_mew_first": 1,
             "supervisor_rescue": 3,
@@ -171,15 +172,15 @@ def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None
         },
         "passed": False,
     }
-    assert summary["attempt_window_task_ids"] == [592, 593, 595, 596, 597, 598, 599, 600, 601, 602]
+    assert summary["attempt_window_task_ids"] == [602, 601, 600, 599, 598, 597, 596, 595, 593, 592]
     assert summary["included_attempt_sections"] == ["### M6.9:", "### M6.10:"]
     assert summary["counts"]["result_class"]["supervisor_rescue"] == 3
     text = format_mew_first_calibration_report(summary)
     assert "included_attempt_sections: ### M6.9:, ### M6.10:" in text
-    assert "attempt_window: #592 #593 #595 #596 #597 #598 #599 #600 #601 #602" in text
+    assert "attempt_window: #602 #601 #600 #599 #598 #597 #596 #595 #593 #592" in text
     assert "gate: 4/10 clean_or_practical threshold=7 success_gap=3 passed=False" in text
-    assert "gate_successes: #593 #595 #596 #597" in text
-    assert "gate_blockers: #592 #598 #599 #600 #601 #602" in text
+    assert "gate_successes: #597 #596 #595 #593" in text
+    assert "gate_blockers: #602 #601 #600 #599 #598 #592" in text
     assert "gate_blocker_classes: partial_mew_first=1 supervisor_owned=1 supervisor_owned_or_unknown=1 supervisor_rescue=3" in text
     assert "#599 supervisor_rescue" in text
 
@@ -215,9 +216,40 @@ def test_extract_mew_first_attempts_includes_m6_10_attempts_after_m6_9() -> None
 
     attempts = extract_mew_first_attempts(text, limit=10)
 
-    assert [attempt.task_id for attempt in attempts][-2:] == [602, 606]
-    assert attempts[-1].result_class == "clean_mew_first"
-    assert attempts[-1].patch_owner == "mew"
+    assert [attempt.task_id for attempt in attempts][:2] == [606, 602]
+    assert attempts[0].result_class == "clean_mew_first"
+    assert attempts[0].patch_owner == "mew"
+
+
+def test_extract_mew_first_attempts_limit_selects_newest_task_ids_first() -> None:
+    text = """
+### M6.16: Calibration
+
+- Task `#675` landed a bounded formatter slice as clean mew-first evidence.
+  The fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Valid proof passed.
+- Task `#674` landed a side-dogfood ledger-semantics slice as practical
+  mew-first evidence after reviewer repair. Valid proof passed.
+- Task `#673` landed a bounded mew-first implementation evidence slice. The
+  fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+
+### M6.10: Execution Accelerators
+
+- Task `#629` landed an older mew-first implementation evidence slice. The
+  fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+- Task `#631` landed an older mew-first implementation evidence slice. The
+  fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+- Task `#632` landed an older mew-first implementation evidence slice. The
+  fresh mew-first session drafted the paired source/test patch and the
+  supervisor approved without rescue edits. Validation covered focused tests.
+"""
+
+    attempts = extract_mew_first_attempts(text, limit=3)
+
+    assert [attempt.task_id for attempt in attempts] == [675, 674, 673]
 
 
 def test_reviewer_steered_mew_first_attempt_is_practical_not_clean() -> None:
@@ -300,7 +332,7 @@ def test_extract_mew_first_attempts_ignores_narrative_status_bullets_but_keeps_a
 
     attempts = extract_mew_first_attempts(text, limit=10)
 
-    assert [attempt.task_id for attempt in attempts] == [639, 660, 664]
+    assert [attempt.task_id for attempt in attempts] == [664, 660, 639]
     assert attempts[0].result_class == "clean_mew_first"
     assert attempts[1].result_class == "practical_mew_first"
     assert attempts[2].result_class == "clean_mew_first"
@@ -324,4 +356,4 @@ def test_cmd_metrics_mew_first_json_output(tmp_path: Path, capsys) -> None:
 
     assert payload["kind"] == "mew_first_calibration"
     assert payload["gate"]["clean_or_practical_successes"] == 4
-    assert payload["attempts"][-1]["task_id"] == 602
+    assert payload["attempts"][0]["task_id"] == 602

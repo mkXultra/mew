@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping
 
 DEFAULT_MILESTONE_STATUS_PATH = Path("ROADMAP_STATUS.md")
 SUCCESS_CLASSES = frozenset({"clean_mew_first", "practical_mew_first"})
-DEFAULT_ATTEMPT_SECTION_HEADINGS = ("### M6.9:", "### M6.10:")
+DEFAULT_ATTEMPT_SECTION_HEADINGS = ("### M6.9:", "### M6.10:", "### M6.16:")
 
 
 @dataclass(frozen=True)
@@ -277,7 +277,7 @@ def extract_mew_first_attempts(text: str, *, limit: int = 10) -> list[MewFirstAt
                     source_excerpt=_excerpt(block),
                 )
             )
-    return attempts[-limit:]
+    return sorted(attempts, key=lambda attempt: attempt.task_id, reverse=True)[:limit]
 
 
 def summarize_mew_first_calibration(
