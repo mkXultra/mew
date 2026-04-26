@@ -264,6 +264,23 @@ Current M6.16 evidence:
   timing flake. Codex-ultra re-review session
   `019dca8b-7797-7760-b628-100e80455aa5` reported no findings after the
   reviewer fixes.
+- Task `#668` landed the GitHub issue `#9` behavior-verifier prompt slice as
+  practical mew-first evidence. The work think prompt now tells tests and
+  verifier commands to prefer behavior, contract, output, state, or
+  docs-visible assertions over exact source text phrase assertions unless the
+  task explicitly requires a literal public string or security-sensitive marker.
+  Count this as practical mew-first without rescue edits: mew authored the
+  paired source/test patch, codex-ultra review session
+  `019dcab7-b73d-7bf2-b4a5-994e8c940a62` found the missing write-ready and
+  tiny-draft prompt surfaces, and mew session `#651` repaired them without
+  supervisor product-code rescue. The supervisor only corrected an invalid
+  pytest `-k` verifier expression in the task invocation. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or write_ready_tiny_draft or behavior' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`. The invalid original verifier
+  `work_think_prompt or source_literal or behavior verifier` was a task-spec
+  operator error, not a product regression. Codex-ultra re-review reported no
+  findings after the write-ready and tiny-draft repair.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

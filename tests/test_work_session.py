@@ -7088,6 +7088,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("patch_proposal", fast_prompt)
         self.assertNotIn("patch_blocker", fast_prompt)
         self.assertLess(len(fast_prompt), len(prompt))
+        def assert_behavior_verifier_guidance(verifier_prompt):
+            self.assertIn(
+                "prefer behavior, contract, output, state, or docs-visible assertions",
+                verifier_prompt,
+            )
+            self.assertIn("over exact source text phrase assertions", verifier_prompt)
+            self.assertIn(
+                "unless the task explicitly requires a literal public string or security-sensitive marker",
+                verifier_prompt,
+            )
+
+        assert_behavior_verifier_guidance(prompt)
+        assert_behavior_verifier_guidance(fast_prompt)
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
         self.assertEqual(
@@ -7099,6 +7112,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("task_goal.required_terms", tiny_prompt)
         self.assertIn('"kind": "patch_proposal|patch_blocker"', tiny_prompt)
         self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
+        assert_behavior_verifier_guidance(tiny_prompt)
         self.assertLess(len(tiny_prompt), len(fast_prompt))
 
     def test_tiny_write_ready_draft_context_carries_task_goal_terms(self):
