@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, and lane-attempt telemetry v0 landed; next prove legacy replay compatibility and mirror-lane bundles. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, replay lane reads, and lane-attempt telemetry v0 landed; next add M6.13.2 side-project dogfood telemetry before side-project implementation starts. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
@@ -81,6 +81,9 @@ Current M6.13 target:
   deliberation write path
 - emit lane-attempt telemetry needed for future calibration economics routing,
   while keeping M6.13 v0 routing rule-based
+- add M6.13.2 side-project implementation dogfood telemetry v0 before the
+  side-project lane starts, because reply/chat logs are auxiliary evidence and
+  M6.16 needs structured implementation-lane data
 - defer broad refactoring until M6.16, except for narrow M6.14 repairs when
   the same reproducible mew-first failure class blocks M6.13 twice
 - bind deliberation attempts to explicit model, effort, timeout, budget, and
@@ -93,9 +96,18 @@ Current M6.13 target:
 
 Current M6.13 chain:
 
-`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
+`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof -> M6.13.2 side-project dogfood telemetry`
 
 Current M6.13 evidence:
+
+- M6.13.2 decision memory saved at
+  `.mew/memory/private/project/20260426T081045Z-decision-m6-13-2-side-project-dogfood-telemetry.md`.
+  It records the side-project dogfood reporting flow: side-project task ->
+  mew-first implementer -> Codex CLI/Codex reviewer/comparator/verifier ->
+  tests/proof -> JSONL ledger append -> commit on success or M6.14 repair on
+  structural failure. It also records the non-goals: no side-project
+  implementation, EV routing, automatic Codex CLI integration, implementation
+  lane refactor, or M6.13 close in this slice.
 
 - Task `#647` / session `#634` landed the first additive WorkTodo lane field
   on `_normalize_active_work_todo`: missing or empty lane normalizes to
@@ -568,13 +580,16 @@ should be additive and low-risk:
   without changing tiny-lane behavior
 - add lane-attempt telemetry fields that future M6.16/M6.17 work can use for
   calibration economics, without claiming EV routing in M6.13 v0
+- add M6.13.2 side-project implementation dogfood telemetry before launching
+  the side-project dogfood lane, so the first external implementation attempts
+  produce structured M6.16 evidence instead of only reply/chat history
 
 Planned future milestones:
 
 - **M6.16 Codex-Grade Implementation Lane**: use M6.13 lane-attempt telemetry
-  and later mew-first data to harden the authoritative implementation lane.
-  Broad refactoring belongs here only when a measured bottleneck or recurring
-  failure class is named with before/after proof.
+  and the M6.13.2 side-project dogfood ledger to harden the authoritative
+  implementation lane. Broad refactoring belongs here only when a measured
+  bottleneck or recurring failure class is named with before/after proof.
 - **M6.17 Resident Meta Loop / Lane Chooser**: add a reviewer-gated resident
   supervisor after implementation-lane reliability and lane boundaries are
   proven.
@@ -655,10 +670,13 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
+`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof -> M6.13.2 side-project dogfood telemetry`
 
 Acceptable near-term work:
 
+- implement M6.13.2 side-project dogfood telemetry v0: JSONL schema,
+  reader/writer or append helper, report surface, task report template, and
+  focused tests
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
 - prove old sessions and existing replay bundles with absent lane metadata keep
@@ -672,6 +690,9 @@ Non-goals for the next session:
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
+- side-project implementation before M6.13.2 telemetry exists
+- automatic Codex CLI integration or treating Codex CLI implementation as
+  mew-first autonomy credit
 - M7 inbound-signal work
 - raw deliberation transcript storage
 - broad refactors not tied to lane telemetry or a repeated M6.14 repair-class

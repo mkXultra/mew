@@ -831,6 +831,10 @@ Target:
   `lane=tiny`
 - a mirror lane that proves non-authoritative lane identity and lane-scoped
   bundles without changing tiny-lane behavior
+- M6.13.2 side-project implementation dogfood telemetry v0: a structured
+  JSONL/report surface that records side-project mew-first implementation
+  attempts before the side-project lane starts, so M6.16 can polish the
+  implementation lane from comparable evidence instead of reply transcripts
 - explicit deliberation model binding with requested/effective backend, model,
   effort, timeout, schema contract, and budget telemetry
 - blocker-code escalation rules that refresh stale state instead of escalating,
@@ -866,6 +870,12 @@ Done when:
 - lane attempts emit comparable telemetry for future calibration economics
   routing; M6.13 records the evidence needed for expected-value routing but
   does not require EV-based automatic routing in v0
+- side-project dogfood can record a mew-first implementation attempt with
+  task/session id, side project, worktree or branch, Codex CLI role
+  (`reviewer`, `comparator`, `verifier`, `fallback`, or `implementer`),
+  first-edit latency, read turns before edit, files changed, tests run,
+  reviewer rejections, verifier failures, rescue edits, outcome, failure
+  class, repair requirement, proof artifacts, and commit
 - one full internalization cycle is proven: deliberation solves or materially
   advances a hard task, reviewer approval writes a `source_lane=deliberation`
   reasoning trace, and a later same-shape task retrieves that trace through
@@ -895,6 +905,11 @@ Architecture boundary:
   are required for the lane slice itself, or when the same reproducible
   mew-first failure class has blocked at least two attempts and the repair fits
   the M6.14 repair ledger.
+- M6.13.2 does not build the side project, choose EV routing, auto-integrate
+  Codex CLI, or harden the implementation lane. It only installs the
+  measurement contract. Side-project implementation remains mew-first, while
+  Codex CLI/Codex is recorded separately as reviewer, comparator, verifier,
+  fallback, or implementer.
 
 ## Milestone 6.14: Mew-First Failure Repair Ledger
 
@@ -959,6 +974,8 @@ Target:
   while keeping compatibility with M6.13 lane metadata
 - analyze recent mew-first lane attempts by rescue rate, approval rejection,
   verifier failure, first-edit latency, retry path, and failure class
+- consume the M6.13.2 side-project dogfood ledger as a primary evidence source
+  for implementation-lane bottlenecks; reply/chat logs are auxiliary evidence
 - reduce measured implementation-lane friction without adding new write
   authority or hiding failures behind deliberation
 - perform targeted refactor hardening only when a measured bottleneck or
