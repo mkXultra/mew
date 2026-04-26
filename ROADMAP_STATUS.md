@@ -147,6 +147,27 @@ Current M6.8 evidence:
   --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
   tests/test_commands.py src/mew/work_loop.py tests/test_work_session.py`, and
   `git diff --check`.
+- Dogfooding `mew task propose-next 631 --record --json` immediately after
+  #631 recorded a blocked proposal for stale governance task `#388`, proving
+  the scope fence but also exposing that automatic selection could get stuck on
+  the first blocked ready candidate.
+- Task `#632` / session `#618` repaired that selector behavior mew-first.
+  Automatic `task propose-next` now scans ready/todo coding tasks, builds each
+  proposal, skips governance-blocked proposals, and returns the first unblocked
+  candidate; explicit `--candidate-task-id` still returns and records blocked
+  proposals for reviewer visibility.
+- #632 mew-first note: the first patch only added comments/assertions around
+  existing explicit-candidate behavior and was rejected. After reviewer steer,
+  mew produced the accepted source/test patch with no supervisor product edit.
+- #632 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_commands.py
+  tests/test_work_session.py -k 'task_propose_next or write_ready'
+  --no-testmon`, `uv run ruff check src/mew/commands.py
+  tests/test_commands.py`, and `git diff --check`.
+- Post-#632 dogfood `mew task propose-next 632 --record --json` skipped stale
+  governance task `#388` and returned `no safe selector candidate found`
+  instead of proposing the blocked task.
 
 M6.8 is done when:
 

@@ -564,37 +564,39 @@ def _build_task_selector_next_proposal(state, args):
     if not previous_task:
         return None, 1, f"mew: task not found: {args.previous_task_id}"
 
-    candidate_task = None
-    message = ""
     candidate_task_id = getattr(args, "candidate_task_id", None)
     if candidate_task_id:
         candidate_task = find_task(state, candidate_task_id)
+        message = ""
         if not candidate_task:
             message = f"candidate task not found: {candidate_task_id}"
         elif str(candidate_task.get("id")) == str(previous_task.get("id")):
             message = "candidate task matches the previous task"
         elif not _task_selector_candidate_is_open_coding(candidate_task):
             message = "candidate task is not a ready/todo coding task"
-    else:
-        for task in sorted(open_tasks(state), key=task_sort_key):
-            if str(task.get("id")) == str(previous_task.get("id")):
-                continue
-            if _task_selector_candidate_is_open_coding(task):
-                candidate_task = task
-                break
-        if not candidate_task:
-            message = "no safe selector candidate found"
+        if message:
+            return _task_selector_no_candidate_response(previous_task, message), 1, None
 
-    if message:
-        return _task_selector_no_candidate_response(previous_task, message), 1, None
+        selector_reason = (
+            f"explicit candidate task #{candidate_task.get('id')} after previous task #{previous_task.get('id')}"
+        )
+        proposal = build_task_selector_proposal(previous_task, candidate_task, selector_reason)
+        return proposal, 1 if proposal.get("blocked") else 0, None
 
-    selector_reason = (
-        f"explicit candidate task #{candidate_task.get('id')} after previous task #{previous_task.get('id')}"
-        if candidate_task_id
-        else f"first ready/todo coding task after previous task #{previous_task.get('id')}"
-    )
-    proposal = build_task_selector_proposal(previous_task, candidate_task, selector_reason)
-    return proposal, 1 if proposal.get("blocked") else 0, None
+    for task in sorted(open_tasks(state), key=task_sort_key):
+        if str(task.get("id")) == str(previous_task.get("id")):
+            continue
+        if not _task_selector_candidate_is_open_coding(task):
+            continue
+        selector_reason = (
+            f"ready/todo coding task #{task.get('id')} after previous task #{previous_task.get('id')}"
+        )
+        proposal = build_task_selector_proposal(previous_task, task, selector_reason)
+        if proposal.get("blocked"):
+            continue
+        return proposal, 0, None
+
+    return _task_selector_no_candidate_response(previous_task, "no safe selector candidate found"), 1, None
 
 
 def cmd_task_propose_next(args):
