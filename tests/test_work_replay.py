@@ -179,9 +179,11 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 os.chdir(old_cwd)
 
     def test_patch_draft_compiler_replay_writes_expected_payload_files(self):
+        from mew.work_lanes import get_work_todo_lane_view
+
         session_id = "s-9"
         todo_id = "todo-9-1"
-        todo = {"id": todo_id, "source": {"target_paths": ["src/mew/patch_draft.py"]}}
+        todo = {"id": todo_id, "lane": "mirror", "source": {"target_paths": ["src/mew/patch_draft.py"]}}
         proposal = {"kind": "patch_request", "payload": "value"}
         validator_result = {"kind": "patch_blocker", "code": "write_policy_violation"}
         cached_windows = {"src/mew/patch_draft.py": {"path": "src/mew/patch_draft.py", "text": "before", "line_start": 1, "line_end": 1}}
@@ -234,6 +236,11 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(metadata["bundle"], "patch_draft_compiler")
                 self.assertEqual(metadata["session_id"], str(session_id))
                 self.assertEqual(metadata["todo_id"], todo_id)
+                lane_view = get_work_todo_lane_view(todo)
+                self.assertEqual(metadata["lane"], lane_view.name)
+                self.assertEqual(metadata["lane_role"], lane_view.role)
+                self.assertEqual(metadata["lane_schema_version"], 1)
+                self.assertEqual(metadata["lane_attempt_id"], f"{session_id}:{todo_id}:1")
                 self.assertTrue(metadata["calibration_counted"])
                 self.assertEqual(metadata["calibration_exclusion_reason"], "")
                 self.assertEqual(metadata["attempt"], 1)
@@ -244,6 +251,95 @@ class PatchDraftCompilerReplayTests(unittest.TestCase):
                 self.assertEqual(metadata["files"]["live_files"], "live_files.json")
                 self.assertEqual(metadata["files"]["allowed_write_roots"], "allowed_write_roots.json")
                 self.assertEqual(metadata["files"]["validator_result"], "validator_result.json")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_patch_draft_compiler_replay_defaults_missing_and_empty_lane_to_tiny(self):
+        from mew.work_lanes import get_work_todo_lane_view
+
+        session_id = "s-9b"
+        todo_id = "todo-9b-1"
+        proposal = {"kind": "patch_request", "payload": "value"}
+        validator_result = {"kind": "patch_blocker", "code": "write_policy_violation"}
+        cached_windows = {}
+        live_files = {}
+        allowed_write_roots = ["."]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_date_iso", return_value="2026-04-22"):
+                    with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                        missing_lane_path = write_patch_draft_compiler_replay(
+                            session_id=session_id,
+                            todo_id=todo_id,
+                            todo={"id": todo_id},
+                            proposal=proposal,
+                            cached_windows=cached_windows,
+                            live_files=live_files,
+                            allowed_write_roots=allowed_write_roots,
+                            validator_result=validator_result,
+                        )
+                        empty_lane_path = write_patch_draft_compiler_replay(
+                            session_id=session_id,
+                            todo_id=todo_id,
+                            todo={"id": todo_id, "lane": ""},
+                            proposal=proposal,
+                            cached_windows=cached_windows,
+                            live_files=live_files,
+                            allowed_write_roots=allowed_write_roots,
+                            validator_result=validator_result,
+                        )
+
+                tiny_lane_view = get_work_todo_lane_view({})
+                missing_metadata = json.loads(Path(missing_lane_path).read_text(encoding="utf-8"))
+                empty_metadata = json.loads(Path(empty_lane_path).read_text(encoding="utf-8"))
+                self.assertEqual(missing_metadata["lane"], tiny_lane_view.name)
+                self.assertEqual(missing_metadata["lane_role"], tiny_lane_view.role)
+                self.assertEqual(missing_metadata["lane_schema_version"], 1)
+                self.assertEqual(missing_metadata["lane_attempt_id"], f"{session_id}:{todo_id}:1")
+                self.assertEqual(empty_metadata["lane"], tiny_lane_view.name)
+                self.assertEqual(empty_metadata["lane_role"], tiny_lane_view.role)
+                self.assertEqual(empty_metadata["lane_schema_version"], 1)
+                self.assertEqual(empty_metadata["lane_attempt_id"], f"{session_id}:{todo_id}:2")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_model_failure_replay_defaults_missing_lane_to_tiny(self):
+        from mew.work_lanes import get_work_todo_lane_view
+        from mew.work_replay import write_work_model_failure_replay
+
+        session = {
+            "id": "s-11",
+            "task_id": "task-11",
+            "active_work_todo": {"id": "todo-11-1"},
+        }
+        model_turn = {
+            "id": "77",
+            "started_at": "2026-04-22T09:00:00Z",
+            "finished_at": "2026-04-22T09:01:00Z",
+            "model_metrics": {"write_ready_fast_path": True},
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch("mew.work_replay.now_iso", return_value="2026-04-22T10:00:00Z"):
+                    report_path = write_work_model_failure_replay(
+                        session=session,
+                        model_turn=model_turn,
+                        exc=RuntimeError("boom"),
+                    )
+
+                self.assertTrue(report_path)
+                report = json.loads(Path(report_path).read_text(encoding="utf-8"))
+                tiny_lane_view = get_work_todo_lane_view(session["active_work_todo"])
+                self.assertEqual(report["lane"], tiny_lane_view.name)
+                self.assertEqual(report["lane_role"], tiny_lane_view.role)
+                self.assertEqual(report["lane_schema_version"], 1)
+                self.assertEqual(report["lane_attempt_id"], "s-11:77:1")
             finally:
                 os.chdir(old_cwd)
 

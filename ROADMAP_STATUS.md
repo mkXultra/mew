@@ -162,6 +162,26 @@ Current M6.13 evidence:
   `uv run pytest -q tests/test_work_session.py -k "write_ready" --no-testmon`,
   `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
   `git diff --check`.
+- While retrying `#650`, verifier baseline exposed one more M6.14 substrate
+  repair: generic `fast-path` wording in the replay-harness task description
+  was extracted as a required term and made the clean replay compiler fixture
+  return `patch_blocker`. Task `#652` added `fast-path` to the generic
+  required-term stopword set and covered this with a focused work-session test.
+  This was direct Codex substrate repair, not mew-first autonomy credit.
+- Task `#650` / session `#638` then completed the replay metadata slice
+  mew-first after repair. Replay bundle metadata now derives lane provenance
+  via `get_work_todo_lane_view()` and records `lane`, `lane_role`,
+  `lane_schema_version=1`, and `lane_attempt_id`; missing/empty lanes resolve
+  to `tiny` with authoritative role, while explicit lanes use registry roles.
+  The reviewer steer was needed: the reviewer rejected the first lane-only
+  draft, repaired the verifier substrate, then approved the mew-authored
+  source/test patch without rescue edits. Validation covered focused tests.
+- #650/#652 validation passed:
+  `uv run pytest -q tests/test_work_replay.py --no-testmon`,
+  `uv run pytest -q tests/test_work_replay.py tests/test_work_lanes.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "write_ready or required_terms" --no-testmon`,
+  `uv run ruff check src/mew/work_replay.py src/mew/work_loop.py tests/test_work_replay.py tests/test_work_session.py`, and
+  `git diff --check`.
 - Resident architecture framing was recorded in
   `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`. Claude Ultra and
   Codex Ultra both reviewed the direction as `approve_with_changes`; the
@@ -597,15 +617,12 @@ The next implementation task should map to this chain:
 
 Acceptable near-term work:
 
-- retry task `#650` mew-first after the #651 substrate repair; the retry must
-  implement real replay lane provenance/defaulting rather than synthetic
-  `required_terms` metadata
-- prove old sessions and existing replay bundles continue to resolve missing
-  or absent lane metadata as `tiny`
-- wire the minimal lane-attempt telemetry helper into future lane attempts only
-  when that slice already needs a lane attempt record; do not add EV routing
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
+- prove old sessions and existing replay bundles with absent lane metadata keep
+  tiny-compatible behavior at their read/report boundary
+- wire the minimal lane-attempt telemetry helper into future lane attempts only
+  when that slice already needs a lane attempt record; do not add EV routing
 
 Non-goals for the next session:
 
@@ -623,6 +640,16 @@ Non-goals for the next session:
 
 Latest M6.13 source/test validation:
 
+- task `#650` / session `#638`: replay metadata lane provenance/defaulting
+- task `#652`: M6.14 fast-path required-term stopword repair
+- `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
+- `uv run pytest -q tests/test_work_replay.py tests/test_work_lanes.py --no-testmon`
+  passed
+- `uv run pytest -q tests/test_work_session.py -k "write_ready or required_terms" --no-testmon`
+  passed
+- `uv run ruff check src/mew/work_replay.py src/mew/work_loop.py tests/test_work_replay.py tests/test_work_session.py`
+  passed
+- `git diff --check` passed
 - task `#651`: M6.14 repair for #650 required-terms synthetic schema
 - `uv run pytest -q tests/test_work_session.py -k "required_terms or tiny_write_ready_draft_prompt" --no-testmon`
   passed

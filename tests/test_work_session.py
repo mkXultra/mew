@@ -6955,6 +6955,23 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("m6_9-drift-canary", tiny_context["task_goal"]["required_terms"])
 
+    def test_tiny_write_ready_draft_context_ignores_generic_fast_path_terms(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def meaning():\n    return 41\n",
+            test_text="def test_meaning():\n    assert meaning() == 41\n",
+        )
+        context["task"]["title"] = "Write-ready replay harness"
+        context["task"]["description"] = (
+            "Deterministically exercise the write-ready fast-path replay seam."
+        )
+        context["guidance"] = "Draft one paired dry-run edit using the exact cached windows."
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+
+        self.assertEqual(tiny_context["task_goal"]["required_terms"], [])
+
     def test_tiny_write_ready_draft_context_keeps_milestone_and_required_field_terms(self):
         from mew.work_loop import build_write_ready_tiny_draft_model_context
 

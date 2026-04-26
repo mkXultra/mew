@@ -6,6 +6,7 @@ import subprocess
 from .errors import CodexRefusalError, ModelBackendError, ModelRefusalError
 from .patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
 from .timeutil import now_date_iso, now_iso, parse_time
+from .work_lanes import get_work_todo_lane_view
 from .work_session import WORK_TODO_PHASE_STATUSES, build_work_session_resume
 
 
@@ -381,6 +382,20 @@ def _todo_dir_name(session):
     return f"no-todo-{session_id}"
 
 
+def _replay_lane_metadata(todo, *attempt_parts):
+    lane_view = get_work_todo_lane_view(todo)
+    lane_attempt_id = ":".join(
+        str(part if part is not None else "").strip()
+        for part in attempt_parts
+    )
+    return {
+        "lane": lane_view.name,
+        "lane_role": lane_view.role,
+        "lane_schema_version": 1,
+        "lane_attempt_id": lane_attempt_id,
+    }
+
+
 def _build_resume_context(session, task):
     resume = build_work_session_resume(session, task=task)
     return {
@@ -424,6 +439,7 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
 
     session_copy = deepcopy(session)
     resume_context = _build_resume_context(session_copy, task=task)
+    active_work_todo = resume_context.get("active_work_todo") or session.get("active_work_todo") or {}
     model_metrics = model_turn.get("model_metrics") or {}
     failure = _failure_profile(exc, model_turn=model_turn)
 
@@ -435,6 +451,7 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
         "session_id": session_id,
         "task_id": _task_id_for_report(session, task),
         "model_turn_id": turn_id,
+        **_replay_lane_metadata(active_work_todo, session_id, turn_id, attempt),
         "date_bucket": date_bucket,
         "captured_at": now_iso(),
         "attempt": attempt,
@@ -450,7 +467,7 @@ def write_work_model_failure_replay(*, session, model_turn, exc, task=None):
             "summary": model_turn.get("summary") or model_turn.get("error") or failure["summary"],
         },
         "blocker_code": _derive_model_failure_blocker_code(model_metrics),
-        "active_work_todo": resume_context.get("active_work_todo") or session.get("active_work_todo") or {},
+        "active_work_todo": active_work_todo,
         "model_metrics": dict(model_metrics),
         "draft_metrics": {
             "draft_phase": resume_context.get("draft_phase"),
@@ -554,6 +571,7 @@ def write_patch_draft_compiler_replay(
         "bucket_tag": _derive_compiler_bucket_tag(validator_result, todo),
         "session_id": normalized_session_id,
         "todo_id": normalized_todo_id,
+        **_replay_lane_metadata(todo, normalized_session_id, normalized_todo_id, attempt),
         "blocker_code": _derive_compiler_blocker_code(
             validator_result.get("code"),
         ),

@@ -97,6 +97,7 @@ WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS = 1.0
 WORK_TASK_GOAL_TERM_RE = re.compile(r"\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+\b")
 WORK_TASK_GOAL_TERM_STOPWORDS = {
     "dry-run",
+    "fast-path",
     "write-ready",
 }
 WORK_TASK_GOAL_REQUIRED_TERMS_LIMIT = 10
