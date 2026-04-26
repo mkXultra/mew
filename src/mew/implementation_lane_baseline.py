@@ -52,12 +52,15 @@ def _dedupe_preserving_order(values: Any) -> list[Any]:
 
 def _first_edit_latency(observation_metrics: Mapping[str, Any]) -> dict[str, Any]:
     self_hosting = _mapping(observation_metrics.get("self_hosting"))
+    diagnostics = _mapping(observation_metrics.get("diagnostics"))
     first_edit = _mapping(self_hosting.get("first_edit_proposal_seconds"))
+    samples = diagnostics.get("slow_first_edit_proposals")
     return {
         "count": _int(first_edit.get("count")),
         "median": _number(first_edit.get("median")),
         "p95": _number(first_edit.get("p95")),
         "max": _number(first_edit.get("max")),
+        "samples": samples if isinstance(samples, list) else [],
     }
 
 
@@ -267,4 +270,21 @@ def format_implementation_lane_baseline_report(summary: Mapping[str, Any]) -> st
             f"reason={recommendation.get('reason')}"
         ),
     ]
+    for sample in first_edit.get("samples") or []:
+        if not isinstance(sample, Mapping):
+            continue
+        lines.append(
+            "  slow_first_edit_proposal: "
+            f"session={sample.get('session_id')} "
+            f"task={sample.get('task_id')} "
+            f"status={sample.get('task_status')} "
+            f"seconds={sample.get('first_edit_proposal_seconds')} "
+            f"first_write=#{sample.get('first_write_tool_call_id')} "
+            f"tool={sample.get('first_write_tool')} "
+            f"path={sample.get('first_write_path')} "
+            f"started_at={sample.get('started_at')}"
+        )
+        first_model_summary = sample.get("first_model_summary")
+        if first_model_summary:
+            lines.append(f"    first_model_summary: {first_model_summary}")
     return "\n".join(lines)

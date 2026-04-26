@@ -425,6 +425,24 @@ Current M6.16 evidence:
   #669 #668 #667` and passes the gate at `8/10`; `--limit 20` reduces the
   measured rescue/partial rate to `0.5`. Codex-ultra review session
   `019dcb76-a4a1-7803-b29c-d9a888edae14` reported `NO FINDINGS`.
+- Task `#677` landed an M6.16 first-edit-latency instrumentation slice as
+  practical mew-first evidence. Metrics diagnostics now expose
+  `slow_first_edit_proposals` samples with session/task fields, first-edit
+  seconds, first write tool id/tool/path, start time, and first model-turn
+  summary; the implementation-lane baseline carries those samples under
+  `first_edit_latency.samples` and prints them in the text report. Session
+  `#665` authored the read-only telemetry/reporting patch, and session `#666`
+  repaired the codex-ultra threshold finding so exactly-at-threshold `30.0s`
+  samples are not treated as slow. Valid proof passed:
+  `uv run pytest -q tests/test_metrics.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/metrics.py src/mew/implementation_lane_baseline.py tests/test_metrics.py tests/test_implementation_lane_baseline.py`,
+  `git diff --check`,
+  `./mew metrics --implementation-lane --limit 20 --json`,
+  and `./mew metrics --implementation-lane --limit 20`. Current samples name
+  concrete first-edit latency targets including sessions `#665`, `#652`, and
+  `#649`. Codex-ultra review session
+  `019dcb8a-8e66-71b3-b488-203fb4f5eb4f` ended with `NO FINDINGS`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

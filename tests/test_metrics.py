@@ -341,6 +341,96 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("tools=1 turns=2 notes=1", text)
         self.assertIn("latest_note: Manual implementation", text)
 
+    def test_observation_metrics_surface_slow_first_edit_proposal_samples(self):
+        state = default_state()
+        state["tasks"].append({"id": 42, "title": "Slow first edit", "kind": "coding", "status": "ready"})
+        state["tasks"].append({"id": 43, "title": "Threshold first edit", "kind": "coding", "status": "ready"})
+        state["work_sessions"].append(
+            {
+                "id": 77,
+                "task_id": 42,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:01:30Z",
+                "model_turns": [
+                    {
+                        "id": 101,
+                        "status": "completed",
+                        "summary": "Mapped telemetry before edit.",
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:01:10Z",
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": 201,
+                        "tool": "read_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:03Z",
+                        "finished_at": "2026-04-19T00:00:04Z",
+                        "parameters": {"path": "src/mew/metrics.py"},
+                        "result": {"path": "src/mew/metrics.py"},
+                    },
+                    {
+                        "id": 202,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:01:21Z",
+                        "finished_at": "2026-04-19T00:01:22Z",
+                        "parameters": {"path": "src/mew/metrics.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                ],
+            }
+        )
+        state["work_sessions"].append(
+            {
+                "id": 78,
+                "task_id": 43,
+                "status": "closed",
+                "created_at": "2026-04-19T00:00:00Z",
+                "updated_at": "2026-04-19T00:00:32Z",
+                "model_turns": [
+                    {
+                        "id": 102,
+                        "status": "completed",
+                        "summary": "Reached exact threshold.",
+                        "started_at": "2026-04-19T00:00:01Z",
+                        "finished_at": "2026-04-19T00:00:10Z",
+                    }
+                ],
+                "tool_calls": [
+                    {
+                        "id": 203,
+                        "tool": "edit_file",
+                        "status": "completed",
+                        "started_at": "2026-04-19T00:00:31Z",
+                        "finished_at": "2026-04-19T00:00:32Z",
+                        "parameters": {"path": "src/mew/metrics.py"},
+                        "result": {"dry_run": True, "changed": True},
+                    },
+                ],
+            }
+        )
+
+        metrics = build_observation_metrics(state, kind="coding")
+
+        self.assertEqual(metrics["self_hosting"]["first_edit_proposal_seconds"]["max"], 80.0)
+        slow_samples = metrics["diagnostics"]["slow_first_edit_proposals"]
+        self.assertEqual([item["session_id"] for item in slow_samples], [77])
+        sample = slow_samples[0]
+        self.assertEqual(sample["session_id"], 77)
+        self.assertEqual(sample["task_id"], 42)
+        self.assertEqual(sample["task_title"], "Slow first edit")
+        self.assertEqual(sample["task_status"], "ready")
+        self.assertEqual(sample["first_edit_proposal_seconds"], 80.0)
+        self.assertEqual(sample["first_write_tool_call_id"], 202)
+        self.assertEqual(sample["first_write_tool"], "edit_file")
+        self.assertEqual(sample["first_write_path"], "src/mew/metrics.py")
+        self.assertEqual(sample["started_at"], "2026-04-19T00:01:21Z")
+        self.assertEqual(sample["first_model_turn_id"], 101)
+        self.assertIn("Mapped telemetry", sample["first_model_summary"])
+
     def test_first_tool_latency_starts_at_first_model_turn_when_session_was_dormant(self):
         state = default_state()
         state["tasks"].append({"id": 1, "title": "Observe dormant session", "kind": "coding", "status": "ready"})

@@ -43,6 +43,22 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
             "self_hosting": {
                 "first_edit_proposal_seconds": {"count": 3, "median": 12.0, "p95": 30.0, "max": 44.0},
             },
+            "diagnostics": {
+                "slow_first_edit_proposals": [
+                    {
+                        "session_id": 99,
+                        "task_id": 11,
+                        "task_title": "Slow patch",
+                        "task_status": "ready",
+                        "first_edit_proposal_seconds": 44.0,
+                        "first_write_tool_call_id": 123,
+                        "first_write_tool": "edit_file",
+                        "first_write_path": "src/mew/metrics.py",
+                        "started_at": "2026-04-19T00:00:44Z",
+                        "first_model_summary": "Planned too long before editing.",
+                    }
+                ],
+            },
         },
         side_project_summary={
             "kind": "side_project_dogfood",
@@ -67,7 +83,12 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
     assert summary["mew_first"]["failure_classes"]["drift_class"] == {"wrong_target_substitution": 1}
     assert summary["approval"] == {"total": 5, "rejected": 2, "rejection_rate": 0.4}
     assert summary["verifier"] == {"total": 4, "failed": 1, "failure_rate": 0.25}
-    assert summary["first_edit_latency"] == {"count": 3, "median": 12.0, "p95": 30.0, "max": 44.0}
+    assert summary["first_edit_latency"]["count"] == 3
+    assert summary["first_edit_latency"]["median"] == 12.0
+    assert summary["first_edit_latency"]["p95"] == 30.0
+    assert summary["first_edit_latency"]["max"] == 44.0
+    assert summary["first_edit_latency"]["samples"][0]["session_id"] == 99
+    assert summary["first_edit_latency"]["samples"][0]["first_write_path"] == "src/mew/metrics.py"
     assert summary["side_project"]["rows_total"] == 3
     assert summary["side_project"]["clean_or_practical"] == 1
     assert summary["side_project"]["rescue_rate"] == 0.667
@@ -81,6 +102,9 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
     assert "approval: rejected=2/5 rejection_rate=0.4" in text
     assert "verifier: failed=1/4 failure_rate=0.25" in text
     assert "first_edit_latency: count=3 median=12.0 p95=30.0 max=44.0" in text
+    assert "slow_first_edit_proposal: session=99 task=11 status=ready seconds=44.0" in text
+    assert "first_write=#123 tool=edit_file path=src/mew/metrics.py" in text
+    assert "first_model_summary: Planned too long before editing." in text
     assert (
         "side_project: rows=3 success=1 success_rate=0.333 failed=1 "
         "structural_repairs=1 codex_product_code_rescue_edits=2 rescue_rate=0.667"
@@ -192,7 +216,25 @@ def test_cmd_metrics_implementation_lane_text_output(monkeypatch, capsys) -> Non
             },
             "approval": {"total": 4, "rejected": 1, "rejection_rate": 0.25},
             "verifier": {"total": 3, "failed": 0, "failure_rate": 0.0},
-            "first_edit_latency": {"count": 2, "median": 7.0, "p95": 15.0, "max": 15.0},
+            "first_edit_latency": {
+                "count": 2,
+                "median": 7.0,
+                "p95": 15.0,
+                "max": 15.0,
+                "samples": [
+                    {
+                        "session_id": 7,
+                        "task_id": 2,
+                        "task_status": "ready",
+                        "first_edit_proposal_seconds": 15.0,
+                        "first_write_tool_call_id": 8,
+                        "first_write_tool": "edit_file",
+                        "first_write_path": "src/mew/commands.py",
+                        "started_at": "2026-04-19T00:00:15Z",
+                        "first_model_summary": "Found implementation surface.",
+                    }
+                ],
+            },
             "side_project": {
                 "rows_total": 0,
                 "clean_or_practical": 0,
@@ -225,6 +267,8 @@ def test_cmd_metrics_implementation_lane_text_output(monkeypatch, capsys) -> Non
     output = capsys.readouterr().out
     assert "Implementation-lane baseline" in output
     assert "approval: rejected=1/4 rejection_rate=0.25" in output
+    assert "slow_first_edit_proposal: session=7 task=2 status=ready seconds=15.0" in output
+    assert "first_model_summary: Found implementation surface." in output
     assert "recommended_first_bottleneck: mew_first_rescue_partial" in output
 
 
