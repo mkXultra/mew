@@ -88,7 +88,7 @@ Current M6.16 target:
 
 Current M6.16 chain:
 
-`M6.16 -> measured bottleneck: mew_first_rescue_partial -> reduce ordinary implementation-lane rescue/partial rate`
+`M6.16 -> measured bottleneck: mew_first_rescue_partial / first_edit_latency -> reduce ordinary implementation-lane rescue/partial rate and pre-edit rediscovery`
 
 Current M6.16 evidence:
 
@@ -442,7 +442,27 @@ Current M6.16 evidence:
   and `./mew metrics --implementation-lane --limit 20`. Current samples name
   concrete first-edit latency targets including sessions `#665`, `#652`, and
   `#649`. Codex-ultra review session
-  `019dcb8a-8e66-71b3-b488-203fb4f5eb4f` ended with `NO FINDINGS`.
+  `019dcb8a-8e66-71b3-b488-203fb4f5eb4f` ended with `NO FINDINGS`. No
+  supervisor product-code rescue occurred.
+- Task `#678` landed an M6.16 first-edit-latency reduction slice as clean
+  mew-first evidence. The normal THINK prompt now treats first-edit latency as
+  an operational budget: when scoped source/test cached windows already contain
+  first-edit old text, mew should avoid another same-surface rediscovery turn
+  and prefer the bounded paired edit path while preserving exact-old-text,
+  pairing, scope, and verifier gates. Session `#667` authored the patch,
+  produced a patch-draft replay on the write-ready surface, and passed both
+  the focused prompt verifier and the full work-session unittest module:
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or first_edit_latency' --no-testmon`
+  and `uv run python -m unittest tests.test_work_session`. Additional local
+  checks passed: `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`
+  and `git diff --check`. Codex-ultra review session
+  `019dcb9d-ddf7-7f30-8605-7b603f048ba8` reported `STATUS: pass` with
+  `NO FINDINGS`; this was mew-first without rescue edits. After the `#677`
+  and `#678` evidence-classification notes, `./mew metrics --mew-first --limit 10 --json`
+  passes at `8/10`; `./mew metrics --implementation-lane --limit 20 --json`
+  reports `clean_or_practical_successes=12/20`, `rescue_partial_rate=0.4`,
+  `approval.rejection_rate=0.143`, `verifier.failure_rate=0.0`, and
+  first-edit latency `median=285.5s`, `p95=536.55s`, `max=704.0s`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
