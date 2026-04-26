@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | First additive WorkTodo lane-default slice landed; next prove lane registry and mirror compatibility. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default and lane registry v0 landed; next prove legacy replay compatibility and mirror-lane bundles. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
@@ -85,7 +85,7 @@ Current M6.13 target:
 
 Current M6.13 chain:
 
-`M6.13 -> additive lane foundation -> preserve tiny behavior while adding lane metadata`
+`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
 
 Current M6.13 evidence:
 
@@ -104,6 +104,23 @@ Current M6.13 evidence:
   steer, but stalled in partial-apply/rollback plus cached-window recovery
   before the final source repair. Treat another repeat as an M6.14 repair
   signal.
+- Task `#648` / session `#635` landed the first data-only lane registry v0.
+  `src/mew/work_lanes.py` now lists supported lanes `tiny`, `mirror`, and
+  `deliberation`; `tiny` is authoritative/write-capable with legacy layout,
+  `mirror` is non-authoritative lane-scoped mirror evidence, and
+  `deliberation` is non-authoritative lane-scoped shadow evidence requiring
+  explicit model binding. Missing or empty lane lookups fall back to `tiny`;
+  unknown lane strings return an unsupported view while preserving the original
+  WorkTodo lane value.
+- #648 validation passed: work-session focused verifier
+  `uv run pytest -q tests/test_work_lanes.py tests/test_work_session.py -k 'work_lane or active_work_todo_lane' --no-testmon`,
+  `uv run python -m unittest tests.test_work_lanes`,
+  `uv run ruff check src/mew/work_lanes.py tests/test_work_lanes.py`, and
+  `git diff --check`.
+- #648 mew-first accounting: `success_mew_first_after_reviewer_rejection`.
+  The reviewer rejected the first role-enum draft and steered the exact
+  authoritative/mirror/shadow contract, but mew authored and verified the final
+  source/test patch. No supervisor product rescue was used.
 
 Current M6.8.5 close evidence:
 
@@ -537,6 +554,12 @@ Non-goals for the next session:
 
 Latest M6.13 source/test validation:
 
+- task `#648` / session `#635`: data-only lane registry v0
+- `uv run pytest -q tests/test_work_lanes.py tests/test_work_session.py -k 'work_lane or active_work_todo_lane' --no-testmon`
+  passed
+- `uv run python -m unittest tests.test_work_lanes` passed
+- `uv run ruff check src/mew/work_lanes.py tests/test_work_lanes.py` passed
+- `git diff --check` passed
 - task `#647` / session `#634`: additive WorkTodo lane normalization
 - `uv run pytest -q tests/test_work_session.py -k 'active_work_todo or lane' --no-testmon`
   passed
