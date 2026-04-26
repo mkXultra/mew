@@ -18,22 +18,22 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP5 Feed M6.16 | `done` | The side-project cohort is summarized into a measured M6.16 hardening recommendation and now includes the SP4 extension row. |
 | SP6 Mew State Companion Export | `done` | State-brief mode landed clean: static mew-state-like fixture, README usage, stdout/output-file behavior, and focused tests are in place without live `.mew` access. |
 | SP7 Multi-Fixture Companion Bundles | `done` | Bundle mode landed practical: static manifest, deterministic grouping/order, missing-fixture behavior, README usage, stdout/output-file proof, and focused tests are in place. |
-| SP8 Multi-Day Companion Archive | `not_started` | Next planned slice: render a fixture-backed archive/index of companion outputs by day and surface. |
-| SP9 Issue and Dogfood Ledger Digest | `not_started` | Planned after SP8: summarize fixture-backed dogfood rows and `[side-pj]` issue summaries for reader-facing evidence. |
+| SP8 Multi-Day Companion Archive | `done` | Archive-index mode landed practical: static multi-day fixture, day/surface/next-action grouping, empty-day behavior, README usage, stdout/output-file proof, and focused tests are in place. |
+| SP9 Issue and Dogfood Ledger Digest | `not_started` | Next planned slice: summarize fixture-backed dogfood rows and `[side-pj]` issue summaries for reader-facing evidence. |
 | SP10 Companion Export Contract | `not_started` | Planned after SP9: document and test the stable local input/output contract without importing core mew. |
 | SP11 Second Side-Project Gate | `not_started` | Planned final gate: decide whether to continue this project, start a second side project, or pause side-project work. |
 
 ## Active Focus
 
-Active side-project focus: **SP8 Multi-Day Companion Archive**.
+Active side-project focus: **SP9 Issue and Dogfood Ledger Digest**.
 
 Current target:
 
-- extend `mew-companion-log` with a deterministic archive/index surface that
-  groups fixture-backed companion outputs by day, surface, and next action
-  while keeping all implementation inside `experiments/mew-companion-log`
-- use fixture data and explicit fixture paths only; do not crawl live
-  filesystem state, do not read live `.mew` state, and do not edit core mew
+- extend `mew-companion-log` with a deterministic dogfood digest that summarizes
+  fixture-backed side-project ledger rows and `[side-pj]` issue summaries while
+  keeping all implementation inside `experiments/mew-companion-log`
+- use static fixture data only; do not query GitHub live from the side-project
+  CLI, do not read live `.mew` state, and do not edit core mew
 - use SP6-SP11 as the next side-project roadmap arc before considering a
   second isolated side project
 - route the already-fixed structural write-scope blocker as closed issue `#1`
@@ -194,27 +194,50 @@ Current target:
   coupling search were also verified.
 - Reusable polish issue opened:
   `https://github.com/mkXultra/mew/issues/4`.
+- Task `#8` / sessions `#11` and `#12` added the SP8 multi-day companion
+  archive index with Codex CLI as `operator` and mew as first implementer.
+  Session `#11` reached the right archive-index implementation shape but the
+  first verifier failed because a new stdout ordering assertion compared
+  headings across different day sections. Mew chose a remember/checkpoint under
+  high pressure, so Codex restarted a fresh mew session with the repair plan.
+  Session `#12` authored the final `--mode archive-index` renderer, static
+  archive fixture, README usage/output-file examples, snapshot test, CLI stdout
+  test, output-file test, empty-day behavior coverage, and fixture shape
+  assertions under `experiments/mew-companion-log`.
+- Archive index local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/8-archive-index-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `9`;
+  outcome `practical`, failure class
+  `archive_index_cross_day_ordering_retry_after_verifier_failure`,
+  `rescue_edits=0`.
+- Archive index verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `26 passed`. Archive-index stdout, archive-index `--output`, bundle
+  stdout, `git diff --check`, and a scoped no-core/no-live/no-crawl coupling
+  search were also verified.
+- Reusable polish issue opened:
+  `https://github.com/mkXultra/mew/issues/5`.
 
 ## Missing Proof
 
-- SP1, SP2, SP3, SP4, SP5, SP6, and SP7 are closed for the first `mew-companion-log`
+- SP1, SP2, SP3, SP4, SP5, SP6, SP7, and SP8 are closed for the first `mew-companion-log`
   cohort.
-- SP8 has not started. It still needs a bounded task, mew-first implementation,
+- SP9 has not started. It still needs a bounded task, mew-first implementation,
   focused verifier, local report, ledger row, and status update.
-- SP9-SP11 are planned but intentionally wait for SP8 evidence.
+- SP10-SP11 are planned but intentionally wait for SP9 evidence.
 
 ## Next Action
 
-Start SP8:
+Start SP9:
 
-1. define task `#8` for a fixture-driven archive/index mode under
+1. define task `#9` for a fixture-driven dogfood digest mode under
    `experiments/mew-companion-log`
 2. run current-repo `./mew` mew-first with `--model gpt-5.5`, using
    `--allow-read experiments/mew-companion-log` and
    `--allow-write experiments/mew-companion-log`
-3. require deterministic day/surface ordering, empty-day behavior, README
-   usage, stdout proof, output-file proof, focused tests, local report, ledger
-   row, and issue extraction for any reusable polish finding
+3. require outcome/failure-class/rescue-edit grouping, issue-link rendering,
+   README usage, stdout proof, output-file proof, focused tests, local report,
+   ledger row, and issue extraction for any reusable polish finding
 
 ## Non-Goals
 

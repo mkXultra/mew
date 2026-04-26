@@ -10,6 +10,7 @@ SCRIPT = ROOT / "companion_log.py"
 FIXTURE = ROOT / "fixtures" / "sample_session.json"
 STATE_FIXTURE = ROOT / "fixtures" / "sample_mew_state.json"
 BUNDLE_FIXTURE = ROOT / "fixtures" / "sample_bundle.json"
+ARCHIVE_FIXTURE = ROOT / "fixtures" / "sample_archive.json"
 
 
 def test_render_report_from_fixture_module_import() -> None:
@@ -435,6 +436,124 @@ def test_cli_writes_bundle_output_file(tmp_path: Path) -> None:
     assert written.startswith("# Companion Bundle: SP7 multi-fixture companion bundle")
     assert "# Morning Journal: SP2 companion output" in written
     assert "# Mew State Companion Brief: SP6 side-project loop" in written
+
+
+def test_render_archive_index_snapshot() -> None:
+    sys.path.insert(0, str(ROOT))
+    try:
+        from companion_log import load_session, render_archive_index
+    finally:
+        sys.path.pop(0)
+
+    archive = render_archive_index(load_session(ARCHIVE_FIXTURE))
+
+    assert archive == (
+        "# Companion Archive Index: SP8 multi-day companion archive\n"
+        "\n"
+        "_Date: 2026-04-26_\n"
+        "\n"
+        "## Summary\n"
+        "Static multi-day archive manifest for reviewing companion outputs without reading live mew state.\n"
+        "\n"
+        "## 2026-04-24\n"
+        "- Summary: Earlier companion outputs show research and state context.\n"
+        "\n"
+        "### research-digest\n"
+        "#### Next action: Carry the strongest signal forward\n"
+        "- **Research digest review** (`research-digest`) — Ranked static research feed for companion planning.\n"
+        "  - Fixture: sample_session.json\n"
+        "  - Why: The digest can seed a later companion loop.\n"
+        "\n"
+        "### state-brief\n"
+        "#### Next action: Stay inside fixture boundaries\n"
+        "- **State brief checkpoint** (`state-brief`) — A static state snapshot marks the project boundary.\n"
+        "  - Fixture: sample_mew_state.json\n"
+        "  - Why: Avoid live .mew reads while reviewing archive history.\n"
+        "\n"
+        "## 2026-04-25\n"
+        "- Summary: A deliberately empty archive day documents quiet days.\n"
+        "- No companion outputs archived for this day.\n"
+        "\n"
+        "## 2026-04-26\n"
+        "- Summary: SP6 and SP7 companion surfaces are ready for review.\n"
+        "\n"
+        "### morning-journal\n"
+        "#### Next action: Keep journal behavior unchanged\n"
+        "- **Morning journal companion note** (`morning-journal`) — Morning planning remains available as a single-session surface.\n"
+        "  - Fixture: sample_session.json\n"
+        "  - Why: The archive index should not alter single-session markdown.\n"
+        "\n"
+        "### state-brief\n"
+        "#### Next action: Review SP8 archive index\n"
+        "- **State brief after SP6** (`state-brief`) — Static state brief summarizes current side-project context.\n"
+        "  - Fixture: sample_mew_state.json\n"
+        "  - Why: Use the archive index to choose the next companion surface.\n"
+    )
+
+
+def test_cli_prints_archive_index_mode_to_stdout() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(ARCHIVE_FIXTURE), "--mode", "archive-index"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.startswith("# Companion Archive Index: SP8 multi-day companion archive")
+    assert "# Companion Bundle:" not in result.stdout
+    assert "# Companion Log:" not in result.stdout
+    assert result.stdout.index("## 2026-04-24") < result.stdout.index("## 2026-04-25")
+    assert result.stdout.index("## 2026-04-25") < result.stdout.index("## 2026-04-26")
+    day_2026_04_26 = result.stdout.split("## 2026-04-26", 1)[1]
+    assert day_2026_04_26.index("### morning-journal") < day_2026_04_26.index("### state-brief")
+    assert "- No companion outputs archived for this day." in result.stdout
+    assert result.stderr == ""
+
+
+def test_cli_writes_archive_index_output_file(tmp_path: Path) -> None:
+    output = tmp_path / "archive-index.md"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(ARCHIVE_FIXTURE),
+            "--mode",
+            "archive-index",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    written = output.read_text(encoding="utf-8")
+    assert written.startswith("# Companion Archive Index: SP8 multi-day companion archive")
+    assert "#### Next action: Review SP8 archive index" in written
+    assert "sample_mew_state.json" in written
+
+
+def test_archive_fixture_is_valid_json_object() -> None:
+    data = json.loads(ARCHIVE_FIXTURE.read_text(encoding="utf-8"))
+
+    assert data["id"] == "sp8-sample-archive"
+    assert isinstance(data["days"], list)
+    assert {day["day"] for day in data["days"]} == {
+        "2026-04-24",
+        "2026-04-25",
+        "2026-04-26",
+    }
+    assert any(day["entries"] == [] for day in data["days"])
+    required = {"day", "surface", "fixture", "mode", "title", "summary", "next_action"}
+    for day in data["days"]:
+        assert isinstance(day["entries"], list)
+        for entry in day["entries"]:
+            assert required <= set(entry)
+            assert entry["day"] == day["day"]
+            assert not Path(entry["fixture"]).is_absolute()
+            assert isinstance(entry["next_action"], dict)
+            assert "label" in entry["next_action"]
 
 
 def test_cli_bundle_missing_fixture_error_is_deterministic(tmp_path: Path) -> None:

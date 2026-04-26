@@ -302,6 +302,95 @@ def render_bundle(manifest: dict[str, Any], *, base_path: Path) -> str:
     return "\n".join(lines)
 
 
+def _next_action_label(next_action: Any) -> str:
+    if isinstance(next_action, dict):
+        return str(next_action.get("label") or "Review archived output")
+    if next_action:
+        return str(next_action)
+    return "Review archived output"
+
+
+def _next_action_reason(next_action: Any) -> str:
+    if isinstance(next_action, dict):
+        return str(next_action.get("reason") or "")
+    return ""
+
+
+def render_archive_index(manifest: dict[str, Any]) -> str:
+    """Render a deterministic multi-day companion archive index."""
+    title = manifest.get("title") or manifest.get("id") or "Companion Archive"
+    days = _as_list(manifest.get("days"))
+
+    lines = [f"# Companion Archive Index: {title}"]
+    date = manifest.get("date")
+    if date:
+        lines.extend(["", f"_Date: {date}_"])
+    summary = manifest.get("summary")
+    if summary:
+        lines.extend(["", "## Summary", str(summary)])
+
+    normalized_days: list[tuple[str, str, list[dict[str, Any]]]] = []
+    for day_record in days:
+        if not isinstance(day_record, dict):
+            raise ValueError("archive days must be objects")
+        day = str(day_record.get("day") or "")
+        if not day:
+            raise ValueError("archive days must declare a day")
+        entries: list[dict[str, Any]] = []
+        for entry in _as_list(day_record.get("entries")):
+            if not isinstance(entry, dict):
+                raise ValueError("archive entries must be objects")
+            if not entry.get("fixture"):
+                raise ValueError("archive entries must declare a fixture")
+            entries.append(entry)
+        normalized_days.append((day, str(day_record.get("summary") or ""), entries))
+
+    for day, day_summary, entries in sorted(normalized_days, key=lambda item: item[0]):
+        lines.extend(["", f"## {day}"])
+        if day_summary:
+            lines.append(f"- Summary: {day_summary}")
+        if not entries:
+            lines.append("- No companion outputs archived for this day.")
+            continue
+
+        current_surface: str | None = None
+        current_action: str | None = None
+        sorted_entries = sorted(
+            entries,
+            key=lambda entry: (
+                str(entry.get("surface") or entry.get("mode") or "companion-output"),
+                _next_action_label(entry.get("next_action")),
+                str(entry.get("title") or "Untitled companion output"),
+                str(entry.get("fixture") or ""),
+            ),
+        )
+        for entry in sorted_entries:
+            surface = str(entry.get("surface") or entry.get("mode") or "companion-output")
+            action_label = _next_action_label(entry.get("next_action"))
+            if surface != current_surface:
+                lines.extend(["", f"### {surface}"])
+                current_surface = surface
+                current_action = None
+            if action_label != current_action:
+                lines.append(f"#### Next action: {action_label}")
+                current_action = action_label
+
+            title = str(entry.get("title") or "Untitled companion output")
+            mode = str(entry.get("mode") or "report")
+            entry_summary = str(entry.get("summary") or "")
+            bullet = f"- **{title}** (`{mode}`)"
+            if entry_summary:
+                bullet = f"{bullet} — {entry_summary}"
+            lines.append(bullet)
+            lines.append(f"  - Fixture: {entry['fixture']}")
+            reason = _next_action_reason(entry.get("next_action"))
+            if reason:
+                lines.append(f"  - Why: {reason}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 RENDERERS = {
     "report": render_report,
     "morning-journal": render_morning_journal,
@@ -310,6 +399,7 @@ RENDERERS = {
     "research-digest": render_research_digest,
     "state-brief": render_state_brief,
     "bundle": render_bundle,
+    "archive-index": render_archive_index,
 }
 
 

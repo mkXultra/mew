@@ -1,0 +1,73 @@
+{
+  "id": "sp8-sample-archive",
+  "title": "SP8 multi-day companion archive",
+  "date": "2026-04-26",
+  "summary": "Static multi-day archive manifest for reviewing companion outputs without reading live mew state.",
+  "days": [
+    {
+      "day": "2026-04-26",
+      "summary": "SP6 and SP7 companion surfaces are ready for review.",
+      "entries": [
+        {
+          "day": "2026-04-26",
+          "surface": "state-brief",
+          "fixture": "sample_mew_state.json",
+          "mode": "state-brief",
+          "title": "State brief after SP6",
+          "summary": "Static state brief summarizes current side-project context.",
+          "next_action": {
+            "label": "Review SP8 archive index",
+            "reason": "Use the archive index to choose the next companion surface."
+          }
+        },
+        {
+          "day": "2026-04-26",
+          "surface": "morning-journal",
+          "fixture": "sample_session.json",
+          "mode": "morning-journal",
+          "title": "Morning journal companion note",
+          "summary": "Morning planning remains available as a single-session surface.",
+          "next_action": {
+            "label": "Keep journal behavior unchanged",
+            "reason": "The archive index should not alter single-session markdown."
+          }
+        }
+      ]
+    },
+    {
+      "day": "2026-04-24",
+      "summary": "Earlier companion outputs show research and state context.",
+      "entries": [
+        {
+          "day": "2026-04-24",
+          "surface": "research-digest",
+          "fixture": "sample_session.json",
+          "mode": "research-digest",
+          "title": "Research digest review",
+          "summary": "Ranked static research feed for companion planning.",
+          "next_action": {
+            "label": "Carry the strongest signal forward",
+            "reason": "The digest can seed a later companion loop."
+          }
+        },
+        {
+          "day": "2026-04-24",
+          "surface": "state-brief",
+          "fixture": "sample_mew_state.json",
+          "mode": "state-brief",
+          "title": "State brief checkpoint",
+          "summary": "A static state snapshot marks the project boundary.",
+          "next_action": {
+            "label": "Stay inside fixture boundaries",
+            "reason": "Avoid live .mew reads while reviewing archive history."
+          }
+        }
+      ]
+    },
+    {
+      "day": "2026-04-25",
+      "summary": "A deliberately empty archive day documents quiet days.",
+      "entries": []
+    }
+  ]
+}

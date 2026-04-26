@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "task_id": 8,
+  "session_id": 12,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP8 fixture-driven multi-day companion archive index with static archive fixture, archive-index CLI mode, README usage, deterministic day/surface/next-action grouping, empty-day coverage, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 75.0,
+  "read_turns_before_edit": 2.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_archive.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_archive.json --mode archive-index",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_archive.json --mode archive-index --output /tmp/mew-companion-log-archive-index.md",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_bundle.json --mode bundle",
+    "git diff --check",
+    "rg -n \"src/mew|\\\\.mew|glob\\\\(|rglob\\\\(|os\\\\.walk|requests|urllib|http\" experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/tests/test_companion_log.py experiments/mew-companion-log/README.md experiments/mew-companion-log/fixtures/sample_archive.json"
+  ],
+  "reviewer_rejections": 4,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "archive_index_cross_day_ordering_retry_after_verifier_failure",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/follow/session-11.json",
+    ".mew/follow/session-12.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/8-archive-index-practical.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented SP8 with --model gpt-5.5. Codex acted as operator/reviewer/verifier only. Session #11 produced the archive-index implementation shape but verifier failed because a new stdout ordering assertion compared headings across different day sections; the batch rolled back. Mew then chose remember/stop under high pressure instead of applying the narrow test repair, so Codex closed the session and restarted a fresh mew session with the repair plan. Session #12 authored the final implementation, static archive fixture, README usage/output-file example, snapshot/stdout/output-file/empty-day/fixture tests, and the focused verifier passed with 26 tests. No Codex product-code rescue was used."
+}
