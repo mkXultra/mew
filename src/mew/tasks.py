@@ -268,6 +268,40 @@ def _selector_signal_refs(refs):
         return list(refs)
     return [refs]
 
+
+def _selector_reason_text(selector_reason):
+    if not isinstance(selector_reason, dict):
+        return selector_reason or ""
+    lines = []
+    for key in ("lane-dispatch", "reviewer-gated", "meta-loop", "expected-value"):
+        value = selector_reason.get(key)
+        if value:
+            lines.append(f"{key}: {value}")
+    return "\n".join(lines)
+
+
+def _selector_lane_dispatch(candidate_task):
+    scope = normalize_task_scope(candidate_task.get("scope") or {})
+    target_paths = scope.get("target_paths") or []
+    test_paths = [path for path in target_paths if path.startswith("tests/") and path.endswith(".py")]
+    verifier = "focused verifier required before execution"
+    if test_paths:
+        verifier = f"uv run python -m unittest {test_paths[0][:-3].replace('/', '.')}"
+    return {
+        "authoritative_lane": "tiny",
+        "helper_lanes": ["deliberation", "mirror"],
+        "fallback_lane": "tiny",
+        "verifier": verifier,
+        "budget": "bounded read-only lane-dispatch proposal; no task dispatch before reviewer approval",
+        "expected_value_rationale": (
+            "tiny is the implementation default for the meta-loop; deliberation and mirror lanes "
+            "supply helper evidence only when reviewer-gated escalation has positive expected-value"
+        ),
+        "repair_route": "M6.14 repair episode for structural implementation-lane failures",
+        "reviewer_gate": "approval_required",
+    }
+
+
 def build_task_selector_proposal(
     previous_task,
     candidate_task,
@@ -283,7 +317,8 @@ def build_task_selector_proposal(
         "previous_task_id": previous_task.get("id"),
         "proposed_task_id": candidate_task.get("id"),
         "proposed_task_title": candidate_task.get("title") or "",
-        "selector_reason": selector_reason or "",
+        "selector_reason": _selector_reason_text(selector_reason),
+        "lane_dispatch": _selector_lane_dispatch(candidate_task),
         "approval_required": True,
         "memory_signal_refs": _selector_signal_refs(memory_signal_refs),
         "failure_cluster_reason": failure_cluster_reason or "",

@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-26
+Last updated: 2026-04-27
 
 This file is the compact operational roadmap dashboard. It is intentionally
 short enough to survive context compression and long-session reentry.
@@ -85,6 +85,22 @@ Current M6.17 target:
 Current M6.17 chain:
 
 `M6.17 -> reviewer-gated meta-loop proposal -> choose next task and lane dispatch from roadmap, memory, and calibration evidence`
+
+Current M6.17 evidence:
+
+- Task `#679` landed the first reviewer-visible lane-dispatch proposal slice as
+  mixed mew-first plus supervisor review-fix evidence. Mew sessions `#668` and
+  `#669` produced the initial `lane_dispatch` schema, human formatter exposure,
+  and paired tests, but codex-ultra review
+  `019dcbbe-33bb-7313-80bd-9ef159edd697` found two acceptance gaps:
+  missing `repair_route` and missing `lane_dispatch` on no-candidate selector
+  responses. The supervisor applied only those review fixes after the mew work
+  session exhausted its failure budget, so this is product progress but not
+  clean mew-first autonomy credit. Validation passed:
+  `uv run python -m unittest tests.test_tasks tests.test_commands`,
+  `uv run ruff check src/mew/tasks.py src/mew/commands.py tests/test_tasks.py tests/test_commands.py`,
+  and `git diff --check`. Codex-ultra re-review
+  `019dcbc5-974b-7fc3-955b-b2bc869c74c3` returned `STATUS: pass`.
 
 M6.16 close evidence:
 

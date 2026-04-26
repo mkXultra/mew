@@ -783,6 +783,7 @@ def format_task_selector_proposal(proposal):
         "proposed_task_id",
         "proposed_task_title",
         "selector_reason",
+        "lane_dispatch",
         "approval_required",
         "memory_signal_refs",
         "failure_cluster_reason",
@@ -798,19 +799,17 @@ def format_task_selector_proposal(proposal):
 
 
 def _task_selector_no_candidate_response(previous_task, message):
-    return {
-        "previous_task_id": previous_task.get("id"),
-        "proposed_task_id": None,
-        "proposed_task_title": "",
-        "selector_reason": message,
-        "approval_required": True,
-        "memory_signal_refs": [],
-        "failure_cluster_reason": "",
-        "preference_signal_refs": [],
-        "blocked": True,
-        "blocked_reason": message,
-        "governance_violation": False,
-    }
+    proposal = build_task_selector_proposal(previous_task, {}, message)
+    proposal.update(
+        {
+            "proposed_task_id": None,
+            "proposed_task_title": "",
+            "blocked": True,
+            "blocked_reason": message,
+            "governance_violation": False,
+        }
+    )
+    return proposal
 
 
 def _next_task_selector_proposal_id(state):
