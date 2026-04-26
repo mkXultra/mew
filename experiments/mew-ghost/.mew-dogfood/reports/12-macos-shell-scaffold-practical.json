@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "task_id": 12,
+  "session_id": 25,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Create the SP12 mew-ghost macOS shell scaffold with a permission-safe probe contract, deterministic local HTML/state rendering, dry-run mew chat/code launch intents, README usage, fixture, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 82.0,
+  "read_turns_before_edit": 2.0,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP.md",
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/fixtures/sample_ghost_state.json",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/12-macos-shell-scaffold-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html",
+    "git diff --check"
+  ],
+  "reviewer_rejections": 4,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "mew_ghost_scaffold_verifier_repair_and_readme_command_followup",
+  "repair_required": false,
+  "proof_artifacts": [
+    "SIDE_PROJECT_ROADMAP.md SP12-SP15 mew-ghost arc",
+    "SIDE_PROJECT_ROADMAP_STATUS.md SP12 active focus",
+    ".mew/sessions/23/snapshot.json",
+    ".mew/sessions/24/snapshot.json",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/fixtures/sample_ghost_state.json",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/12-macos-shell-scaffold-practical.json",
+    "/tmp/mew-ghost.html"
+  ],
+  "commit": "",
+  "notes": "User explicitly authorized mew-ghost as the second side-project arc after the first cohort was merged. Operator opened SP12-SP15 roadmap/status entries, then ran repo-root ./mew from /Users/mk/dev/personal-pj/mew_side_pj with --model gpt-5.5 and write scope limited to experiments/mew-ghost. Session #23 first failed because the empty target directory did not exist, then timed out after operator-created setup. Session #24 authored the four-file scaffold and repaired one verifier failure caused by an assertion expecting the exact phrase 'screen capture' in ghost.py; focused verifier then passed 7 tests. Operator rejected four stale dry-run approvals from the rolled-back first batch after the repaired batch had already applied. Session #25 completed reviewer follow-up by replacing README plain python usage with UV_CACHE_DIR=.uv-cache uv run python and adding README usage coverage; focused verifier passed 8 tests. No Codex product-code rescue edits were made. SP12 remains fixture-driven: no live .mew state, no src/mew imports, no screen capture, no hidden monitoring, no network, and no live macOS Accessibility probe by default."
+}

@@ -22,22 +22,22 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP9 Issue and Dogfood Ledger Digest | `done` | Dogfood-digest mode landed practical: static dogfood rows, `[side-pj]` issue summaries, outcome/failure-class/rescue-edits grouping, README usage, stdout/output-file proof, and focused tests are in place. |
 | SP10 Companion Export Contract | `done` | Export contract landed practical: local schema examples, documented markdown surfaces for every mode, README pointer, and all-mode output-file compatibility tests are in place. |
 | SP11 Second Side-Project Gate | `done` | Gate landed practical: the recommendation is to pause new side-project work and feed SP6-SP10 evidence into core M6.16/M9/M11 before starting a second isolated side project. |
-| SP12 mew-ghost macOS Shell Scaffold | `planned` | User authorized a second side-project arc for a larger macOS presence dogfood loop; first slice must stay isolated and permission-safe. |
-| SP13 mew-ghost Live macOS Probe Integration | `not_started` | Deferred until SP12 establishes a tested scaffold and structured permission fallback. |
+| SP12 mew-ghost macOS Shell Scaffold | `done` | Scaffold landed practical: isolated `experiments/mew-ghost` shell, permission-safe macOS probe contract, deterministic HTML/state rendering, dry-run `mew chat`/`mew code` intents, README usage, local report, and focused tests are in place. |
+| SP13 mew-ghost Live macOS Probe Integration | `planned` | Next slice: add explicit opt-in live macOS probing while preserving structured permission/platform fallback and hermetic tests. |
 | SP14 mew-ghost Presence Loop | `not_started` | Deferred until probe/state contract exists. |
 | SP15 mew-ghost Launcher Contract | `not_started` | Deferred until visual presence and command-intent surfaces are stable. |
 
 ## Active Focus
 
-Active side-project focus: **SP12 mew-ghost macOS Shell Scaffold**.
+Active side-project focus: **SP13 mew-ghost Live macOS Probe Integration**.
 
 Current target:
 
-- start `mew-ghost` as the second isolated side project under
-  `experiments/mew-ghost`
-- keep the first slice macOS-aware but permission-safe: no screen capture, no
-  hidden monitoring, and no live `.mew` state reads
-- focused verifier:
+- keep `mew-ghost` isolated under `experiments/mew-ghost`
+- add live macOS probing only through an explicit opt-in command or mode
+- preserve structured fallback for missing `osascript`, non-macOS platforms,
+  permission denial, empty probe results, and timeouts
+- focused verifier remains:
   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
 - keep `mew-companion-log` stable as the local fixture-tested companion surface
   set for future product planning and contract checks
@@ -285,27 +285,50 @@ Current target:
 - Gate verification passed:
   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
   returned `31 passed`. `git diff --check` was also verified.
+- Task `#12` / sessions `#23` through `#25` opened the second side-project arc
+  and added the SP12 mew-ghost macOS shell scaffold with Codex CLI as
+  `operator` and mew as first implementer. Operator bookkeeping first opened
+  SP12-SP15 in `SIDE_PROJECT_ROADMAP.md` and this status file. Session `#23`
+  exposed setup friction because `experiments/mew-ghost` did not exist, then a
+  model timeout; operator created the empty target directory and restarted with
+  narrower guidance. Session `#24` authored the four-file scaffold under
+  `experiments/mew-ghost`: README, `ghost.py`, static fixture, and focused
+  tests. Mew repaired one focused verifier failure caused by a source-string
+  assertion and reached `7 passed`. Session `#25` completed reviewer follow-up
+  by changing README examples to
+  `UV_CACHE_DIR=.uv-cache uv run python ...` and adding README usage coverage.
+- mew-ghost SP12 local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/12-macos-shell-scaffold-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `13`;
+  outcome `practical`, failure class
+  `mew_ghost_scaffold_verifier_repair_and_readme_command_followup`,
+  `rescue_edits=0`.
+- mew-ghost SP12 verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+  returned `8 passed`. The state CLI, HTML `--output` path, rendered HTML
+  content check, and `git diff --check` were also verified.
 
 ## Missing Proof
 
 - SP1 through SP11 are closed for the first `mew-companion-log` cohort.
-- SP12 is open for `mew-ghost`, but no `experiments/mew-ghost` implementation
-  exists yet.
-- No `mew-ghost` side-dogfood ledger row exists yet.
+- SP12 is closed for the second `mew-ghost` cohort.
+- SP13 has not started; no explicit live macOS `osascript` probe exists yet.
 - Open `[side-pj]` implementation-lane polish issues remain M6.16 input and do
   not block the isolated `mew-ghost` scaffold unless the same failure repeats.
 
 ## Next Action
 
-Start SP12 with mew as first implementer:
+Start SP13 with mew as first implementer:
 
-1. create a coding task for `mew-ghost` SP12
+1. create a coding task for `mew-ghost` SP13
 2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
    with `--model gpt-5.5`
 3. allow writes only under `experiments/mew-ghost`
-4. verify with
+4. implement an explicit opt-in live macOS probe path while keeping tests
+   hermetic through injected providers or subprocess fakes
+5. verify with
    `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
-5. write a local side-dogfood report before appending to the canonical ledger
+6. write a local side-dogfood report before appending to the canonical ledger
 
 ## Non-Goals
 

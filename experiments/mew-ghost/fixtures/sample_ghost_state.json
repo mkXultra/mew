@@ -1,0 +1,18 @@
+{
+  "fixture_name": "sample_ghost_state",
+  "generated_at": "2026-04-26T12:00:00Z",
+  "ghost": {
+    "name": "mew-ghost",
+    "mood": "curious",
+    "focus": "Writing the SP12 scaffold",
+    "message": "Ghost is watching VS Code without screen capture."
+  },
+  "probe": {
+    "status": "available",
+    "reason": null,
+    "platform": "Darwin",
+    "active_app": "Visual Studio Code",
+    "window_title": "experiments/mew-ghost/ghost.py",
+    "requires_permission": true
+  }
+}
