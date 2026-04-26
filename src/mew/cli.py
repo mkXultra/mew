@@ -1829,6 +1829,7 @@ def build_parser():
         cmd_task_proposal_execute,
         cmd_task_proposal_reject,
         cmd_task_propose_next,
+        cmd_task_selector_status,
     )
 
     propose_next_parser = task_subparsers.add_parser(
@@ -1868,6 +1869,13 @@ def build_parser():
         "--json", action="store_true", help="print the selector execution attempt audit as JSON"
     )
     execute_proposal_parser.set_defaults(func=cmd_task_proposal_execute)
+
+    selector_status_parser = task_subparsers.add_parser(
+        "selector-status",
+        help="summarize selector proposal and execution proof progress without dispatching work",
+    )
+    selector_status_parser.add_argument("--json", action="store_true", help="print selector proof status as JSON")
+    selector_status_parser.set_defaults(func=cmd_task_selector_status)
 
     done_parser = task_subparsers.add_parser("done", help="mark a task done")
     done_parser.add_argument("task_id")

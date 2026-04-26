@@ -679,6 +679,55 @@ def _finish_task_selector_execution_rejection(args, attempt, message):
     return 1
 
 
+def task_selector_chain_status(state):
+    proposals = list(state.get("selector_proposals") or [])
+    attempts = list(state.get("selector_execution_attempts") or [])
+    blocked_proposals = 0
+    for record in proposals:
+        proposal = record.get("proposal") or {}
+        if record.get("status") == "blocked" or proposal.get("blocked"):
+            blocked_proposals += 1
+    return {
+        "counts": {
+            "proposals": len(proposals),
+            "attempts": len(attempts),
+            "approved_handoffs": sum(1 for record in attempts if record.get("status") == "handoff_ready"),
+            "rejected_attempts": sum(1 for record in attempts if record.get("status") == "rejected"),
+            "blocked_proposals": blocked_proposals,
+        },
+        "latest_proposal": proposals[-1] if proposals else None,
+        "latest_attempt": attempts[-1] if attempts else None,
+    }
+
+
+def _format_task_selector_chain_status(status):
+    counts = status.get("counts") or {}
+    lines = [
+        f"selector_proposals: {counts.get('proposals', 0)}",
+        f"selector_execution_attempts: {counts.get('attempts', 0)}",
+        f"approved_handoffs: {counts.get('approved_handoffs', 0)}",
+        f"rejected_attempts: {counts.get('rejected_attempts', 0)}",
+        f"blocked_proposals: {counts.get('blocked_proposals', 0)}",
+    ]
+    for key in ("latest_proposal", "latest_attempt"):
+        value = status.get(key)
+        if value is None:
+            lines.append(f"{key}: null")
+        else:
+            lines.append(f"{key}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}")
+    return "\n".join(lines)
+
+
+def cmd_task_selector_status(args):
+    state = load_state()
+    status = task_selector_chain_status(state)
+    if getattr(args, "json", False):
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+    else:
+        print(_format_task_selector_chain_status(status))
+    return 0
+
+
 def cmd_task_proposal_execute(args):
     with state_lock():
         state = load_state()

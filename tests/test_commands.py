@@ -413,6 +413,71 @@ class CommandTests(unittest.TestCase):
         expected_state.pop("selector_proposals", None)
         self.assertEqual(state_without_records, expected_state)
 
+    def test_task_selector_status_json_summarizes_selector_records_read_only(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                state = commands_module.load_state()
+                state["selector_proposals"] = [
+                    {
+                        "id": 1,
+                        "previous_task_id": 1,
+                        "proposed_task_id": 2,
+                        "status": "approved",
+                        "proposal": {"blocked": False},
+                    },
+                    {
+                        "id": 2,
+                        "previous_task_id": 2,
+                        "proposed_task_id": 3,
+                        "status": "blocked",
+                        "proposal": {"blocked": True},
+                    },
+                ]
+                state["selector_execution_attempts"] = [
+                    {
+                        "id": 1,
+                        "proposal_id": 1,
+                        "proposed_task_id": 2,
+                        "status": "handoff_ready",
+                        "auto_run": False,
+                    },
+                    {
+                        "id": 2,
+                        "proposal_id": 2,
+                        "proposed_task_id": 3,
+                        "status": "rejected",
+                        "blocked_reason": "blocked by review",
+                    },
+                ]
+                commands_module.save_state(state)
+                state_before = commands_module.load_state()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "selector-status", "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        status = json.loads(stdout.getvalue())
+        self.assertEqual(
+            status["counts"],
+            {
+                "proposals": 2,
+                "attempts": 2,
+                "approved_handoffs": 1,
+                "rejected_attempts": 1,
+                "blocked_proposals": 1,
+            },
+        )
+        self.assertEqual(status["latest_proposal"], state_before["selector_proposals"][-1])
+        self.assertEqual(status["latest_attempt"], state_before["selector_execution_attempts"][-1])
+        self.assertEqual(state_after, state_before)
+
     def test_task_approve_proposal_cli_records_reviewer_decision_without_dispatch(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
