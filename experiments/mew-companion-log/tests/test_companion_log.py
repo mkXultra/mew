@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "companion_log.py"
 FIXTURE = ROOT / "fixtures" / "sample_session.json"
+STATE_FIXTURE = ROOT / "fixtures" / "sample_mew_state.json"
 
 
 def test_render_report_from_fixture_module_import() -> None:
@@ -161,6 +162,42 @@ def test_render_research_digest_snapshot() -> None:
     )
 
 
+def test_render_state_brief_snapshot() -> None:
+    sys.path.insert(0, str(ROOT))
+    try:
+        from companion_log import load_session, render_state_brief
+    finally:
+        sys.path.pop(0)
+
+    brief = render_state_brief(load_session(STATE_FIXTURE))
+
+    assert brief == (
+        "# Mew State Companion Brief: SP6 side-project loop\n"
+        "\n"
+        "_Date: 2026-04-26_\n"
+        "\n"
+        "## Current State\n"
+        "- Status: focused side-project implementation\n"
+        "- Summary: Static fixture snapshot for companion review; it is not read from live .mew state.\n"
+        "- Active task: SP6 add state brief companion output\n"
+        "\n"
+        "## Recent Work\n"
+        "- Tasks: SP4 research digest completed; SP6 state brief is now active.\n"
+        "- Sessions: Work session 9 inspected the companion-log CLI, tests, README, and fixtures.\n"
+        "- Memory notes: Long-session charter preserves the no-core-source and static-fixture boundary.\n"
+        "- Dogfood: CLI stdout and output-file checks make companion markdown reviewable.\n"
+        "- Side-pj issues: SP6 remains the next side-project issue to land after SP4.\n"
+        "\n"
+        "## Unresolved Risks\n"
+        "- Accidentally reading live mew state: Use only this static fixture under experiments/mew-companion-log.\n"
+        "- State brief becoming too verbose: Render only current state, recent work, unresolved risks, and one next action.\n"
+        "\n"
+        "## Next Suggested Side-Project Action\n"
+        "- Land SP6 state-brief mode with fixture, README usage, and focused tests.\n"
+        "  - Why: It gives the companion a concise state export without coupling to core mew internals.\n"
+    )
+
+
 def test_cli_prints_markdown_to_stdout() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(FIXTURE)],
@@ -231,6 +268,23 @@ def test_cli_prints_research_digest_mode_to_stdout() -> None:
     assert result.stderr == ""
 
 
+def test_cli_prints_state_brief_mode_to_stdout() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(STATE_FIXTURE), "--mode", "state-brief"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.startswith("# Mew State Companion Brief: SP6 side-project loop")
+    assert "## Current State" in result.stdout
+    assert "## Recent Work" in result.stdout
+    assert "## Unresolved Risks" in result.stdout
+    assert "## Next Suggested Side-Project Action" in result.stdout
+    assert "Land SP6 state-brief mode" in result.stdout
+    assert result.stderr == ""
+
+
 def test_cli_writes_markdown_output_file(tmp_path: Path) -> None:
     output = tmp_path / "report.md"
 
@@ -269,6 +323,30 @@ def test_cli_writes_research_digest_output_file(tmp_path: Path) -> None:
     assert "1. **Mew companion patterns**" in written
 
 
+def test_cli_writes_state_brief_output_file(tmp_path: Path) -> None:
+    output = tmp_path / "state-brief.md"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(STATE_FIXTURE),
+            "--mode",
+            "state-brief",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    written = output.read_text(encoding="utf-8")
+    assert written.startswith("# Mew State Companion Brief: SP6 side-project loop")
+    assert "Accidentally reading live mew state" in written
+    assert "Next Suggested Side-Project Action" in written
+
+
 def test_fixture_is_valid_json_object() -> None:
     data = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
@@ -281,3 +359,18 @@ def test_fixture_is_valid_json_object() -> None:
     assert isinstance(data["research_digest"], dict)
     assert isinstance(data["research_digest"]["entries"], list)
     assert data["research_digest"]["entries"][0]["url"].startswith("fixture://research/")
+
+
+def test_state_fixture_is_valid_json_object() -> None:
+    data = json.loads(STATE_FIXTURE.read_text(encoding="utf-8"))
+
+    assert data["id"] == "sp6-sample-state"
+    assert isinstance(data["current_state"], dict)
+    assert isinstance(data["recent_tasks"], list)
+    assert isinstance(data["sessions"], list)
+    assert isinstance(data["memory_notes"], list)
+    assert isinstance(data["dogfood_rows"], list)
+    assert isinstance(data["side_pj_issues"], list)
+    assert isinstance(data["recent_work"], list)
+    assert isinstance(data["unresolved_risks"], list)
+    assert isinstance(data["next_side_project_action"], dict)

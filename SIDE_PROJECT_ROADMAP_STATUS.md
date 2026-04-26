@@ -16,8 +16,8 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP3 Implementation-Lane Evidence Cohort | `done` | Five side-project attempts are recorded; failures are classified and rescue edits remain zero. |
 | SP4 Optional Research Digest Slice | `done` | Static fixture research digest landed with deterministic ranking, README usage, stdout, and output-file tests. |
 | SP5 Feed M6.16 | `done` | The side-project cohort is summarized into a measured M6.16 hardening recommendation and now includes the SP4 extension row. |
-| SP6 Mew State Companion Export | `not_started` | Next planned slice: render a mew-state-like fixture into a companion state brief without live `.mew` access. |
-| SP7 Multi-Fixture Companion Bundles | `not_started` | Planned after SP6: combine several explicit local fixtures into one deterministic companion bundle. |
+| SP6 Mew State Companion Export | `done` | State-brief mode landed clean: static mew-state-like fixture, README usage, stdout/output-file behavior, and focused tests are in place without live `.mew` access. |
+| SP7 Multi-Fixture Companion Bundles | `not_started` | Next planned slice: combine several explicit local fixtures into one deterministic companion bundle. |
 | SP8 Multi-Day Companion Archive | `not_started` | Planned after SP7: render a fixture-backed archive/index of companion outputs by day and surface. |
 | SP9 Issue and Dogfood Ledger Digest | `not_started` | Planned after SP8: summarize fixture-backed dogfood rows and `[side-pj]` issue summaries for reader-facing evidence. |
 | SP10 Companion Export Contract | `not_started` | Planned after SP9: document and test the stable local input/output contract without importing core mew. |
@@ -25,14 +25,15 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 
 ## Active Focus
 
-Active side-project focus: **SP6 Mew State Companion Export**.
+Active side-project focus: **SP7 Multi-Fixture Companion Bundles**.
 
 Current target:
 
-- extend `mew-companion-log` with state-oriented companion output while keeping
-  all implementation inside `experiments/mew-companion-log`
-- use mew-state-like fixture JSON only; do not read live `.mew` state and do
-  not edit core mew
+- extend `mew-companion-log` with a deterministic companion bundle that combines
+  several explicit local fixtures while keeping all implementation inside
+  `experiments/mew-companion-log`
+- use fixture paths supplied to the side-project CLI only; do not read live
+  `.mew` state and do not edit core mew
 - use SP6-SP11 as the next side-project roadmap arc before considering a
   second isolated side project
 - route the already-fixed structural write-scope blocker as closed issue `#1`
@@ -158,26 +159,43 @@ Current target:
   returned `13 passed`. The default report CLI, morning journal stdout,
   evening journal stdout, dream/learning stdout, research digest stdout,
   research digest `--output` path, and `git diff --check` were also verified.
+- Task `#6` / session `#9` added the SP6 mew state companion export with Codex
+  CLI as `operator` and mew as first implementer. Mew authored the
+  fixture-driven `--mode state-brief` renderer, static mew-state-like fixture,
+  README usage/output-file examples, snapshot test, CLI stdout test,
+  output-file test, and fixture shape assertions under
+  `experiments/mew-companion-log`.
+- State brief local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/6-state-brief-clean.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `7`;
+  outcome `clean`, failure class `none_observed`, `rescue_edits=0`.
+- State brief verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `17 passed`. The default report CLI, morning journal stdout,
+  evening journal stdout, dream/learning stdout, research digest stdout, state
+  brief stdout, state brief `--output` path, `git diff --check`, and a scoped
+  search for `src/mew` / live `.mew` coupling were also verified.
 
 ## Missing Proof
 
-- SP1, SP2, SP3, SP4, and SP5 are closed for the first `mew-companion-log`
+- SP1, SP2, SP3, SP4, SP5, and SP6 are closed for the first `mew-companion-log`
   cohort.
-- SP6 has not started. It still needs a bounded task, mew-first implementation,
+- SP7 has not started. It still needs a bounded task, mew-first implementation,
   focused verifier, local report, ledger row, and status update.
-- SP7-SP11 are planned but intentionally wait for SP6 evidence.
+- SP8-SP11 are planned but intentionally wait for SP7 evidence.
 
 ## Next Action
 
-Start SP6:
+Start SP7:
 
-1. define task `#6` for a fixture-driven `--mode state-brief` or equivalent
-   under `experiments/mew-companion-log`
+1. define task `#7` for a fixture-driven companion bundle mode or option under
+   `experiments/mew-companion-log`
 2. run current-repo `./mew` mew-first with `--model gpt-5.5`, using
    `--allow-read experiments/mew-companion-log` and
    `--allow-write experiments/mew-companion-log`
-3. require README usage, stdout proof, output-file proof, focused tests, local
-   report, ledger row, and issue extraction for any reusable polish finding
+3. require deterministic fixture ordering, missing-fixture behavior, README
+   usage, stdout proof, output-file proof, focused tests, local report, ledger
+   row, and issue extraction for any reusable polish finding
 
 ## Non-Goals
 

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "task_id": 6,
+  "session_id": 9,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP6 fixture-driven mew-state companion brief with static state fixture, CLI mode, README usage, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 51.0,
+  "read_turns_before_edit": 2.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_mew_state.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_mew_state.json --mode state-brief",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_mew_state.json --mode state-brief --output /tmp/mew-companion-log-state-brief.md",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode morning-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode evening-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode dream-learning",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode research-digest",
+    "git diff --check",
+    "rg -n \"src/mew|\\\\.mew|Path\\\\(|open\\\\(|read_text\\\\(|glob\\\\(\" experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/tests/test_companion_log.py experiments/mew-companion-log/README.md"
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "clean",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/follow/session-9.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/6-state-brief-clean.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented SP6 with --model gpt-5.5. Codex acted as operator/reviewer/verifier only. The implementation stayed under experiments/mew-companion-log, added a static mew-state-like fixture, state-brief renderer/CLI mode, README stdout/output-file usage, snapshot coverage, CLI stdout coverage, output-file coverage, and fixture shape coverage. Focused pytest passed with 17 tests, existing modes were spot-checked, no src/mew import or live .mew access was introduced, and no rescue edits were used."
+}

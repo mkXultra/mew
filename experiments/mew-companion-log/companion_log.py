@@ -193,12 +193,74 @@ def render_research_digest(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_state_brief(data: dict[str, Any]) -> str:
+    """Render a concise companion brief from a static mew-state-like fixture."""
+    state = data.get("current_state", {})
+    recent_work = _as_list(data.get("recent_work"))
+    risks = _as_list(data.get("unresolved_risks"))
+    next_action = data.get("next_side_project_action", {})
+
+    title = state.get("title", "Mew State Companion Brief")
+    lines = [f"# {title}"]
+
+    date = data.get("date")
+    if date:
+        lines.extend(["", f"_Date: {date}_"])
+
+    lines.extend(["", "## Current State"])
+    status = state.get("status")
+    if status:
+        lines.append(f"- Status: {status}")
+    summary = state.get("summary")
+    if summary:
+        lines.append(f"- Summary: {summary}")
+
+    active_task = state.get("active_task")
+    if active_task:
+        lines.append(f"- Active task: {active_task}")
+
+    lines.extend(["", "## Recent Work"])
+    for item in recent_work:
+        if isinstance(item, dict):
+            label = item.get("label", "Recent item")
+            detail = item.get("detail", "")
+            lines.append(f"- {label}: {detail}")
+        else:
+            lines.append(f"- {item}")
+
+    lines.extend(["", "## Unresolved Risks"])
+    for risk in risks:
+        if isinstance(risk, dict):
+            name = risk.get("name", "Risk")
+            mitigation = risk.get("mitigation")
+            if mitigation:
+                lines.append(f"- {name}: {mitigation}")
+            else:
+                lines.append(f"- {name}")
+        else:
+            lines.append(f"- {risk}")
+
+    lines.extend(["", "## Next Suggested Side-Project Action"])
+    if isinstance(next_action, dict):
+        label = next_action.get("label", "Next action")
+        reason = next_action.get("reason")
+        lines.append(f"- {label}")
+        if reason:
+            lines.append(f"  - Why: {reason}")
+    elif next_action:
+        lines.append(f"- {next_action}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 RENDERERS = {
     "report": render_report,
     "morning-journal": render_morning_journal,
     "evening-journal": render_evening_journal,
     "dream-learning": render_dream_learning,
     "research-digest": render_research_digest,
+    "state-brief": render_state_brief,
 }
 
 
