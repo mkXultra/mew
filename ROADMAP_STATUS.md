@@ -49,8 +49,8 @@ is tracked below.
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
-| 6.16 Codex-Grade Implementation Lane | `in_progress` | Baseline surface is landing; first measured bottleneck is mew-first rescue/partial implementation attempts. |
-| 6.17 Resident Meta Loop / Lane Chooser | `not_started` | Future supervisor milestone after lane telemetry, mirror/deliberation boundaries, and implementation-lane reliability are proven. |
+| 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
+| 6.17 Resident Meta Loop / Lane Chooser | `in_progress` | Active supervisor milestone: propose reviewer-gated task and lane dispatch from roadmap, memory, and calibration metrics. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
@@ -59,38 +59,34 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.16 Codex-Grade Implementation Lane**.
+Active work: **M6.17 Resident Meta Loop / Lane Chooser**.
 
-Why M6.16 is active:
+Why M6.17 is active:
 
-- M6.13 closed the deliberation/mirror/internalization gate with both
-  deterministic and live gpt-5.5 proof.
-- The next resident capability gap is not another helper lane; it is the
-  ordinary authoritative implementation lane. Mew needs reliable hands before
-  lane composition or a meta loop can be valuable.
-- M6.13.2 side-project dogfood telemetry, mew-first attempt history, and
-  M6.14 repair records now provide enough evidence to choose measured
-  implementation-lane bottlenecks instead of guessing.
+- M6.16 closed with residuals: the latest mew-first cohort is reliable enough
+  for a reviewer-gated supervisor to propose work without merely orchestrating
+  unreliable hands.
+- The next resident capability gap is task/lane dispatch: choosing when to use
+  the implementation lane, deliberation lane, repair lane, or human review gate
+  from roadmap state, memory, and calibration economics.
+- M6.17 must stay read-only or reviewer-gated in v0. It should propose, not
+  mutate, dispatch/roadmap/memory state without approval.
 
-Current M6.16 target:
+Current M6.17 target:
 
-- treat persisted `tiny` as the authoritative implementation lane while using
-  `implementation` as the product-facing concept
-- measure recent mew-first attempts by rescue rate, approval rejection,
-  verifier failure, first-edit latency, retry path, and failure class
-- consume the M6.13.2 side-project dogfood ledger only as evidence; do not let
-  side-project control preempt the main milestone unless it exposes a core
-  blocker
-- reduce measured friction with narrow changes and focused replay/test proof
-- keep M6.14 as the repair path for structural mew-first failures
-- avoid broad work-loop/work-session refactors unless a measured recurring
-  failure class names the bottleneck
+- build a compact, reviewer-visible meta-loop proposal surface
+- read roadmap status, mew-first/implementation-lane metrics, memory, task
+  state, active sessions, and user constraints
+- propose exactly one next task and lane dispatch with evidence, expected
+  value, fallback, verifier, and repair route
+- require reviewer approval before dispatch in v0
+- preserve M6.14 as the structural repair route
 
-Current M6.16 chain:
+Current M6.17 chain:
 
-`M6.16 -> measured bottleneck: mew_first_rescue_partial / first_edit_latency -> reduce ordinary implementation-lane rescue/partial rate and pre-edit rediscovery`
+`M6.17 -> reviewer-gated meta-loop proposal -> choose next task and lane dispatch from roadmap, memory, and calibration evidence`
 
-Current M6.16 evidence:
+M6.16 close evidence:
 
 - Task `#656` produced the first M6.16 baseline slice as supervisor-owned
   rescue after failed mew-first attempts. Sessions `#642` and `#643` did not
@@ -1125,6 +1121,9 @@ These caveats are preserved; they do not reopen the milestones by default.
   using the closed residual surfaces.
 - Reopen M6.12 only if the read-only report stops parsing the canonical ledger
   or gives incorrect missing-bundle/citation results.
+- Reopen M6.16 only if a fresh bounded implementation-lane cohort regresses
+  below the recorded close gate, or if first-edit latency remains high on
+  current-head samples after M6.17 has used it as lane-choice evidence.
 - M6.14 remains the default home for future mew-first substrate repair
   episodes.
 
@@ -1132,21 +1131,18 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.16 -> measured bottleneck: mew_first_rescue_partial -> reduce ordinary implementation-lane rescue/partial rate`
+`M6.17 -> reviewer-gated meta-loop proposal -> choose next task and lane dispatch from roadmap, memory, and calibration evidence`
 
 Acceptable near-term work:
 
-- build a compact M6.16 baseline report from recent mew-first attempts,
-  M6.13 lane telemetry, M6.13.2 side-project ledger entries, and M6.14 repair
-  records
-- classify the first implementation-lane bottleneck by rescue rate, approval
-  rejection, verifier failure, first-edit latency, retry path, or failure class
-- make one narrow implementation-lane change tied to that measured bottleneck
-  and record before/after evidence
-- if the bottleneck is structural, open or append an M6.14 repair episode
-  instead of hiding it behind supervisor edits
-- keep deliberation as helper evidence only; do not use it to mask weak normal
-  implementation-lane behavior
+- build a compact read-only proposal surface for the resident meta loop
+- consume roadmap status, current tasks, active sessions, memory, and
+  implementation-lane/calibration metrics as evidence
+- propose exactly one next task, authoritative lane, helper lane if any,
+  verifier, fallback, repair route, budget, and expected-value rationale
+- require reviewer approval before dispatch or mutation in v0
+- route structural implementation failures to M6.14 instead of hiding them
+  behind supervisor edits
 
 Non-goals for the next session:
 
@@ -1154,24 +1150,22 @@ Non-goals for the next session:
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
-- side-project dogfood control; user controls side-project launch and M6.16
-  only consumes the resulting ledger/problem evidence
 - M7 inbound-signal work
-- broad refactors not tied to a measured implementation-lane bottleneck
-- polish not mapped to the M6.16 gate
+- broad refactors not tied to the meta-loop proposal surface
+- direct roadmap/task/memory mutation by the meta loop without reviewer approval
+- polish not mapped to the M6.17 gate
 
 ## Latest Validation
 
-Latest M6.13 source/test validation:
+Latest M6.16 source/test validation:
 
-- M6.13 deliberation preflight/budget primitive slice:
-  `uv run pytest -q tests/test_deliberation.py --no-testmon`,
-  `uv run pytest -q tests/test_deliberation.py tests/test_work_session.py -k "deliberation" --no-testmon`,
-  `uv run pytest -q tests/test_deliberation.py tests/test_work_lanes.py --no-testmon`,
-  `uv run pytest -q tests/test_work_session.py -k "deliberation or active_work_todo or lane" --no-testmon`,
-  and
-  `uv run ruff check src/mew/deliberation.py src/mew/work_session.py tests/test_deliberation.py tests/test_work_session.py`
-  passed.
+- Task `#678` first-edit latency budget slice:
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or first_edit_latency' --no-testmon`,
+  `uv run python -m unittest tests.test_work_session`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check` passed. Codex-ultra review session
+  `019dcb9d-ddf7-7f30-8605-7b603f048ba8` reported `STATUS: pass` with
+  `NO FINDINGS`.
 - M6.13 deliberation work-loop call-boundary slice:
   `uv run pytest -q tests/test_work_deliberation_loop.py --no-testmon`,
   `uv run pytest -q tests/test_deliberation.py tests/test_work_deliberation_loop.py --no-testmon`,
