@@ -1363,6 +1363,7 @@ def compact_active_memory_for_prompt(
                 "memory_scope",
                 "type",
                 "memory_type",
+                "memory_kind",
                 "key",
                 "name",
                 "description",
@@ -1372,6 +1373,15 @@ def compact_active_memory_for_prompt(
                 "score",
                 "reason",
                 "matched_terms",
+                "situation",
+                "verdict",
+                "abstraction_level",
+                "source_lane",
+                "source_lane_attempt_id",
+                "source_blocker_code",
+                "source_bundle_ref",
+                "same_shape_key",
+                "reviewer_decision_ref",
             )
             if item.get(key) not in (None, "", [], {})
         }
@@ -5883,6 +5893,12 @@ def build_write_ready_tiny_draft_model_context(context):
             "write": list(((write_ready_context.get("allowed_roots") or {}).get("write") or [])),
         },
     }
+    active_memory = resume.get("active_memory") if isinstance(resume.get("active_memory"), dict) else {}
+    if active_memory:
+        result["active_memory"] = compact_active_memory_for_prompt(
+            active_memory,
+            mode="tiny_write_ready",
+        )
     if failed_patch_repair:
         result["failed_patch_repair"] = failed_patch_repair
     return result
@@ -6028,7 +6044,8 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "Write-ready tiny draft lane is active.\n"
         "Return exactly one patch artifact for the active scoped implementation slice.\n"
         "Allowed kinds are patch_proposal or patch_blocker.\n"
-        "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts.\n"
+        "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts for patch content.\n"
+        "If active_memory is present, use it only as distilled reasoning guidance for choosing the narrow patch shape; do not read memory files or copy memory metadata into code.\n"
         "If task_goal.required_terms is non-empty, treat those terms as semantic anchors from the task goal, not product fields to copy into code or metadata.\n"
         "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
         "Never persist a key named required_terms unless the task explicitly asks to add a required_terms API.\n"

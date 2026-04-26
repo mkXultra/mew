@@ -28,7 +28,14 @@ from .tasks import find_task
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
 from .typed_memory import FileMemoryBackend
-from .work_session import build_work_session_effort, build_work_session_resume, find_work_session
+from .work_session import (
+    build_work_session_effort,
+    build_work_session_resume,
+    create_work_session,
+    find_work_session,
+    finish_work_model_turn,
+    start_work_model_turn,
+)
 from .write_tools import build_write_intent
 
 
@@ -2966,9 +2973,9 @@ def run_m6_13_deliberation_internalization_scenario(workspace, env=None):
             },
             {
                 "id": later_task_id,
-                "title": "M6.13 same-shape review rejection repair",
+                "title": "M6.13 related review rejection repair",
                 "description": (
-                    "Use the prior review rejection narrow causal repair trace for a work loop paired-test "
+                    "Use the prior review rejection narrow causal repair trace for a work loop paired test "
                     "blocker family without invoking deliberation."
                 ),
                 "status": "todo",
@@ -3057,6 +3064,111 @@ def run_m6_13_deliberation_internalization_scenario(workspace, env=None):
     ]
     recalled = bool(matches)
     matched_terms = set(matches[0].get("matched_terms") or []) if matches else set()
+    patch_scenario_path = PATCH_DRAFT_FIXTURE_ROOT / "paired_src_test_happy" / "scenario.json"
+    patch_scenario = json.loads(patch_scenario_path.read_text(encoding="utf-8"))
+    for path, payload in (patch_scenario.get("live_files") or {}).items():
+        live_path = workspace / path
+        live_path.parent.mkdir(parents=True, exist_ok=True)
+        live_path.write_text(payload.get("text") or "", encoding="utf-8")
+    target_paths = list((patch_scenario.get("todo") or {}).get("source", {}).get("target_paths") or [])
+    later_task = next((item for item in state["tasks"] if item.get("id") == later_task_id), {})
+    live_session, _created = create_work_session(state, later_task)
+    live_session["tool_calls"] = []
+    for index, path in enumerate(target_paths, start=1):
+        window = ((patch_scenario.get("cached_windows") or {}).get(path) or {}).copy()
+        live_session["tool_calls"].append(
+            {
+                "id": index,
+                "tool": "read_file",
+                "status": "completed",
+                "parameters": {
+                    "path": path,
+                    "line_start": window.get("line_start"),
+                    "line_count": max(1, (window.get("line_end") or 1) - (window.get("line_start") or 1) + 1),
+                },
+                "result": {
+                    "path": path,
+                    "line_start": window.get("line_start"),
+                    "line_end": window.get("line_end"),
+                    "text": window.get("text") or "",
+                    "next_line": (window.get("line_end") or 0) + 1,
+                    "context_truncated": bool(window.get("context_truncated")),
+                    "source_truncated": False,
+                    "truncated": False,
+                },
+            }
+        )
+    decision_plan = {
+        "summary": "prepare write-ready tiny reuse proof",
+        "working_memory": {
+            "hypothesis": "Exact source/test windows are cached for a paired tiny-lane draft.",
+            "next_step": "Draft one paired dry-run edit batch using the recalled deliberation trace.",
+            "plan_items": [
+                "Use active memory before drafting the paired edit.",
+                "Draft one paired dry-run edit batch for " + " and ".join(target_paths),
+            ],
+            "target_paths": target_paths,
+            "last_verified_state": "Exact cached windows and deliberation-derived active memory are available.",
+        },
+    }
+    turn = start_work_model_turn(
+        state,
+        live_session,
+        decision_plan,
+        {"summary": decision_plan["summary"]},
+        {"type": "wait", "reason": "ready for the tiny-lane reuse proof"},
+    )
+    finish_work_model_turn(state, live_session["id"], turn["id"])
+    observed_tiny_prompts = []
+    from . import work_loop as work_loop_module
+
+    original_model_call = work_loop_module.call_model_json_with_retries
+
+    def fake_tiny_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+        observed_tiny_prompts.append(
+            {
+                "log_prefix": str(log_prefix or ""),
+                "prompt_has_trace": "M6.13 deliberation internalization trace" in str(prompt or ""),
+                "prompt_has_source_lane": '"source_lane":"deliberation"' in str(prompt or ""),
+                "prompt_has_same_shape_key": same_shape_key in str(prompt or ""),
+            }
+        )
+        if "work_write_ready_tiny_draft" in str(log_prefix or ""):
+            return patch_scenario.get("model_output") or {}
+        return {"summary": "unexpected broad model", "action": {"type": "wait", "reason": "unexpected broad model"}}
+
+    old_cwd = os.getcwd()
+    os.chdir(workspace)
+    work_loop_module.call_model_json_with_retries = fake_tiny_model
+    try:
+        planned = work_loop_module.plan_work_model_turn(
+            state,
+            live_session,
+            later_task,
+            {"path": "auth.json"},
+            model="codex",
+            base_url="https://example.invalid",
+            model_backend="codex",
+            timeout=60,
+            allowed_read_roots=["."],
+            allowed_write_roots=patch_scenario.get("allowed_write_roots") or ["."],
+            allow_verify=True,
+            verify_command="uv run python -m unittest tests.test_patch_draft",
+            act_mode="deterministic",
+        )
+    finally:
+        work_loop_module.call_model_json_with_retries = original_model_call
+        os.chdir(old_cwd)
+    planned_action = planned.get("action") if isinstance(planned, dict) else {}
+    planned_metrics = planned.get("model_metrics") if isinstance(planned, dict) else {}
+    tiny_prompt_observed = next(
+        (
+            item
+            for item in observed_tiny_prompts
+            if "work_write_ready_tiny_draft" in item.get("log_prefix", "")
+        ),
+        {},
+    )
     tiny_bundle_path = workspace / tiny_bundle_ref
     tiny_bundle_path.parent.mkdir(parents=True, exist_ok=True)
     tiny_bundle = {
@@ -3067,8 +3179,17 @@ def run_m6_13_deliberation_internalization_scenario(workspace, env=None):
         "same_shape_key": same_shape_key,
         "used_memory_ids": [entry.get("id")] if entry.get("id") else [],
         "deliberation_invoked": False,
-        "result": "solved",
-        "reviewer_confirmed_trace_shortened_deliberation": recalled,
+        "result": "planned_patch",
+        "planned_action_type": planned_action.get("type") if isinstance(planned_action, dict) else "",
+        "tiny_write_ready_draft_outcome": planned_metrics.get("tiny_write_ready_draft_outcome") or "",
+        "patch_draft_compiler_artifact_kind": planned_metrics.get("patch_draft_compiler_artifact_kind") or "",
+        "patch_draft_compiler_replay_path": planned_metrics.get("patch_draft_compiler_replay_path") or "",
+        "prompt_has_trace": bool(tiny_prompt_observed.get("prompt_has_trace")),
+        "prompt_has_source_lane": bool(tiny_prompt_observed.get("prompt_has_source_lane")),
+        "prompt_has_same_shape_key": bool(tiny_prompt_observed.get("prompt_has_same_shape_key")),
+        "reviewer_confirmed_trace_shortened_deliberation": recalled
+        and bool(tiny_prompt_observed.get("prompt_has_same_shape_key"))
+        and planned_action.get("type") == "batch",
     }
     write_json_file(tiny_bundle_path, tiny_bundle)
     trace_rel = str(Path(STATE_DIR) / "durable" / "m6_13-deliberation-internalization-trace.json")
@@ -3100,7 +3221,7 @@ def run_m6_13_deliberation_internalization_scenario(workspace, env=None):
         "later_task_deliberation_invoked": tiny_bundle["deliberation_invoked"],
         "reasoning_trace_ledger_ref": ledger_rel,
         "known_limitations": [
-            "tiny-lane replay bundle is a deterministic fixture, not a live tiny-lane run",
+            "tiny-lane planning path uses a deterministic fake model, not a live provider call",
             "active-memory recall uses provenance-aware matching, not final M6.9 statistical ranked recall",
         ],
     }
@@ -3144,12 +3265,18 @@ def run_m6_13_deliberation_internalization_scenario(workspace, env=None):
     _scenario_check(
         checks,
         "m6_13_deliberation_internalization_records_tiny_reuse_contract",
-        tiny_bundle["result"] == "solved"
+        tiny_bundle["result"] == "planned_patch"
         and tiny_bundle["deliberation_invoked"] is False
         and entry.get("id") in tiny_bundle["used_memory_ids"]
+        and tiny_bundle["planned_action_type"] == "batch"
+        and tiny_bundle["tiny_write_ready_draft_outcome"] == "succeeded"
+        and tiny_bundle["patch_draft_compiler_artifact_kind"] == "patch_draft"
+        and tiny_bundle["prompt_has_trace"] is True
+        and tiny_bundle["prompt_has_source_lane"] is True
+        and tiny_bundle["prompt_has_same_shape_key"] is True
         and tiny_bundle["reviewer_confirmed_trace_shortened_deliberation"] is True,
         observed=tiny_bundle,
-        expected="deterministic tiny-lane reuse contract records trace use without invoking deliberation",
+        expected="tiny planning path receives trace provenance and produces a validated paired patch draft",
     )
     _scenario_check(
         checks,

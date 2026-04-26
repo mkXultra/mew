@@ -169,8 +169,10 @@ Current M6.13 evidence:
   durable ledger slot. A deterministic dogfood scenario records a hard
   deliberation-assisted task, writes the reviewed trace, proves a later
   same-shape task recalls it through provenance-aware active memory, and
-  records a tiny-lane reuse contract fixture with `deliberation_invoked=false`.
-  This is a Phase 3 contract surface, not yet the live close proof.
+  runs the tiny write-ready planning path with a deterministic fake model that
+  receives the trace provenance in prompt context and emits a validated paired
+  patch draft with `deliberation_invoked=false`. This is a Phase 3 contract
+  surface, not yet a live-provider close proof.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
@@ -800,8 +802,10 @@ Latest M6.13 source/test validation:
 - M6.13 Phase 3 internalization proof slice:
   `uv run pytest -q tests/test_memory.py -k 'reasoning_trace' --no-testmon`,
   `uv run pytest -q tests/test_dogfood.py -k 'm6_13_deliberation_internalization or scenario_choices' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'compact_active_memory_preserves_reasoning_trace_provenance' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'write_ready_tiny or write_ready_fast_path or compact_active_memory_preserves_reasoning_trace_provenance' --no-testmon`,
   `uv run python -m mew dogfood --scenario m6_13-deliberation-internalization --json`,
-  `uv run ruff check src/mew/typed_memory.py src/mew/commands.py src/mew/cli.py src/mew/dogfood.py tests/test_memory.py tests/test_dogfood.py`,
+  `uv run ruff check src/mew/typed_memory.py src/mew/work_session.py src/mew/work_loop.py src/mew/commands.py src/mew/cli.py src/mew/dogfood.py tests/test_memory.py tests/test_dogfood.py tests/test_work_session.py`,
   and `git diff --check` passed.
 - M6.14 side-project write-scope repair from GitHub issue `#1`:
   `uv run pytest -q tests/test_work_write_scope.py --no-testmon`,

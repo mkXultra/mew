@@ -19475,6 +19475,88 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_compact_active_memory_preserves_reasoning_trace_provenance(self):
+        from mew.work_loop import build_work_model_context, build_work_think_prompt
+        from mew.work_session import create_work_session
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["title"] = "Review rejection narrow causal repair"
+                    task["description"] = "Use the prior work loop paired-test deliberation trace."
+                    create_work_session(state, task)
+                    save_state(state)
+
+                self.assertEqual(
+                    main(
+                        [
+                            "memory",
+                            "--add",
+                            "Store the approved distilled reasoning from a deliberation lane attempt.",
+                            "--type",
+                            "project",
+                            "--kind",
+                            "reasoning-trace",
+                            "--scope",
+                            "private",
+                            "--name",
+                            "M6.13 compact prompt trace",
+                            "--description",
+                            "Reviewer-approved reasoning trace distilled from a deliberation lane result.",
+                            "--approved",
+                            "--situation",
+                            "review rejection needs a narrow causal repair in the work loop",
+                            "--reasoning",
+                            "classify the blocker family and paired-test surface before drafting",
+                            "--verdict",
+                            "draft the smallest paired source/test repair",
+                            "--abstraction-level",
+                            "deep",
+                            "--source-lane",
+                            "deliberation",
+                            "--source-lane-attempt-id",
+                            "lane-deliberation-todo-61301-attempt-1",
+                            "--source-blocker-code",
+                            "review_rejected",
+                            "--source-bundle-ref",
+                            ".mew/durable/replay/deliberation/m6_13-hard.json",
+                            "--same-shape-key",
+                            "review_rejected:work_loop:paired-test:narrow-causal-repair",
+                            "--reviewer-decision-ref",
+                            "review-20260426-m6-13-internalization",
+                        ]
+                    ),
+                    0,
+                )
+
+                state = load_state()
+                session = state["work_sessions"][0]
+                task = state["tasks"][0]
+                context = build_work_model_context(
+                    state,
+                    session,
+                    task,
+                    "now",
+                    prompt_context_mode="compact_memory",
+                )
+                active_memory = context["work_session"]["resume"]["active_memory"]
+                items = active_memory["items"]
+                trace_item = next(item for item in items if item.get("source_lane") == "deliberation")
+                self.assertNotIn("text", trace_item)
+                self.assertEqual(trace_item["memory_kind"], "reasoning-trace")
+                self.assertEqual(trace_item["same_shape_key"], "review_rejected:work_loop:paired-test:narrow-causal-repair")
+                self.assertEqual(trace_item["source_blocker_code"], "review_rejected")
+                prompt = build_work_think_prompt(context)
+                self.assertIn('"source_lane": "deliberation"', prompt)
+                self.assertIn("review_rejected:work_loop:paired-test:narrow-causal-repair", prompt)
+                self.assertNotIn("Store the approved distilled reasoning", prompt)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_loop_model_calls_disable_transient_retries(self):
         from mew.work_loop import call_model_json_with_retries
 
