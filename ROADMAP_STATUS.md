@@ -113,6 +113,18 @@ Current M6.17 evidence:
   `git diff --check`. Codex-ultra review
   `019dcbd8-e9bb-7880-9009-7efb152bc3eb` returned `STATUS: pass` after the
   punctuation/current-milestone test gaps were fixed.
+- Task `#681` added `next_action` to no-candidate selector proposals so a
+  reviewer still sees the active native self-improve path when no safe bounded
+  task candidate exists. Mew session `#671` authored the source/test patch and
+  verification passed; the supervisor applied a tiny formatter follow-up so
+  normal candidate proposals do not show `next_action: null`. After marking
+  `#681` done, `./mew task propose-next 681 --json` returns a blocked
+  no-candidate proposal with `lane_dispatch` plus `next_action: ./mew
+  self-improve --start-session --focus 'Advance M6.17 Resident Meta Loop /
+  Lane Chooser'`. Validation passed: `uv run python -m unittest
+  tests.test_commands`, `uv run ruff check src/mew/commands.py
+  tests/test_commands.py`, and `git diff --check`. Codex-ultra review
+  `019dcbe9-aae6-75d1-a17d-fb613f1ef4c3` returned `STATUS: pass`.
 
 M6.16 close evidence:
 

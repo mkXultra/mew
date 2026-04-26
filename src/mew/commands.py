@@ -792,13 +792,15 @@ def format_task_selector_proposal(proposal):
         "blocked_reason",
         "governance_violation",
     ]
+    if "next_action" in proposal:
+        keys.insert(5, "next_action")
     return "\n".join(
         f"{key}: {_task_selector_display_value(proposal.get(key))}"
         for key in keys
     )
 
 
-def _task_selector_no_candidate_response(previous_task, message):
+def _task_selector_no_candidate_response(state, previous_task, message):
     proposal = build_task_selector_proposal(previous_task, {}, message)
     proposal.update(
         {
@@ -807,6 +809,7 @@ def _task_selector_no_candidate_response(previous_task, message):
             "blocked": True,
             "blocked_reason": message,
             "governance_violation": False,
+            "next_action": next_move(state, kind="coding"),
         }
     )
     return proposal
@@ -1171,7 +1174,7 @@ def _build_task_selector_next_proposal(state, args):
         elif not _task_selector_candidate_is_open_coding(candidate_task):
             message = "candidate task is not a ready/todo coding task"
         if message:
-            return _task_selector_no_candidate_response(previous_task, message), 1, None
+            return _task_selector_no_candidate_response(state, previous_task, message), 1, None
 
         selector_reason = (
             f"explicit candidate task #{candidate_task.get('id')} after previous task #{previous_task.get('id')}"
@@ -1201,7 +1204,7 @@ def _build_task_selector_next_proposal(state, args):
             proposal["failure_cluster_reason"] = failure_cluster_reason
         return proposal, 0, None
 
-    return _task_selector_no_candidate_response(previous_task, "no safe selector candidate found"), 1, None
+    return _task_selector_no_candidate_response(state, previous_task, "no safe selector candidate found"), 1, None
 
 
 def cmd_task_propose_next(args):
