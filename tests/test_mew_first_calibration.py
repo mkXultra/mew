@@ -164,6 +164,25 @@ def test_reviewer_steered_mew_first_attempt_is_practical_not_clean() -> None:
     assert attempts[-1].rejected_patch_family == "reviewer_rejected_patch"
 
 
+def test_success_after_blocker_fixes_stays_in_attempt_window() -> None:
+    text = """
+### M6.16: Codex-Grade Implementation Lane
+
+- Task `#660` then landed as bounded mew-first implementation evidence for
+  M6.16 measurement quality after the `#661` and `#662` blocker fixes. Count
+  this as `success_after_substrate_fix`: the fresh mew-first session drafted
+  the paired source/test patch and the supervisor approved without product
+  rescue edits; a reviewer steer was needed only to replace an invalid task
+  verifier. Valid proof passed.
+"""
+
+    attempts = extract_mew_first_attempts(text, limit=10)
+
+    assert [attempt.task_id for attempt in attempts] == [660]
+    assert attempts[-1].result_class == "practical_mew_first"
+    assert attempts[-1].autonomy_credit == "practical"
+
+
 def test_extract_mew_first_attempts_classifies_task_goal_and_synthetic_schema_substitution() -> None:
     text = """
 ### M6.16: Codex-Grade Implementation Lane

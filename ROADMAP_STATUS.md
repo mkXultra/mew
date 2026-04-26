@@ -175,6 +175,23 @@ Current M6.16 evidence:
   `uv run pytest -q tests/test_work_session.py tests/test_work_rejection_frontier.py -k 'evidence_source_scope_terms or task_goal_substitution or required_terms' --no-testmon`,
   `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
   `git diff --check`.
+- Task `#660` then landed as bounded mew-first implementation evidence for
+  M6.16 measurement quality after the `#661` and `#662` blocker fixes and
+  switching live work to `~/.codex/auth.json`. It deduplicates
+  `mew_first.gate_blocking_task_ids` in `mew metrics --implementation-lane`
+  while preserving first-seen order, with paired coverage in
+  `tests/test_implementation_lane_baseline.py`. Count this as
+  `success_after_substrate_fix`: the fresh mew-first session drafted the
+  paired source/test patch and the supervisor approved without product rescue
+  edits; a reviewer steer was needed only to replace an invalid task verifier
+  (`-k "gate_blocking"` selected no tests and exited 5). Valid proof passed:
+  `uv run pytest -q tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run pytest -q tests/test_implementation_lane_baseline.py tests/test_metrics.py -k 'implementation_lane or gate_blocking or metrics' --no-testmon`,
+  `uv run ruff check src/mew/implementation_lane_baseline.py tests/test_implementation_lane_baseline.py`,
+  `./mew metrics --mew-first --limit 100 --json`,
+  `./mew metrics --implementation-lane --json`, and `git diff --check`.
+  Codex-ultra re-review reported no findings after confirming `#660` is in
+  the mew-first attempt window and counted as a practical success.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
