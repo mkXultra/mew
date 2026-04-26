@@ -1229,10 +1229,16 @@ class MemoryTests(unittest.TestCase):
                 data = json.loads(stdout.getvalue())
                 active_memory = data["active_memory"]
                 self.assertEqual(data["task"]["id"], 1)
+                self.assertEqual(active_memory["ranker"]["name"], "m6_9-ranked-recall")
+                self.assertIn("task_shape_similarity", active_memory["ranker"]["components"])
                 self.assertTrue(
                     any(item["name"] == "Active recall debug route" for item in active_memory["items"]),
                     active_memory,
                 )
+                recalled_item = next(item for item in active_memory["items"] if item["name"] == "Active recall debug route")
+                self.assertGreaterEqual(recalled_item["rank"], 1)
+                self.assertIn("recency", recalled_item["score_components"])
+                self.assertIn("importance", recalled_item["score_components"])
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(main(["memory", "--active", "--task-id", "1"]), 0)

@@ -19761,6 +19761,20 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("active", terms)
         self.assertNotIn("memory", terms)
 
+    def test_active_memory_terms_split_same_shape_key_notes(self):
+        terms = active_memory_terms(
+            task={
+                "title": "Later repair",
+                "description": "Use the prior trace.",
+                "notes": "same_shape_key=review_rejected:work_loop:paired-test:narrow-causal-repair",
+                "kind": "coding",
+            }
+        )
+
+        for expected in ("review", "rejected", "loop", "paired", "test", "narrow", "causal", "repair"):
+            self.assertIn(expected, terms)
+        self.assertNotIn("same_shape_key", terms)
+
     def test_work_session_working_memory_prefers_observed_verification_and_marks_stale(self):
         from mew.work_session import (
             build_work_session_resume,
