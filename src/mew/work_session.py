@@ -6640,6 +6640,16 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         state,
         task_id,
     )
+    deliberation_attempts = (
+        session.get("deliberation_attempts")
+        if isinstance(session.get("deliberation_attempts"), list)
+        else []
+    )
+    deliberation_cost_events = (
+        session.get("deliberation_cost_events")
+        if isinstance(session.get("deliberation_cost_events"), list)
+        else []
+    )
 
     resume = {
         "session_id": session.get("id"),
@@ -6698,6 +6708,10 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "recent_decisions": recent_decisions,
         "latest_verifier_closeout": latest_verifier_closeout,
         "latest_patch_draft_compiler_replay": latest_patch_draft_compiler_replay,
+        "deliberation_attempts": list(deliberation_attempts)[-limit:],
+        "deliberation_cost_events": list(deliberation_cost_events)[-limit:],
+        "latest_deliberation_result": session.get("latest_deliberation_result") or {},
+        "latest_deliberation_bundle": str(session.get("latest_deliberation_bundle") or "").strip(),
         "compressed_prior_think": compressed_prior_think,
         "working_memory": working_memory,
         "user_preferences": user_preferences,
