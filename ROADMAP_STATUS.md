@@ -41,7 +41,7 @@ is tracked below.
 | 6.6 Coding Competence: Codex CLI Parity | `done` | Bootstrap, comparator slots, and frozen Codex CLI side-by-side batch passed with recorded caveats. |
 | 6.7 Supervised Self-Hosting Loop | `done` | Reviewer-gated supervised iterations, reentry, and detached close-watch satisfied the gate. |
 | 6.8 Task Chaining: Supervised Self-Selection | `done` | Close gate passed via `docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`. |
-| 6.8.5 Selector Intelligence and Curriculum Integration | `not_started` | Active next. Add intelligence signals on top of the closed M6.8 approval contract. |
+| 6.8.5 Selector Intelligence and Curriculum Integration | `in_progress` | First read-only failure-cluster selector signal landed; preference/reviewer-history signals remain. |
 | 6.9 Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`; Phase 4 moved to M6.8.5. |
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
@@ -76,6 +76,31 @@ Current M6.8.5 target:
 - keep reviewer approval mandatory before handoff execution
 - keep selector-owned output away from roadmap-status, milestone-close, and
   governance files
+
+Current M6.8.5 evidence:
+
+- Task `#639` / session `#627` landed the first read-only selector
+  intelligence signal after bounded M6.14 substrate repair. Non-blocked
+  `mew task propose-next` proposals now attach `failure_cluster_reason` from
+  `summarize_calibration_ledger("proof-artifacts/m6_11_calibration_ledger.jsonl")`
+  when the existing M6.12 calibration ledger has non-positive archetype counts.
+  Missing-ledger and blocked proposal paths leave the existing field empty; the
+  M6.8 approval/no-dispatch/governance contract is unchanged.
+- #639 mew-first note: sessions `#625`/`#626` first failed with rejected
+  synthetic-schema/hard-coded metadata patches. M6.14 repair task `#640`
+  landed `synthetic_schema_substitution` rejection-frontier classification in
+  commit `9c2c1d1`, then #627 retried #639 and produced the accepted source/test
+  patch. Count this as `success_after_substrate_fix`; Codex reviewer correction
+  was limited to rejecting bad drafts and steering the `CalibrationSummary.counts`
+  API, not authoring the product patch.
+- #639 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py tests/test_commands.py
+  tests/test_work_session.py`, and `git diff --check`.
+- #639 dogfood evidence: `mew task propose-next 639 --candidate-task-id 641
+  --record --json` produced `failure_cluster_reason:
+  preflight_gap:9 from proof-artifacts/m6_11_calibration_ledger.jsonl` while
+  keeping `approval_required=true`, `blocked=false`, and no auto-dispatch.
 
 Closed M6.8 evidence:
 

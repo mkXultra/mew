@@ -40,6 +40,7 @@ from .brief import (
     scoped_agent_status,
     verification_outcome,
 )
+from .calibration_report import ARCHETYPE_PRIORITY, summarize_calibration_ledger
 from .codex_api import load_codex_oauth
 from .config import CHAT_TRANSCRIPT_FILE, DEFAULT_MODEL_BACKEND, EFFECT_LOG_FILE, LOG_FILE, STATE_DIR
 from .context import build_context
@@ -498,6 +499,24 @@ def _task_selector_display_value(value):
     return str(value)
 
 
+def _task_selector_failure_cluster_reason():
+    ledger_path = Path("proof-artifacts") / "m6_11_calibration_ledger.jsonl"
+    if not ledger_path.exists():
+        return ""
+    try:
+        summary = summarize_calibration_ledger(ledger_path)
+    except Exception:
+        return ""
+    counts = getattr(summary, "counts", {}) or {}
+    for archetype in ARCHETYPE_PRIORITY:
+        if archetype == "positive_outcome_v0":
+            continue
+        count = counts.get(archetype, 0)
+        if isinstance(count, int) and count > 0:
+            return f"{archetype}:{count} from {ledger_path.as_posix()}"
+    return ""
+
+
 def format_task_selector_proposal(proposal):
     keys = [
         "previous_task_id",
@@ -899,6 +918,10 @@ def _build_task_selector_next_proposal(state, args):
             f"explicit candidate task #{candidate_task.get('id')} after previous task #{previous_task.get('id')}"
         )
         proposal = build_task_selector_proposal(previous_task, candidate_task, selector_reason)
+        if not proposal.get("blocked"):
+            failure_cluster_reason = _task_selector_failure_cluster_reason()
+            if failure_cluster_reason:
+                proposal["failure_cluster_reason"] = failure_cluster_reason
         return proposal, 1 if proposal.get("blocked") else 0, None
 
     for task in sorted(open_tasks(state), key=task_sort_key):
@@ -912,6 +935,9 @@ def _build_task_selector_next_proposal(state, args):
         proposal = build_task_selector_proposal(previous_task, task, selector_reason)
         if proposal.get("blocked"):
             continue
+        failure_cluster_reason = _task_selector_failure_cluster_reason()
+        if failure_cluster_reason:
+            proposal["failure_cluster_reason"] = failure_cluster_reason
         return proposal, 0, None
 
     return _task_selector_no_candidate_response(previous_task, "no safe selector candidate found"), 1, None

@@ -340,6 +340,69 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(state.get("agent_runs") or [], [])
         self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
 
+    def test_task_propose_next_record_includes_failure_cluster_reason_from_ledger(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                os.makedirs("proof-artifacts")
+                ledger_path = os.path.join("proof-artifacts", "m6_11_calibration_ledger.jsonl")
+                with open(ledger_path, "w", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"blocker_code": "cached_window_incomplete"}) + "\n")
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                candidate = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        expected_reason = "cached_window_integrity:1 from proof-artifacts/m6_11_calibration_ledger.jsonl"
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(proposal["failure_cluster_reason"], expected_reason)
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["proposal"]["failure_cluster_reason"], expected_reason)
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_record_leaves_failure_cluster_reason_empty_without_ledger(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with patch.object(commands_module, "summarize_calibration_ledger") as summarize:
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                    previous = json.loads(stdout.getvalue())["task"]
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(main(["task", "add", "Candidate", "--kind", "coding", "--ready", "--json"]), 0)
+                    candidate = json.loads(stdout.getvalue())["task"]
+
+                    with redirect_stdout(StringIO()) as stdout:
+                        code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                    state = commands_module.load_state()
+                summarize.assert_not_called()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        proposal = json.loads(stdout.getvalue())
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertEqual(proposal["failure_cluster_reason"], "")
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["proposal"]["failure_cluster_reason"], "")
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
     def test_task_propose_next_record_persists_blocked_selector_record(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
