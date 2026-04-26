@@ -599,6 +599,46 @@ def _task_selector_habit_task_template(task):
     return f"{kind}:{'-'.join(tokens[:2])}"
 
 
+def _task_selector_expected_runner_command(task_id):
+    if task_id is None:
+        return ""
+    return f"./mew work {task_id} --start-session"
+
+
+def _task_selector_compiled_habit_runner_candidate_ref(
+    *,
+    current_task_id,
+    source_task_id,
+    task_template,
+    source_proposal_id,
+    source_attempt,
+    reviewer_decision,
+):
+    if not isinstance(source_attempt, dict):
+        return {}
+    if str(source_attempt.get("status") or "") != "handoff_ready":
+        return {}
+    if str(reviewer_decision or "").lower() != "approved":
+        return {}
+    runner_command = _task_selector_expected_runner_command(current_task_id)
+    source_runner_command = _task_selector_expected_runner_command(source_task_id)
+    if not runner_command or not source_runner_command:
+        return {}
+    if str(source_attempt.get("next_command") or "") != source_runner_command:
+        return {}
+    ref = {
+        "kind": "compiled_habit_runner_candidate",
+        "task_template": task_template,
+        "source_proposal_id": source_proposal_id,
+        "runner_command": runner_command,
+        "reviewer_decision": str(reviewer_decision),
+    }
+    source_attempt_id = source_attempt.get("id")
+    if source_attempt_id is not None:
+        ref["source_attempt_id"] = source_attempt_id
+    return ref
+
+
 def _task_selector_habit_template_refs(state, proposal):
     if not isinstance(state, dict) or not isinstance(proposal, dict):
         return []
@@ -665,6 +705,16 @@ def _task_selector_habit_template_refs(state, proposal):
         if reviewer_decision:
             ref["reviewer_decision"] = str(reviewer_decision)
         refs.append(ref)
+        compiled_ref = _task_selector_compiled_habit_runner_candidate_ref(
+            current_task_id=current_task_id,
+            source_task_id=record_task_id,
+            task_template=current_template,
+            source_proposal_id=proposal_id,
+            source_attempt=outcome_attempt,
+            reviewer_decision=reviewer_decision,
+        )
+        if compiled_ref:
+            refs.append(compiled_ref)
         if len(refs) >= _TASK_SELECTOR_HABIT_TEMPLATE_REF_LIMIT:
             break
     return refs

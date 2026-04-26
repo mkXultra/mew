@@ -610,7 +610,15 @@ class CommandTests(unittest.TestCase):
                 "outcome": "handoff_ready",
                 "attempt_id": 1,
                 "reviewer_decision": "approved",
-            }
+            },
+            {
+                "kind": "compiled_habit_runner_candidate",
+                "task_template": "coding:improve-selector",
+                "source_proposal_id": 1,
+                "runner_command": f"./mew work {candidate['id']} --start-session",
+                "reviewer_decision": "approved",
+                "source_attempt_id": 1,
+            },
         ]
         self.assertEqual(non_record_code, 0)
         self.assertEqual(record_code, 0)
@@ -625,6 +633,76 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(len(records), 2)
         self.assertEqual(records[-1]["proposal"]["memory_signal_refs"], expected_refs)
         self.assertEqual(len(state.get("selector_execution_attempts") or []), 1)
+        self.assertEqual(state.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "done", "ready"])
+
+    def test_task_propose_next_skips_compiled_habit_candidate_on_runner_command_mismatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "Improve selector template alpha", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                prior_candidate = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "Improve selector template beta", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+                state = commands_module.load_state()
+                for task in state["tasks"]:
+                    if task["id"] == prior_candidate["id"]:
+                        task["status"] = "done"
+                state["selector_proposals"] = [
+                    {
+                        "id": 1,
+                        "previous_task_id": previous["id"],
+                        "proposed_task_id": prior_candidate["id"],
+                        "status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "worked before",
+                        "proposal": {
+                            "blocked": False,
+                            "selector_reason": "same template worked before",
+                            "proposed_task_id": prior_candidate["id"],
+                        },
+                    }
+                ]
+                state["selector_execution_attempts"] = [
+                    {
+                        "id": 1,
+                        "proposal_id": 1,
+                        "proposed_task_id": prior_candidate["id"],
+                        "status": "handoff_ready",
+                        "approval_status": "approved",
+                        "reviewer_decision": "approved",
+                        "reviewer_reason": "worked before",
+                        "next_command": "./mew work 999 --start-session",
+                        "auto_run": False,
+                    }
+                ]
+                commands_module.save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                proposal = json.loads(stdout.getvalue())
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(proposal["proposed_task_id"], candidate["id"])
+        self.assertTrue(proposal["approval_required"])
+        self.assertEqual([ref["kind"] for ref in proposal["memory_signal_refs"]], ["selector_habit_template"])
+        records = state.get("selector_proposals") or []
+        self.assertEqual(records[-1]["proposal"]["memory_signal_refs"], proposal["memory_signal_refs"])
         self.assertEqual(state.get("agent_runs") or [], [])
         self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "done", "ready"])
 

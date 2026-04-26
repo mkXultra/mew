@@ -41,7 +41,7 @@ is tracked below.
 | 6.6 Coding Competence: Codex CLI Parity | `done` | Bootstrap, comparator slots, and frozen Codex CLI side-by-side batch passed with recorded caveats. |
 | 6.7 Supervised Self-Hosting Loop | `done` | Reviewer-gated supervised iterations, reentry, and detached close-watch satisfied the gate. |
 | 6.8 Task Chaining: Supervised Self-Selection | `done` | Close gate passed via `docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`. |
-| 6.8.5 Selector Intelligence and Curriculum Integration | `in_progress` | First read-only failure-cluster selector signal landed; preference/reviewer-history signals remain. |
+| 6.8.5 Selector Intelligence and Curriculum Integration | `in_progress` | Failure, preference, calibration, habit-template, and compiled-runner selector refs landed; preference draft-prep proof remains. |
 | 6.9 Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`; Phase 4 moved to M6.8.5. |
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
@@ -153,6 +153,20 @@ Current M6.8.5 evidence:
   applied after reviewer approval. Count this as `success_after_substrate_fix`;
   no supervisor product patch.
 - #643 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py tests/test_commands.py`,
+  and `git diff --check`.
+- Task `#645` / session `#632` implemented the M6.8.5 habit compilation v0
+  proof slice. Selector habit evidence now emits a reviewer-visible
+  `compiled_habit_runner_candidate` entry in existing `memory_signal_refs` only
+  when a repeated task template has approved handoff evidence and the historical
+  `next_command` matches the deterministic runner command shape for that source
+  task. Command mismatches fall back to the normal selector proposal with no
+  compiled candidate ref; approval-required/no-dispatch behavior is unchanged.
+- #645 mew-first note: #632 was mew-authored and needed no supervisor product
+  rescue. The reviewer approved one paired source/test dry-run patch and then
+  asked mew to finish after verification. Count this as `success_mew_first`.
+- #645 validation passed: `uv run pytest -q tests/test_commands.py
   --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
   --no-testmon`, `uv run ruff check src/mew/commands.py tests/test_commands.py`,
   and `git diff --check`.
