@@ -570,6 +570,152 @@ class CommandTests(unittest.TestCase):
         self.assertIn("selector proposal 1 is blocked and cannot be approved", stderr.getvalue())
         self.assertEqual(state_after, state_before)
 
+    def test_task_execute_proposal_cli_missing_proposal_logs_rejection_without_dispatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                state_before = commands_module.load_state()
+                stderr = StringIO()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    with patch("sys.stderr", stderr):
+                        code = main(["task", "execute-proposal", "99", "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        attempt = json.loads(stdout.getvalue())
+        self.assertEqual(attempt["proposal_id"], 99)
+        self.assertIsNone(attempt["proposed_task_id"])
+        self.assertEqual(attempt["status"], "rejected")
+        self.assertEqual(attempt["blocked_reason"], "selector proposal not found")
+        self.assertTrue(attempt["governance_violation"])
+        self.assertTrue(attempt["timestamp"])
+        self.assertIn("selector proposal not found: 99", stderr.getvalue())
+        self.assertEqual(state_after["selector_execution_attempts"], [attempt])
+        self.assertEqual(state_after.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state_after["tasks"]], ["ready"])
+        state_without_attempts = dict(state_after)
+        state_without_attempts.pop("selector_execution_attempts", None)
+        self.assertEqual(state_without_attempts, state_before)
+
+    def test_task_execute_proposal_cli_unapproved_proposal_logs_rejection_without_dispatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "Candidate follow up", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "propose-next",
+                                str(previous["id"]),
+                                "--candidate-task-id",
+                                str(candidate["id"]),
+                                "--record",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                state_before = commands_module.load_state()
+                proposal = state_before["selector_proposals"][0]
+                stderr = StringIO()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    with patch("sys.stderr", stderr):
+                        code = main(["task", "execute-proposal", str(proposal["id"]), "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        attempt = json.loads(stdout.getvalue())
+        self.assertEqual(attempt["proposal_id"], proposal["id"])
+        self.assertEqual(attempt["proposed_task_id"], candidate["id"])
+        self.assertEqual(attempt["status"], "rejected")
+        self.assertEqual(attempt["blocked_reason"], "missing reviewer approval")
+        self.assertTrue(attempt["governance_violation"])
+        self.assertTrue(attempt["timestamp"])
+        self.assertIn("is not approved for execution", stderr.getvalue())
+        self.assertEqual(state_after["selector_execution_attempts"], [attempt])
+        self.assertEqual(state_after.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state_after["tasks"]], ["ready", "ready"])
+        state_without_attempts = dict(state_after)
+        state_without_attempts.pop("selector_execution_attempts", None)
+        self.assertEqual(state_without_attempts, state_before)
+
+    def test_task_execute_proposal_cli_blocked_proposal_logs_rejection_without_dispatch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "roadmap-status update", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                candidate = json.loads(stdout.getvalue())["task"]
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "task",
+                                "propose-next",
+                                str(previous["id"]),
+                                "--candidate-task-id",
+                                str(candidate["id"]),
+                                "--record",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                state_before = commands_module.load_state()
+                proposal = state_before["selector_proposals"][0]
+                self.assertEqual(proposal["status"], "blocked")
+                stderr = StringIO()
+
+                with redirect_stdout(StringIO()) as stdout:
+                    with patch("sys.stderr", stderr):
+                        code = main(["task", "execute-proposal", str(proposal["id"]), "--json"])
+                state_after = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        attempt = json.loads(stdout.getvalue())
+        self.assertEqual(attempt["proposal_id"], proposal["id"])
+        self.assertEqual(attempt["proposed_task_id"], candidate["id"])
+        self.assertEqual(attempt["status"], "rejected")
+        self.assertEqual(attempt["blocked_reason"], "blocked proposal")
+        self.assertTrue(attempt["governance_violation"])
+        self.assertTrue(attempt["timestamp"])
+        self.assertIn("is blocked and cannot be executed", stderr.getvalue())
+        self.assertEqual(state_after["selector_execution_attempts"], [attempt])
+        self.assertEqual(state_after.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state_after["tasks"]], ["ready", "ready"])
+        state_without_attempts = dict(state_after)
+        state_without_attempts.pop("selector_execution_attempts", None)
+        self.assertEqual(state_without_attempts, state_before)
+
     def test_do_uses_supervised_work_defaults(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

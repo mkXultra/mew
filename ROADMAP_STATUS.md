@@ -187,6 +187,23 @@ Current M6.8 evidence:
   --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
   --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
   tests/test_commands.py`, and `git diff --check`.
+- Task `#634` / session `#620` landed the first guarded execution attempt
+  slice mew-first. `mew task execute-proposal <id>` now rejects missing,
+  unapproved, and blocked selector proposals, persists
+  `selector_execution_attempts` audit records with `proposal_id`,
+  `proposed_task_id`, `status=rejected`, `blocked_reason`,
+  `governance_violation=true`, and `timestamp`, and does not mutate tasks or
+  dispatch agent runs.
+- #634 dogfood: `mew task execute-proposal 5 --json` rejected/logged blocked
+  proposal execution, `mew task propose-next 634 --candidate-task-id 635
+  --record --json` created proposal `#7`, `mew task execute-proposal 7 --json`
+  rejected/logged the unapproved execution attempt, and after reviewer approval
+  `mew task execute-proposal 7 --json` returned the safe v0 message that
+  approved execution handoff is not implemented and no task was dispatched.
+- #634 validation passed: `uv run pytest -q tests/test_commands.py
+  --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
+  --no-testmon`, `uv run ruff check src/mew/commands.py src/mew/cli.py
+  tests/test_commands.py`, and `git diff --check`.
 
 M6.8 is done when:
 

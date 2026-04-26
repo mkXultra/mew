@@ -1824,7 +1824,12 @@ def build_parser():
     show_parser.add_argument("--json", action="store_true", help="print the task as JSON")
     show_parser.set_defaults(func=cmd_task_show)
 
-    from .commands import cmd_task_proposal_approve, cmd_task_proposal_reject, cmd_task_propose_next
+    from .commands import (
+        cmd_task_proposal_approve,
+        cmd_task_proposal_execute,
+        cmd_task_proposal_reject,
+        cmd_task_propose_next,
+    )
 
     propose_next_parser = task_subparsers.add_parser(
         "propose-next",
@@ -1853,6 +1858,16 @@ def build_parser():
     reject_proposal_parser.add_argument("--reason", default="", help="reviewer-visible rejection reason")
     reject_proposal_parser.add_argument("--json", action="store_true", help="print the selector_proposals record as JSON")
     reject_proposal_parser.set_defaults(func=cmd_task_proposal_reject)
+
+    execute_proposal_parser = task_subparsers.add_parser(
+        "execute-proposal",
+        help="attempt guarded selector proposal execution without dispatching unapproved work",
+    )
+    execute_proposal_parser.add_argument("proposal_id")
+    execute_proposal_parser.add_argument(
+        "--json", action="store_true", help="print the selector execution attempt audit as JSON"
+    )
+    execute_proposal_parser.set_defaults(func=cmd_task_proposal_execute)
 
     done_parser = task_subparsers.add_parser("done", help="mark a task done")
     done_parser.add_argument("task_id")

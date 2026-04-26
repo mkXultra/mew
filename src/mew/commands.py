@@ -620,6 +620,100 @@ def cmd_task_proposal_reject(args):
     return _decide_task_selector_proposal(args, "rejected")
 
 
+def _next_task_selector_execution_attempt_id(state):
+    ids = []
+    for record in state.get("selector_execution_attempts") or []:
+        try:
+            ids.append(int(record.get("id")))
+        except (TypeError, ValueError):
+            continue
+    return max(ids) + 1 if ids else 1
+
+
+def _task_selector_execution_proposal_id_value(proposal_id):
+    try:
+        return int(proposal_id)
+    except (TypeError, ValueError):
+        return proposal_id
+
+
+def _record_task_selector_execution_rejection(state, proposal_id, proposed_task_id, blocked_reason):
+    timestamp = now_iso()
+    record = {
+        "id": _next_task_selector_execution_attempt_id(state),
+        "proposal_id": _task_selector_execution_proposal_id_value(proposal_id),
+        "proposed_task_id": proposed_task_id,
+        "status": "rejected",
+        "blocked_reason": blocked_reason,
+        "governance_violation": True,
+        "timestamp": timestamp,
+    }
+    state.setdefault("selector_execution_attempts", []).append(record)
+    return record
+
+
+def _finish_task_selector_execution_rejection(args, attempt, message):
+    if getattr(args, "json", False):
+        print(json.dumps(attempt, ensure_ascii=False, indent=2))
+    print(message, file=sys.stderr)
+    return 1
+
+
+def cmd_task_proposal_execute(args):
+    with state_lock():
+        state = load_state()
+        record = _find_task_selector_proposal_record(state, args.proposal_id)
+        if not record:
+            attempt = _record_task_selector_execution_rejection(
+                state,
+                args.proposal_id,
+                None,
+                "selector proposal not found",
+            )
+            save_state(state)
+            return _finish_task_selector_execution_rejection(
+                args,
+                attempt,
+                f"mew: selector proposal not found: {args.proposal_id}",
+            )
+
+        proposal = record.get("proposal") or {}
+        proposed_task_id = record.get("proposed_task_id") or proposal.get("proposed_task_id")
+        if proposal.get("blocked") or record.get("status") == "blocked":
+            attempt = _record_task_selector_execution_rejection(
+                state,
+                record.get("id"),
+                proposed_task_id,
+                "blocked proposal",
+            )
+            save_state(state)
+            return _finish_task_selector_execution_rejection(
+                args,
+                attempt,
+                f"mew: selector proposal {args.proposal_id} is blocked and cannot be executed",
+            )
+
+        if record.get("status") != "approved" or record.get("reviewer_decision") != "approved":
+            attempt = _record_task_selector_execution_rejection(
+                state,
+                record.get("id"),
+                proposed_task_id,
+                "missing reviewer approval",
+            )
+            save_state(state)
+            return _finish_task_selector_execution_rejection(
+                args,
+                attempt,
+                f"mew: selector proposal {args.proposal_id} is not approved for execution",
+            )
+
+    print(
+        "mew: selector proposal execution is not implemented in this safe v0; no task was dispatched",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def _build_task_selector_next_proposal(state, args):
     previous_task = find_task(state, args.previous_task_id)
     if not previous_task:
