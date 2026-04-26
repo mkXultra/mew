@@ -156,6 +156,9 @@ Current M6.13 evidence:
   attempt, and `--no-auto-deliberation` disables automatic escalation for the
   run without blocking explicit reviewer commands. This makes the next proof
   commands observable instead of relying only on free-text guidance markers.
+  Command-boundary tests now prove that `cmd_work_ai` persists reviewer
+  commanded traces, automatic eligible traces, and no-auto fallback traces
+  while still calling the tiny lane after the fallback.
 - GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
   class: write-batch normalization/execution assumed every code batch must be
   a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
