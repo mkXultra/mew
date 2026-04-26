@@ -15752,6 +15752,50 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(resume["latest_patch_draft_compiler_replay"], {})
 
+    def test_work_session_resume_surfaces_deliberation_trace_fields(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "tool_calls": [],
+            "model_turns": [],
+            "deliberation_attempts": [
+                {"lane_attempt_id": "lane-deliberation-todo-1-attempt-1", "allowed": False},
+                {"lane_attempt_id": "lane-deliberation-todo-1-attempt-2", "allowed": True},
+            ],
+            "deliberation_cost_events": [
+                {"event": "budget_checked", "lane_attempt_id": "lane-deliberation-todo-1-attempt-1"},
+                {"event": "budget_reserved", "lane_attempt_id": "lane-deliberation-todo-1-attempt-2"},
+            ],
+            "latest_deliberation_result": {
+                "lane_attempt_id": "lane-deliberation-todo-1-attempt-2",
+                "status": "reserved",
+            },
+            "latest_deliberation_bundle": ".mew/replays/work-loop/deliberation/report.json",
+        }
+
+        resume = build_work_session_resume(session, task={"id": 1, "title": "task"}, limit=1)
+
+        self.assertEqual(
+            resume["deliberation_attempts"],
+            [{"lane_attempt_id": "lane-deliberation-todo-1-attempt-2", "allowed": True}],
+        )
+        self.assertEqual(
+            resume["deliberation_cost_events"],
+            [{"event": "budget_reserved", "lane_attempt_id": "lane-deliberation-todo-1-attempt-2"}],
+        )
+        self.assertEqual(
+            resume["latest_deliberation_result"],
+            {
+                "lane_attempt_id": "lane-deliberation-todo-1-attempt-2",
+                "status": "reserved",
+            },
+        )
+        self.assertEqual(
+            resume["latest_deliberation_bundle"],
+            ".mew/replays/work-loop/deliberation/report.json",
+        )
+
     def test_plan_work_model_turn_blocks_calibration_measured_patch_draft_finish_after_verifier_only_closeout(self):
         from mew.work_loop import plan_work_model_turn
 

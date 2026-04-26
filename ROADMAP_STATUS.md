@@ -46,7 +46,7 @@ is tracked below.
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
-| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, replay lane reads, lane-attempt telemetry, and mirror lane-scoped replay bundles landed. |
+| 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, mirror lane-scoped replay bundles, and deliberation preflight/budget primitives landed. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
@@ -137,6 +137,29 @@ Current M6.13 evidence:
   model-selected action unchanged. A replay-writer exception in the mirror
   path is captured as compiler observation data and does not replace or fail
   the outer action.
+- The current deliberation preflight slice added `src/mew/deliberation.py` as
+  pure M6.13 Phase 2 substrate: it normalizes requested/effective model
+  bindings, classifies blocker-code escalation eligibility, reserves per-task
+  attempt budget, builds cost/fallback events, appends deliberation attempts
+  and cost events to session trace state, exposes those fields through
+  `build_work_session_resume`, and validates the v1 `deliberation_result`
+  contract before any raw model output can influence the tiny lane.
+- The current work-loop call-boundary slice wires those deliberation primitives
+  into `plan_work_model_turn` as a read-only lane attempt. Eligible blockers
+  can make one explicitly bound high-effort call; validated results stop as
+  reviewer-visible `result_ready` waits, while timeout, non-schema, validation,
+  budget, or state-limit cases record fallback trace data and leave tiny
+  available. `cmd_work_ai` now persists the returned session trace patch
+  through `apply_work_session_trace_patch`.
+- GitHub issue `#1` from side-project dogfood exposed a bounded M6.14 repair
+  class: write-batch normalization/execution assumed every code batch must be
+  a mew-core `src/mew/**` plus root `tests/**` pair, which blocked declared
+  non-core product roots such as `experiments/mew-companion-log`. The repair
+  keeps the strict mew-core paired-test rule for `src/mew/**` writes, but lets
+  non-core write batches proceed when every write is inside
+  `allowed_write_roots`; prompts now describe the same distinction. This is
+  substrate repair from side-project evidence, not side-project implementation
+  progress.
 - Mirror-lane validation passed:
   `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,
   `uv run pytest -q tests/test_proof_summary.py -k "lane_metadata" --no-testmon`,
@@ -700,12 +723,15 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.13 -> additive lane foundation -> tiny compatibility plus mirror-lane proof`
+`M6.13 -> deliberation Phase 2 -> live reviewer-command and automatic eligible attempt proof`
 
 Acceptable near-term work:
 
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
+- prove the deliberation call boundary with one reviewer-commanded attempt,
+  one automatic eligible attempt, and one deliberate fallback while preserving
+  tiny fallback
 - prove old sessions and existing replay bundles with absent lane metadata keep
   tiny-compatible behavior at their read/report boundary
 - wire the minimal lane-attempt telemetry helper into future lane attempts only
@@ -729,6 +755,26 @@ Non-goals for the next session:
 
 Latest M6.13 source/test validation:
 
+- M6.13 deliberation preflight/budget primitive slice:
+  `uv run pytest -q tests/test_deliberation.py --no-testmon`,
+  `uv run pytest -q tests/test_deliberation.py tests/test_work_session.py -k "deliberation" --no-testmon`,
+  `uv run pytest -q tests/test_deliberation.py tests/test_work_lanes.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k "deliberation or active_work_todo or lane" --no-testmon`,
+  and
+  `uv run ruff check src/mew/deliberation.py src/mew/work_session.py tests/test_deliberation.py tests/test_work_session.py`
+  passed.
+- M6.13 deliberation work-loop call-boundary slice:
+  `uv run pytest -q tests/test_work_deliberation_loop.py --no-testmon`,
+  `uv run pytest -q tests/test_deliberation.py tests/test_work_deliberation_loop.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'deliberation or active_work_todo or lane' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'plan_work_model_turn' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py src/mew/work_session.py src/mew/commands.py tests/test_work_deliberation_loop.py`,
+  and `git diff --check` passed.
+- M6.14 side-project write-scope repair from GitHub issue `#1`:
+  `uv run pytest -q tests/test_work_write_scope.py --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'plan_work_model_turn or paired or write_batch' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py src/mew/commands.py tests/test_work_write_scope.py`,
+  and `git diff --check` passed.
 - M6.13 mirror lane-scoped replay bundle slice:
   `uv run pytest -q tests/test_work_replay.py -k "lane or path_shape" --no-testmon`,
   `uv run pytest -q tests/test_proof_summary.py -k "lane_metadata" --no-testmon`,

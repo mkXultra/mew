@@ -11,6 +11,13 @@ import tokenize
 
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
+from .deliberation import (
+    DELIBERATION_RESULT_SCHEMA_CONTRACT,
+    build_deliberation_attempt_record,
+    build_deliberation_fallback_event,
+    evaluate_deliberation_request,
+    validate_deliberation_result,
+)
 from .errors import MewError, ModelBackendError
 from .patch_draft import (
     PATCH_BLOCKER_RECOVERY_ACTIONS,
@@ -75,6 +82,9 @@ WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
 WORK_WRITE_READY_TINY_DRAFT_MODEL_TIMEOUT_SECONDS = 30.0
+WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS = 120.0
+WORK_DELIBERATION_REASONING_EFFORT = "high"
+WORK_DELIBERATION_MAX_ATTEMPTS_PER_TODO = 1
 WORK_WRITE_READY_DRAFT_PROMPT_CONTRACT_VERSION = "v2"
 WORK_WRITE_READY_TINY_DRAFT_PROMPT_CONTRACT_VERSION = "v3"
 WORK_WRITE_READY_TINY_DRAFT_REASONING_EFFORT = "low"
@@ -911,6 +921,381 @@ def _work_loop_model_metrics_have_patch_replay_or_artifact(model_metrics):
         str(metrics.get("tiny_write_ready_draft_compiler_artifact_kind") or "").strip(),
     }
     return bool(artifact_kinds & {"patch_draft", "patch_blocker"})
+
+
+def _work_deliberation_reviewer_commanded(guidance):
+    lowered = str(guidance or "").casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "deliberation",
+            "deliberate",
+            "high-effort",
+            "high effort",
+            "escalate",
+            "deep reasoning",
+        )
+    )
+
+
+def _work_deliberation_task_shape(task, guidance=""):
+    text = "\n".join(
+        str(part or "")
+        for part in (
+            (task or {}).get("title") if isinstance(task, dict) else "",
+            (task or {}).get("description") if isinstance(task, dict) else "",
+            guidance,
+        )
+        if str(part or "").strip()
+    ).casefold()
+    if any(marker in text for marker in ("cross-file", "cross file", "multi-file", "multi file")):
+        return "cross_file"
+    if any(marker in text for marker in ("design", "architecture", "policy", "roadmap")):
+        return "design"
+    if any(marker in text for marker in ("abstract", "conceptual", "strategy")):
+        return "abstract"
+    return ""
+
+
+def _work_deliberation_attempts_for_todo(resume, todo_id, blocker_code):
+    attempts = (resume or {}).get("deliberation_attempts")
+    if not isinstance(attempts, list):
+        return []
+    todo_id = str(todo_id or "").strip()
+    blocker_code = str(blocker_code or "").strip()
+    return [
+        item
+        for item in attempts
+        if isinstance(item, dict)
+        and str(item.get("todo_id") or "").strip() == todo_id
+        and str(item.get("blocker_code") or "").strip() == blocker_code
+    ]
+
+
+def _work_deliberation_trace_patch(decision, *, latest_result=None, fallback_event=None):
+    attempt = build_deliberation_attempt_record(decision)
+    cost_events = [
+        dict(event)
+        for event in ((decision or {}).get("cost_events") or [])
+        if isinstance(event, dict)
+    ]
+    if isinstance(fallback_event, dict) and fallback_event:
+        cost_events.append(dict(fallback_event))
+    if latest_result is None:
+        latest_result = {
+            "lane_attempt_id": attempt.get("lane_attempt_id") or "",
+            "status": "reserved" if attempt.get("allowed") else "fallback",
+            "reason": attempt.get("reason") or "",
+            "fallback_lane": attempt.get("fallback_lane") or "tiny",
+        }
+    return {
+        "attempt": attempt,
+        "cost_events": cost_events,
+        "latest_result": dict(latest_result or {}),
+    }
+
+
+def _work_deliberation_trace_metrics_from_patch(trace_patch):
+    attempt = (trace_patch or {}).get("attempt") if isinstance(trace_patch, dict) else {}
+    latest = (trace_patch or {}).get("latest_result") if isinstance(trace_patch, dict) else {}
+    return {
+        "attempted": bool((attempt or {}).get("allowed")),
+        "lane_attempt_id": (attempt or {}).get("lane_attempt_id") or "",
+        "todo_id": (attempt or {}).get("todo_id") or "",
+        "blocker_code": (attempt or {}).get("blocker_code") or "",
+        "status": (latest or {}).get("status") or "",
+        "reason": (latest or {}).get("reason") or (attempt or {}).get("reason") or "",
+        "fallback_lane": (latest or {}).get("fallback_lane") or (attempt or {}).get("fallback_lane") or "tiny",
+        "requested_model": (attempt or {}).get("requested_model") or "",
+        "effective_model": (attempt or {}).get("effective_model") or "",
+        "effective_effort": (attempt or {}).get("effective_effort") or "",
+        "timeout_seconds": (attempt or {}).get("timeout_seconds") or 0,
+    }
+
+
+def _work_plan_with_session_trace_patch(result, trace_patch):
+    if not trace_patch:
+        return result
+    planned = dict(result or {})
+    planned["session_trace_patch"] = trace_patch
+    return planned
+
+
+def _work_deliberation_preflight_decision(
+    context,
+    *,
+    model_backend,
+    model,
+    timeout,
+    guidance="",
+):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
+    active_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    if not active_todo:
+        return {}
+    blocker = active_todo.get("blocker") if isinstance(active_todo.get("blocker"), dict) else {}
+    blocker_code = str(blocker.get("code") or "").strip()
+    if not blocker_code:
+        return {}
+    todo_id = str(active_todo.get("id") or "").strip()
+    previous_attempts = _work_deliberation_attempts_for_todo(resume, todo_id, blocker_code)
+    if previous_attempts:
+        return {}
+    attempts = active_todo.get("attempts") if isinstance(active_todo.get("attempts"), dict) else {}
+    try:
+        draft_attempts = int(attempts.get("draft") or 0)
+    except (TypeError, ValueError):
+        draft_attempts = 0
+    deliberation_timeout = max(float(timeout or 0), WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS)
+    return evaluate_deliberation_request(
+        todo=active_todo,
+        blocker_code=blocker_code,
+        binding={
+            "backend": model_backend,
+            "model": model,
+            "requested_effort": WORK_DELIBERATION_REASONING_EFFORT,
+            "timeout_seconds": deliberation_timeout,
+            "schema_contract": DELIBERATION_RESULT_SCHEMA_CONTRACT,
+        },
+        budget={
+            "max_attempts_per_todo": WORK_DELIBERATION_MAX_ATTEMPTS_PER_TODO,
+            "attempts_used": len(previous_attempts),
+        },
+        reviewer_commanded=_work_deliberation_reviewer_commanded(guidance),
+        task_shape=_work_deliberation_task_shape((context or {}).get("task") or {}, guidance=guidance),
+        repeated=draft_attempts > 1,
+        refusal_classified=blocker_code == "model_returned_refusal" and bool(blocker.get("detail")),
+        created_at=(context or {}).get("current_time") or "",
+    )
+
+
+def build_work_deliberation_prompt(context, decision):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
+    active_todo = resume.get("active_work_todo") if isinstance(resume.get("active_work_todo"), dict) else {}
+    blocker = active_todo.get("blocker") if isinstance(active_todo.get("blocker"), dict) else {}
+    focused_context = {
+        "task": (context or {}).get("task") or {},
+        "active_work_todo": {
+            "id": active_todo.get("id") or "",
+            "lane": active_todo.get("lane") or "tiny",
+            "status": active_todo.get("status") or "",
+            "source": active_todo.get("source") or {},
+            "attempts": active_todo.get("attempts") or {},
+            "blocker": blocker,
+        },
+        "deliberation_request": {
+            "lane_attempt_id": (decision or {}).get("lane_attempt_id") or "",
+            "reason": (decision or {}).get("reason") or "",
+            "budget_snapshot": (decision or {}).get("budget_snapshot") or {},
+            "schema_contract": DELIBERATION_RESULT_SCHEMA_CONTRACT,
+        },
+        "recent_decisions": list((resume or {}).get("recent_decisions") or [])[-3:],
+        "working_memory": (resume or {}).get("working_memory") or {},
+        "failed_patch_repair": (resume or {}).get("failed_patch_repair") or {},
+    }
+    return (
+        "You are the read-only deliberation lane for mew work mode.\n"
+        "Return only JSON. Do not use markdown.\n"
+        "You do not write files, execute tools, approve changes, or replace the tiny implementation lane.\n"
+        "Analyze the active blocker and produce a compact strategy that a reviewer can inspect.\n"
+        "Do not include hidden chain-of-thought or raw transcript. Use a distilled reasoning_summary only.\n"
+        "Schema:\n"
+        "{\n"
+        '  "kind": "deliberation_result",\n'
+        '  "schema_version": 1,\n'
+        f'  "todo_id": "{(decision or {}).get("todo_id") or ""}",\n'
+        '  "lane": "deliberation",\n'
+        f'  "blocker_code": "{(decision or {}).get("blocker_code") or ""}",\n'
+        '  "decision": "propose_patch_strategy|decline_escalation|needs_state_refresh",\n'
+        '  "situation": "short task and blocker summary",\n'
+        '  "reasoning_summary": "distilled reasoning, no raw hidden transcript",\n'
+        '  "recommended_next": "retry_tiny|refresh_state|ask_reviewer|finish_blocked",\n'
+        '  "expected_trace_candidate": true,\n'
+        '  "confidence": "low|medium|high"\n'
+        "}\n\n"
+        f"FocusedContext JSON:\n{json.dumps(focused_context, ensure_ascii=False, indent=2)}"
+    )
+
+
+def _attempt_work_deliberation_lane(
+    *,
+    context,
+    model_auth,
+    model,
+    base_url,
+    model_backend,
+    timeout,
+    guidance="",
+    progress=None,
+    current_time="",
+):
+    decision = _work_deliberation_preflight_decision(
+        context,
+        model_backend=model_backend,
+        model=model,
+        timeout=timeout,
+        guidance=guidance,
+    )
+    if not decision:
+        return {}
+
+    trace_patch = _work_deliberation_trace_patch(decision)
+    result = {
+        "status": "preflight_blocked",
+        "decision": decision,
+        "trace_patch": trace_patch,
+        "metrics": _work_deliberation_trace_metrics_from_patch(trace_patch),
+    }
+    if not decision.get("allowed"):
+        return result
+
+    prompt = build_work_deliberation_prompt(context, decision)
+    started = time.monotonic()
+    try:
+        with codex_reasoning_effort_scope(
+            ((decision.get("binding") or {}).get("effective_effort") or WORK_DELIBERATION_REASONING_EFFORT)
+        ):
+            payload = call_model_json_with_retries(
+                model_backend,
+                model_auth,
+                prompt,
+                model,
+                base_url,
+                (decision.get("binding") or {}).get("timeout_seconds") or timeout,
+                log_prefix=(
+                    f"{current_time}: work_deliberation {model_backend} "
+                    f"session={((context or {}).get('work_session') or {}).get('id')}"
+                ),
+            )
+    except Exception as exc:
+        fallback_reason = "timeout" if _work_model_error_looks_like_timeout(exc) else "model_error"
+        fallback_event = build_deliberation_fallback_event(
+            reason=fallback_reason,
+            todo_id=decision.get("todo_id") or "",
+            blocker_code=decision.get("blocker_code") or "",
+            lane_attempt_id=decision.get("lane_attempt_id") or "",
+            created_at=current_time,
+        )
+        trace_patch = _work_deliberation_trace_patch(
+            decision,
+            fallback_event=fallback_event,
+            latest_result={
+                "lane_attempt_id": decision.get("lane_attempt_id") or "",
+                "status": "fallback",
+                "reason": fallback_reason,
+                "fallback_lane": "tiny",
+            },
+        )
+        metrics = _work_deliberation_trace_metrics_from_patch(trace_patch)
+        metrics.update(
+            {
+                "prompt_chars": len(prompt),
+                "elapsed_seconds": _round_seconds(time.monotonic() - started),
+                "error": clip_output(str(exc), 500),
+            }
+        )
+        if progress:
+            progress(
+                f"session #{((context or {}).get('work_session') or {}).get('id')}: "
+                f"DELIBERATION fallback reason={fallback_reason}"
+            )
+        return {
+            "status": "fallback",
+            "decision": decision,
+            "trace_patch": trace_patch,
+            "metrics": metrics,
+        }
+
+    validation = validate_deliberation_result(
+        payload,
+        todo_id=decision.get("todo_id") or "",
+        blocker_code=decision.get("blocker_code") or "",
+    )
+    if not validation.get("ok"):
+        fallback_reason = str(validation.get("reason") or "validation_failed")
+        fallback_event = build_deliberation_fallback_event(
+            reason=fallback_reason,
+            todo_id=decision.get("todo_id") or "",
+            blocker_code=decision.get("blocker_code") or "",
+            lane_attempt_id=decision.get("lane_attempt_id") or "",
+            created_at=current_time,
+        )
+        trace_patch = _work_deliberation_trace_patch(
+            decision,
+            fallback_event=fallback_event,
+            latest_result={
+                "lane_attempt_id": decision.get("lane_attempt_id") or "",
+                "status": "fallback",
+                "reason": fallback_reason,
+                "fallback_lane": "tiny",
+                "invalid_fields": validation.get("invalid_fields") or [],
+            },
+        )
+        metrics = _work_deliberation_trace_metrics_from_patch(trace_patch)
+        metrics.update(
+            {
+                "prompt_chars": len(prompt),
+                "elapsed_seconds": _round_seconds(time.monotonic() - started),
+                "invalid_fields": validation.get("invalid_fields") or [],
+            }
+        )
+        if progress:
+            progress(
+                f"session #{((context or {}).get('work_session') or {}).get('id')}: "
+                f"DELIBERATION fallback reason={fallback_reason}"
+            )
+        return {
+            "status": "fallback",
+            "decision": decision,
+            "trace_patch": trace_patch,
+            "metrics": metrics,
+            "validation": validation,
+        }
+
+    latest_result = {
+        "lane_attempt_id": decision.get("lane_attempt_id") or "",
+        "status": "result_ready",
+        "reason": decision.get("reason") or "",
+        "fallback_lane": "tiny",
+        "result": validation.get("result") or {},
+    }
+    trace_patch = _work_deliberation_trace_patch(decision, latest_result=latest_result)
+    metrics = _work_deliberation_trace_metrics_from_patch(trace_patch)
+    metrics.update(
+        {
+            "prompt_chars": len(prompt),
+            "elapsed_seconds": _round_seconds(time.monotonic() - started),
+            "result_decision": (validation.get("result") or {}).get("decision") or "",
+            "recommended_next": (validation.get("result") or {}).get("recommended_next") or "",
+            "expected_trace_candidate": bool((validation.get("result") or {}).get("expected_trace_candidate")),
+        }
+    )
+    action = {
+        "type": "wait",
+        "reason": "deliberation result ready for reviewer approval before internalization",
+        "summary": (validation.get("result") or {}).get("reasoning_summary") or "",
+    }
+    if progress:
+        progress(f"session #{((context or {}).get('work_session') or {}).get('id')}: DELIBERATION ok")
+    return {
+        "status": "result_ready",
+        "decision": decision,
+        "trace_patch": trace_patch,
+        "metrics": metrics,
+        "validation": validation,
+        "action": action,
+        "decision_plan": {
+            "summary": (validation.get("result") or {}).get("situation") or "deliberation result ready",
+            "deliberation_result": validation.get("result") or {},
+        },
+        "action_plan": {
+            "summary": (validation.get("result") or {}).get("reasoning_summary") or "deliberation result ready",
+            "action": action,
+            "act_mode": "deliberation",
+        },
+    }
 
 
 def _empty_patch_draft_compiler_observation():
@@ -5176,7 +5561,10 @@ def _attempt_write_ready_tiny_draft_turn(
     }
     if tiny_write_ready_todo_id:
         action_plan["todo_id"] = tiny_write_ready_todo_id
-    action = normalize_work_model_action(action_plan)
+    action = normalize_work_model_action(
+        action_plan,
+        allowed_write_roots=allowed_write_roots,
+    )
     if action.get("type") == "wait":
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
         metrics["tiny_write_ready_draft_fallback_reason"] = "translated_preview_unusable"
@@ -5574,7 +5962,7 @@ def build_work_think_prompt(context):
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. If a needed recent_read_file_windows entry is context_truncated, fall back to the matching read_file tool_calls result text before declaring that old text unrecoverable. "
-        "If you already know the exact paired tests/** and src/mew/** edits, you may use one batch action with up to five write/edit tools; this paired-write constraint applies to code write batches under tests/** and src/mew/**. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. For a code write batch, every write must be under tests/** or src/mew/**, and at least one test edit plus one source edit is required. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you already know the exact scoped edits, you may use one batch action with up to five write/edit tools under capabilities.allowed_write_roots. For mew core source edits under src/mew/**, include a paired tests/** edit in the same batch. For non-core product roots such as experiments/**, keep every write under the declared root and include local tests when the task scope calls for them. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice or do one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
         "If you can make a small safe edit, use edit_file, edit_file_hunks, or write_file. For edit_file you must include exact old and new strings; for edit_file_hunks you must give one path plus a non-empty edits list of exact old/new pairs for disjoint hunks in that same file. If you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file or edit_file_hunks. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
@@ -5615,7 +6003,7 @@ def build_work_write_ready_think_prompt(context):
         "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
         "If a required term cannot naturally appear in the scoped source/test edit, return wait with blocker task_goal_term_missing instead of inventing schema or switching to a nearby helper.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
-        "Prefer one paired dry-run batch under tests/** and src/mew/** now.\n"
+        "Prefer one scoped dry-run batch under active_work_todo.source.target_paths now. For mew core target paths this means paired tests/** plus src/mew/**; for non-core allowed roots, stay inside the declared product root and include local tests when they are in scope.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
         "Do not add read, search, glob, git, shell, or verification actions on this fast path.\n"
         "Do not broaden scope, roots, or the focused verify command.\n"
@@ -5631,7 +6019,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Write-ready tiny draft lane is active.\n"
-        "Return exactly one patch artifact for the active paired src/test slice.\n"
+        "Return exactly one patch artifact for the active scoped implementation slice.\n"
         "Allowed kinds are patch_proposal or patch_blocker.\n"
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts.\n"
         "If task_goal.required_terms is non-empty, treat those terms as semantic anchors from the task goal, not product fields to copy into code or metadata.\n"
@@ -5641,7 +6029,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "Stay inside allowed_roots.write and do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
-        "If one file needs multiple hunks, express them in one files[i].edits array.\n"
+        "For mew core target paths, keep the patch paired across src/mew/** and tests/**. For non-core target paths, stay inside active_work_todo.source.target_paths and allowed_roots.write. If one file needs multiple hunks, express them in one files[i].edits array.\n"
         "If drafting cannot proceed from the cached windows, return patch_blocker with one stable code and detail.\n"
         "Use cached_window_incomplete when the cached text exists but ends mid-block; use missing_exact_cached_window_texts when exact cached text is absent.\n"
         "Schema:\n"
@@ -5668,7 +6056,12 @@ def build_work_act_prompt(context, decision_plan):
     )
 
 
-def normalize_work_model_action(action_plan, verify_command="", suggested_verify_command=""):
+def normalize_work_model_action(
+    action_plan,
+    verify_command="",
+    suggested_verify_command="",
+    allowed_write_roots=None,
+):
     if not isinstance(action_plan, dict):
         action_plan = {}
     action = action_plan.get("action")
@@ -5700,6 +6093,7 @@ def normalize_work_model_action(action_plan, verify_command="", suggested_verify
                 {"action": item},
                 verify_command=verify_command,
                 suggested_verify_command=suggested_verify_command,
+                allowed_write_roots=allowed_write_roots,
             )
             dropped_tool_count += int(sub_action.get("truncated_tools") or 0)
             if sub_action.get("type") == "batch":
@@ -5735,14 +6129,20 @@ def normalize_work_model_action(action_plan, verify_command="", suggested_verify
                     "type": "wait",
                     "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",
                 }
-            paired_reason = paired_write_batch_rejection_reason(normalized_tools)
+            paired_reason = paired_write_batch_rejection_reason(
+                normalized_tools,
+                allowed_write_roots=allowed_write_roots,
+            )
             if paired_reason:
                 return {"type": "wait", "reason": paired_reason}
-            paired_tools = normalize_paired_write_batch_tools(normalized_tools)
+            paired_tools = normalize_paired_write_batch_tools(
+                normalized_tools,
+                allowed_write_roots=allowed_write_roots,
+            )
             if not paired_tools:
                 return {
                     "type": "wait",
-                    "reason": "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each",
+                    "reason": "write batch could not be normalized inside the declared write roots",
                 }
             normalized_tools = paired_tools
         normalized = {"type": "batch", "tools": normalized_tools}
@@ -5942,6 +6342,25 @@ def _work_batch_path_is_mew_source(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
+def _work_batch_path_under_allowed_write_roots(path, allowed_write_roots=None):
+    normalized = _normalized_work_path(path)
+    if not normalized:
+        return False
+    roots = [
+        _normalized_work_path(root)
+        for root in (allowed_write_roots or [])
+        if _normalized_work_path(root)
+    ]
+    if not roots:
+        return False
+    for root in roots:
+        if root in {".", "*"}:
+            return True
+        if normalized == root or normalized.startswith(f"{root.rstrip('/')}/"):
+            return True
+    return False
+
+
 def duplicate_paired_write_batch_paths(tools):
     seen = set()
     duplicates = []
@@ -5956,12 +6375,12 @@ def duplicate_paired_write_batch_paths(tools):
     return duplicates
 
 
-def paired_write_batch_rejection_reason(tools):
+def paired_write_batch_rejection_reason(tools, allowed_write_roots=None):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
-        return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+        return "write batch requires at least two write/edit tools for a complete scoped slice"
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
-        return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+        return "write batch contains an invalid write/edit tool; provide path and exact content or old/new hunks"
     duplicates = duplicate_paired_write_batch_paths(write_tools)
     if duplicates:
         return (
@@ -5970,8 +6389,17 @@ def paired_write_batch_rejection_reason(tools):
         )
     tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
     source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
-    if not tests_tools or not source_tools or len(tests_tools) + len(source_tools) != len(write_tools):
+    if source_tools and (not tests_tools or len(tests_tools) + len(source_tools) != len(write_tools)):
         return "write batch is limited to write/edit tools under tests/** and src/mew/** with at least one of each"
+    if source_tools:
+        return ""
+    if all(
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        for tool in write_tools
+    ):
+        return ""
+    if allowed_write_roots:
+        return "write batch contains paths outside the declared allowed_write_roots"
     return ""
 
 
@@ -5998,7 +6426,7 @@ def valid_paired_write_batch_sub_action(action):
     return False
 
 
-def normalize_paired_write_batch_tools(tools):
+def normalize_paired_write_batch_tools(tools, allowed_write_roots=None):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
         return []
@@ -6008,15 +6436,21 @@ def normalize_paired_write_batch_tools(tools):
         return []
     tests_tools = [tool for tool in write_tools if _work_batch_path_is_tests(tool.get("path"))]
     source_tools = [tool for tool in write_tools if _work_batch_path_is_mew_source(tool.get("path"))]
-    if not tests_tools or not source_tools or len(tests_tools) + len(source_tools) != len(write_tools):
+    if source_tools and (not tests_tools or len(tests_tools) + len(source_tools) != len(write_tools)):
         return []
-    source_path = source_tools[0].get("path")
+    if not source_tools and not all(
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        for tool in write_tools
+    ):
+        return []
+    source_path = source_tools[0].get("path") if source_tools else ""
     normalized = []
-    for raw_tool in [*tests_tools, *source_tools]:
+    ordered_tools = [*tests_tools, *source_tools] if source_tools else write_tools
+    for raw_tool in ordered_tools:
         tool = dict(raw_tool)
         tool["apply"] = False
         tool["dry_run"] = True
-        if raw_tool in tests_tools:
+        if source_path and raw_tool in tests_tools:
             tool["defer_verify_on_approval"] = True
             tool["paired_test_source_path"] = source_path
         normalized.append(tool)
@@ -6232,6 +6666,51 @@ def plan_work_model_turn(
         "write_ready_fast_path": bool(write_ready_fast_path.get("active")),
         "write_ready_fast_path_reason": write_ready_fast_path.get("reason") or "",
     }
+    session_trace_patch = {}
+    deliberation_result = _attempt_work_deliberation_lane(
+        context=context,
+        model_auth=model_auth,
+        model=model,
+        base_url=base_url,
+        model_backend=model_backend,
+        timeout=timeout,
+        guidance=guidance,
+        progress=progress,
+        current_time=current_time,
+    )
+    if deliberation_result:
+        session_trace_patch = deliberation_result.get("trace_patch") or {}
+        model_metrics["deliberation"] = deliberation_result.get("metrics") or {}
+        if deliberation_result.get("status") == "result_ready":
+            metrics = deliberation_result.get("metrics") or {}
+            model_metrics["think"] = {
+                "prompt_chars": metrics.get("prompt_chars") or 0,
+                "timeout_seconds": metrics.get("timeout_seconds") or WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS,
+                "elapsed_seconds": metrics.get("elapsed_seconds") or 0.0,
+            }
+            model_metrics["act"] = {
+                "prompt_chars": 0,
+                "elapsed_seconds": 0.0,
+                "mode": "deliberation",
+            }
+            model_metrics["total_model_seconds"] = _round_seconds(
+                (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
+                + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)
+            )
+            if pre_model_metrics_sink:
+                pre_model_metrics_sink(dict(model_metrics))
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": deliberation_result.get("decision_plan") or {},
+                    "action_plan": deliberation_result.get("action_plan") or {},
+                    "action": deliberation_result.get("action")
+                    or {"type": "wait", "reason": "deliberation result ready"},
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+                },
+                session_trace_patch,
+            )
     preflight_block = _work_write_ready_preflight_block(context, write_ready_fast_path)
     if preflight_block:
         preflight_blocker = (
@@ -6280,14 +6759,17 @@ def plan_work_model_turn(
             progress(
                 f"session #{session.get('id')}: preflight blocker {write_ready_fast_path.get('reason') or 'unknown'}"
             )
-        return {
-            "decision_plan": preflight_block.get("decision_plan") or {},
-            "action_plan": preflight_block.get("action_plan") or {},
-            "action": preflight_block.get("action") or {"type": "wait", "reason": "preflight blocker"},
-            "context": context,
-            "model_metrics": model_metrics,
-            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
-        }
+        return _work_plan_with_session_trace_patch(
+            {
+                "decision_plan": preflight_block.get("decision_plan") or {},
+                "action_plan": preflight_block.get("action_plan") or {},
+                "action": preflight_block.get("action") or {"type": "wait", "reason": "preflight blocker"},
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+            },
+            session_trace_patch,
+        )
     explicit_refresh_before_draft = _work_write_ready_explicit_refresh_before_tiny_draft(
         context,
         write_ready_fast_path,
@@ -6308,14 +6790,17 @@ def plan_work_model_turn(
             pre_model_metrics_sink(dict(model_metrics))
         if progress:
             progress(f"session #{session.get('id')}: explicit refresh before tiny draft")
-        return {
-            "decision_plan": explicit_refresh_before_draft.get("decision_plan") or {},
-            "action_plan": explicit_refresh_before_draft.get("action_plan") or {},
-            "action": explicit_refresh_before_draft.get("action") or {"type": "wait", "reason": "refresh unavailable"},
-            "context": context,
-            "model_metrics": model_metrics,
-            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
-        }
+        return _work_plan_with_session_trace_patch(
+            {
+                "decision_plan": explicit_refresh_before_draft.get("decision_plan") or {},
+                "action_plan": explicit_refresh_before_draft.get("action_plan") or {},
+                "action": explicit_refresh_before_draft.get("action") or {"type": "wait", "reason": "refresh unavailable"},
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": {"phases": [], "chunks": 0, "chars": 0},
+            },
+            session_trace_patch,
+        )
     rejection_frontier_recovery = (
         _work_rejection_frontier_recovery_action(context, write_ready_fast_path)
         if write_ready_fast_path.get("active")
@@ -6337,22 +6822,25 @@ def plan_work_model_turn(
             pre_model_metrics_sink(dict(model_metrics))
         if progress:
             progress(f"session #{session.get('id')}: rejection frontier recovery before redraft")
-        return {
-            "decision_plan": {
-                "summary": rejection_frontier_recovery.get("reason")
-                or "refresh exact context before redrafting after reviewer rejection",
-            },
-            "action_plan": {
-                "summary": rejection_frontier_recovery.get("reason")
-                or "refresh exact context before redrafting after reviewer rejection",
+        return _work_plan_with_session_trace_patch(
+            {
+                "decision_plan": {
+                    "summary": rejection_frontier_recovery.get("reason")
+                    or "refresh exact context before redrafting after reviewer rejection",
+                },
+                "action_plan": {
+                    "summary": rejection_frontier_recovery.get("reason")
+                    or "refresh exact context before redrafting after reviewer rejection",
+                    "action": rejection_frontier_recovery,
+                    "act_mode": "deterministic",
+                },
                 "action": rejection_frontier_recovery,
-                "act_mode": "deterministic",
+                "context": context,
+                "model_metrics": model_metrics,
+                "model_stream": {"phases": [], "chunks": 0, "chars": 0},
             },
-            "action": rejection_frontier_recovery,
-            "context": context,
-            "model_metrics": model_metrics,
-            "model_stream": {"phases": [], "chunks": 0, "chars": 0},
-        }
+            session_trace_patch,
+        )
     if write_ready_fast_path.get("active"):
         draft_windows = (
             write_ready_fast_path.get("recent_windows")
@@ -6459,14 +6947,17 @@ def plan_work_model_turn(
                 )
             if progress:
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
-            return {
-                "decision_plan": tiny_result.get("decision_plan") or {},
-                "action_plan": action_plan,
-                "action": action,
-                "context": context,
-                "model_metrics": model_metrics,
-                "model_stream": compact_model_stream(stream_deltas),
-            }
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": tiny_result.get("decision_plan") or {},
+                    "action_plan": action_plan,
+                    "action": action,
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": compact_model_stream(stream_deltas),
+                },
+                session_trace_patch,
+            )
         if pre_model_metrics_sink:
             pre_model_metrics_sink(dict(model_metrics))
     think_started = time.monotonic()
@@ -6515,14 +7006,17 @@ def plan_work_model_turn(
                     f"session #{session.get('id')}: THINK timeout converted to write-ready blocker"
                 )
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
-            return {
-                "decision_plan": decision_plan,
-                "action_plan": action_plan,
-                "action": action,
-                "context": context,
-                "model_metrics": model_metrics,
-                "model_stream": compact_model_stream(stream_deltas),
-            }
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": decision_plan,
+                    "action_plan": action_plan,
+                    "action": action,
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": compact_model_stream(stream_deltas),
+                },
+                session_trace_patch,
+            )
         raise
     think_elapsed = time.monotonic() - think_started
     if progress:
@@ -6533,6 +7027,7 @@ def plan_work_model_turn(
             decision_plan,
             verify_command=verify_command,
             suggested_verify_command=suggested_verify_command,
+            allowed_write_roots=allowed_write_roots,
         )
         action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""
         action_plan = {
@@ -6575,6 +7070,7 @@ def plan_work_model_turn(
         action_plan,
         verify_command=verify_command,
         suggested_verify_command=suggested_verify_command,
+        allowed_write_roots=allowed_write_roots,
     )
     if write_ready_fast_path.get("active") and not skip_shadow_compile:
         model_metrics.update(
@@ -6616,11 +7112,14 @@ def plan_work_model_turn(
     )
     if progress:
         progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
-    return {
-        "decision_plan": decision_plan,
-        "action_plan": action_plan,
-        "action": action,
-        "context": context,
-        "model_metrics": model_metrics,
-        "model_stream": compact_model_stream(stream_deltas),
-    }
+    return _work_plan_with_session_trace_patch(
+        {
+            "decision_plan": decision_plan,
+            "action_plan": action_plan,
+            "action": action,
+            "context": context,
+            "model_metrics": model_metrics,
+            "model_stream": compact_model_stream(stream_deltas),
+        },
+        session_trace_patch,
+    )
