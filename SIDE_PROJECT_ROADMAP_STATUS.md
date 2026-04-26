@@ -12,30 +12,27 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 |---|---|---|
 | SP0 Dogfood Harness Ready | `done` | Roadmap, status, `side-pj-mew-impl` skill, and M6.13.2 telemetry CLI are ready. |
 | SP1 mew-companion-log Scaffold | `done` | Scaffold landed after issue #1 repair; mew-authored source, fixture, README, and tests pass. |
-| SP2 Journal and Dream Reports | `in_progress` | Morning and evening journal outputs landed clean; dream/learning surface remains. |
-| SP3 Implementation-Lane Evidence Cohort | `not_started` | Needs at least five recorded side-project attempts; current ledger rows: 4. |
+| SP2 Journal and Dream Reports | `done` | Morning, evening, and dream/learning fixture-driven outputs landed with focused tests. |
+| SP3 Implementation-Lane Evidence Cohort | `done` | Five side-project attempts are recorded; failures are classified and rescue edits remain zero. |
 | SP4 Optional Research Digest Slice | `not_started` | Deferred until SP1-SP3 produce useful evidence. |
-| SP5 Feed M6.16 | `not_started` | Waits for enough side-project telemetry to name core implementation-lane bottlenecks. |
+| SP5 Feed M6.16 | `in_progress` | The five-row cohort is ready to summarize into measured implementation-lane hardening work. |
 
 ## Active Focus
 
-Active side-project focus: **SP2 Journal and Dream Reports**.
+Active side-project focus: **SP5 Feed M6.16**.
 
 Current target:
 
-- keep side-project implementation mew-first
-- use side-project Codex CLI as the `operator` that runs current-repo `./mew`
-  commands against the side-project target directory and makes local decisions
-- use Codex/Codex CLI as reviewer, comparator, or verifier when it is checking
-  mew's work
-- side-project Codex writes normal completion reports to a local report outbox;
-  current-repo Codex polls those reports and records accepted rows with
-  `./mew side-dogfood append`
-- GitHub issues are only for problems: one real problem per issue, `[side-pj]`
-  title prefix, open/closed state only, no label workflow in v0
-- treat `proof-artifacts/side_project_dogfood_ledger.jsonl` as the primary
-  evidence source for M6.16; reply/chat logs are auxiliary
-- continue `mew-companion-log`, not a GUI or OS-permission-heavy project
+- summarize the five-row `mew-companion-log` cohort for M6.16
+- name concrete implementation-lane bottlenecks from measured evidence, not
+  subjective impressions
+- route the already-fixed structural write-scope blocker as closed issue `#1`
+  evidence, not an active side-project blocker
+- preserve the current operating model: current-repo `./mew`, side-project
+  target directory under `experiments/mew-companion-log`, Codex as
+  operator/reviewer/verifier, and rescue edits explicitly tracked
+- defer SP4 unless an optional static research digest adds more evidence than
+  summarizing the existing cohort
 
 ## Evidence
 
@@ -45,9 +42,9 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
-  four `mew-companion-log` rows on 2026-04-26: `rows_total=4`, one `failed`,
-  one `practical`, two `clean`, `structural_repairs_required=1`, and
-  `rescue_edits_total=0`.
+  five `mew-companion-log` rows on 2026-04-26: `rows_total=5`, one `failed`,
+  two `practical`, two `clean`, `success_rate=0.8`,
+  `structural_repairs_required=1`, and `rescue_edits_total=0`.
 - `side-pj-mew-impl` skill exists at
   `.codex/skills/side-pj-mew-impl/SKILL.md`.
 - First side project selected: `mew-companion-log`.
@@ -110,24 +107,44 @@ Current target:
   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
   returned `8 passed`. The default report CLI, morning journal stdout, evening
   journal stdout, and evening journal `--output` path were also verified.
+- Task `#4` / sessions `#6` and `#7` added the final SP2 dream/learning
+  surface with Codex CLI as `operator` and mew as first implementer. Session
+  `#6` authored the fixture-driven `--mode dream-learning` renderer, fixture
+  data, README fixture description, and snapshot-style test under
+  `experiments/mew-companion-log`.
+- Reviewer follow-up was required because the first pass lacked a README Usage
+  command for `--mode dream-learning` and a focused CLI stdout test for that
+  mode. Session `#7` authored both follow-up edits.
+- Dream/learning local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/4-dream-learning-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `5`;
+  outcome `practical`, failure class
+  `readme_cli_test_followup_after_dream_learning`, `rescue_edits=0`.
+- Dream/learning verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `10 passed`. The default report CLI, morning journal stdout,
+  evening journal stdout, dream/learning stdout, dream/learning `--output`
+  path, and `git diff --check` were also verified.
 
 ## Missing Proof
 
-- SP2 dream/learning output does not exist yet.
-- SP2 still needs the dream/learning surface before close.
-- SP3 still needs at least five recorded side-project attempts; current ledger
-  rows: 4.
+- SP1, SP2, and SP3 are closed for the first `mew-companion-log` cohort.
+- SP5 still needs a compact M6.16 evidence summary that names bottlenecks,
+  rescue points, first-edit latency, and the next core hardening slice.
+- SP4 remains optional and should stay deferred unless the static research
+  digest would produce evidence that the five-row implementation cohort cannot.
 
 ## Next Action
 
-Continue SP2:
+Continue SP5:
 
-1. define one bounded dream/learning report task under
-   `experiments/mew-companion-log`
-2. run current-repo `./mew` mew-first with `--model gpt-5.5`
-3. keep Codex CLI as `operator` / `reviewer` / `verifier`, not product-code
-   implementer
-4. append a new side-dogfood report row after verification
+1. create a compact side-project cohort summary from
+   `./mew side-dogfood report --json`
+2. map observed failure classes to M6.16 implementation-lane hardening inputs
+3. decide the next bounded core hardening slice or explicitly defer it with
+   rationale
+4. keep SP4 deferred unless additional side-project implementation evidence is
+   more useful than acting on the existing cohort
 
 ## Non-Goals
 

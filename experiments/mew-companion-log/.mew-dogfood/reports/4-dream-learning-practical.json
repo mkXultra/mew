@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "task_id": 4,
+  "session_id": 7,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Add SP2 fixture-driven dream/learning markdown output with CLI mode, fixture data, README usage, and focused tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 30.0,
+  "read_turns_before_edit": 2.0,
+  "files_changed": [
+    "experiments/mew-companion-log/README.md",
+    "experiments/mew-companion-log/companion_log.py",
+    "experiments/mew-companion-log/fixtures/sample_session.json",
+    "experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode morning-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode evening-journal",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode dream-learning",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode dream-learning --output /tmp/mew-companion-log-dream.md",
+    "git diff --check"
+  ],
+  "reviewer_rejections": 1,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "readme_cli_test_followup_after_dream_learning",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/follow/session-6.json",
+    ".mew/follow/session-7.json",
+    "experiments/mew-companion-log/.mew-dogfood/reports/4-dream-learning-practical.json"
+  ],
+  "commit": "",
+  "notes": "Mew implemented the SP2 dream/learning surface using --model gpt-5.5. Codex acted as operator/reviewer/verifier only. The first pass added renderer, fixture data, README fixture description, and snapshot coverage; reviewer follow-up required README Usage for --mode dream-learning and a focused CLI stdout test. Mew authored the follow-up, focused pytest passed with 10 tests, CLI modes were manually verified, and no rescue edits were used."
+}

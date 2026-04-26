@@ -119,10 +119,48 @@ def render_evening_journal(session: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_dream_learning(session: dict[str, Any]) -> str:
+    """Return a fixture-driven dream/learning markdown surface."""
+    dream_learning = session.get("dream_learning", {})
+    if dream_learning is None:
+        dream_learning = {}
+    if not isinstance(dream_learning, dict):
+        raise ValueError("dream_learning must be an object when provided")
+
+    title = dream_learning.get("title") or f"Dream Learning: {session.get('title') or session.get('id') or 'Untitled session'}"
+    date = dream_learning.get("date")
+    dream = dream_learning.get("dream")
+    signals = _as_list(dream_learning.get("signals"))
+    learning = _as_list(dream_learning.get("learning"))
+    practice = _as_list(dream_learning.get("practice"))
+    closing_prompt = dream_learning.get("closing_prompt")
+
+    lines = [f"# {title}"]
+    if date:
+        lines.extend(["", f"_Date: {date}_"])
+    if dream:
+        lines.extend(["", "## Dream", str(dream)])
+    if signals:
+        lines.extend(["", "## Signals"])
+        lines.extend(f"- {item}" for item in signals)
+    if learning:
+        lines.extend(["", "## Learning"])
+        lines.extend(f"- {item}" for item in learning)
+    if practice:
+        lines.extend(["", "## Practice"])
+        lines.extend(f"- {item}" for item in practice)
+    if closing_prompt:
+        lines.extend(["", "## Companion Prompt", str(closing_prompt)])
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 RENDERERS = {
     "report": render_report,
     "morning-journal": render_morning_journal,
     "evening-journal": render_evening_journal,
+    "dream-learning": render_dream_learning,
 }
 
 

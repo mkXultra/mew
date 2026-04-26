@@ -5,7 +5,7 @@ An isolated experiment for rendering small markdown companion surfaces from a me
 ## Files
 
 - `companion_log.py` — standalone Python CLI/script that reads fixture JSON and renders markdown.
-- `fixtures/sample_session.json` — sample session data used by the report, morning journal, and evening journal commands/tests.
+- `fixtures/sample_session.json` — sample session data used by the report, morning journal, evening journal, and dream/learning commands/tests.
 - `tests/test_companion_log.py` — focused pytest coverage for rendering, stdout, output-file writing, and fixture shape.
 
 ## Usage
@@ -26,6 +26,12 @@ Render the SP2 evening journal surface from the same fixture:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode evening-journal
+```
+
+Render the SP2 dream/learning surface from the same fixture:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-companion-log/companion_log.py experiments/mew-companion-log/fixtures/sample_session.json --mode dream-learning
 ```
 
 Write markdown to a file:

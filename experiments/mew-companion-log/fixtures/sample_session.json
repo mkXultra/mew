@@ -46,5 +46,23 @@
       "Run the focused pytest command after reviewing the markdown shape."
     ],
     "closing_prompt": "What should be acknowledged before setting the work down for the night?"
+  },
+  "dream_learning": {
+    "title": "Dream Learning: SP2 companion output",
+    "date": "2026-04-26",
+    "dream": "Let the companion notice quiet patterns across the day without turning them into pressure.",
+    "signals": [
+      "Morning intentions and evening reflections both point toward gentle, fixture-driven surfaces.",
+      "Small CLI modes keep each companion output discoverable without changing the default report."
+    ],
+    "learning": [
+      "Snapshot tests make the markdown contract easy to review.",
+      "A final dream/learning mode can connect planning and reflection into one lightweight surface."
+    ],
+    "practice": [
+      "Choose one learning signal to carry into tomorrow's experiment.",
+      "Keep the next companion iteration isolated under experiments/mew-companion-log."
+    ],
+    "closing_prompt": "What quiet signal wants to become tomorrow's small experiment?"
   }
 }

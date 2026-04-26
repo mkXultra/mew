@@ -94,6 +94,40 @@ def test_render_evening_journal_snapshot() -> None:
     )
 
 
+def test_render_dream_learning_snapshot() -> None:
+    sys.path.insert(0, str(ROOT))
+    try:
+        from companion_log import load_session, render_dream_learning
+    finally:
+        sys.path.pop(0)
+
+    dream = render_dream_learning(load_session(FIXTURE))
+
+    assert dream == (
+        "# Dream Learning: SP2 companion output\n"
+        "\n"
+        "_Date: 2026-04-26_\n"
+        "\n"
+        "## Dream\n"
+        "Let the companion notice quiet patterns across the day without turning them into pressure.\n"
+        "\n"
+        "## Signals\n"
+        "- Morning intentions and evening reflections both point toward gentle, fixture-driven surfaces.\n"
+        "- Small CLI modes keep each companion output discoverable without changing the default report.\n"
+        "\n"
+        "## Learning\n"
+        "- Snapshot tests make the markdown contract easy to review.\n"
+        "- A final dream/learning mode can connect planning and reflection into one lightweight surface.\n"
+        "\n"
+        "## Practice\n"
+        "- Choose one learning signal to carry into tomorrow's experiment.\n"
+        "- Keep the next companion iteration isolated under experiments/mew-companion-log.\n"
+        "\n"
+        "## Companion Prompt\n"
+        "What quiet signal wants to become tomorrow's small experiment?\n"
+    )
+
+
 def test_cli_prints_markdown_to_stdout() -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(FIXTURE)],
@@ -132,6 +166,20 @@ def test_cli_prints_evening_journal_mode_to_stdout() -> None:
     assert result.stdout.startswith("# Evening Journal: SP2 companion output")
     assert "## Tomorrow" in result.stdout
     assert "setting the work down for the night" in result.stdout
+    assert result.stderr == ""
+
+
+def test_cli_prints_dream_learning_mode_to_stdout() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(FIXTURE), "--mode", "dream-learning"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.startswith("# Dream Learning: SP2 companion output")
+    assert "## Learning" in result.stdout
+    assert "tomorrow's small experiment" in result.stdout
     assert result.stderr == ""
 
 
