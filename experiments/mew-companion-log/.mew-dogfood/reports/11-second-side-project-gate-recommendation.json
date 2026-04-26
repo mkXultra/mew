@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "task_id": 11,
+  "session_id": 22,
+  "side_project": "mew-companion-log",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-companion-log",
+  "task_summary": "Write the SP11 second side-project gate recommendation using static SP6-SP10 dogfood evidence and make an explicit continue/start-second-project/pause decision without beginning a second project.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4.0,
+  "files_changed": [
+    "experiments/mew-companion-log/SECOND_SIDE_PROJECT_GATE.md",
+    "experiments/mew-companion-log/.mew-dogfood/reports/11-second-side-project-gate-recommendation.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py"
+  ],
+  "reviewer_rejections": 2,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "second_side_project_gate_recommends_core_hardening_before_new_cohort",
+  "repair_required": false,
+  "proof_artifacts": [
+    "proof-artifacts/side_project_dogfood_ledger.jsonl rows 7-11",
+    "SIDE_PROJECT_ROADMAP_STATUS.md SP6-SP11 status section",
+    ".mew/follow/session-20.json",
+    ".mew/follow/session-21.json",
+    ".mew/follow/session-22.json",
+    "experiments/mew-companion-log/SECOND_SIDE_PROJECT_GATE.md",
+    "experiments/mew-companion-log/.mew-dogfood/reports/11-second-side-project-gate-recommendation.json"
+  ],
+  "commit": "",
+  "recommendation": "pause_side_project_work_for_core_M6_16_M9_M11_use",
+  "evidence_summary": {
+    "ledger_rows": [7, 8, 9, 10, 11],
+    "tasks": [6, 7, 8, 9, 10],
+    "outcomes": ["clean", "practical", "practical", "practical", "practical"],
+    "failure_classes": [
+      "none_observed",
+      "same_file_write_batch_retry_timeout_after_bundle_verifier_failure",
+      "archive_index_cross_day_ordering_retry_after_verifier_failure",
+      "dogfood_digest_ledger_semantics_repair_after_write_batch_retries",
+      "contract_heading_mismatch_reviewer_followup"
+    ],
+    "first_edit_latency": [51.0, 70.0, 75.0, 75.0, 100.0],
+    "rescue_edits_total": 0,
+    "issue_queue_outcomes": [
+      "SP7 reusable polish issue #4 opened",
+      "SP8 reusable polish issue #5 opened",
+      "SP9 reusable polish issue #6 opened",
+      "SP10 reusable polish issue #7 opened"
+    ]
+  },
+  "notes": "SP11 is a static/local gate artifact only. It recommends pausing new side-project implementation and feeding the first side-project cohort into core M6.16/M9/M11 work before starting a second isolated side project. The decision is grounded in SP6-SP10 ledger rows: rescue_edits stayed at zero, outcomes remained clean/practical, but repeated verifier, write-batch/session-pressure, ledger-semantics, and reviewer-contract polish classes accumulated while first-edit latency rose from 51 to 100. Session #21 repaired reviewer feedback that the reusable issue queue originally omitted issue #4; existing local status evidence for [side-pj] issues #4, #5, #6, and #7 now covers the reusable polish queue visible at this gate. Operator bookkeeping then corrected the local report proof artifact paths to the repo-root .mew/follow files before ledger append. No live GitHub query, live .mew state, src/mew import, network use, filesystem crawl, or second side-project implementation was used."
+}

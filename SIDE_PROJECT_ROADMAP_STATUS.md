@@ -21,19 +21,18 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP8 Multi-Day Companion Archive | `done` | Archive-index mode landed practical: static multi-day fixture, day/surface/next-action grouping, empty-day behavior, README usage, stdout/output-file proof, and focused tests are in place. |
 | SP9 Issue and Dogfood Ledger Digest | `done` | Dogfood-digest mode landed practical: static dogfood rows, `[side-pj]` issue summaries, outcome/failure-class/rescue-edits grouping, README usage, stdout/output-file proof, and focused tests are in place. |
 | SP10 Companion Export Contract | `done` | Export contract landed practical: local schema examples, documented markdown surfaces for every mode, README pointer, and all-mode output-file compatibility tests are in place. |
-| SP11 Second Side-Project Gate | `not_started` | Next planned final gate: decide whether to continue this project, start a second side project, or pause side-project work. |
+| SP11 Second Side-Project Gate | `done` | Gate landed practical: the recommendation is to pause new side-project work and feed SP6-SP10 evidence into core M6.16/M9/M11 before starting a second isolated side project. |
 
 ## Active Focus
 
-Active side-project focus: **SP11 Second Side-Project Gate**.
+Active side-project focus: **paused after SP11**.
 
 Current target:
 
-- summarize the side-project dogfood ledger after SP6-SP10 and compare repeated
-  failure classes, rescue edits, first-edit latency, and issue queue outcomes
-- decide whether the recommendation is to continue `mew-companion-log`, start a
-  second isolated side project, or pause side-project work for core
-  M6.16/M9/M11 use
+- feed SP6-SP10 side-project evidence into core M6.16/M9/M11 planning before
+  starting any second isolated side project
+- keep `mew-companion-log` stable as the local fixture-tested companion surface
+  set for future product planning and contract checks
 - use SP6-SP11 as the next side-project roadmap arc before considering a
   second isolated side project
 - route the already-fixed structural write-scope blocker as closed issue `#1`
@@ -50,8 +49,8 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
-  eleven `mew-companion-log` rows on 2026-04-26: `rows_total=11`, one `failed`,
-  seven `practical`, three `clean`, `success_rate=0.909`,
+  twelve `mew-companion-log` rows on 2026-04-26: `rows_total=12`, one `failed`,
+  eight `practical`, three `clean`, `success_rate=0.917`,
   `structural_repairs_required=1`, and `rescue_edits_total=0`.
 - `side-pj-mew-impl` skill exists at
   `.codex/skills/side-pj-mew-impl/SKILL.md`.
@@ -260,28 +259,45 @@ Current target:
   coupling search were also verified.
 - Reusable polish issue opened:
   `https://github.com/mkXultra/mew/issues/7`.
+- Task `#11` / sessions `#20` through `#22` added the SP11 second side-project
+  gate recommendation with Codex CLI as `operator` and mew as first implementer.
+  Mew authored `experiments/mew-companion-log/SECOND_SIDE_PROJECT_GATE.md` and
+  a local SP11 report. The gate compares SP6-SP10 ledger rows `7` through `11`,
+  repeated failure classes, `rescue_edits=0`, first-edit latency, and issue
+  queue outcomes. Reviewer follow-up was required to include SP7 issue `#4` in
+  the issue queue comparison and to correct local report proof paths before
+  ledger append.
+- Second side-project gate local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/11-second-side-project-gate-recommendation.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `12`;
+  outcome `practical`, failure class
+  `second_side_project_gate_recommends_core_hardening_before_new_cohort`,
+  `rescue_edits=0`.
+- Gate recommendation:
+  pause new side-project implementation and feed the first side-project cohort
+  into core M6.16/M9/M11 before starting a second isolated side project.
+- Gate verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `31 passed`. `git diff --check` was also verified.
 
 ## Missing Proof
 
-- SP1, SP2, SP3, SP4, SP5, SP6, SP7, SP8, SP9, and SP10 are closed for the
-  first `mew-companion-log` cohort.
-- SP11 has not started. It still needs a bounded task, mew-first
-  implementation, focused verifier, local report, ledger row, and status
-  update.
+- SP1 through SP11 are closed for the first `mew-companion-log` cohort.
+- No second side-project implementation is authorized by this roadmap state.
+- The remaining work is outside this side-project arc: consume the evidence in
+  core M6.16/M9/M11 planning and close or address the open `[side-pj]`
+  implementation-lane polish issues.
 
 ## Next Action
 
-Start SP11:
+Pause side-project implementation and return evidence to core planning:
 
-1. define task `#11` for the second side-project gate recommendation under
-   `experiments/mew-companion-log`
-2. run current-repo `./mew` mew-first with `--model gpt-5.5`, using
-   `--allow-read experiments/mew-companion-log` and
-   `--allow-write experiments/mew-companion-log`
-3. require a local summary comparing SP6-SP10 evidence, repeated failure
-   classes, rescue edits, first-edit latency, issue queue outcomes, an explicit
-   continue/start-second-project/pause recommendation, local report, ledger
-   row, and issue extraction for any reusable polish finding
+1. use `experiments/mew-companion-log/SECOND_SIDE_PROJECT_GATE.md` as the local
+   SP11 decision artifact
+2. use ledger rows `7` through `12` and issues `#4` through `#7` as M6.16
+   implementation-lane polish input
+3. do not start a second isolated side project until a future roadmap/status
+   update explicitly opens one
 
 ## Non-Goals
 
