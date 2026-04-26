@@ -54,6 +54,42 @@ M6_9_FIXTURE = """
 """
 
 
+M6_16_REVIEW_REPAIR_FIXTURE = """
+### M6.16: Calibration
+
+- Task `#674` landed the GitHub issue `#6` side-dogfood ledger-semantics
+  slice as practical mew-first evidence. `mew side-dogfood report` now states
+  that `rescue_edits` is a numeric Codex product-code rescue count and excludes
+  operator steering, reviewer rejection, verifier follow-up, and generic
+  repair. Count this as practical mew-first without rescue edits and
+  without supervisor product-code rescue: session `#659` authored the initial
+  paired source/test patch; codex-ultra review found a non-integral float
+  truncation bug and missing machine-readable alias; session `#660` repaired
+  both. Valid proof passed. Codex-ultra re-review reported no findings.
+"""
+
+
+M6_16_REVIEW_REPAIR_WITHOUT_RESCUE_EDITS_ONLY_FIXTURE = """
+### M6.16: Calibration
+
+- Task `#671` landed the side-dogfood validation slice as practical mew-first
+  evidence. Count this as practical mew-first without rescue edits: session
+  `#650` authored the initial paired source/test patch; codex-ultra review
+  found the verifier only checked internal flags; session `#651` repaired the
+  behavior-visible proof. Valid proof passed. Codex-ultra re-review reported no
+  findings.
+"""
+
+
+M6_16_CLEAN_NO_RESCUE_FIXTURE = """
+### M6.16: Calibration
+
+- Task `#675` landed a bounded formatter slice as clean mew-first evidence. The
+  mew-first session authored the paired source/test patch without rescue edits.
+  Valid proof passed without reviewer findings.
+"""
+
+
 def test_extract_mew_first_attempts_skips_substrate_repairs_and_classifies_latest_10() -> None:
     attempts = extract_mew_first_attempts(M6_9_FIXTURE, limit=10)
 
@@ -72,6 +108,45 @@ def test_extract_mew_first_attempts_skips_substrate_repairs_and_classifies_lates
     ]
     assert attempts[7].drift_class == "generic_cleanup_substitution"
     assert attempts[7].rejected_patch_family == "generic_cleanup"
+
+
+def test_reviewer_repaired_mew_first_without_supervisor_rescue_is_practical(tmp_path: Path) -> None:
+    attempts = extract_mew_first_attempts(M6_16_REVIEW_REPAIR_FIXTURE, limit=10)
+
+    assert [attempt.task_id for attempt in attempts] == [674]
+    assert attempts[0].result_class == "practical_mew_first"
+    assert attempts[0].patch_owner == "mew"
+    assert attempts[0].autonomy_credit == "practical"
+
+    source = tmp_path / "ROADMAP_STATUS.md"
+    source.write_text(M6_16_REVIEW_REPAIR_FIXTURE, encoding="utf-8")
+
+    summary = summarize_mew_first_calibration(source_path=source, limit=10)
+
+    assert summary["gate"]["gate_success_task_ids"] == [674]
+    assert summary["gate"]["gate_blocking_task_ids"] == []
+    assert summary["counts"]["result_class"]["practical_mew_first"] == 1
+
+
+def test_reviewer_repaired_practical_credit_without_rescue_edits_only_is_practical() -> None:
+    attempts = extract_mew_first_attempts(
+        M6_16_REVIEW_REPAIR_WITHOUT_RESCUE_EDITS_ONLY_FIXTURE,
+        limit=10,
+    )
+
+    assert [attempt.task_id for attempt in attempts] == [671]
+    assert attempts[0].result_class == "practical_mew_first"
+    assert attempts[0].patch_owner == "mew"
+    assert attempts[0].autonomy_credit == "practical"
+
+
+def test_clean_mew_first_without_rescue_edits_stays_clean() -> None:
+    attempts = extract_mew_first_attempts(M6_16_CLEAN_NO_RESCUE_FIXTURE, limit=10)
+
+    assert [attempt.task_id for attempt in attempts] == [675]
+    assert attempts[0].result_class == "clean_mew_first"
+    assert attempts[0].patch_owner == "mew"
+    assert attempts[0].autonomy_credit == "clean"
 
 
 def test_summarize_mew_first_calibration_gate_and_format(tmp_path: Path) -> None:

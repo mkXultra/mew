@@ -387,6 +387,24 @@ Current M6.16 evidence:
   `uv run python -m unittest tests.test_commands`,
   `uv run ruff check src/mew/side_project_dogfood.py src/mew/implementation_lane_baseline.py tests/test_side_project_dogfood.py tests/test_implementation_lane_baseline.py`,
   and `git diff --check`. Codex-ultra re-review reported no findings.
+- Task `#675` landed an M6.16 measurement-quality slice as practical
+  mew-first evidence. The mew-first calibration now treats reviewer-mediated
+  mew-first repairs with no supervisor product-code rescue as
+  `practical_mew_first`, while preserving clean credit for no-review
+  `without rescue edits` entries. Sessions `#661`, `#662`, and `#663`
+  authored the paired source/test patch and repaired two codex-ultra review
+  findings plus the live `#671` wording gap. Valid proof passed:
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/mew_first_calibration.py tests/test_mew_first_calibration.py`,
+  `git diff --check`,
+  `./mew metrics --mew-first --limit 100 --json`,
+  and `./mew metrics --implementation-lane --json`. Metrics now classify
+  tasks `#671` and `#674` as practical, keep clean/practical successes at
+  `11`, and reduce the measured rescue/partial count from `29` to `28`.
+  Codex-ultra review session `019dcb59-5c67-7e12-9169-500867c5e80c` ended with
+  `NO FINDINGS`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
