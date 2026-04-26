@@ -281,6 +281,117 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("for 'src/**/*.py'", summary)
         self.assertNotIn("for None", summary)
 
+    def test_work_session_resume_surfaces_approved_selector_preference_refs_in_prompt(self):
+        import json
+
+        task = {"id": 42, "title": "Preference draft prep", "status": "ready", "kind": "coding", "notes": ""}
+        session = {
+            "id": 5,
+            "task_id": task["id"],
+            "status": "active",
+            "title": task["title"],
+            "goal": "Expose selected selector preference refs.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        preference_refs = [
+            {
+                "kind": "selector_preference",
+                "task_template": "coding:selector-pref",
+                "outcome": "prefer reviewer-visible draft proof",
+                "detail": "x" * 400,
+                "index": index,
+            }
+            for index in range(6)
+        ]
+        state = {
+            "tasks": [task],
+            "selector_proposals": [
+                {
+                    "id": 9,
+                    "previous_task_id": 41,
+                    "proposed_task_id": task["id"],
+                    "status": "approved",
+                    "reviewer_decision": "approved",
+                    "proposal": {
+                        "proposed_task_id": task["id"],
+                        "preference_signal_refs": preference_refs,
+                        "memory_signal_refs": [{"kind": "raw-memory-only"}],
+                    },
+                }
+            ],
+        }
+
+        resume = build_work_session_resume(session, task=task, state=state, current_time="2026-04-17T00:01:00Z")
+        resume_text = format_work_session_resume(resume)
+        from mew.work_loop import build_work_model_context, build_work_think_prompt
+
+        context = build_work_model_context(state, session, task, "2026-04-17T00:01:00Z")
+        prompt_text = build_work_think_prompt(context)
+        if not isinstance(prompt_text, str):
+            prompt_text = json.dumps(prompt_text, sort_keys=True)
+
+        refs = resume["preference_signal_refs"]
+        self.assertEqual(len(refs), 5)
+        self.assertEqual(refs[0]["kind"], "selector_preference")
+        self.assertEqual(refs[0]["provenance"], "approved_selector_proposal")
+        self.assertEqual(refs[0]["selector_proposal_id"], 9)
+        self.assertLessEqual(len(refs[0]["detail"]), 240)
+        self.assertIn("Preference signal refs", resume_text)
+        self.assertIn("provenance=approved_selector_proposal", resume_text)
+        self.assertIn("selector_proposal_id=9", resume_text)
+        self.assertIn("preference_signal_refs", prompt_text)
+        self.assertIn("approved_selector_proposal", prompt_text)
+        self.assertIn("selector_preference", prompt_text)
+
+        missing_preference_state = {
+            "tasks": [task],
+            "selector_proposals": [
+                {
+                    "id": 10,
+                    "proposed_task_id": task["id"],
+                    "status": "approved",
+                    "reviewer_decision": "approved",
+                    "proposal": {
+                        "proposed_task_id": task["id"],
+                        "memory_signal_refs": [{"kind": "raw-memory-only"}],
+                    },
+                }
+            ],
+        }
+        missing_resume = build_work_session_resume(
+            session,
+            task=task,
+            state=missing_preference_state,
+            current_time="2026-04-17T00:01:00Z",
+        )
+        self.assertEqual(missing_resume["preference_signal_refs"], [])
+        self.assertNotIn("Preference signal refs", format_work_session_resume(missing_resume))
+
+        unapproved_state = {
+            "tasks": [task],
+            "selector_proposals": [
+                {
+                    "id": 11,
+                    "proposed_task_id": task["id"],
+                    "status": "pending",
+                    "proposal": {
+                        "proposed_task_id": task["id"],
+                        "preference_signal_refs": preference_refs,
+                    },
+                }
+            ],
+        }
+        unapproved_resume = build_work_session_resume(
+            session,
+            task=task,
+            state=unapproved_state,
+            current_time="2026-04-17T00:01:00Z",
+        )
+        self.assertEqual(unapproved_resume["preference_signal_refs"], [])
+
     def test_work_session_effort_budget_counts_steps_duration_and_warnings(self):
         session = {
             "id": 1,

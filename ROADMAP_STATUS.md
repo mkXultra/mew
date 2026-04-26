@@ -41,7 +41,7 @@ is tracked below.
 | 6.6 Coding Competence: Codex CLI Parity | `done` | Bootstrap, comparator slots, and frozen Codex CLI side-by-side batch passed with recorded caveats. |
 | 6.7 Supervised Self-Hosting Loop | `done` | Reviewer-gated supervised iterations, reentry, and detached close-watch satisfied the gate. |
 | 6.8 Task Chaining: Supervised Self-Selection | `done` | Close gate passed via `docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`. |
-| 6.8.5 Selector Intelligence and Curriculum Integration | `in_progress` | Failure, preference, calibration, habit-template, and compiled-runner selector refs landed; preference draft-prep proof remains. |
+| 6.8.5 Selector Intelligence and Curriculum Integration | `in_progress` | Failure, preference, calibration, habit-template, compiled-runner, and preference draft-prep refs landed; close audit pending. |
 | 6.9 Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`; Phase 4 moved to M6.8.5. |
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
@@ -170,6 +170,27 @@ Current M6.8.5 evidence:
   --no-testmon`, `uv run pytest -q tests/test_tasks.py tests/test_commands.py
   --no-testmon`, `uv run ruff check src/mew/commands.py tests/test_commands.py`,
   and `git diff --check`.
+- Task `#646` / session `#633` closed the preference draft-preparation proof
+  slice. Work-session resume and THINK prompt context now surface bounded
+  `preference_signal_refs` from the approved selector proposal that selected the
+  current task, with `approved_selector_proposal` provenance and selector
+  proposal/task ids. Missing preference refs, unapproved selector records, or
+  wrong-task records produce an empty field; `memory_signal_refs` are not used
+  as a fallback.
+- #646 mew-first note: #633 first produced a close source/test dry-run that
+  incorrectly fell back to `memory_signal_refs`. The reviewer rejected it, and
+  mew retried with a paired source/test patch that removed the fallback and
+  added a THINK-prompt assertion. Count this as
+  `success_mew_first_with_reviewer_revision`; no supervisor product patch.
+- #646 validation passed: focused
+  `uv run pytest -q tests/test_work_session.py -k 'selector_preference_refs_in_prompt' --no-testmon`,
+  exact-timeout rerun
+  `uv run pytest -q tests/test_work_session.py -k 'selector_preference_refs_in_prompt or hard_timeout_without_retries' --no-testmon`,
+  full `uv run pytest -q tests/test_work_session.py --no-testmon` on rerun,
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
+  `git diff --check`. The first full work-session run had one transient
+  hard-timeout assertion failure; the exact failing test and full suite passed
+  immediately on rerun.
 
 Closed M6.8 evidence:
 

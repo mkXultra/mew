@@ -5960,6 +5960,64 @@ def _latest_patch_draft_compiler_replay_summary(turns):
     return {}
 
 
+def _work_resume_selected_approved_selector_preference_signal_refs(state, task_id, limit=5, value_max_chars=240):
+    state = state if isinstance(state, dict) else {}
+    task_id_text = str(task_id or "").strip()
+    if not state or not task_id_text:
+        return []
+    try:
+        max_items = max(0, int(limit))
+    except (TypeError, ValueError):
+        max_items = 5
+    if max_items <= 0:
+        return []
+
+    for selector_record in reversed(list(state.get("selector_proposals") or [])):
+        if not isinstance(selector_record, dict):
+            continue
+        proposal = selector_record.get("proposal") if isinstance(selector_record.get("proposal"), dict) else {}
+        proposed_task_id = selector_record.get("proposed_task_id")
+        if proposed_task_id in (None, ""):
+            proposed_task_id = proposal.get("proposed_task_id")
+        if str(proposed_task_id or "").strip() != task_id_text:
+            continue
+        status = str(selector_record.get("status") or "").strip().lower()
+        reviewer_decision = str(selector_record.get("reviewer_decision") or "").strip().lower()
+        if status != "approved" or (reviewer_decision and reviewer_decision != "approved"):
+            continue
+
+        refs = proposal.get("preference_signal_refs")
+        if not isinstance(refs, list):
+            return []
+
+        bounded_refs = []
+        for ref_index, ref in enumerate(refs):
+            if len(bounded_refs) >= max_items:
+                break
+            if not isinstance(ref, dict):
+                continue
+            bounded_ref = {}
+            for key, value in list(ref.items())[:12]:
+                key_text = clip_inline_text(str(key), 80)
+                if not key_text:
+                    continue
+                if isinstance(value, str):
+                    bounded_ref[key_text] = clip_inline_text(value, value_max_chars)
+                elif isinstance(value, (int, float, bool)) or value is None:
+                    bounded_ref[key_text] = value
+                else:
+                    bounded_ref[key_text] = clip_inline_text(str(value), value_max_chars)
+            bounded_ref["provenance"] = "approved_selector_proposal"
+            bounded_ref["selector_proposal_id"] = selector_record.get("id")
+            bounded_ref["selector_proposed_task_id"] = proposed_task_id
+            bounded_ref["selector_previous_task_id"] = selector_record.get("previous_task_id")
+            bounded_ref["selector_reviewer_decision"] = selector_record.get("reviewer_decision") or selector_record.get("status")
+            bounded_ref["selector_ref_index"] = ref_index
+            bounded_refs.append(bounded_ref)
+        return bounded_refs
+    return []
+
+
 def build_work_session_resume(session, task=None, limit=8, state=None, current_time=None):
     if not session:
         return None
@@ -6559,6 +6617,10 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     effort = build_work_session_effort(session, current_time=current_time)
     same_surface_audit = build_same_surface_audit_checkpoint(session, task, calls)
     prompt_cache_boundary = _build_prompt_cache_boundary(draft_state)
+    selector_preference_signal_refs = _work_resume_selected_approved_selector_preference_signal_refs(
+        state,
+        task_id,
+    )
 
     resume = {
         "session_id": session.get("id"),
@@ -6582,6 +6644,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "draft_prompt_dynamic_chars": draft_state.get("draft_prompt_dynamic_chars"),
         "draft_retry_same_prefix": bool(draft_state.get("draft_retry_same_prefix")),
         "prompt_cache_boundary": prompt_cache_boundary,
+        "preference_signal_refs": selector_preference_signal_refs,
         "files_touched": paths[-limit:],
         "declared_write_roots": declared_write_roots,
         "commands": commands[-limit:],
@@ -6746,6 +6809,21 @@ def format_work_session_resume(resume):
     continuity_next = format_work_continuity_recommendation(resume.get("continuity") or {})
     if continuity_next:
         lines.append(continuity_next)
+    preference_signal_refs = resume.get("preference_signal_refs") or []
+    if preference_signal_refs:
+        lines.extend(["", "Preference signal refs"])
+        for ref in preference_signal_refs:
+            label = ref.get("kind") or ref.get("source") or "preference_signal_ref"
+            lines.append(
+                f"- {label} provenance={ref.get('provenance') or ''} "
+                f"selector_proposal_id={ref.get('selector_proposal_id') or ''}"
+            )
+            detail_parts = []
+            for key in ("task_template", "outcome", "reviewer_decision", "selector_reviewer_decision"):
+                if ref.get(key):
+                    detail_parts.append(f"{key}={clip_inline_text(str(ref.get(key)), 120)}")
+            if detail_parts:
+                lines.append(f"  {', '.join(detail_parts)}")
     lines.extend(["", "Files touched"])
     files = resume.get("files_touched") or []
     if files:
