@@ -29782,7 +29782,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("write batch exceeds 5 tools", action["reason"])
         self.assertIn("narrower complete slice", action["reason"])
 
-    def test_work_model_batch_refuses_same_path_write_edits(self):
+    def test_work_model_batch_collapses_same_path_write_edits(self):
         from mew.work_loop import normalize_work_model_action
 
         action = normalize_work_model_action(
@@ -29793,8 +29793,78 @@ class WorkSessionTests(unittest.TestCase):
                         {"type": "edit_file", "path": "tests/test_alpha.py", "old": "assert old", "new": "assert new"},
                         {"type": "edit_file", "path": "src/mew/alpha.py", "old": "VALUE = 'old'", "new": "VALUE = 'new'"},
                         {"type": "edit_file", "path": "src/mew/alpha.py", "old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "EXTRA = 'old'", "new": "EXTRA = 'new'"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "FINAL = 'old'", "new": "FINAL = 'new'"},
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "CLEANUP = 'old'", "new": "CLEANUP = 'new'"},
                     ],
-                    "reason": "preview paired edits with two source hunks",
+                    "reason": "preview paired edits with five source hunks",
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(len(action["tools"]), 2)
+        self.assertNotIn("truncated_tools", action)
+        self.assertEqual(action["tools"][1]["type"], "edit_file_hunks")
+        self.assertEqual(action["tools"][1]["path"], "src/mew/alpha.py")
+        self.assertEqual(
+            action["tools"][1]["edits"],
+            [
+                {"old": "VALUE = 'old'", "new": "VALUE = 'new'"},
+                {"old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                {"old": "EXTRA = 'old'", "new": "EXTRA = 'new'"},
+                {"old": "FINAL = 'old'", "new": "FINAL = 'new'"},
+                {"old": "CLEANUP = 'old'", "new": "CLEANUP = 'new'"},
+            ],
+        )
+        self.assertTrue(action["tools"][0]["dry_run"])
+        self.assertTrue(action["tools"][1]["dry_run"])
+
+    def test_work_model_batch_refuses_same_path_write_edits_with_write_file(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                'action': {
+                    'type': 'batch',
+                    'tools': [
+                        {'type': 'edit_file', 'path': 'tests/test_alpha.py', 'old': 'assert old', 'new': 'assert new'},
+                        {'type': 'write_file', 'path': 'src/mew/alpha.py', 'content': 'VALUE = 1'},
+                        {'type': 'edit_file', 'path': 'src/mew/alpha.py', 'old': "VALUE = 'old'", 'new': "VALUE = 'new'"},
+                    ],
+                    'reason': 'preview paired edits with unsafe mixed source writes',
+                },
+            }
+        )
+
+        self.assertEqual(action['type'], 'wait')
+        self.assertIn('at most one write/edit per file path', action['reason'])
+        self.assertIn('edit_file or edit_file_hunks for src/mew/alpha.py', action['reason'])
+
+    def test_work_model_batch_refuses_same_path_write_edits_with_replace_all(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {"type": "edit_file", "path": "tests/test_alpha.py", "old": "assert old", "new": "assert new"},
+                        {
+                            "type": "edit_file",
+                            "path": "src/mew/alpha.py",
+                            "old": "VALUE = 'old'",
+                            "new": "VALUE = 'new'",
+                            "replace_all": True,
+                        },
+                        {
+                            "type": "edit_file",
+                            "path": "src/mew/alpha.py",
+                            "old": "VALUE = 'also old'",
+                            "new": "VALUE = 'also new'",
+                        },
+                    ],
+                    "reason": "preview paired edits with unsafe replace_all source writes",
                 },
             }
         )

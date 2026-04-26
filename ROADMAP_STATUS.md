@@ -246,6 +246,24 @@ Current M6.16 evidence:
   `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
   `git diff --check`. Codex-ultra re-review reported no findings after the
   rolled-back-write regression was added.
+- Task `#667` landed the GitHub issue `#3` same-file write-batch ergonomics
+  slice as practical mew-first evidence. The work loop now collapses duplicate
+  same-path `edit_file` actions into one `edit_file_hunks` action before
+  enforcing the five-tool write-batch cap, while preserving rejection for
+  unsafe `write_file` duplicates and `replace_all=True` edit semantics. Count
+  this as practical mew-first without rescue edits: mew authored the source
+  and test patch, Codex-ultra first found two correctness issues, and reviewer
+  steer was needed for mew to repair both in the same session with no
+  supervisor product-code rescue. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k "same_path_write_edits or edit_file_hunks or paired_write_batch" --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`. The broad `uv run python -m unittest tests.test_work_session`
+  attempts are not counted as product regressions: inside the mew run they
+  inherited `MEW_CODEX_REASONING_EFFORT=high` and failed existing reasoning
+  expectation tests, and the manual env-cleared rerun hit an unrelated 0.21s
+  timing flake. Codex-ultra re-review session
+  `019dca8b-7797-7760-b628-100e80455aa5` reported no findings after the
+  reviewer fixes.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
