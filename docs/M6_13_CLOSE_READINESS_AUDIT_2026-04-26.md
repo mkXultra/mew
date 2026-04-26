@@ -11,8 +11,9 @@ gate.
 - `m6_13-deliberation-internalization` records a deliberation-assisted hard
   task, a distilled `source_lane=deliberation` reasoning trace, and a later
   same-shape tiny-lane planning attempt.
-- The scenario now emits a reviewer decision artifact reference under
-  `.mew/durable/review/`.
+- The scenario now emits and consumes a reviewer decision artifact under
+  `.mew/durable/review/`; mismatched decisions fail validation before the
+  artifact can count as approval evidence.
 - `mew memory --active --task-id` emits observable M6.9 ranked recall
   metadata: ranker name, score, rank, score components, matched terms, and top
   entry ids. The v1 scorer includes recency, importance, relevance, symbol
@@ -33,10 +34,8 @@ M6.13's close gate requires a full internalization cycle:
 5. reviewer evidence confirms the trace shortened or avoided deliberation
 
 The current artifact proves the contract shape, but it still records
-`close_evidence=false` for two reasons:
+`close_evidence=false` for one reason:
 
-- Reviewer approval is represented by a scenario artifact, not an independent
-  reviewer decision consumed from outside the scenario.
 - The later same-shape task proves validated tiny patch planning, not an
   applied and verified tiny-only solve.
 
@@ -52,9 +51,14 @@ as overclaimed. After revision, the same reviewer approved the current shape:
 
 Reviewer session: `019dc96d-a73d-7762-baa4-6af2430c61b9`.
 
-After that review, the first blocker was reduced further by replacing scored
-active recall with a real `m6_9-ranked-recall` event. This does not close
-M6.13 by itself because the reviewer and tiny-solve blockers remain.
+After that review, two blockers were reduced further:
+
+- scored active recall was replaced with a real `m6_9-ranked-recall` event
+- reviewer approval is now consumed from the durable review artifact instead
+  of trusted as an in-memory object
+
+This does not close M6.13 by itself because the later-task proof is still
+validated patch planning, not an applied and verified tiny-only solve.
 
 ## Accepted Validation
 
@@ -70,13 +74,10 @@ M6.13 by itself because the reviewer and tiny-solve blockers remain.
 
 ## Next Close Tasks
 
-The next M6.13 work should close one of the remaining recorded blockers, in
-this order:
+The next M6.13 work should close the remaining recorded blocker:
 
-1. Consume an independent reviewer decision artifact instead of synthesizing
-   approval inside the scenario.
-2. Extend the later same-shape proof from validated tiny patch planning to an
+1. Extend the later same-shape proof from validated tiny patch planning to an
    applied and verified tiny-only solve.
 
-Do not mark M6.13 done until both are resolved or the close gate is
+Do not mark M6.13 done until this is resolved or the close gate is
 explicitly rewritten.
