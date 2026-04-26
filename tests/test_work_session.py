@@ -27957,6 +27957,211 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual([approval["tool_call_id"] for approval in resume["pending_approvals"]], [1])
 
+    def test_retry_context_omits_rejected_patch_body_from_prompt(self):
+        from mew.work_loop import (
+            build_work_model_context,
+            build_write_ready_tiny_draft_model_context,
+            build_write_ready_work_model_context,
+        )
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        stale_old = "STALE_REJECTED_OLD_BODY"
+        stale_new = "STALE_REJECTED_NEW_BODY"
+        task = {
+            "id": 670,
+            "title": "M6.16: compact retry context",
+            "description": "Retry from current target windows after rejected write batches.",
+            "status": "doing",
+            "kind": "coding",
+            "scope": {"target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"]},
+        }
+        session = {
+            "id": 654,
+            "task_id": 670,
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_session.py", "line_start": 100, "line_count": 30},
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "line_start": 100,
+                        "line_end": 129,
+                        "line_count": 30,
+                        "text": "source window\n",
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_work_session.py", "line_start": 200, "line_count": 30},
+                    "result": {
+                        "path": "tests/test_work_session.py",
+                        "line_start": 200,
+                        "line_end": 229,
+                        "line_count": 30,
+                        "text": "test window\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {
+                        "path": "src/mew/work_session.py",
+                        "old": stale_old,
+                        "new": stale_new,
+                    },
+                    "result": {
+                        "path": "src/mew/work_session.py",
+                        "dry_run": True,
+                        "changed": True,
+                        "written": False,
+                        "diff": f"--- src/mew/work_session.py\n+++ src/mew/work_session.py\n@@\n-{stale_old}\n+{stale_new}\n",
+                    },
+                    "approval_status": "rejected",
+                    "rejection_reason": "stale retry body after reviewer cleanup",
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 10,
+                    "status": "completed",
+                    "summary": "ready to retry from cached windows",
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "The rejected patch body is stale, but the current windows are cached.",
+                            "next_step": "Draft one paired retry from current cached windows.",
+                            "plan_items": [
+                                "Draft one paired dry-run edit batch for src/mew/work_session.py and tests/test_work_session.py",
+                                "Run the focused verifier after apply",
+                            ],
+                            "target_paths": ["src/mew/work_session.py", "tests/test_work_session.py"],
+                        }
+                    },
+                    "action": {"type": "wait", "reason": "ready to retry"},
+                },
+            ],
+        }
+        state = {"tasks": [task], "work_sessions": [session]}
+
+        resume = build_work_session_resume(session, task=task, state=state)
+        retry_context = resume["retry_context"]
+        self.assertEqual(retry_context["trigger"], "rejected_write")
+        self.assertEqual(retry_context["source_tool_call_id"], 3)
+        self.assertEqual(retry_context["approval_status"], "rejected")
+        self.assertEqual(len(retry_context["target_windows"]), 2)
+        self.assertNotIn(stale_old, json.dumps(retry_context))
+        self.assertNotIn(stale_new, json.dumps(retry_context))
+        self.assertIn("retry_context:", format_work_session_resume(resume))
+
+        context = build_work_model_context(
+            state,
+            session,
+            task,
+            "now",
+            allowed_read_roots=["."],
+            allowed_write_roots=["."],
+            prompt_context_mode="compact_memory",
+        )
+        rejected_call = next(call for call in context["work_session"]["tool_calls"] if call["id"] == 3)
+        self.assertTrue(rejected_call["resolved_write_body_omitted"])
+        self.assertEqual(rejected_call["parameters"]["omitted_write_body_fields"], ["new", "old"])
+        self.assertNotIn("old", rejected_call["parameters"])
+        self.assertNotIn("new", rejected_call["parameters"])
+        self.assertTrue(rejected_call["result"]["diff_omitted"])
+        self.assertNotIn("diff", rejected_call["result"])
+        self.assertNotIn(stale_old, json.dumps(rejected_call))
+        self.assertNotIn(stale_new, json.dumps(rejected_call))
+
+        fast_context = build_write_ready_work_model_context(context)
+        self.assertEqual(fast_context["retry_context"]["trigger"], "rejected_write")
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        self.assertEqual(tiny_context["retry_context"]["trigger"], "rejected_write")
+
+    def test_retry_context_summarizes_rolled_back_verifier_failure_without_diff_body(self):
+        from mew.work_loop import work_tool_call_for_model
+        from mew.work_session import build_work_session_resume
+
+        stale_body = "STALE_ROLLBACK_PATCH_BODY"
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Rolled back retry",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "edit_file",
+                    "status": "failed",
+                    "parameters": {"path": "src/mew/work_loop.py", "old": stale_body, "new": "replacement"},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "changed": True,
+                        "dry_run": False,
+                        "written": True,
+                        "rolled_back": True,
+                        "verification_exit_code": 1,
+                        "batch_rollback_reason": "batch verification failed",
+                        "diff": f"-{stale_body}\n+replacement\n",
+                    },
+                    "error": "batch verification failed",
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        retry_context = resume["retry_context"]
+        self.assertEqual(retry_context["trigger"], "rolled_back_write")
+        self.assertEqual(retry_context["verification_exit_code"], 1)
+        self.assertIn("batch verification failed", retry_context["batch_rollback_reason"])
+        self.assertNotIn(stale_body, json.dumps(retry_context))
+
+        prompt_call = work_tool_call_for_model(session["tool_calls"][0], prompt_context_mode="compact_memory")
+        self.assertTrue(prompt_call["resolved_write_body_omitted"])
+        self.assertNotIn("old", prompt_call["parameters"])
+        self.assertTrue(prompt_call["result"]["diff_omitted"])
+        self.assertNotIn("diff", prompt_call["result"])
+        self.assertNotIn(stale_body, json.dumps(prompt_call))
+
+    def test_retry_context_does_not_surface_superseded_rejected_write(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Superseded retry",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "notes.md", "old": "bad", "new": "worse"},
+                    "result": {"path": "notes.md", "dry_run": True, "changed": True, "written": False},
+                    "approval_status": "rejected",
+                    "rejection_reason": "wrong patch",
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "notes.md", "old": "bad", "new": "good"},
+                    "result": {"path": "notes.md", "dry_run": False, "changed": True, "written": True},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        self.assertEqual(build_work_session_resume(session)["retry_context"], {})
+
     def test_work_ai_batch_rejects_unpaired_mew_source_write(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

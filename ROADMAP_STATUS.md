@@ -301,6 +301,26 @@ Current M6.16 evidence:
   failure inside the mew run inherited `MEW_CODEX_REASONING_EFFORT=high` and is
   not counted as a product regression. Codex-ultra re-review reported no
   findings after the generic three-surface repair.
+- Task `#670` landed the GitHub issue `#4` rejected/rolled-back retry-context
+  compaction slice as supervisor-owned M6.16/M6.14 repair evidence after a
+  mew-first attempt failed to produce a patch. Session `#654` spent ten steps
+  on targeted inspection and write-ready cached-window refresh, then reached
+  `max_steps` without drafting. The supervisor-owned repair adds
+  `resume.retry_context` for rejected and rolled-back writes, omits raw
+  `old`/`new`/`content`/`edits` and `diff` bodies from resolved rejected or
+  rolled-back write tool calls in model prompts, propagates the compact
+  retry context into write-ready and deliberation focused contexts, and drops
+  stale retry context after a newer changed write supersedes it. Count this as
+  loop-substrate/product progress, not mew-first autonomy credit. Valid proof
+  passed:
+  `uv run pytest -q tests/test_work_session.py -k 'rejected or rolled_back or retry_context or patch_body or pending_approval or work_session_resume' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'write_ready or failed_patch_repair or rejection_frontier or retry_context' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py --no-testmon`,
+  `uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check`. Codex-ultra review session
+  `019dcaf1-2534-7a12-8812-e6927b62d586` first found stale supersession and
+  empty-diff-key issues, then re-review reported no findings after both
+  regressions were covered.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
