@@ -85,8 +85,8 @@ before starting a new mew coding operation. Never run the pull from
 6. Review with Codex/Codex CLI as reviewer/comparator/verifier when needed.
 7. Run the focused verifier.
 8. Write a local structured result report in the side-project report outbox.
-9. Only create a GitHub issue when there is a real problem that current-repo
-   Codex should process.
+9. Create GitHub issues only for real problems or reusable implementation-lane
+   polish findings. Keep normal progress in the local report/ledger.
 10. Stop instead of implementing directly when mew cannot complete the task.
 
 ## Current-Repo Model
@@ -142,9 +142,15 @@ The side-project Codex CLI should not need to update the main ledger directly.
 
 ## Problem Report Line
 
-Use GitHub issues only for problems. Do not use labels for the first version;
-GitHub's open/closed state is enough. Use the title prefix `[side-pj]` so main
-Codex can poll issues without labels.
+Use GitHub issues only for problems or reusable M6.16 implementation-lane
+polish findings. Do not use labels for the first version; GitHub's open/closed
+state is enough. Use the title prefix `[side-pj]` so main Codex can poll
+issues without labels.
+
+Do not upload the whole ledger as an issue. The ledger is the canonical local
+evidence record. Issues are work items extracted from that evidence. Create one
+issue per problem or polish finding, usually keyed by one repeated or reusable
+`failure_class`.
 
 Create one issue per problem when:
 
@@ -156,10 +162,30 @@ Create one issue per problem when:
   honestly
 - the failure appears to be a core mew loop/substrate problem
 
+Also create one issue per polish finding when the ledger shows a failure class
+or practical outcome that did not block the side project but would help M6.16
+make the implementation lane better. Examples:
+
+- repeated or reusable closeout gaps, such as missing README usage, CLI stdout
+  proof, output-file proof, or focused tests after the main implementation
+  passed
+- write/edit ergonomics that cost a turn, such as same-file hunks not being
+  collapsed before a write batch
+- verifier coverage gaps where the configured verifier passed but did not
+  prove the user-facing mode or acceptance contract
+- fast, successful reviewer-rejection recovery that still points to an
+  avoidable implementation-lane interruption
+
+Do not create polish issues for one-off normal progress, purely subjective
+observations, or rows whose only purpose is recording successful side-project
+work. Prefer a compact evidence summary with ledger row refs over pasting raw
+JSONL.
+
 The issue should include:
 
 - title prefix `[side-pj]`
 - side project and task summary
+- relevant ledger row(s), `failure_class`, outcome, and `rescue_edits`
 - command(s) used to operate mew
 - what mew attempted
 - verifier output or failure evidence
