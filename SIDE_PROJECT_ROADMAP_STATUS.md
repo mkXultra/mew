@@ -14,25 +14,23 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP1 mew-companion-log Scaffold | `done` | Scaffold landed after issue #1 repair; mew-authored source, fixture, README, and tests pass. |
 | SP2 Journal and Dream Reports | `done` | Morning, evening, and dream/learning fixture-driven outputs landed with focused tests. |
 | SP3 Implementation-Lane Evidence Cohort | `done` | Five side-project attempts are recorded; failures are classified and rescue edits remain zero. |
-| SP4 Optional Research Digest Slice | `not_started` | Deferred until SP1-SP3 produce useful evidence. |
-| SP5 Feed M6.16 | `in_progress` | The five-row cohort is ready to summarize into measured implementation-lane hardening work. |
+| SP4 Optional Research Digest Slice | `not_started` | Deferred; the first cohort already produced enough M6.16 implementation-lane evidence. |
+| SP5 Feed M6.16 | `done` | The five-row cohort is summarized into a measured M6.16 hardening recommendation. |
 
 ## Active Focus
 
-Active side-project focus: **SP5 Feed M6.16**.
+Active side-project focus: **first cohort complete**.
 
 Current target:
 
-- summarize the five-row `mew-companion-log` cohort for M6.16
-- name concrete implementation-lane bottlenecks from measured evidence, not
-  subjective impressions
+- keep the first `mew-companion-log` cohort as closed evidence for M6.16
+- return to the main roadmap unless the user explicitly asks for an optional
+  SP4 static research digest or another side-project cohort
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
-- preserve the current operating model: current-repo `./mew`, side-project
-  target directory under `experiments/mew-companion-log`, Codex as
+- preserve the current operating model for any future side-project cohort:
+  current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
-- defer SP4 unless an optional static research digest adds more evidence than
-  summarizing the existing cohort
 
 ## Evidence
 
@@ -125,26 +123,29 @@ Current target:
   returned `10 passed`. The default report CLI, morning journal stdout,
   evening journal stdout, dream/learning stdout, dream/learning `--output`
   path, and `git diff --check` were also verified.
+- SP5 summary artifact:
+  `docs/M6_16_SIDE_PROJECT_DOGFOOD_SUMMARY_2026-04-26.md`.
+- SP5 conclusion: the first M6.16 slice should target implementation closeout
+  completeness because practical rows were caused by missing README/CLI/test
+  acceptance proof, while first-edit latency was acceptable and structural
+  failure already routed through M6.14.
 
 ## Missing Proof
 
-- SP1, SP2, and SP3 are closed for the first `mew-companion-log` cohort.
-- SP5 still needs a compact M6.16 evidence summary that names bottlenecks,
-  rescue points, first-edit latency, and the next core hardening slice.
-- SP4 remains optional and should stay deferred unless the static research
-  digest would produce evidence that the five-row implementation cohort cannot.
+- SP1, SP2, SP3, and SP5 are closed for the first `mew-companion-log` cohort.
+- SP4 remains optional and deferred; it does not block M6.16 because the first
+  cohort already names measured implementation-lane bottlenecks.
 
 ## Next Action
 
-Continue SP5:
+Return to the main roadmap:
 
-1. create a compact side-project cohort summary from
-   `./mew side-dogfood report --json`
-2. map observed failure classes to M6.16 implementation-lane hardening inputs
-3. decide the next bounded core hardening slice or explicitly defer it with
-   rationale
-4. keep SP4 deferred unless additional side-project implementation evidence is
-   more useful than acting on the existing cohort
+1. keep `docs/M6_16_SIDE_PROJECT_DOGFOOD_SUMMARY_2026-04-26.md` as the M6.16
+   side-project input
+2. use implementation closeout completeness as the recommended first M6.16
+   hardening slice when M6.16 starts
+3. keep SP4 deferred unless the user asks for another side-project slice or
+   M6.16 needs more external implementation evidence
 
 ## Non-Goals
 

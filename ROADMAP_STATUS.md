@@ -49,7 +49,7 @@ is tracked below.
 | 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default, lane registry v0, mirror lane-scoped replay bundles, and deliberation preflight/budget primitives landed. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
-| 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
+| 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone; first side-project dogfood cohort now names implementation closeout completeness as the initial measured target. |
 | 6.17 Resident Meta Loop / Lane Chooser | `not_started` | Future supervisor milestone after lane telemetry, mirror/deliberation boundaries, and implementation-lane reliability are proven. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -114,6 +114,12 @@ Current M6.13 evidence:
   directory. Direct Codex CLI implementation must be recorded via
   `codex_cli_used_as` as `implementer` or `fallback` and does not count as
   mew-first autonomy credit.
+- The first side-project dogfood cohort is now summarized for M6.16 in
+  `docs/M6_16_SIDE_PROJECT_DOGFOOD_SUMMARY_2026-04-26.md`: five
+  `mew-companion-log` rows, `success_rate=0.8`, `rescue_edits_total=0`, one
+  closed M6.14 write-root repair, and a first hardening recommendation to
+  improve implementation closeout completeness for README/CLI/test acceptance
+  proof.
 
 - Task `#647` / session `#634` landed the first additive WorkTodo lane field
   on `_normalize_active_work_todo`: missing or empty lane normalizes to
@@ -649,7 +655,10 @@ Planned future milestones:
 
 - **M6.16 Codex-Grade Implementation Lane**: use M6.13 lane-attempt telemetry
   and the M6.13.2 side-project dogfood ledger to harden the authoritative
-  implementation lane. Broad refactoring belongs here only when a measured
+  implementation lane. The first side-project cohort recommends a bounded
+  closeout-completeness slice before latency work: make finish evidence account
+  for user-facing acceptance artifacts such as README commands, CLI stdout, and
+  output-file proof. Broad refactoring belongs here only when a measured
   bottleneck or recurring failure class is named with before/after proof.
 - **M6.17 Resident Meta Loop / Lane Chooser**: add a reviewer-gated resident
   supervisor after implementation-lane reliability and lane boundaries are
@@ -667,7 +676,7 @@ Planned future milestones:
 | M6.11 | MemoryExplore protocol full freeze/replay and agentization | Keep read-only provider for now; full agentization waits until a second planner will not obscure loop failures | M10 or later memory/explorer milestone | No |
 | M6.11 | Provider-specific prompt caching | Only when provider telemetry shows cache/latency as a direct blocker | M6.13 or later acceleration slice | No |
 | M6.12 | Governance/evaluator/adversarial wiring | First use M6.12 as read-only selector input in M6.8.5; automatic governance wiring needs a later explicit safety milestone | M6.8.5 read-only, later governance milestone | No |
-| Resident architecture | Codex-grade implementation lane hardening | After M6.13 emits enough lane-attempt telemetry to identify implementation-lane bottlenecks | M6.16 | No |
+| Resident architecture | Codex-grade implementation lane hardening | Side-project cohort summary exists; start after M6.13 scheduling/gate permits acting on M6.16 | M6.16 | No |
 | Resident architecture | Resident meta loop / lane chooser | After M6.13 lane boundaries and M6.16 implementation-lane reliability are proven | M6.17 | No |
 | Refactor policy | Broad work-loop/work-session refactoring | Defer until M6.16 unless the same reproducible failure class blocks M6.13 mew-first work twice and fits M6.14 repair | M6.16 or M6.14 repair | No |
 
@@ -751,8 +760,8 @@ Non-goals for the next session:
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
-- side-project dogfood; it is user-controlled and outside the current mainline
-  M6.13 task selection unless a reproducible core blocker is reported
+- new side-project dogfood collection; the first cohort is complete and should
+  be consumed later by M6.16 unless a reproducible core blocker is reported
 - M7 inbound-signal work
 - raw deliberation transcript storage
 - broad refactors not tied to lane telemetry or a repeated M6.14 repair-class
@@ -804,6 +813,12 @@ Latest M6.13 source/test validation:
   passed, `./mew side-dogfood template` printed the appendable schema, and
   `./mew side-dogfood report --json` returned an empty valid report for the
   default ledger.
+- M6.13.2 side-project cohort consumed for M6.16:
+  `./mew side-dogfood report --json` returned five `mew-companion-log` rows
+  with `success_rate=0.8` and `rescue_edits_total=0`;
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `10 passed`; `git diff --check` passed; the cohort summary is
+  `docs/M6_16_SIDE_PROJECT_DOGFOOD_SUMMARY_2026-04-26.md`.
 - task `#650` / session `#638`: replay metadata lane provenance/defaulting
 - task `#652`: M6.14 fast-path required-term stopword repair
 - `uv run pytest -q tests/test_work_replay.py --no-testmon` passed
