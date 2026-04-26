@@ -1,12 +1,26 @@
-# mew-ghost SP13 shell scaffold
+# mew-ghost SP14 presence shell
 
-`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP13 is fixture-driven by default and adds an explicit opt-in live macOS active-window probe: it does not import core mew code, read live `.mew` state, capture the screen, monitor hidden activity, use the network, or package a native app.
+`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP14 remains fixture-driven by default and adds a bounded deterministic presence loop over the SP13 explicit opt-in live macOS active-window probe: it does not import core mew code, read live `.mew` state, capture the screen, monitor hidden activity, use the network, or package a native app.
 
 ## What this slice provides
 
 - `ghost.py`: a standalone Python entrypoint/module.
-- `fixtures/sample_ghost_state.json`: deterministic input for ghost state and local HTML rendering.
-- `tests/test_mew_ghost.py`: focused tests for fixture rendering, explicit live-probe fallbacks, CLI output, isolation, and dry-run launch intents.
+- `fixtures/sample_ghost_state.json`: deterministic input for ghost state, presence classification, and local HTML rendering.
+- `tests/test_mew_ghost.py`: focused tests for fixture rendering, presence transitions, stable refresh snapshots, explicit live-probe fallbacks, CLI output, isolation, README usage, and dry-run launch intents.
+
+## Presence refresh contract
+
+Default rendering is local and fixture-safe. A render builds a bounded list of deterministic snapshots in-process and then stops. There is no background loop, hidden capture, screen capture, network access, live `.mew` read, or watcher.
+
+`build_presence_loop()` maps the fixture task/app/window inputs into visual/presence states:
+
+- `idle`: no active surface is available.
+- `attentive`: an active non-coding surface is available.
+- `coding`: coding tools, coding task metadata, terminal, or source-file windows are active.
+- `waiting`: the task/window text indicates waiting, pending review, or pause.
+- `blocked`: the live probe is permission-denied or task state is blocked/error.
+
+The CLI option `--refresh-count` controls how many snapshots are rendered and is clamped to a fixed local bound. Every snapshot is derived from the same fixture/probe input and stable fixture timestamp, so repeated renders produce identical state and HTML.
 
 ## Permission-safe probe contract
 
@@ -38,10 +52,10 @@ Render deterministic local HTML from the fixture:
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html
 ```
 
-Print deterministic JSON state:
+Print deterministic JSON state with five bounded refresh snapshots:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --refresh-count 5
 ```
 
 Explicitly opt into the live macOS active-window probe and print the structured fallback/result:

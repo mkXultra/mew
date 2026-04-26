@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Standalone SP13 mew-ghost shell scaffold.
+"""Standalone SP14 mew-ghost presence shell scaffold.
 
 The module is deliberately local and fixture-driven by default. It can perform
 an explicit opt-in macOS active app/window probe through osascript, renders a
 deterministic local HTML shell, exposes dry-run command intents, and uses no
-screen capture or hidden monitoring.
+screen capture, hidden monitoring, network access, live .mew reads, or core mew
+imports.
 """
 
 from __future__ import annotations
@@ -19,12 +20,15 @@ from html import escape
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-SCHEMA_VERSION = "mew-ghost.sp13.v1"
+SCHEMA_VERSION = "mew-ghost.sp14.v1"
 DEFAULT_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_ghost_state.json"
 ProbeProvider = Callable[[], Mapping[str, Any]]
 OsascriptRunner = Callable[..., subprocess.CompletedProcess[str]]
 WhichProvider = Callable[[str], str | None]
 OSASCRIPT_TIMEOUT_SECONDS = 2.0
+DEFAULT_REFRESH_COUNT = 3
+MAX_REFRESH_COUNT = 12
+PRESENCE_STATES = ("idle", "attentive", "coding", "waiting", "blocked")
 ACTIVE_WINDOW_OSASCRIPT = "\n".join(
     [
         'tell application "System Events"',
@@ -278,15 +282,133 @@ def build_launcher_intents(*, dry_run: bool = True) -> list[dict[str, Any]]:
     ]
 
 
+def _lower_text(*parts: object) -> str:
+    return " ".join(str(part or "") for part in parts).lower()
+
+
+def _task_mapping(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw = fixture.get("task")
+    return raw if isinstance(raw, Mapping) else {}
+
+
+def classify_presence(
+    *,
+    active_window: Mapping[str, Any],
+    task: Mapping[str, Any] | None = None,
+    ghost: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Map app/window/task state into one deterministic presence state."""
+    del ghost
+    task = task or {}
+    probe_status = str(active_window.get("status") or "unavailable")
+    reason = active_window.get("reason")
+    task_status = str(task.get("status") or "").lower()
+    task_kind = str(task.get("kind") or "").lower()
+    surface_text = _lower_text(active_window.get("active_app"), active_window.get("window_title"))
+    task_text = _lower_text(task.get("title"), task.get("description"))
+    combined_text = _lower_text(surface_text, task_text)
+
+    if probe_status == "permission_denied" or task_status in {"blocked", "error"}:
+        state = "blocked"
+        detail = "permission_or_task_blocked"
+    elif task_status in {"waiting", "paused", "review", "pending"} or any(
+        marker in combined_text for marker in ("waiting", "review", "pending", "blocked on")
+    ):
+        state = "waiting"
+        detail = "task_waiting"
+    elif task_kind == "coding" or any(
+        marker in combined_text
+        for marker in (
+            "code",
+            "coding",
+            "visual studio code",
+            "vscode",
+            "xcode",
+            "terminal",
+            ".py",
+        )
+    ):
+        state = "coding"
+        detail = "coding_surface"
+    elif probe_status == "available" or any(marker in surface_text for marker in ("notes", "browser", "safari")):
+        state = "attentive"
+        detail = "active_surface"
+    else:
+        state = "idle"
+        detail = str(reason or "no_active_surface")
+
+    return {
+        "state": state,
+        "detail": detail,
+        "allowed_states": list(PRESENCE_STATES),
+        "inputs": {
+            "probe_status": probe_status,
+            "probe_reason": reason,
+            "active_app": active_window.get("active_app"),
+            "window_title": active_window.get("window_title"),
+            "task_status": task.get("status"),
+            "task_kind": task.get("kind"),
+        },
+    }
+
+
+def normalize_refresh_count(value: int | str | None = DEFAULT_REFRESH_COUNT) -> int:
+    """Clamp refresh count to a bounded deterministic range."""
+    try:
+        parsed = int(value if value is not None else DEFAULT_REFRESH_COUNT)
+    except (TypeError, ValueError):
+        parsed = DEFAULT_REFRESH_COUNT
+    return max(1, min(parsed, MAX_REFRESH_COUNT))
+
+
+def build_presence_loop(
+    *,
+    fixture: Mapping[str, Any],
+    active_window: Mapping[str, Any],
+    ghost: Mapping[str, Any],
+    refresh_count: int | str | None = DEFAULT_REFRESH_COUNT,
+) -> dict[str, Any]:
+    """Render a bounded deterministic refresh contract without monitoring."""
+    count = normalize_refresh_count(refresh_count)
+    task = _task_mapping(fixture)
+    classified = classify_presence(active_window=active_window, task=task, ghost=ghost)
+    base_time = str(fixture.get("generated_at") or "fixture-time")
+    snapshots = [
+        {
+            "refresh_index": index,
+            "rendered_at": base_time,
+            "presence_state": classified["state"],
+            "visual_state": classified["state"],
+            "detail": classified["detail"],
+            "active_app": active_window.get("active_app"),
+            "window_title": active_window.get("window_title"),
+            "task_title": task.get("title"),
+        }
+        for index in range(count)
+    ]
+    return {
+        "contract": "bounded_deterministic_refresh",
+        "refresh_count": count,
+        "max_refresh_count": MAX_REFRESH_COUNT,
+        "background_monitoring": False,
+        "hidden_capture": False,
+        "network": False,
+        "live_mew_reads": False,
+        "classification": classified,
+        "snapshots": snapshots,
+    }
+
+
 def build_ghost_state(
     fixture: Mapping[str, Any],
     *,
     probe_provider: ProbeProvider | None = None,
     platform_name: str | None = None,
+    refresh_count: int | str | None = DEFAULT_REFRESH_COUNT,
 ) -> dict[str, Any]:
     """Build deterministic ghost state from a fixture plus optional probe."""
-    ghost = fixture.get("ghost")
-    if not isinstance(ghost, Mapping):
+    ghost_raw = fixture.get("ghost")
+    if not isinstance(ghost_raw, Mapping):
         raise ValueError("ghost fixture requires a 'ghost' object")
 
     if probe_provider is None and isinstance(fixture.get("probe"), Mapping):
@@ -294,17 +416,26 @@ def build_ghost_state(
     else:
         probe = probe_active_window(probe_provider, platform_name=platform_name)
 
+    ghost = {
+        "name": str(ghost_raw.get("name") or "mew-ghost"),
+        "mood": str(ghost_raw.get("mood") or "neutral"),
+        "message": str(ghost_raw.get("message") or "ready"),
+        "focus": str(ghost_raw.get("focus") or "local shell"),
+    }
+    presence = build_presence_loop(
+        fixture=fixture,
+        active_window=probe,
+        ghost=ghost,
+        refresh_count=refresh_count,
+    )
+
     return {
         "schema_version": SCHEMA_VERSION,
         "fixture_name": str(fixture.get("fixture_name") or "unknown"),
         "generated_at": str(fixture.get("generated_at") or "fixture-time"),
-        "ghost": {
-            "name": str(ghost.get("name") or "mew-ghost"),
-            "mood": str(ghost.get("mood") or "neutral"),
-            "message": str(ghost.get("message") or "ready"),
-            "focus": str(ghost.get("focus") or "local shell"),
-        },
+        "ghost": ghost,
         "active_window": probe,
+        "presence": presence,
         "launch_intents": build_launcher_intents(dry_run=True),
     }
 
@@ -313,6 +444,8 @@ def render_local_html(state: Mapping[str, Any]) -> str:
     """Render deterministic local HTML for the ghost shell."""
     ghost = state["ghost"]
     probe = state["active_window"]
+    presence = state["presence"]
+    classification = presence["classification"]
     intents = state["launch_intents"]
 
     intent_items = "\n".join(
@@ -323,6 +456,16 @@ def render_local_html(state: Mapping[str, Any]) -> str:
         + " <strong>(dry-run)</strong></li>"
         for intent in intents
     )
+    snapshot_items = "\n".join(
+        "        <li>refresh "
+        + escape(str(snapshot["refresh_index"]))
+        + ": <strong>"
+        + escape(snapshot["presence_state"])
+        + "</strong> — "
+        + escape(snapshot["detail"])
+        + "</li>"
+        for snapshot in presence["snapshots"]
+    )
     state_json = escape(json.dumps(state, indent=2, sort_keys=True))
 
     return "\n".join(
@@ -331,7 +474,7 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             "<html lang=\"en\">",
             "  <head>",
             "    <meta charset=\"utf-8\">",
-            "    <title>mew-ghost SP13 shell</title>",
+            "    <title>mew-ghost SP14 presence shell</title>",
             "    <style>",
             "      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; background: #111827; color: #f9fafb; }",
             "      main { max-width: 780px; }",
@@ -339,6 +482,7 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             "      code, pre { background: #030712; color: #d1fae5; padding: 0.15rem 0.3rem; border-radius: 6px; }",
             "      pre { padding: 1rem; overflow-x: auto; }",
             "      .status { color: #93c5fd; }",
+            "      .presence { color: #fcd34d; }",
             "    </style>",
             "  </head>",
             "  <body>",
@@ -349,6 +493,14 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             "        <p><strong>Mood:</strong> " + escape(ghost["mood"]) + "</p>",
             "        <p><strong>Focus:</strong> " + escape(ghost["focus"]) + "</p>",
             "        <p>" + escape(ghost["message"]) + "</p>",
+            "      </section>",
+            "      <section>",
+            "        <h2>Presence loop</h2>",
+            "        <p class=\"presence\"><strong>Presence:</strong> " + escape(classification["state"]) + "</p>",
+            "        <p><strong>Refresh contract:</strong> " + escape(presence["contract"]) + " (" + escape(str(presence["refresh_count"])) + " snapshots)</p>",
+            "        <ul>",
+            snapshot_items,
+            "        </ul>",
             "      </section>",
             "      <section>",
             "        <h2>Active app/window probe</h2>",
@@ -380,9 +532,15 @@ def render_fixture(
     *,
     probe_provider: ProbeProvider | None = None,
     platform_name: str | None = None,
+    refresh_count: int | str | None = DEFAULT_REFRESH_COUNT,
 ) -> tuple[dict[str, Any], str]:
     fixture = load_fixture(path)
-    state = build_ghost_state(fixture, probe_provider=probe_provider, platform_name=platform_name)
+    state = build_ghost_state(
+        fixture,
+        probe_provider=probe_provider,
+        platform_name=platform_name,
+        refresh_count=refresh_count,
+    )
     return state, render_local_html(state)
 
 
@@ -391,10 +549,16 @@ def main(
     *,
     live_probe_provider: ProbeProvider | None = None,
 ) -> int:
-    parser = argparse.ArgumentParser(description="Render the SP13 mew-ghost shell")
+    parser = argparse.ArgumentParser(description="Render the SP14 mew-ghost presence shell")
     parser.add_argument("--fixture", default=str(DEFAULT_FIXTURE), help="local JSON fixture to render")
     parser.add_argument("--output", help="write rendered output to this path")
     parser.add_argument("--format", choices=("html", "state"), default="html")
+    parser.add_argument(
+        "--refresh-count",
+        type=int,
+        default=DEFAULT_REFRESH_COUNT,
+        help=f"bounded deterministic snapshot count, clamped to 1..{MAX_REFRESH_COUNT}",
+    )
     parser.add_argument(
         "--live-active-window",
         action="store_true",
@@ -406,7 +570,7 @@ def main(
     if args.live_active_window:
         provider = live_probe_provider or make_macos_osascript_probe_provider()
 
-    state, html = render_fixture(args.fixture, probe_provider=provider)
+    state, html = render_fixture(args.fixture, probe_provider=provider, refresh_count=args.refresh_count)
     rendered = json.dumps(state, indent=2, sort_keys=True) + "\n" if args.format == "state" else html
 
     if args.output:

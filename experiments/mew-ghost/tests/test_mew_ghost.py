@@ -10,7 +10,7 @@ README_PATH = ROOT / "README.md"
 GHOST_PATH = ROOT / "ghost.py"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_ghost_state.json"
 
-spec = importlib.util.spec_from_file_location("mew_ghost_sp13", GHOST_PATH)
+spec = importlib.util.spec_from_file_location("mew_ghost_sp14", GHOST_PATH)
 ghost = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(ghost)
@@ -26,12 +26,68 @@ def test_fixture_builds_deterministic_state_and_html() -> None:
 
     assert state_one == state_two
     assert html_one == html_two
-    assert state_one["schema_version"] == "mew-ghost.sp13.v1"
+    assert state_one["schema_version"] == "mew-ghost.sp14.v1"
     assert state_one["active_window"]["status"] == "available"
     assert state_one["active_window"]["active_app"] == "Visual Studio Code"
+    assert state_one["presence"]["classification"]["state"] == "coding"
+    assert [snapshot["presence_state"] for snapshot in state_one["presence"]["snapshots"]] == [
+        "coding",
+        "coding",
+        "coding",
+    ]
     assert "Ghost is watching VS Code without screen capture." in html_one
     assert "Writing the SP12 scaffold" in html_one
-    assert "mew-ghost.sp13.v1" in html_one
+    assert "mew-ghost.sp14.v1" in html_one
+    assert "bounded_deterministic_refresh" in html_one
+
+
+def test_presence_classifies_idle_attentive_coding_waiting_and_blocked() -> None:
+    base_probe = {
+        "status": "available",
+        "reason": None,
+        "active_app": "Notes",
+        "window_title": "planning",
+    }
+
+    idle = ghost.classify_presence(
+        active_window={"status": "unavailable", "reason": "requires_macos"},
+        task={"status": "ready"},
+        ghost={"focus": "local shell"},
+    )
+    attentive = ghost.classify_presence(active_window=base_probe, task={"status": "ready"})
+    coding = ghost.classify_presence(
+        active_window={**base_probe, "active_app": "Visual Studio Code", "window_title": "ghost.py"},
+        task={"status": "ready", "kind": "coding"},
+    )
+    waiting = ghost.classify_presence(active_window=base_probe, task={"status": "waiting"})
+    blocked = ghost.classify_presence(active_window={"status": "permission_denied"}, task={"status": "ready"})
+
+    assert [idle["state"], attentive["state"], coding["state"], waiting["state"], blocked["state"]] == [
+        "idle",
+        "attentive",
+        "coding",
+        "waiting",
+        "blocked",
+    ]
+    assert blocked["allowed_states"] == ["idle", "attentive", "coding", "waiting", "blocked"]
+
+
+def test_presence_loop_is_bounded_deterministic_and_fixture_safe() -> None:
+    fixture = ghost.load_fixture(FIXTURE_PATH)
+
+    state_one = ghost.build_ghost_state(fixture, refresh_count=99)
+    state_two = ghost.build_ghost_state(fixture, refresh_count=99)
+
+    assert state_one["presence"] == state_two["presence"]
+    assert state_one["presence"]["refresh_count"] == ghost.MAX_REFRESH_COUNT
+    assert len(state_one["presence"]["snapshots"]) == ghost.MAX_REFRESH_COUNT
+    assert state_one["presence"]["background_monitoring"] is False
+    assert state_one["presence"]["hidden_capture"] is False
+    assert state_one["presence"]["network"] is False
+    assert state_one["presence"]["live_mew_reads"] is False
+    assert [snapshot["refresh_index"] for snapshot in state_one["presence"]["snapshots"]] == list(
+        range(ghost.MAX_REFRESH_COUNT)
+    )
 
 
 def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
@@ -45,7 +101,7 @@ def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
 
     assert calls == []
     assert unavailable == {
-        "schema_version": "mew-ghost.sp13.v1",
+        "schema_version": "mew-ghost.sp14.v1",
         "status": "unavailable",
         "reason": "requires_macos",
         "platform": "Linux",
@@ -206,7 +262,7 @@ def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
     html_output = tmp_path / "ghost.html"
     state_output = tmp_path / "ghost-state.json"
 
-    assert ghost.main(["--fixture", str(FIXTURE_PATH), "--output", str(html_output)]) == 0
+    assert ghost.main(["--fixture", str(FIXTURE_PATH), "--output", str(html_output), "--refresh-count", "2"]) == 0
     assert ghost.main([
         "--fixture",
         str(FIXTURE_PATH),
@@ -214,20 +270,26 @@ def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
         "state",
         "--output",
         str(state_output),
+        "--refresh-count",
+        "2",
     ]) == 0
 
     html = html_output.read_text(encoding="utf-8")
     state = json.loads(state_output.read_text(encoding="utf-8"))
 
     assert html.startswith("<!doctype html>")
-    assert "<title>mew-ghost SP13 shell</title>" in html
+    assert "<title>mew-ghost SP14 presence shell</title>" in html
+    assert "refresh 0" in html
+    assert "refresh 1" in html
     assert state["fixture_name"] == "sample_ghost_state"
+    assert state["presence"]["refresh_count"] == 2
+    assert state["presence"]["snapshots"][0]["presence_state"] == "coding"
     assert state["launch_intents"][0]["command"] == ["mew", "chat"]
 
 
 def test_cli_live_opt_in_uses_injected_provider_for_stdout(capsys) -> None:
     assert ghost.main(
-        ["--fixture", str(FIXTURE_PATH), "--format", "state", "--live-active-window"],
+        ["--fixture", str(FIXTURE_PATH), "--format", "state", "--live-active-window", "--refresh-count", "1"],
         live_probe_provider=lambda: {
             "active_app": "Safari",
             "window_title": "mew-ghost notes",
@@ -239,6 +301,8 @@ def test_cli_live_opt_in_uses_injected_provider_for_stdout(capsys) -> None:
 
     assert state["active_window"]["status"] == "available"
     assert state["active_window"]["active_app"] == "Safari"
+    assert state["presence"]["refresh_count"] == 1
+    assert state["presence"]["classification"]["state"] == "attentive"
     assert state["launch_intents"][0]["dry_run"] is True
 
 
@@ -252,7 +316,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
 
     assert usage_lines == [
         "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html",
-        "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state",
+        "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --refresh-count 5",
         "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window",
     ]
     assert all(not line.startswith("python experiments/mew-ghost/ghost.py") for line in usage_lines)
@@ -268,3 +332,5 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert "screen capture" in source
     assert "hidden monitoring" in source
     assert "--live-active-window" in source
+    assert "network" in source
+    assert "live_mew_reads" in source

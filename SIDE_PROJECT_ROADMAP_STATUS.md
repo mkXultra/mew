@@ -24,19 +24,22 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP11 Second Side-Project Gate | `done` | Gate landed practical: the recommendation is to pause new side-project work and feed SP6-SP10 evidence into core M6.16/M9/M11 before starting a second isolated side project. |
 | SP12 mew-ghost macOS Shell Scaffold | `done` | Scaffold landed practical: isolated `experiments/mew-ghost` shell, permission-safe macOS probe contract, deterministic HTML/state rendering, dry-run `mew chat`/`mew code` intents, README usage, local report, and focused tests are in place. |
 | SP13 mew-ghost Live macOS Probe Integration | `done` | Live probe integration landed practical: explicit `--live-active-window` opt-in, injectable `osascript` runner/provider, structured fallbacks, README usage, output proof, and hermetic tests are in place. |
-| SP14 mew-ghost Presence Loop | `planned` | Next slice: add a bounded deterministic refresh/presence loop on top of the SP13 probe/state contract. |
-| SP15 mew-ghost Launcher Contract | `not_started` | Deferred until visual presence and command-intent surfaces are stable. |
+| SP14 mew-ghost Presence Loop | `done` | Presence loop landed practical: deterministic idle/attentive/coding/waiting/blocked classification, bounded refresh snapshots, README refresh contract, output proof, and focused tests are in place. |
+| SP15 mew-ghost Launcher Contract | `planned` | Next slice: finish safe launch behavior for mew chat/code actions with dry-run by default and opt-in execution outside tests. |
 
 ## Active Focus
 
-Active side-project focus: **SP14 mew-ghost Presence Loop**.
+Active side-project focus: **SP15 mew-ghost Launcher Contract**.
 
 Current target:
 
 - keep `mew-ghost` isolated under `experiments/mew-ghost`
 - keep live macOS probing explicit through `--live-active-window`
-- add a bounded deterministic presence loop over the existing state renderer
-  without background monitoring or hidden capture
+- finish the launcher contract for `mew chat` and `mew code`
+- keep launch behavior dry-run by default, with any direct execution opt-in and
+  outside tests
+- preserve the bounded deterministic presence loop without background
+  monitoring or hidden capture
 - preserve structured fallback for missing `osascript`, non-macOS platforms,
   permission denial, empty probe results, malformed output, and timeouts
 - focused verifier remains:
@@ -335,26 +338,53 @@ Current target:
   also verified.
 - Reusable polish issue opened:
   `https://github.com/mkXultra/mew/issues/10`.
+- Task `#14` / session `#27` added the SP14 bounded presence loop with Codex
+  CLI as `operator` and mew as first implementer. Mew authored deterministic
+  presence classification for `idle`, `attentive`, `coding`, `waiting`, and
+  `blocked`; bounded refresh snapshots; the rendered HTML presence section;
+  README refresh-contract documentation; CLI `--refresh-count`; and hermetic
+  tests under `experiments/mew-ghost`.
+- Session `#27` first hit an invalid JSON model response before edits, then a
+  source-only batch whose verifier failed because tests and README were not
+  updated. After operator rejection, mew produced a complete source/tests/README
+  batch; the first complete batch failed one expectation for Safari notes
+  classification, then mew repaired it in the same session.
+- Stale failed approvals remained after the corrected batch passed, repeating
+  issue `#10`; the issue was updated with SP14 evidence.
+- mew-ghost SP14 local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/14-presence-loop-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `15`;
+  outcome `practical`, failure class
+  `presence_loop_json_parse_source_only_and_stale_approval_repair`,
+  `rescue_edits=0`.
+- mew-ghost SP14 verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+  returned `15 passed`. Default state CLI with refresh count, explicit live
+  opt-in state CLI, HTML `--output`, state `--output`, rendered HTML content
+  checks, `git diff --check`, and scoped no-core/no-live-state coupling
+  searches were also verified.
 
 ## Missing Proof
 
 - SP1 through SP11 are closed for the first `mew-companion-log` cohort.
 - SP12 is closed for the second `mew-ghost` cohort.
 - SP13 is closed for the second `mew-ghost` cohort.
-- SP14 has not started; no bounded presence refresh loop exists yet.
+- SP14 is closed for the second `mew-ghost` cohort.
+- SP15 has not started; safe launch execution behavior beyond dry-run intents
+  is not yet defined.
 - Open `[side-pj]` implementation-lane polish issues remain M6.16 input and do
   not block the isolated `mew-ghost` scaffold unless the same failure repeats.
 
 ## Next Action
 
-Start SP14 with mew as first implementer:
+Start SP15 with mew as first implementer:
 
-1. create a coding task for `mew-ghost` SP14
+1. create a coding task for `mew-ghost` SP15
 2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
    with `--model gpt-5.5`
 3. allow writes only under `experiments/mew-ghost`
-4. implement a bounded presence loop that can render multiple deterministic
-   state snapshots without background monitoring
+4. finish the launcher contract for `mew chat` / `mew code`, keeping dry-run as
+   the default and direct execution opt-in/outside tests
 5. verify with
    `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
 6. write a local side-dogfood report before appending to the canonical ledger

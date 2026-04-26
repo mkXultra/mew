@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "task_id": 14,
+  "session_id": 27,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Add a bounded deterministic presence loop to mew-ghost, including idle/attentive/coding/waiting/blocked classification, stable refresh snapshots, README refresh contract, CLI/output proof, and hermetic tests.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 116.0,
+  "read_turns_before_edit": 5.0,
+  "files_changed": [
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/14-presence-loop-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "git diff --check",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --refresh-count 2",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost-sp14.html --refresh-count 2",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --output /tmp/mew-ghost-sp14-state.json --refresh-count 2",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --refresh-count 1",
+    "rg -n \"mew-ghost SP14 presence shell|bounded_deterministic_refresh|refresh 0|refresh 1|mew chat|mew code\" /tmp/mew-ghost-sp14.html",
+    "jq '.schema_version, .presence.refresh_count, .presence.snapshots[0].presence_state, .launch_intents[0].command' /tmp/mew-ghost-sp14-state.json"
+  ],
+  "reviewer_rejections": 4,
+  "verifier_failures": 2,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "presence_loop_json_parse_source_only_and_stale_approval_repair",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/27/snapshot.json",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/14-presence-loop-practical.json",
+    "/tmp/mew-ghost-sp14.html",
+    "/tmp/mew-ghost-sp14-state.json",
+    "https://github.com/mkXultra/mew/issues/10#issuecomment-4322151239"
+  ],
+  "commit": "",
+  "notes": "SP14 was implemented by mew in session #27 with --model gpt-5.5, --auth /Users/mk/.codex/auth.json, and write scope limited to experiments/mew-ghost. Before work, origin/main was repeatedly pulled/rebased from the current repo root as required. The first implementation draft failed before edits because the model emitted invalid JSON while preparing a large batch. Mew then proposed a source-only patch #320; auto-approval failed the focused verifier because tests and README were not updated with the source. Operator rejected #320 and steered toward one complete source+tests+README batch. Mew proposed complete batch #325-#327; verifier failed because a live Safari notes case was classified as coding instead of attentive. Mew repaired with corrected batch #333-#335; auto-approval #336-#338 applied the corrected files and the focused verifier passed 15 tests. Operator rejected stale approvals #325-#327 after the corrected batch had already applied and commented on existing issue #10 because the stale failed approval pattern repeated. No Codex product-code rescue edits were made. Real live macOS Accessibility success remains intentionally unrequired; live opt-in behavior is covered by injected providers/runners plus a manual structured fallback command."
+}
