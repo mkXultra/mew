@@ -40,8 +40,8 @@ is tracked below.
 | 6.5 Self-Hosting Speed | `done` | Compact resident rerun produced a verified paired edit proposal with first THINK under 10s. |
 | 6.6 Coding Competence: Codex CLI Parity | `done` | Bootstrap, comparator slots, and frozen Codex CLI side-by-side batch passed with recorded caveats. |
 | 6.7 Supervised Self-Hosting Loop | `done` | Reviewer-gated supervised iterations, reentry, and detached close-watch satisfied the gate. |
-| 6.8 Task Chaining: Supervised Self-Selection | `in_progress` | Active. Build safe reviewer-approved chained task selection. |
-| 6.8.5 Selector Intelligence and Curriculum Integration | `not_started` | Planned immediately after M6.8 core; formal home for M6.9 Phase 4. |
+| 6.8 Task Chaining: Supervised Self-Selection | `done` | Close gate passed via `docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`. |
+| 6.8.5 Selector Intelligence and Curriculum Integration | `not_started` | Active next. Add intelligence signals on top of the closed M6.8 approval contract. |
 | 6.9 Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`; Phase 4 moved to M6.8.5. |
 | 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
@@ -57,29 +57,27 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.8 Task Chaining: Supervised Self-Selection**.
+Active work: **M6.8.5 Selector Intelligence and Curriculum Integration**.
 
-Why M6.8 is active:
+Why M6.8.5 is active:
 
-- M6.9 is closed, but its Phase 4 curriculum/habit/preference work depends on
-  task chaining and is now scheduled as M6.8.5.
-- The current resident capability gap is task selection: mew still needs the
-  human/Codex supervisor to choose each next bounded roadmap task.
-- The next step toward a resident execution shell is not more memory or more
-  polish. It is safe chained task proposal under reviewer approval.
+- M6.8 closed the safe reviewer-approved task handoff contract.
+- M6.9 Phase 4 curriculum/habit/preference work was deliberately deferred
+  until that contract existed, and now belongs here.
+- The current resident capability gap is task quality: mew can chain safe
+  bounded tasks, but selection is still shallow and mostly depends on prepared
+  ready tasks.
 
-Current M6.8 target:
+Current M6.8.5 target:
 
-- mew proposes the next bounded roadmap task at iteration close
-- reviewer approval is required before execution
-- the proposal records `previous_task_id` and `selector_reason`
-- the proposal reserves optional future fields for M6.8.5:
-  `memory_signal_refs`, `failure_cluster_reason`, and `preference_signal_refs`
-- selector-owned output cannot touch roadmap-status, milestone-close, or
+- use the closed M6.8 selector ledger as the approval/scope substrate
+- add read-only selector intelligence signals from failure clusters,
+  preference evidence, and reviewer history
+- keep reviewer approval mandatory before handoff execution
+- keep selector-owned output away from roadmap-status, milestone-close, and
   governance files
-- drift canary and proof-or-revert discipline remain active across the chain
 
-Current M6.8 evidence:
+Closed M6.8 evidence:
 
 - Task `#628` / session `#612` landed the first mew-first selector-contract
   slice: `build_task_selector_proposal()` in `src/mew/tasks.py` produces a
@@ -281,10 +279,13 @@ M6.8 is done when:
 - attempting chained execution without reviewer approval is rejected and logged
   as a governance violation
 
+M6.8 close result: **done**. The recorded audit is
+`docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`.
+
 ## Next Milestone
 
-Next scheduled milestone after M6.8: **M6.8.5 Selector Intelligence and
-Curriculum Integration**.
+Current scheduled milestone: **M6.8.5 Selector Intelligence and Curriculum
+Integration**.
 
 M6.8.5 absorbs M6.9 Phase 4. Do not reopen M6.9 just to implement these:
 
@@ -294,7 +295,7 @@ M6.8.5 absorbs M6.9 Phase 4. Do not reopen M6.9 just to implement these:
 - read-only M6.12/M6.14 selector evidence
 - selector traces that explain why a task was chosen
 
-M6.8.5 should not start until M6.8 core proves the safe chained approval loop.
+M6.8.5 may now start because M6.8 core proved the safe chained approval loop.
 
 ## Post-Close Deferred Ledger
 
@@ -369,33 +370,32 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.8 -> supervised selector contract -> chained proof run with approved handoff`
+`M6.8.5 -> selector intelligence -> read-only failure-cluster signal v0`
 
 Acceptable near-term work:
 
-- run the M6.8 proof chain from an approved selector handoff
-- preserve optional signal refs for M6.8.5, but do not implement
-  curriculum/habit/preference selector policy in M6.8 core
-- prove three consecutive bounded mew-first iterations can be selected,
-  approved, handed off, and reviewed without supervisor product edits
+- add the smallest read-only selector signal that helps mew choose better
+  bounded tasks without changing the M6.8 approval contract
+- start with failure-cluster evidence because it already exists in M6.12/M6.14
+  surfaces and can be attached as `failure_cluster_reason`
+- keep all selector execution reviewer-approved; no auto-dispatch
 
 Non-goals for the next session:
 
-- M6.8.5 curriculum/habit/preference policy before M6.8 core closes
+- autonomous execution or auto-merge
 - M6.13 deliberation lane
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
 - M7 inbound-signal work
-- broad refactors or polish not mapped to the M6.8 gate
+- broad refactors or polish not mapped to the M6.8.5 gate
 
 ## Latest Validation
 
-Latest committed code baseline: `6e1f805 Track selector handoff chain`.
+Latest committed code baseline: `ab73636 Summarize selector proof streak`.
 
-Current uncommitted change: M6.8 selector consecutive proof summary v0 in
-`src/mew/commands.py`, `tests/test_commands.py`, and this roadmap status file;
-validation listed above under task `#638`.
+Current uncommitted change: M6.8 close-gate audit and roadmap-status focus
+switch to M6.8.5. No source/test code changed after `ab73636`.
 
 Observed in this cleanup session:
 
@@ -403,8 +403,8 @@ Observed in this cleanup session:
 - detailed pre-compression `ROADMAP_STATUS.md` was archived to
   `docs/archive/ROADMAP_STATUS_detailed_2026-04-26.md`
 
-Behavioral validation for the active source/test change is listed above under
-task `#638`.
+Behavioral validation for the latest source/test change is listed above under
+task `#638`; this closeout edit is documentation/status only.
 
 ## Maintenance Rule
 
