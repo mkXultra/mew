@@ -25,19 +25,21 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP12 mew-ghost macOS Shell Scaffold | `done` | Scaffold landed practical: isolated `experiments/mew-ghost` shell, permission-safe macOS probe contract, deterministic HTML/state rendering, dry-run `mew chat`/`mew code` intents, README usage, local report, and focused tests are in place. |
 | SP13 mew-ghost Live macOS Probe Integration | `done` | Live probe integration landed practical: explicit `--live-active-window` opt-in, injectable `osascript` runner/provider, structured fallbacks, README usage, output proof, and hermetic tests are in place. |
 | SP14 mew-ghost Presence Loop | `done` | Presence loop landed practical: deterministic idle/attentive/coding/waiting/blocked classification, bounded refresh snapshots, README refresh contract, output proof, and focused tests are in place. |
-| SP15 mew-ghost Launcher Contract | `planned` | Next slice: finish safe launch behavior for mew chat/code actions with dry-run by default and opt-in execution outside tests. |
+| SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
 
 ## Active Focus
 
-Active side-project focus: **SP15 mew-ghost Launcher Contract**.
+Active side-project focus: **SP15 mew-ghost Launcher Contract complete**.
 
-Current target:
+Current state:
 
 - keep `mew-ghost` isolated under `experiments/mew-ghost`
-- keep live macOS probing explicit through `--live-active-window`
-- finish the launcher contract for `mew chat` and `mew code`
-- keep launch behavior dry-run by default, with any direct execution opt-in and
-  outside tests
+- `mew chat` and `mew code` are represented as explicit command arrays
+- launcher state remains dry-run by default with `side_effects: "none"` and
+  `execution.status: "dry_run"`
+- direct launcher execution is gated behind explicit `--execute-launchers`;
+  automated tests use an injected runner and do not spawn real `mew`
+- live macOS probing remains explicit through `--live-active-window`
 - preserve the bounded deterministic presence loop without background
   monitoring or hidden capture
 - preserve structured fallback for missing `osascript`, non-macOS platforms,
@@ -48,9 +50,14 @@ Current target:
   set for future product planning and contract checks
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
+- route the repeated stale failed-approval cleanup pattern as open issue `#10`
+  evidence for M6.16 implementation-lane hardening
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
+- no further `mew-ghost` side-project milestone is currently planned after
+  SP15; the next step is to decide whether to add another side-project arc or
+  feed the accumulated evidence into M6.16/M9/M11.
 
 ## Evidence
 
@@ -59,6 +66,10 @@ Current target:
   `mew side-dogfood report`.
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP15 on 2026-04-26: `rows_total=16`, one `failed`, twelve `practical`,
+  three `clean`, `success_rate=0.938`, `structural_repairs_required=1`, and
+  `rescue_edits_total=0`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
   twelve `mew-companion-log` rows on 2026-04-26: `rows_total=12`, one `failed`,
   eight `practical`, three `clean`, `success_rate=0.917`,
@@ -363,6 +374,31 @@ Current target:
   opt-in state CLI, HTML `--output`, state `--output`, rendered HTML content
   checks, `git diff --check`, and scoped no-core/no-live-state coupling
   searches were also verified.
+- Task `#15` / sessions `#28` through `#30` added the SP15 launcher contract
+  with Codex CLI as `operator` and mew as first implementer. Mew authored
+  explicit `mew chat` and `mew code` command intents, default dry-run execution
+  metadata, the `--execute-launchers` opt-in gate, injected-runner tests that do
+  not spawn real `mew`, README usage, and the SP15 local report under
+  `experiments/mew-ghost`.
+- Session `#28` produced the first launcher-contract batch, but verifier
+  failure left stale pending approvals after SP14 schema expectations were not
+  fully updated. Operator rejected the stale failed approvals and updated issue
+  `#10` with SP15 recurrence evidence. Session `#29` completed the product
+  implementation and verifier pass. Session `#30` rewrote only the local
+  report into canonical side-dogfood schema after operator review found the
+  first report was not appendable.
+- mew-ghost SP15 local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/15-launcher-contract-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `16`;
+  outcome `practical`, failure class
+  `launcher_contract_retry_and_report_schema_followup`, `rescue_edits=0`.
+- mew-ghost SP15 verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+  returned `16 passed`. `git diff --check`, dry-run state output, HTML output,
+  rendered HTML content checks, explicit live-probe fallback output, and
+  temporary side-dogfood ledger append validation were also verified. Real
+  `--execute-launchers` execution remains intentionally outside automated
+  verification and requires local operator opt-in.
 
 ## Missing Proof
 
@@ -370,24 +406,24 @@ Current target:
 - SP12 is closed for the second `mew-ghost` cohort.
 - SP13 is closed for the second `mew-ghost` cohort.
 - SP14 is closed for the second `mew-ghost` cohort.
-- SP15 has not started; safe launch execution behavior beyond dry-run intents
-  is not yet defined.
+- SP15 is closed for the second `mew-ghost` cohort.
+- No planned side-project milestone remains after SP15.
+- Real local execution of `--execute-launchers` is intentionally unverified by
+  automation because it would spawn `mew chat` and `mew code`; the opt-in gate
+  is covered by injected-runner tests and dry-run output proof.
 - Open `[side-pj]` implementation-lane polish issues remain M6.16 input and do
   not block the isolated `mew-ghost` scaffold unless the same failure repeats.
 
 ## Next Action
 
-Start SP15 with mew as first implementer:
+Complete SP15 closeout:
 
-1. create a coding task for `mew-ghost` SP15
-2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
-   with `--model gpt-5.5`
-3. allow writes only under `experiments/mew-ghost`
-4. finish the launcher contract for `mew chat` / `mew code`, keeping dry-run as
-   the default and direct execution opt-in/outside tests
-5. verify with
-   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
-6. write a local side-dogfood report before appending to the canonical ledger
+1. mark task `#15` done
+2. commit the SP15 implementation, local report, ledger row, and this status
+   update
+3. then decide the next side-project direction: add another isolated arc, add
+   post-SP15 `mew-ghost` milestones, or pause side-project implementation and
+   feed rows `13` through `16` into M6.16/M9/M11 planning.
 
 ## Non-Goals
 

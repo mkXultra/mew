@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "task_id": 15,
+  "session_id": 29,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Finish the isolated mew-ghost launcher contract: represent mew chat and mew code as explicit commands, keep dry-run as the default, add direct execution only behind an explicit opt-in outside tests, update README examples for safe dry-run and live macOS usage, and leave local dogfood report evidence for the mew-ghost arc.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4.0,
+  "files_changed": [
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/15-launcher-contract-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "git diff --check",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --refresh-count 5 --output /tmp/mew-ghost-sp15-state.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost-sp15.html",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --output /tmp/mew-ghost-sp15-live-state.json",
+    "jq '.schema_version, .launch_intents[0].command, .launch_intents[0].execution.status, .presence.refresh_count' /tmp/mew-ghost-sp15-state.json",
+    "jq '.active_window.status, .active_window.reason, .launch_intents[0].execution.status' /tmp/mew-ghost-sp15-live-state.json",
+    "rg -n \"mew-ghost SP15 launcher contract|mew chat|mew code|dry-run|mew-ghost.sp15.v1\" /tmp/mew-ghost-sp15.html",
+    "./mew side-dogfood append --input experiments/mew-ghost/.mew-dogfood/reports/15-launcher-contract-practical.json --ledger /tmp/mew-side-dogfood-sp15-report-verify.jsonl --json"
+  ],
+  "reviewer_rejections": 4,
+  "verifier_failures": 2,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "launcher_contract_retry_and_report_schema_followup",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/28/snapshot.json",
+    ".mew/sessions/29/snapshot.json",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/15-launcher-contract-practical.json",
+    "/tmp/mew-ghost-sp15.html",
+    "/tmp/mew-ghost-sp15-state.json",
+    "/tmp/mew-ghost-sp15-live-state.json",
+    "/tmp/mew-side-dogfood-sp15-report-verify.jsonl",
+    "https://github.com/mkXultra/mew/issues/10"
+  ],
+  "commit": "",
+  "notes": "SP15 was completed by mew in successful implementation session #29 after the earlier session #28 rollback/pending approval path. The launcher contract now represents mew chat and mew code as explicit commands, keeps dry-run as the default, and gates direct launcher execution behind the explicit --execute-launchers opt-in. Tests use injected execution rather than real mew subprocesses. README examples cover safe dry-run HTML/state usage and live macOS probe usage. Focused verification passed with 16 tests in the implementation session and in operator review. Automated verification did not perform live macOS launcher execution; that remains an explicit local operator opt-in. Session #30 rewrote only the dogfood report into the canonical side-dogfood schema and validated it by appending to a temporary ledger; operator then normalized the report counters and proof command list before canonical ledger append."
+}

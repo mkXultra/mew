@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Standalone SP14 mew-ghost presence shell scaffold.
+"""Standalone SP15 mew-ghost launcher contract shell.
 
 The module is deliberately local and fixture-driven by default. It can perform
 an explicit opt-in macOS active app/window probe through osascript, renders a
-deterministic local HTML shell, exposes dry-run command intents, and uses no
-screen capture, hidden monitoring, network access, live .mew reads, or core mew
-imports.
+deterministic local HTML shell, exposes dry-run command intents, and only runs
+mew launch commands behind an explicit CLI opt-in. It uses no screen capture,
+hidden monitoring, network access, live .mew reads, or core mew imports.
 """
 
 from __future__ import annotations
@@ -20,10 +20,11 @@ from html import escape
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-SCHEMA_VERSION = "mew-ghost.sp14.v1"
+SCHEMA_VERSION = "mew-ghost.sp15.v1"
 DEFAULT_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_ghost_state.json"
 ProbeProvider = Callable[[], Mapping[str, Any]]
 OsascriptRunner = Callable[..., subprocess.CompletedProcess[str]]
+LauncherRunner = Callable[..., subprocess.CompletedProcess[str]]
 WhichProvider = Callable[[str], str | None]
 OSASCRIPT_TIMEOUT_SECONDS = 2.0
 DEFAULT_REFRESH_COUNT = 3
@@ -261,25 +262,65 @@ def probe_active_window(
 
 
 def build_launcher_intents(*, dry_run: bool = True) -> list[dict[str, Any]]:
-    """Return dry-run launcher intents for the two SP13 command surfaces."""
+    """Return launcher intents for the two explicit mew command surfaces."""
+    side_effects = "none" if dry_run else "executes_local_mew_command"
     return [
         {
             "id": "mew-chat",
             "label": "Open mew chat",
             "command": ["mew", "chat"],
             "dry_run": dry_run,
-            "side_effects": "none",
-            "description": "Would open the chat surface for the operator.",
+            "side_effects": side_effects,
+            "description": "Would open the chat surface for the operator."
+            if dry_run
+            else "Opens the chat surface for the operator.",
         },
         {
             "id": "mew-code",
             "label": "Open mew code",
             "command": ["mew", "code"],
             "dry_run": dry_run,
-            "side_effects": "none",
-            "description": "Would open the coding surface for the operator.",
+            "side_effects": side_effects,
+            "description": "Would open the coding surface for the operator."
+            if dry_run
+            else "Opens the coding surface for the operator.",
         },
     ]
+
+
+def execute_launcher_intents(
+    intents: Sequence[Mapping[str, Any]],
+    *,
+    allow_execute: bool = False,
+    runner: LauncherRunner = subprocess.run,
+) -> list[dict[str, Any]]:
+    """Return launcher intents after dry-run simulation or explicit execution."""
+    observed: list[dict[str, Any]] = []
+    for intent in intents:
+        command = [str(part) for part in intent.get("command", [])]
+        result = dict(intent)
+        if not allow_execute or bool(intent.get("dry_run", True)):
+            result["dry_run"] = True
+            result["side_effects"] = "none"
+            result["execution"] = {
+                "status": "dry_run",
+                "executed": False,
+                "returncode": None,
+            }
+            observed.append(result)
+            continue
+
+        completed = runner(command, capture_output=True, text=True, check=False)
+        returncode = int(getattr(completed, "returncode", 0) or 0)
+        result["dry_run"] = False
+        result["side_effects"] = "executes_local_mew_command"
+        result["execution"] = {
+            "status": "executed" if returncode == 0 else "failed",
+            "executed": True,
+            "returncode": returncode,
+        }
+        observed.append(result)
+    return observed
 
 
 def _lower_text(*parts: object) -> str:
@@ -436,7 +477,7 @@ def build_ghost_state(
         "ghost": ghost,
         "active_window": probe,
         "presence": presence,
-        "launch_intents": build_launcher_intents(dry_run=True),
+        "launch_intents": execute_launcher_intents(build_launcher_intents(dry_run=True)),
     }
 
 
@@ -453,7 +494,9 @@ def render_local_html(state: Mapping[str, Any]) -> str:
         + escape(" ".join(intent["command"]))
         + "</code> — "
         + escape(intent["description"])
-        + " <strong>(dry-run)</strong></li>"
+        + " <strong>("
+        + escape("dry-run" if intent.get("dry_run", True) else "executed")
+        + ")</strong></li>"
         for intent in intents
     )
     snapshot_items = "\n".join(
@@ -474,7 +517,7 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             "<html lang=\"en\">",
             "  <head>",
             "    <meta charset=\"utf-8\">",
-            "    <title>mew-ghost SP14 presence shell</title>",
+            "    <title>mew-ghost SP15 launcher contract</title>",
             "    <style>",
             "      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; background: #111827; color: #f9fafb; }",
             "      main { max-width: 780px; }",
@@ -548,8 +591,9 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     live_probe_provider: ProbeProvider | None = None,
+    launcher_runner: LauncherRunner | None = None,
 ) -> int:
-    parser = argparse.ArgumentParser(description="Render the SP14 mew-ghost presence shell")
+    parser = argparse.ArgumentParser(description="Render the SP15 mew-ghost launcher contract")
     parser.add_argument("--fixture", default=str(DEFAULT_FIXTURE), help="local JSON fixture to render")
     parser.add_argument("--output", help="write rendered output to this path")
     parser.add_argument("--format", choices=("html", "state"), default="html")
@@ -564,6 +608,11 @@ def main(
         action="store_true",
         help="explicitly opt into the macOS osascript active app/window probe",
     )
+    parser.add_argument(
+        "--execute-launchers",
+        action="store_true",
+        help="explicitly opt into running mew chat and mew code; dry-run remains the default",
+    )
     args = parser.parse_args(argv)
 
     provider = None
@@ -571,6 +620,13 @@ def main(
         provider = live_probe_provider or make_macos_osascript_probe_provider()
 
     state, html = render_fixture(args.fixture, probe_provider=provider, refresh_count=args.refresh_count)
+    if args.execute_launchers:
+        state["launch_intents"] = execute_launcher_intents(
+            build_launcher_intents(dry_run=False),
+            allow_execute=True,
+            runner=launcher_runner or subprocess.run,
+        )
+        html = render_local_html(state)
     rendered = json.dumps(state, indent=2, sort_keys=True) + "\n" if args.format == "state" else html
 
     if args.output:

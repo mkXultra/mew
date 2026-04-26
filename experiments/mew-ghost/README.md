@@ -1,12 +1,12 @@
-# mew-ghost SP14 presence shell
+# mew-ghost SP15 launcher contract
 
-`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP14 remains fixture-driven by default and adds a bounded deterministic presence loop over the SP13 explicit opt-in live macOS active-window probe: it does not import core mew code, read live `.mew` state, capture the screen, monitor hidden activity, use the network, or package a native app.
+`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP15 remains fixture-driven and dry-run by default, keeps the bounded deterministic presence loop, and represents `mew chat` and `mew code` as explicit launcher commands. Direct launcher execution is available only behind the explicit `--execute-launchers` CLI opt-in. The shell does not import core mew code, read live `.mew` state, capture the screen, monitor hidden activity, use the network, or package a native app.
 
 ## What this slice provides
 
 - `ghost.py`: a standalone Python entrypoint/module.
 - `fixtures/sample_ghost_state.json`: deterministic input for ghost state, presence classification, and local HTML rendering.
-- `tests/test_mew_ghost.py`: focused tests for fixture rendering, presence transitions, stable refresh snapshots, explicit live-probe fallbacks, CLI output, isolation, README usage, and dry-run launch intents.
+- `tests/test_mew_ghost.py`: focused tests for fixture rendering, presence transitions, stable refresh snapshots, explicit live-probe fallbacks, launcher dry-run/execution gating, CLI output, isolation, and README usage.
 
 ## Presence refresh contract
 
@@ -35,18 +35,20 @@ The CLI option `--refresh-count` controls how many snapshots are rendered and is
 
 Default rendering uses the fixture and does not perform live probing. `--live-active-window` explicitly opts into the macOS `osascript` provider. On non-macOS platforms the probe returns `unavailable` without calling the provider. On macOS, callers may inject a provider or runner; missing `osascript`, permission denial, empty output, malformed output, timeout, and other runner failures are converted into structured `status`/`reason` values instead of prompting, retrying, or reading hidden state.
 
-## Dry-run launch intents
+## Launcher contract
 
 `build_launcher_intents()` returns command intents for:
 
 - `mew chat`
 - `mew code`
 
-The intents are dry-run only. They describe what would be launched and never execute the commands.
+Dry-run is the default. Default state includes both launcher commands with `dry_run: true`, `side_effects: "none"`, and an execution status of `dry_run`; no subprocess is spawned.
+
+Direct execution requires `--execute-launchers`. That flag switches the intents to `dry_run: false` and runs only the two explicit command arrays. Tests use an injected runner so the test suite never spawns real `mew` subprocesses.
 
 ## Usage
 
-Render deterministic local HTML from the fixture:
+Render deterministic local HTML from the fixture. This is the safe dry-run path and never launches `mew`:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html
@@ -62,6 +64,12 @@ Explicitly opt into the live macOS active-window probe and print the structured 
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window
+```
+
+Explicitly opt into direct launcher execution for local macOS dogfood. This runs `mew chat` and `mew code`; omit the flag to stay in dry-run mode:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --execute-launchers
 ```
 
 Run the focused verifier:

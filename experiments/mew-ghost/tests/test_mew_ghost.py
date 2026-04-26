@@ -10,7 +10,7 @@ README_PATH = ROOT / "README.md"
 GHOST_PATH = ROOT / "ghost.py"
 FIXTURE_PATH = ROOT / "fixtures" / "sample_ghost_state.json"
 
-spec = importlib.util.spec_from_file_location("mew_ghost_sp14", GHOST_PATH)
+spec = importlib.util.spec_from_file_location("mew_ghost_sp15", GHOST_PATH)
 ghost = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(ghost)
@@ -26,7 +26,7 @@ def test_fixture_builds_deterministic_state_and_html() -> None:
 
     assert state_one == state_two
     assert html_one == html_two
-    assert state_one["schema_version"] == "mew-ghost.sp14.v1"
+    assert state_one["schema_version"] == "mew-ghost.sp15.v1"
     assert state_one["active_window"]["status"] == "available"
     assert state_one["active_window"]["active_app"] == "Visual Studio Code"
     assert state_one["presence"]["classification"]["state"] == "coding"
@@ -37,7 +37,7 @@ def test_fixture_builds_deterministic_state_and_html() -> None:
     ]
     assert "Ghost is watching VS Code without screen capture." in html_one
     assert "Writing the SP12 scaffold" in html_one
-    assert "mew-ghost.sp14.v1" in html_one
+    assert "mew-ghost.sp15.v1" in html_one
     assert "bounded_deterministic_refresh" in html_one
 
 
@@ -101,7 +101,7 @@ def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
 
     assert calls == []
     assert unavailable == {
-        "schema_version": "mew-ghost.sp14.v1",
+        "schema_version": "mew-ghost.sp15.v1",
         "status": "unavailable",
         "reason": "requires_macos",
         "platform": "Linux",
@@ -249,13 +249,33 @@ def test_live_probe_reports_empty_malformed_and_timeout_results() -> None:
     assert timed_out["reason"] == "osascript_timeout"
 
 
-def test_launcher_intents_are_dry_run_chat_and_code_only() -> None:
+def test_launcher_intents_are_dry_run_by_default_and_execute_only_when_allowed() -> None:
     intents = ghost.build_launcher_intents()
 
     assert [intent["id"] for intent in intents] == ["mew-chat", "mew-code"]
     assert [intent["command"] for intent in intents] == [["mew", "chat"], ["mew", "code"]]
     assert all(intent["dry_run"] is True for intent in intents)
     assert all(intent["side_effects"] == "none" for intent in intents)
+
+    dry_run_results = ghost.execute_launcher_intents(intents)
+    assert [result["execution"]["status"] for result in dry_run_results] == ["dry_run", "dry_run"]
+    assert all(result["execution"]["executed"] is False for result in dry_run_results)
+
+    calls: list[list[str]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["check"] is False
+        return _completed_process()
+
+    executable = ghost.build_launcher_intents(dry_run=False)
+    executed = ghost.execute_launcher_intents(executable, allow_execute=True, runner=runner)
+
+    assert calls == [["mew", "chat"], ["mew", "code"]]
+    assert all(result["dry_run"] is False for result in executed)
+    assert [result["execution"]["status"] for result in executed] == ["executed", "executed"]
 
 
 def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
@@ -278,13 +298,14 @@ def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
     state = json.loads(state_output.read_text(encoding="utf-8"))
 
     assert html.startswith("<!doctype html>")
-    assert "<title>mew-ghost SP14 presence shell</title>" in html
+    assert "<title>mew-ghost SP15 launcher contract</title>" in html
     assert "refresh 0" in html
     assert "refresh 1" in html
     assert state["fixture_name"] == "sample_ghost_state"
     assert state["presence"]["refresh_count"] == 2
     assert state["presence"]["snapshots"][0]["presence_state"] == "coding"
     assert state["launch_intents"][0]["command"] == ["mew", "chat"]
+    assert state["launch_intents"][0]["execution"]["status"] == "dry_run"
 
 
 def test_cli_live_opt_in_uses_injected_provider_for_stdout(capsys) -> None:
@@ -306,6 +327,36 @@ def test_cli_live_opt_in_uses_injected_provider_for_stdout(capsys) -> None:
     assert state["launch_intents"][0]["dry_run"] is True
 
 
+def test_cli_execute_launchers_requires_explicit_flag_and_injected_runner(capsys) -> None:
+    calls: list[list[str]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs["capture_output"] is True
+        assert kwargs["text"] is True
+        assert kwargs["check"] is False
+        return _completed_process()
+
+    assert ghost.main(
+        ["--fixture", str(FIXTURE_PATH), "--format", "state"],
+        launcher_runner=runner,
+    ) == 0
+    dry_run_state = json.loads(capsys.readouterr().out)
+
+    assert calls == []
+    assert dry_run_state["launch_intents"][0]["execution"]["status"] == "dry_run"
+
+    assert ghost.main(
+        ["--fixture", str(FIXTURE_PATH), "--format", "state", "--execute-launchers"],
+        launcher_runner=runner,
+    ) == 0
+    executed_state = json.loads(capsys.readouterr().out)
+
+    assert calls == [["mew", "chat"], ["mew", "code"]]
+    assert all(intent["dry_run"] is False for intent in executed_state["launch_intents"])
+    assert all(intent["execution"]["executed"] is True for intent in executed_state["launch_intents"])
+
+
 def test_readme_usage_prefers_uv_run_python_commands() -> None:
     readme = README_PATH.read_text(encoding="utf-8")
     usage_lines = [
@@ -318,6 +369,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
         "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html",
         "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --refresh-count 5",
         "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window",
+        "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --execute-launchers",
     ]
     assert all(not line.startswith("python experiments/mew-ghost/ghost.py") for line in usage_lines)
 
@@ -332,5 +384,6 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert "screen capture" in source
     assert "hidden monitoring" in source
     assert "--live-active-window" in source
+    assert "--execute-launchers" in source
     assert "network" in source
     assert "live_mew_reads" in source
