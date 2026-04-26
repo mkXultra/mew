@@ -192,6 +192,19 @@ Current M6.16 evidence:
   `./mew metrics --implementation-lane --json`, and `git diff --check`.
   Codex-ultra re-review reported no findings after confirming `#660` is in
   the mew-first attempt window and counted as a practical success.
+- Task `#663` exposed a new M6.16/M6.14 substrate blocker before product
+  editing: after a same-path positive `search_text` on
+  `src/mew/mew_first_calibration.py`, a later same-path zero-match
+  `search_text` caused the broad-read guard to hard-fail a top-of-file
+  `read_file` instead of reusing the positive search anchor. Task `#664`
+  repairs that path: broad-read-after-search-miss now produces a narrow
+  `read_file` replacement from the latest positive same-path search anchor
+  when no cached read window exists. This is supervisor-owned loop-substrate
+  progress, not mew-first autonomy credit; retry `#663` after commit.
+  Focused proof:
+  `uv run pytest -q tests/test_work_session.py -k 'broad_read_after_search_miss' --no-testmon`,
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`, and
+  `git diff --check`. Codex-ultra re-review reported no findings.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

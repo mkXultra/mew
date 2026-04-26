@@ -4223,6 +4223,73 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("latest search_text for this target path returned zero matches", guard["message"])
 
+    def test_broad_read_after_search_miss_guard_reuses_positive_search_anchor(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Guard broad reads",
+            "updated_at": "now",
+            "model_turns": [
+                {
+                    "id": 1,
+                    "status": "completed",
+                    "decision_plan": {
+                        "working_memory": {
+                            "hypothesis": "Repair attempt parsing.",
+                            "next_step": "Search the calibration surface before editing.",
+                            "target_paths": ["src/mew/mew_first_calibration.py"],
+                        }
+                    },
+                }
+            ],
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/mew_first_calibration.py", "query": "attempt_window_task_ids"},
+                    "result": {
+                        "path": "src/mew/mew_first_calibration.py",
+                        "query": "attempt_window_task_ids",
+                        "matches": [
+                            "unparseable match preview",
+                            "src/mew/mew_first_calibration.py:287:        \"attempt_window_task_ids\": ids,",
+                        ],
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/mew_first_calibration.py", "query": "Task #"},
+                    "result": {
+                        "path": "src/mew/mew_first_calibration.py",
+                        "query": "Task #",
+                        "matches": [],
+                    },
+                },
+            ],
+        }
+
+        guard = broad_read_after_search_miss_guard(session, "read_file", {"path": "src/mew/mew_first_calibration.py"})
+
+        self.assertEqual(guard["reason"], "broad_read_after_search_miss")
+        self.assertEqual(guard["search_tool_call_id"], 2)
+        self.assertEqual(
+            guard["suggested_next"],
+            "read_file path=src/mew/mew_first_calibration.py line_start=282 line_count=80",
+        )
+        self.assertEqual(
+            broad_read_guard_replacement_parameters(guard),
+            {
+                "path": "src/mew/mew_first_calibration.py",
+                "line_start": 282,
+                "line_count": 80,
+                "reason": "use latest positive search_text anchor after later zero-match search",
+            },
+        )
+
     def test_work_session_runs_read_only_tools_and_journals_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
