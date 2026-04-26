@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "companion_log.py"
 FIXTURE = ROOT / "fixtures" / "sample_session.json"
 STATE_FIXTURE = ROOT / "fixtures" / "sample_mew_state.json"
+BUNDLE_FIXTURE = ROOT / "fixtures" / "sample_bundle.json"
 
 
 def test_render_report_from_fixture_module_import() -> None:
@@ -374,3 +375,110 @@ def test_state_fixture_is_valid_json_object() -> None:
     assert isinstance(data["recent_work"], list)
     assert isinstance(data["unresolved_risks"], list)
     assert isinstance(data["next_side_project_action"], dict)
+
+
+def test_render_bundle_snapshot() -> None:
+    sys.path.insert(0, str(ROOT))
+    try:
+        from companion_log import load_session, render_bundle
+    finally:
+        sys.path.pop(0)
+
+    bundle = render_bundle(load_session(BUNDLE_FIXTURE), base_path=BUNDLE_FIXTURE.parent)
+
+    assert bundle.startswith("# Companion Bundle: SP7 multi-fixture companion bundle")
+    assert "## Session fixture surfaces" in bundle
+    assert "### Morning journal" in bundle
+    assert "# Morning Journal: SP2 companion output" in bundle
+    assert "### Research digest" in bundle
+    assert "# Research Digest: SP4 static companion output" in bundle
+    assert "## State fixture surfaces" in bundle
+    assert "### State brief" in bundle
+    assert "# Mew State Companion Brief: SP6 side-project loop" in bundle
+
+
+def test_cli_prints_bundle_mode_to_stdout() -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(BUNDLE_FIXTURE), "--mode", "bundle"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.startswith("# Companion Bundle: SP7 multi-fixture companion bundle")
+    assert "## Session fixture surfaces" in result.stdout
+    assert "## State fixture surfaces" in result.stdout
+    assert result.stdout.index("### Morning journal") < result.stdout.index("### Research digest")
+    assert result.stdout.index("### Research digest") < result.stdout.index("### State brief")
+    assert result.stderr == ""
+
+
+def test_cli_writes_bundle_output_file(tmp_path: Path) -> None:
+    output = tmp_path / "bundle.md"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(BUNDLE_FIXTURE),
+            "--mode",
+            "bundle",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    written = output.read_text(encoding="utf-8")
+    assert written.startswith("# Companion Bundle: SP7 multi-fixture companion bundle")
+    assert "# Morning Journal: SP2 companion output" in written
+    assert "# Mew State Companion Brief: SP6 side-project loop" in written
+
+
+def test_cli_bundle_missing_fixture_error_is_deterministic(tmp_path: Path) -> None:
+    missing_manifest = tmp_path / "missing_bundle.json"
+    missing_manifest.write_text(
+        json.dumps(
+            {
+                "id": "missing-bundle",
+                "entries": [
+                    {
+                        "label": "Missing report",
+                        "fixture": "does-not-exist.json",
+                        "mode": "report",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(missing_manifest), "--mode", "bundle"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "error: fixture not found:" in result.stderr
+    assert "does-not-exist.json" in result.stderr
+
+
+def test_bundle_fixture_is_valid_json_object() -> None:
+    data = json.loads(BUNDLE_FIXTURE.read_text(encoding="utf-8"))
+
+    assert data["id"] == "sp7-sample-bundle"
+    assert isinstance(data["entries"], list)
+    assert [entry["label"] for entry in data["entries"]] == [
+        "Morning journal",
+        "Research digest",
+        "State brief",
+    ]
+    assert {entry["fixture"] for entry in data["entries"]} == {
+        "sample_session.json",
+        "sample_mew_state.json",
+    }

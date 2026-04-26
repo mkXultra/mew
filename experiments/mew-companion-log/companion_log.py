@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -254,6 +255,53 @@ def render_state_brief(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_bundle(manifest: dict[str, Any], *, base_path: Path) -> str:
+    """Render a deterministic companion bundle from a multi-fixture manifest."""
+    title = manifest.get("title") or manifest.get("id") or "Companion Bundle"
+    entries = _as_list(manifest.get("entries"))
+
+    lines = [f"# Companion Bundle: {title}"]
+    date = manifest.get("date")
+    if date:
+        lines.extend(["", f"_Date: {date}_"])
+
+    current_group: str | None = None
+    for index, entry in enumerate(entries, start=1):
+        if not isinstance(entry, dict):
+            raise ValueError("bundle entries must be objects")
+        fixture_name = entry.get("fixture")
+        if not fixture_name:
+            raise ValueError("bundle entries must declare a fixture")
+        mode = str(entry.get("mode", "report"))
+        if mode == "bundle" or mode not in RENDERERS:
+            raise ValueError(f"unsupported bundle entry mode: {mode}")
+
+        fixture_path = Path(str(fixture_name))
+        if not fixture_path.is_absolute():
+            fixture_path = base_path / fixture_path
+
+        group = str(entry.get("group") or "Companion Entries")
+        if group != current_group:
+            lines.extend(["", f"## {group}"])
+            current_group = group
+
+        label = entry.get("label") or entry.get("surface") or f"Entry {index}"
+        surface = entry.get("surface") or mode
+        lines.extend(
+            [
+                "",
+                f"### {label}",
+                f"- Fixture: {fixture_name}",
+                f"- Surface: {surface}",
+                "",
+                RENDERERS[mode](load_session(fixture_path)).strip(),
+            ]
+        )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 RENDERERS = {
     "report": render_report,
     "morning-journal": render_morning_journal,
@@ -261,6 +309,7 @@ RENDERERS = {
     "dream-learning": render_dream_learning,
     "research-digest": render_research_digest,
     "state-brief": render_state_brief,
+    "bundle": render_bundle,
 }
 
 
@@ -296,7 +345,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     renderer = RENDERERS[args.mode]
-    report = renderer(load_session(args.fixture))
+    try:
+        if args.mode == "bundle":
+            report = render_bundle(load_session(args.fixture), base_path=args.fixture.parent)
+        else:
+            report = renderer(load_session(args.fixture))
+    except FileNotFoundError as exc:
+        missing = exc.filename or str(exc)
+        print(f"error: fixture not found: {missing}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     if args.output:
         args.output.write_text(report, encoding="utf-8")
     else:

@@ -17,23 +17,23 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP4 Optional Research Digest Slice | `done` | Static fixture research digest landed with deterministic ranking, README usage, stdout, and output-file tests. |
 | SP5 Feed M6.16 | `done` | The side-project cohort is summarized into a measured M6.16 hardening recommendation and now includes the SP4 extension row. |
 | SP6 Mew State Companion Export | `done` | State-brief mode landed clean: static mew-state-like fixture, README usage, stdout/output-file behavior, and focused tests are in place without live `.mew` access. |
-| SP7 Multi-Fixture Companion Bundles | `not_started` | Next planned slice: combine several explicit local fixtures into one deterministic companion bundle. |
-| SP8 Multi-Day Companion Archive | `not_started` | Planned after SP7: render a fixture-backed archive/index of companion outputs by day and surface. |
+| SP7 Multi-Fixture Companion Bundles | `done` | Bundle mode landed practical: static manifest, deterministic grouping/order, missing-fixture behavior, README usage, stdout/output-file proof, and focused tests are in place. |
+| SP8 Multi-Day Companion Archive | `not_started` | Next planned slice: render a fixture-backed archive/index of companion outputs by day and surface. |
 | SP9 Issue and Dogfood Ledger Digest | `not_started` | Planned after SP8: summarize fixture-backed dogfood rows and `[side-pj]` issue summaries for reader-facing evidence. |
 | SP10 Companion Export Contract | `not_started` | Planned after SP9: document and test the stable local input/output contract without importing core mew. |
 | SP11 Second Side-Project Gate | `not_started` | Planned final gate: decide whether to continue this project, start a second side project, or pause side-project work. |
 
 ## Active Focus
 
-Active side-project focus: **SP7 Multi-Fixture Companion Bundles**.
+Active side-project focus: **SP8 Multi-Day Companion Archive**.
 
 Current target:
 
-- extend `mew-companion-log` with a deterministic companion bundle that combines
-  several explicit local fixtures while keeping all implementation inside
-  `experiments/mew-companion-log`
-- use fixture paths supplied to the side-project CLI only; do not read live
-  `.mew` state and do not edit core mew
+- extend `mew-companion-log` with a deterministic archive/index surface that
+  groups fixture-backed companion outputs by day, surface, and next action
+  while keeping all implementation inside `experiments/mew-companion-log`
+- use fixture data and explicit fixture paths only; do not crawl live
+  filesystem state, do not read live `.mew` state, and do not edit core mew
 - use SP6-SP11 as the next side-project roadmap arc before considering a
   second isolated side project
 - route the already-fixed structural write-scope blocker as closed issue `#1`
@@ -165,7 +165,7 @@ Current target:
   README usage/output-file examples, snapshot test, CLI stdout test,
   output-file test, and fixture shape assertions under
   `experiments/mew-companion-log`.
-- State brief local report:
+- Bundle local report:
   `experiments/mew-companion-log/.mew-dogfood/reports/6-state-brief-clean.json`.
 - Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `7`;
   outcome `clean`, failure class `none_observed`, `rescue_edits=0`.
@@ -175,25 +175,44 @@ Current target:
   evening journal stdout, dream/learning stdout, research digest stdout, state
   brief stdout, state brief `--output` path, `git diff --check`, and a scoped
   search for `src/mew` / live `.mew` coupling were also verified.
+- Task `#7` / session `#10` added the SP7 multi-fixture companion bundle with
+  Codex CLI as `operator` and mew as first implementer. Mew authored the
+  fixture-driven `--mode bundle` renderer, static bundle manifest, README
+  usage/output-file examples, snapshot test, CLI stdout test, output-file test,
+  ordering/grouping assertions, missing-fixture behavior coverage, and fixture
+  shape assertions under `experiments/mew-companion-log`.
+- State brief local report:
+  `experiments/mew-companion-log/.mew-dogfood/reports/7-bundle-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `8`;
+  outcome `practical`, failure class
+  `same_file_write_batch_retry_timeout_after_bundle_verifier_failure`,
+  `rescue_edits=0`.
+- Bundle verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-companion-log/tests/test_companion_log.py`
+  returned `22 passed`. Bundle stdout, bundle `--output`, default report
+  stdout, state brief stdout, `git diff --check`, and a scoped no-core/no-live
+  coupling search were also verified.
+- Reusable polish issue opened:
+  `https://github.com/mkXultra/mew/issues/4`.
 
 ## Missing Proof
 
-- SP1, SP2, SP3, SP4, SP5, and SP6 are closed for the first `mew-companion-log`
+- SP1, SP2, SP3, SP4, SP5, SP6, and SP7 are closed for the first `mew-companion-log`
   cohort.
-- SP7 has not started. It still needs a bounded task, mew-first implementation,
+- SP8 has not started. It still needs a bounded task, mew-first implementation,
   focused verifier, local report, ledger row, and status update.
-- SP8-SP11 are planned but intentionally wait for SP7 evidence.
+- SP9-SP11 are planned but intentionally wait for SP8 evidence.
 
 ## Next Action
 
-Start SP7:
+Start SP8:
 
-1. define task `#7` for a fixture-driven companion bundle mode or option under
+1. define task `#8` for a fixture-driven archive/index mode under
    `experiments/mew-companion-log`
 2. run current-repo `./mew` mew-first with `--model gpt-5.5`, using
    `--allow-read experiments/mew-companion-log` and
    `--allow-write experiments/mew-companion-log`
-3. require deterministic fixture ordering, missing-fixture behavior, README
+3. require deterministic day/surface ordering, empty-day behavior, README
    usage, stdout proof, output-file proof, focused tests, local report, ledger
    row, and issue extraction for any reusable polish finding
 
