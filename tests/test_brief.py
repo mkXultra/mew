@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from mew.brief import (
+    active_roadmap_self_improve_focus,
     build_brief,
     build_brief_data,
     build_focus_data,
@@ -67,6 +68,20 @@ class BriefTests(unittest.TestCase):
             self.assertEqual(
                 next_move(default_state(), kind="coding"),
                 "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M5 audited self-improvement loop'`",
+            )
+
+    def test_active_roadmap_focus_reads_current_active_work_m6(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status = os.path.join(tmp, "ROADMAP_STATUS.md")
+            with open(status, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "# Roadmap Status\n\n"
+                    "Active work: **M6.17 Resident Meta Loop / Lane Chooser**.\n"
+                )
+
+            self.assertEqual(
+                active_roadmap_self_improve_focus(tmp),
+                "Advance M6.17 Resident Meta Loop / Lane Chooser",
             )
 
     def test_next_move_coding_filter_prefers_same_day_context_checkpoint_recovery_while_waiting_for_agent(self):
@@ -608,6 +623,76 @@ class BriefTests(unittest.TestCase):
 
         self.assertIn("Next useful move: leave paused work session #3 task #7 paused", brief)
         self.assertIn("- #7 [paused/normal/coding] Paused debug target", brief)
+
+    def test_next_move_coding_filter_skips_older_m6_paused_work_for_active_roadmap_focus(self):
+        state = default_state()
+        add_task(state, task_id=7, title="M6.7 paused debug target", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "M6.7 paused debug target",
+                "goal": "Old milestone work should not override the active roadmap gate.",
+                "created_at": "then",
+                "updated_at": "now",
+                "stop_requested_at": "2026-04-21T15:00:00Z",
+                "stop_reason": "paused old target",
+                "default_options": {"allow_read": ["."]},
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            mew_path = os.path.join(tmp, "mew")
+            with open(mew_path, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\n")
+            os.chmod(mew_path, 0o755)
+            with open(os.path.join(tmp, "ROADMAP_STATUS.md"), "w", encoding="utf-8") as handle:
+                handle.write(
+                    "# Roadmap Status\n\n"
+                    "Active work: **M6.17 Resident Meta Loop / Lane Chooser**.\n"
+                )
+            os.chdir(tmp)
+            try:
+                with patch("mew.brief.current_project_looks_like_mew", return_value=True):
+                    self.assertEqual(
+                        next_move(state, kind="coding"),
+                        "start a native self-improvement session with `./mew self-improve --start-session --focus 'Advance M6.17 Resident Meta Loop / Lane Chooser'`",
+                    )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_next_move_coding_filter_keeps_current_m6_paused_work_paused(self):
+        state = default_state()
+        add_task(state, task_id=7, title="M6.17 paused current target", kind="coding")
+        state["work_sessions"].append(
+            {
+                "id": 3,
+                "task_id": 7,
+                "status": "active",
+                "title": "M6.17 paused current target",
+                "goal": "Current milestone work should remain explicitly paused.",
+                "created_at": "then",
+                "updated_at": "now",
+                "stop_requested_at": "2026-04-21T15:00:00Z",
+                "stop_reason": "paused current target",
+                "default_options": {"allow_read": ["."]},
+                "tool_calls": [],
+                "model_turns": [],
+            }
+        )
+
+        with patch(
+            "mew.brief.active_roadmap_self_improve_focus",
+            return_value="Advance M6.17 Resident Meta Loop / Lane Chooser",
+        ):
+            self.assertEqual(
+                next_move(state, kind="coding"),
+                "leave paused work session #3 task #7 paused and resume only when needed with `./mew work 7 --session --resume --allow-read .`",
+            )
 
     def test_brief_uses_checkpoint_guided_last_request_for_same_day_coding_reentry(self):
         state = default_state()

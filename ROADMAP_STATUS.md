@@ -101,6 +101,18 @@ Current M6.17 evidence:
   `uv run ruff check src/mew/tasks.py src/mew/commands.py tests/test_tasks.py tests/test_commands.py`,
   and `git diff --check`. Codex-ultra re-review
   `019dcbc5-974b-7fc3-955b-b2bc869c74c3` returned `STATUS: pass`.
+- Task `#680` fixed a reentry drift path where `mew next --kind coding` could
+  prefer a stale paused older milestone work session over the active M6.17
+  roadmap gate. Mew session `#670` attempted the task first, but produced three
+  failing or too-broad drafts, so the final patch is supervisor rescue with no
+  mew autonomy credit. The fix parses `Active work: **M6.17 ...**.` from
+  `ROADMAP_STATUS.md`, keeps current/non-milestone paused sessions paused, and
+  routes older `M6.x` paused sessions to the active native self-improve focus.
+  Validation passed: `uv run python -m unittest tests.test_brief`,
+  `uv run ruff check src/mew/brief.py tests/test_brief.py`, and
+  `git diff --check`. Codex-ultra review
+  `019dcbd8-e9bb-7880-9009-7efb152bc3eb` returned `STATUS: pass` after the
+  punctuation/current-milestone test gaps were fixed.
 
 M6.16 close evidence:
 

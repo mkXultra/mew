@@ -36,6 +36,50 @@ def current_project_looks_like_mew():
     )
 
 
+def _clean_roadmap_label(value):
+    return " ".join(str(value or "").replace("*", "").replace("`", "").strip().split()).rstrip(".")
+
+
+def _leading_m6_token(value):
+    text = _clean_roadmap_label(value)
+    if not text:
+        return ""
+    first = text.split()[0].strip(",:;()[]")
+    if not first.startswith("M6."):
+        return ""
+    minor = []
+    for char in first[3:]:
+        if not char.isdigit():
+            break
+        minor.append(char)
+    if not minor:
+        return ""
+    return f"M6.{''.join(minor)}"
+
+
+def _m6_token_from_text(value):
+    for raw_word in _clean_roadmap_label(value).split():
+        token = _leading_m6_token(raw_word)
+        if token:
+            return token
+    return ""
+
+
+def _m6_token_minor(token):
+    try:
+        return int(str(token or "").split(".", 1)[1])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def _older_m6_token(candidate, current):
+    candidate_minor = _m6_token_minor(candidate)
+    current_minor = _m6_token_minor(current)
+    if candidate_minor is None or current_minor is None:
+        return False
+    return candidate_minor < current_minor
+
+
 def active_roadmap_self_improve_focus(root=None):
     root = Path.cwd() if root is None else Path(root)
     status_path = root / "ROADMAP_STATUS.md"
@@ -45,9 +89,14 @@ def active_roadmap_self_improve_focus(root=None):
         return ""
     active = ""
     for line in text.splitlines():
-        if line.startswith("Active milestone:"):
-            active = line.split(":", 1)[1].strip()
+        if line.startswith("Active work:"):
+            active = _clean_roadmap_label(line.split(":", 1)[1])
             break
+        if line.startswith("Active milestone:"):
+            active = _clean_roadmap_label(line.split(":", 1)[1])
+            break
+    if _m6_token_from_text(active):
+        return f"Advance {active}"
     if "Milestone 3" in active:
         return "Prove M3 persistent advantage in resident reentry"
     if "Milestone 4" in active:
@@ -1308,6 +1357,17 @@ def coding_self_improve_focus_from_friction(state, kind=None):
     return roadmap_focus or "Close the remaining M2 continuous coding cockpit parity gap"
 
 
+def stale_paused_work_roadmap_focus(session, kind=None):
+    if kind != "coding" or not (session.get("stop_request") or {}):
+        return ""
+    roadmap_focus = active_roadmap_self_improve_focus()
+    current_token = _m6_token_from_text(roadmap_focus)
+    paused_token = _leading_m6_token(session.get("title"))
+    if roadmap_focus and _older_m6_token(paused_token, current_token):
+        return roadmap_focus
+    return ""
+
+
 def next_move(state, kind=None):
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     action_tasks = actionable_open_tasks(tasks)
@@ -1373,6 +1433,12 @@ def next_move(state, kind=None):
         session = active_work[0]
         stop_request = session.get("stop_request") or {}
         if stop_request:
+            roadmap_focus = stale_paused_work_roadmap_focus(session, kind=kind)
+            if roadmap_focus:
+                return (
+                    "start a native self-improvement session with "
+                    f"`{mew_command('self-improve', '--start-session', '--focus', roadmap_focus)}`"
+                )
             command = session.get("resume_command") or session.get("continue_command")
             return (
                 f"leave paused work session #{session.get('id')} task #{session.get('task_id')} paused "
