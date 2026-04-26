@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 
 from mew.patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
+from mew.work_lanes import get_work_lane_view
 
 
 def _read_container_from_inspect(path):
@@ -147,6 +148,7 @@ def _new_m6_11_cohort_summary():
         "non_counted_bundle_count": 0,
         "non_counted_bundle_reasons": defaultdict(int),
         "bundle_type_counts": defaultdict(int),
+        "lane_counts": defaultdict(int),
         "blocker_code_counts": defaultdict(int),
         "relevant_bundles": 0,
         "compiler_bundles": 0,
@@ -182,6 +184,7 @@ def _finalize_m6_11_cohort_summary(cohort):
     malformed_relevant_bundle_count = int(cohort.get("malformed_relevant_bundle_count", 0))
 
     bundle_type_counts = defaultdict(int, cohort.get("bundle_type_counts", {}))
+    lane_counts = defaultdict(int, cohort.get("lane_counts", {}))
     dominant_bundle_type = ""
     dominant_bundle_count = 0
     if bundle_type_counts:
@@ -202,6 +205,7 @@ def _finalize_m6_11_cohort_summary(cohort):
             defaultdict(int, cohort.get("non_counted_bundle_reasons", {}))
         ),
         "bundle_type_counts": dict(bundle_type_counts),
+        "lane_counts": dict(lane_counts),
         "blocker_code_counts": dict(
             defaultdict(int, cohort.get("blocker_code_counts", {}))
         ),
@@ -235,6 +239,18 @@ def _finalize_m6_11_cohort_summary(cohort):
 
 def _coerce_calibration_counted(value, default=True):
     return value if isinstance(value, bool) else default
+
+
+def _summarize_replay_lane(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    lane_view = get_work_lane_view(payload.get("lane"))
+    return {
+        "lane": lane_view.name,
+        "lane_role": lane_view.role,
+        "lane_authoritative": lane_view.authoritative,
+        "lane_supported": lane_view.supported,
+        "lane_layout": lane_view.layout,
+    }
 
 
 def _read_validator_result(metadata_path, metadata):
@@ -297,6 +313,7 @@ def _summarize_patch_draft_compiler_bundle(metadata_path):
         summary["errors"].append(f"invalid compiler metadata payload: {metadata_path}")
         return summary
 
+    summary.update(_summarize_replay_lane(metadata))
     summary["calibration_counted"] = _coerce_calibration_counted(
         metadata.get("calibration_counted"), default=True
     )
@@ -355,6 +372,7 @@ def _summarize_model_failure_bundle(report_path):
         summary["errors"].append(f"invalid model-failure report payload: {report_path}")
         return summary
 
+    summary.update(_summarize_replay_lane(report))
     bundle_name = report.get("bundle")
     if isinstance(bundle_name, str) and bundle_name.strip():
         summary["bundle_type"] = bundle_name.strip()
@@ -894,6 +912,7 @@ def summarize_m6_11_replay_calibration(replay_root, measurement_head=None):
         errors.append(f"replay root not found: {replay_path}")
 
     bundle_type_counts = defaultdict(int)
+    lane_counts = defaultdict(int)
     malformed_bundle_counts = defaultdict(int)
     malformed_bundle_count = 0
     malformed_relevant_bundle_count = 0
@@ -972,10 +991,15 @@ def summarize_m6_11_replay_calibration(replay_root, measurement_head=None):
         total_bundles += 1
         compiler_bundles += 1
         bundle_type_counts[calibration_bundle_type] += 1
+        lane_name = str(bundle_summary.get("lane") or "").strip()
+        if lane_name:
+            lane_counts[lane_name] += 1
         for cohort_summary in cohort_targets:
             cohort_summary["total_bundles"] += 1
             cohort_summary["compiler_bundles"] += 1
             cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
+            if lane_name:
+                cohort_summary["lane_counts"][lane_name] += 1
         if bundle_summary.get("off_schema"):
             off_schema_count += 1
             for cohort_summary in cohort_targets:
@@ -1041,9 +1065,14 @@ def summarize_m6_11_replay_calibration(replay_root, measurement_head=None):
         calibration_bundle_type = bundle_summary.get("calibration_bundle_type") or "work-loop-model-failure.other"
         total_bundles += 1
         bundle_type_counts[calibration_bundle_type] += 1
+        lane_name = str(bundle_summary.get("lane") or "").strip()
+        if lane_name:
+            lane_counts[lane_name] += 1
         for cohort_summary in cohort_targets:
             cohort_summary["total_bundles"] += 1
             cohort_summary["bundle_type_counts"][calibration_bundle_type] += 1
+            if lane_name:
+                cohort_summary["lane_counts"][lane_name] += 1
         if bundle_summary.get("refusal"):
             refusal_count += 1
             refusal_by_type[calibration_bundle_type] += 1
@@ -1116,6 +1145,7 @@ def summarize_m6_11_replay_calibration(replay_root, measurement_head=None):
             "non_counted_bundle_count": non_counted_bundle_count,
             "non_counted_bundle_reasons": dict(non_counted_bundle_reasons),
             "bundle_type_counts": dict(bundle_type_counts),
+            "lane_counts": dict(lane_counts),
             "relevant_bundles": relevant_bundles,
             "compiler_bundles": compiler_bundles,
             "off_schema_count": off_schema_count,

@@ -208,6 +208,18 @@ Current M6.13 evidence:
   `uv run pytest -q tests/test_patch_draft.py --no-testmon`,
   `uv run ruff check src/mew/patch_draft.py tests/test_patch_draft.py`, and
   `git diff --check`.
+- Task `#653` / session `#641` then completed the proof-summary read/report
+  lane slice mew-first after the bounded repairs. Replay bundle summaries now
+  expose lane metadata via `get_work_lane_view()`; legacy missing/empty lanes
+  default to `tiny` with authoritative role; explicit `mirror` lanes report
+  mirror metadata; and M6.11 replay calibration top-level/cohort summaries now
+  include additive `lane_counts` without changing bundle type counts,
+  thresholds, or classification.
+- #653 validation passed:
+  work-session verifier `uv run pytest -q tests/test_proof_summary.py --no-testmon`,
+  `uv run pytest -q tests/test_proof_summary.py tests/test_work_replay.py tests/test_work_lanes.py --no-testmon`,
+  `uv run ruff check src/mew/proof_summary.py tests/test_proof_summary.py`, and
+  `git diff --check`.
 - Resident architecture framing was recorded in
   `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`. Claude Ultra and
   Codex Ultra both reviewed the direction as `approve_with_changes`; the

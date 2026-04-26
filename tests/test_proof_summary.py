@@ -70,6 +70,7 @@ class ProofSummaryTests(unittest.TestCase):
         git_head="",
         bucket_tag=None,
         blocker_code=None,
+        lane=None,
     ):
         attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
         metadata = {
@@ -82,6 +83,8 @@ class ProofSummaryTests(unittest.TestCase):
             metadata["bucket_tag"] = bucket_tag
         if blocker_code is not None:
             metadata["blocker_code"] = blocker_code
+        if lane is not None:
+            metadata["lane"] = lane
         ProofSummaryTests._write_json(
             attempt_dir / "validator_result.json",
             {"code": code},
@@ -97,6 +100,7 @@ class ProofSummaryTests(unittest.TestCase):
         git_head="",
         bucket_tag=None,
         blocker_code=None,
+        lane=None,
     ):
         attempt_dir = Path(attempt_root) / f"attempt-{attempt}"
         payload = {
@@ -109,6 +113,8 @@ class ProofSummaryTests(unittest.TestCase):
             payload["bucket_tag"] = bucket_tag
         if blocker_code is not None:
             payload["blocker_code"] = blocker_code
+        if lane is not None:
+            payload["lane"] = lane
         ProofSummaryTests._write_json(
             attempt_dir / "report.json",
             payload,
@@ -124,6 +130,52 @@ class ProofSummaryTests(unittest.TestCase):
         ProofSummaryTests._write_json(
             attempt_dir / "report.json",
             {"bundle": bundle_name, "failure": {"code": "model_failed_timeout"}, "git_head": "legacy"},
+        )
+
+    def test_m6_11_replay_lane_metadata_defaults_and_counts(self):
+        from mew.proof_summary import (
+            _summarize_model_failure_bundle,
+            _summarize_patch_draft_compiler_bundle,
+            summarize_m6_11_replay_calibration,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_root = Path(tmp)
+            self._write_relevant_compiler_bundle(
+                replay_root,
+                1,
+                "model_returned_non_schema",
+            )
+            self._write_model_failure_bundle(
+                replay_root,
+                2,
+                "model_failed_timeout",
+                lane="mirror",
+            )
+
+            compiler_summary = _summarize_patch_draft_compiler_bundle(
+                replay_root / "attempt-1" / "replay_metadata.json"
+            )
+            model_failure_summary = _summarize_model_failure_bundle(
+                replay_root / "attempt-2" / "report.json"
+            )
+            summary = summarize_m6_11_replay_calibration(replay_root)
+
+        self.assertEqual(compiler_summary["lane"], "tiny")
+        self.assertEqual(compiler_summary["lane_role"], "authoritative")
+        self.assertTrue(compiler_summary["lane_authoritative"])
+        self.assertTrue(compiler_summary["lane_supported"])
+        self.assertEqual(model_failure_summary["lane"], "mirror")
+        self.assertEqual(model_failure_summary["lane_role"], "mirror")
+        self.assertFalse(model_failure_summary["lane_authoritative"])
+        self.assertTrue(model_failure_summary["lane_supported"])
+        self.assertEqual(
+            summary["calibration"]["lane_counts"],
+            {"tiny": 1, "mirror": 1},
+        )
+        self.assertEqual(
+            summary["calibration"]["cohorts"]["unknown"]["lane_counts"],
+            {"tiny": 1, "mirror": 1},
         )
 
     def test_summarize_resident_loop_artifacts(self):
