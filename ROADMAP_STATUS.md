@@ -49,6 +49,8 @@ is tracked below.
 | 6.13 High-Effort Deliberation Lane | `in_progress` | WorkTodo lane default and lane registry v0 landed; next prove legacy replay compatibility and mirror-lane bundles. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
+| 6.16 Codex-Grade Implementation Lane | `not_started` | Future lane-hardening milestone after M6.13 telemetry identifies ordinary implementation-lane bottlenecks. |
+| 6.17 Resident Meta Loop / Lane Chooser | `not_started` | Future supervisor milestone after lane telemetry, mirror/deliberation boundaries, and implementation-lane reliability are proven. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
@@ -72,9 +74,15 @@ Why M6.13 is active:
 Current M6.13 target:
 
 - keep the existing tiny lane authoritative and backward compatible
+- treat `implementation` as a display/conceptual name for the authoritative
+  tiny lane; `tiny` remains the persisted canonical lane id in M6.13 v0
 - add lane metadata and a lane registry without changing tiny behavior
 - prove mirror-lane identity/bundles as non-authoritative before any
   deliberation write path
+- emit lane-attempt telemetry needed for future calibration economics routing,
+  while keeping M6.13 v0 routing rule-based
+- defer broad refactoring until M6.16, except for narrow M6.14 repairs when
+  the same reproducible mew-first failure class blocks M6.13 twice
 - bind deliberation attempts to explicit model, effort, timeout, budget, and
   schema contracts
 - allow deliberation only for reviewer-commanded or eligible semantic blockers,
@@ -121,6 +129,13 @@ Current M6.13 evidence:
   The reviewer rejected the first role-enum draft and steered the exact
   authoritative/mirror/shadow contract, but mew authored and verified the final
   source/test patch. No supervisor product rescue was used.
+- Resident architecture framing was recorded in
+  `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`. Claude Ultra and
+  Codex Ultra both reviewed the direction as `approve_with_changes`; the
+  accepted constraints are that M6.13 keeps its current close gate, `tiny`
+  remains the persisted canonical lane id, `implementation` is display
+  terminology only, calibration economics starts as telemetry, EV routing is
+  future work, and the meta loop is deferred.
 
 Current M6.8.5 close evidence:
 
@@ -456,6 +471,18 @@ should be additive and low-risk:
 - prove old sessions and replay bundles normalize to tiny without migration
 - prove a mirror lane can record non-authoritative lane identity/bundles
   without changing tiny-lane behavior
+- add lane-attempt telemetry fields that future M6.16/M6.17 work can use for
+  calibration economics, without claiming EV routing in M6.13 v0
+
+Planned future milestones:
+
+- **M6.16 Codex-Grade Implementation Lane**: use M6.13 lane-attempt telemetry
+  and later mew-first data to harden the authoritative implementation lane.
+  Broad refactoring belongs here only when a measured bottleneck or recurring
+  failure class is named with before/after proof.
+- **M6.17 Resident Meta Loop / Lane Chooser**: add a reviewer-gated resident
+  supervisor after implementation-lane reliability and lane boundaries are
+  proven.
 
 ## Post-Close Deferred Ledger
 
@@ -469,6 +496,9 @@ should be additive and low-risk:
 | M6.11 | MemoryExplore protocol full freeze/replay and agentization | Keep read-only provider for now; full agentization waits until a second planner will not obscure loop failures | M10 or later memory/explorer milestone | No |
 | M6.11 | Provider-specific prompt caching | Only when provider telemetry shows cache/latency as a direct blocker | M6.13 or later acceleration slice | No |
 | M6.12 | Governance/evaluator/adversarial wiring | First use M6.12 as read-only selector input in M6.8.5; automatic governance wiring needs a later explicit safety milestone | M6.8.5 read-only, later governance milestone | No |
+| Resident architecture | Codex-grade implementation lane hardening | After M6.13 emits enough lane-attempt telemetry to identify implementation-lane bottlenecks | M6.16 | No |
+| Resident architecture | Resident meta loop / lane chooser | After M6.13 lane boundaries and M6.16 implementation-lane reliability are proven | M6.17 | No |
+| Refactor policy | Broad work-loop/work-session refactoring | Defer until M6.16 unless the same reproducible failure class blocks M6.13 mew-first work twice and fits M6.14 repair | M6.16 or M6.14 repair | No |
 
 ## Mew-First Operating Rule
 
@@ -537,6 +567,8 @@ Acceptable near-term work:
 - create the smallest mew-first task that adds lane metadata with `tiny` as the
   default
 - prove old sessions and existing replay bundles remain compatible
+- emit minimal lane-attempt telemetry for future calibration economics without
+  enabling EV routing
 - add mirror-lane recording as non-authoritative evidence only after tiny
   compatibility is proven
 
@@ -548,6 +580,8 @@ Non-goals for the next session:
 - provider-specific prompt caching
 - M7 inbound-signal work
 - raw deliberation transcript storage
+- broad refactors not tied to lane telemetry or a repeated M6.14 repair-class
+  failure
 - broad refactors or polish not mapped to the M6.13 gate
 
 ## Latest Validation

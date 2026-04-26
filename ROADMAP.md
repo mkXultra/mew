@@ -842,6 +842,8 @@ Target:
   reasoning traces, never raw transcript storage
 - design spec:
   `docs/DESIGN_2026-04-25_M6_13_DELIBERATION_LANE.md`
+- resident architecture framing reference:
+  `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
 
 Done when:
 
@@ -861,6 +863,9 @@ Done when:
   deliberation failure falls back to tiny without breaking the work loop
 - cost events record budget checks, reservations, spend or estimates, blocks,
   and fallback
+- lane attempts emit comparable telemetry for future calibration economics
+  routing; M6.13 records the evidence needed for expected-value routing but
+  does not require EV-based automatic routing in v0
 - one full internalization cycle is proven: deliberation solves or materially
   advances a hard task, reviewer approval writes a `source_lane=deliberation`
   reasoning trace, and a later same-shape task retrieves that trace through
@@ -874,6 +879,22 @@ Why it matters:
   controlled way to ask for expensive reasoning, keep budgets and fallback
   visible, and then internalize the useful result so later tiny-lane work gets
   smarter instead of merely calling a stronger model again.
+
+Architecture boundary:
+
+- M6.13 keeps `tiny` as the canonical persisted lane id. `implementation` is a
+  display/conceptual name for the authoritative tiny lane, not a v0 storage
+  migration.
+- M6.13 does not implement the future resident meta loop. It leaves lane
+  decision, result, replay, and calibration contracts that a later supervisor
+  can use.
+- M6.13 does not broaden non-coding lanes (`research`, `routine`, `planning`)
+  into active implementation scope. Those remain architectural direction until
+  the coding lane substrate has proven itself.
+- M6.13 does not start broad refactoring. Refactors are allowed only when they
+  are required for the lane slice itself, or when the same reproducible
+  mew-first failure class has blocked at least two attempts and the repair fits
+  the M6.14 repair ledger.
 
 ## Milestone 6.14: Mew-First Failure Repair Ledger
 
@@ -925,6 +946,107 @@ Why it matters:
   implementation failure into a repair loop for the body itself, which is the
   path toward mew surpassing reactive coding CLIs rather than being wrapped by
   one.
+
+## Milestone 6.16: Codex-Grade Implementation Lane
+
+Use the lane telemetry collected during M6.13 and later mew-first work to make
+the authoritative implementation lane reliably usable for ordinary bounded
+coding tasks.
+
+Target:
+
+- treat the persisted `tiny` lane as the authoritative implementation lane,
+  while keeping compatibility with M6.13 lane metadata
+- analyze recent mew-first lane attempts by rescue rate, approval rejection,
+  verifier failure, first-edit latency, retry path, and failure class
+- reduce measured implementation-lane friction without adding new write
+  authority or hiding failures behind deliberation
+- perform targeted refactor hardening only when a measured bottleneck or
+  recurring failure class is named
+- keep M6.14 as the repair path for structural mew-first failures
+- preserve M6.11 patch-draft compiler, exact cached-window, scope-fence, and
+  verifier discipline
+
+Refactor policy:
+
+- no aesthetic refactor
+- no broad `work_loop.py` / `work_session.py` split without a named recurring
+  failure class
+- each refactor must record the baseline symptom, expected improvement,
+  focused verifier or replay proof, and after evidence
+- if the same failure class blocks M6.13 mew-first work twice before M6.16,
+  handle it as a bounded M6.14 repair episode rather than waiting for M6.16
+
+Start when:
+
+- M6.13 has enough lane-attempt telemetry to identify the main implementation
+  lane failure modes, or implementation-lane regression reopens the
+  M6.6/M6.10 bar
+
+Done when:
+
+- a recent bounded mew-first coding cohort shows improved implementation-lane
+  reliability against the prior measured baseline
+- supervisor-authored product rescue is rare and every rescue is classified
+  instead of hidden
+- approval rejections are either reduced or produce fast, successful retries
+  with recorded failure classes
+- verifier failures have an explicit retry or repair path
+- first-edit latency improves enough that ordinary source/test tasks feel
+  usable compared with a fresh coding CLI
+- any refactor used for the milestone names the measured bottleneck it reduced
+  and records before/after evidence
+- failures that are structural enter M6.14 repair episodes rather than being
+  papered over by direct Codex edits
+
+Why it matters:
+
+- Lane composition only helps if the authoritative implementation lane has
+  competent hands. M6.16 converts M6.13's lane telemetry into focused
+  implementation-lane hardening instead of letting deliberation become a
+  workaround for weak ordinary coding.
+
+## Milestone 6.17: Resident Meta Loop / Lane Chooser
+
+Add a resident supervisor that can propose task and lane dispatch decisions
+from roadmap state, work-session state, memory, and calibration economics.
+
+Target:
+
+- a read-only or reviewer-gated meta loop that observes current roadmap focus,
+  tasks, active sessions, metrics, memory, and user constraints
+- task-selection and lane-dispatch proposals that explain their evidence and
+  expected-value assumptions
+- integration with existing M6.8.5 selector evidence instead of creating a
+  second competing planner
+- respect for M6.14 repair episodes when implementation-lane failures are
+  structural
+- no unattended automatic dispatch or milestone-close mutation in v0
+
+Start when:
+
+- implementation-lane telemetry is stable enough for lane-choice reasoning
+- M6.13 has proven mirror/deliberation/internalization boundaries
+- M6.16 has reduced ordinary implementation-lane friction enough that a
+  supervisor would not simply orchestrate unreliable hands
+
+Done when:
+
+- the meta loop can produce a reviewer-visible next-task and lane-dispatch
+  proposal with evidence from roadmap status, memory, and calibration metrics
+- the proposal names the authoritative lane, any helper lanes, fallback,
+  verifier, budget, and expected-value rationale
+- reviewer approval is required before dispatch in v0
+- after a completed work item, the meta loop can propose the next action or
+  repair path without losing the active milestone gate
+- no task status, roadmap status, or durable memory write is mutated without
+  the appropriate lane/reviewer/policy gate
+
+Why it matters:
+
+- A resident AI is more than a work loop. It needs a supervisor that can decide
+  what to work on, which body to use, when to ask, when to repair itself, and
+  how to feed outcomes back into memory without drifting from the roadmap.
 
 ## Milestone 7: Senses - Inbound Signals
 
