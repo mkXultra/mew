@@ -110,6 +110,7 @@ WORK_TASK_GOAL_TERM_STOPWORDS = {
     "fast-path",
     "github-issue",
     "implementation-lane",
+    "no-testmon",
     "prompt-only",
     "roadmap_status",
     "side-pj",
