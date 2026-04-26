@@ -164,6 +164,24 @@ def test_reviewer_steered_mew_first_attempt_is_practical_not_clean() -> None:
     assert attempts[-1].rejected_patch_family == "reviewer_rejected_patch"
 
 
+def test_extract_mew_first_attempts_classifies_task_goal_and_synthetic_schema_substitution() -> None:
+    text = """
+### M6.16: Codex-Grade Implementation Lane
+
+- Task `#656` produced a supervisor-owned rescue after failed mew-first
+  attempts. The final retry drifted into a wrong-target calibration parser
+  patch and recorded task-goal/substitution fragility plus
+  synthetic_schema_substitution after reviewer feedback.
+"""
+
+    attempts = extract_mew_first_attempts(text, limit=10)
+
+    assert len(attempts) == 1
+    assert attempts[0].result_class == "supervisor_owned"
+    assert attempts[0].drift_class == "task_goal_substitution"
+    assert attempts[0].rejected_patch_family == "task_goal_substitution"
+
+
 def test_metrics_parser_accepts_mew_first_calibration_flags() -> None:
     args = build_parser().parse_args(["metrics", "--mew-first", "--source-file", "status.md", "--json"])
 

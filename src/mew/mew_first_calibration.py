@@ -151,11 +151,15 @@ def _autonomy_credit(result_class: str) -> str:
 
 def _drift_class(block: str) -> str:
     lowered = _norm(block)
+    if "task-goal" in lowered or "task goal" in lowered:
+        return "task_goal_substitution"
+    if "synthetic_schema_substitution" in lowered or "synthetic-schema" in lowered:
+        return "synthetic_schema_substitution"
     if "m6.11-only artifact tweak" in lowered:
         return "wrong_milestone_artifact_tweak"
     if "symbol-index-hit" in lowered and "artifact tweak" in lowered:
         return "existing_scenario_artifact_tweak"
-    if "wrong target" in lowered:
+    if "wrong-target" in lowered or "wrong target" in lowered:
         return "wrong_target_substitution"
     if "generic dogfood cleanup" in lowered or "generic cleanup" in lowered:
         return "generic_cleanup_substitution"
@@ -174,6 +178,10 @@ def _drift_class(block: str) -> str:
 
 def _rejected_patch_family(block: str) -> str:
     lowered = _norm(block)
+    if "task-goal" in lowered or "task goal" in lowered:
+        return "task_goal_substitution"
+    if "synthetic_schema_substitution" in lowered or "synthetic-schema" in lowered:
+        return "synthetic_schema_substitution"
     if "reviewer-rejected patch" in lowered or "reviewer rejected patch" in lowered:
         return "reviewer_rejected_patch"
     if "existing-scenario artifact tweak" in lowered or "artifact tweak" in lowered:

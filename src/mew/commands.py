@@ -70,8 +70,12 @@ from .journal import (
     render_journal_markdown,
     write_journal_report,
 )
+from .implementation_lane_baseline import (
+    format_implementation_lane_baseline_report,
+    summarize_implementation_lane_baseline,
+)
 from .memory import add_deep_memory, compact_memory, recall_memory
-from .metrics import build_observation_metrics, format_observation_metrics
+from .metrics import DEFAULT_SAMPLE_LIMIT, build_observation_metrics, format_observation_metrics
 from .mew_first_calibration import (
     format_mew_first_calibration_report,
     summarize_mew_first_calibration,
@@ -11201,6 +11205,20 @@ def cmd_focus(args):
 
 
 def cmd_metrics(args):
+    if getattr(args, "implementation_lane", False):
+        limit = getattr(args, "limit", None) or 100
+        data = summarize_implementation_lane_baseline(
+            state=load_state(),
+            source_path=getattr(args, "source_file", None) or "ROADMAP_STATUS.md",
+            limit=limit,
+            sample_limit=getattr(args, "sample_limit", None) or DEFAULT_SAMPLE_LIMIT,
+            side_project_ledger_path=getattr(args, "side_project_ledger", None),
+        )
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+            return 0
+        print(format_implementation_lane_baseline_report(data))
+        return 0
     if getattr(args, "mew_first", False):
         data = summarize_mew_first_calibration(
             source_path=getattr(args, "source_file", None) or "ROADMAP_STATUS.md",

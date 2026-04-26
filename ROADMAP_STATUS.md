@@ -49,7 +49,7 @@ is tracked below.
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
-| 6.16 Codex-Grade Implementation Lane | `not_started` | Next active milestone: use M6.13 lane telemetry and mew-first evidence to harden ordinary implementation-lane reliability. |
+| 6.16 Codex-Grade Implementation Lane | `in_progress` | Baseline surface is landing; first measured bottleneck is mew-first rescue/partial implementation attempts. |
 | 6.17 Resident Meta Loop / Lane Chooser | `not_started` | Future supervisor milestone after lane telemetry, mirror/deliberation boundaries, and implementation-lane reliability are proven. |
 | 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -88,10 +88,31 @@ Current M6.16 target:
 
 Current M6.16 chain:
 
-`M6.16 -> implementation-lane baseline -> measured bottleneck reduction cohort`
+`M6.16 -> measured bottleneck: mew_first_rescue_partial -> reduce ordinary implementation-lane rescue/partial rate`
 
 Current M6.16 evidence:
 
+- Task `#656` produced the first M6.16 baseline slice as supervisor-owned
+  rescue after failed mew-first attempts. Sessions `#642` and `#643` did not
+  land product code: the first draft was label-only, the second helper-only
+  draft missed the real metrics shape and CLI surface, the fresh retry hit
+  `task_goal_term_missing`, and the final retry drifted into a wrong-target
+  calibration parser patch. Count this as `product_progress_supervisor_rescue`
+  with no autonomy credit, and as implementation-lane evidence for
+  task-goal/substitution fragility after rejection feedback.
+- The supervisor-owned baseline surface adds `mew metrics --implementation-lane`
+  plus `src/mew/implementation_lane_baseline.py`. It combines
+  `summarize_mew_first_calibration`, `build_observation_metrics(kind="coding")`,
+  and `summarize_side_project_dogfood`. Current output reports
+  `attempts_total=12`, `clean_or_practical_successes=3`,
+  `rescue_partial_count=9`, `approval.rejected=13/18`,
+  `verifier.failed=0/75`, `first_edit_latency.p95=890.0`, empty
+  side-project dogfood rows, and failure classes including
+  `task_goal_substitution` and `synthetic_schema_substitution`; it recommends
+  `mew_first_rescue_partial` as the first bottleneck. Validation passed:
+  `uv run pytest -q tests/test_implementation_lane_baseline.py tests/test_mew_first_calibration.py tests/test_metrics.py tests/test_side_project_dogfood.py --no-testmon`,
+  `uv run ruff check src/mew/implementation_lane_baseline.py src/mew/commands.py src/mew/cli.py tests/test_implementation_lane_baseline.py`,
+  `./mew metrics --implementation-lane --json`, and `git diff --check`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal

@@ -688,9 +688,18 @@ def build_parser():
         help="summarize M6.10 mew-first calibration economics from roadmap evidence",
     )
     metrics_parser.add_argument(
+        "--implementation-lane",
+        action="store_true",
+        help="summarize the M6.16 implementation-lane baseline from existing telemetry",
+    )
+    metrics_parser.add_argument(
         "--source-file",
         default="ROADMAP_STATUS.md",
-        help="source markdown for --mew-first; defaults to ROADMAP_STATUS.md",
+        help="source markdown for --mew-first or --implementation-lane; defaults to ROADMAP_STATUS.md",
+    )
+    metrics_parser.add_argument(
+        "--side-project-ledger",
+        help="side-project dogfood ledger path for --implementation-lane",
     )
     metrics_parser.add_argument("--json", action="store_true", help="print structured JSON")
     metrics_parser.set_defaults(func=cmd_metrics)
