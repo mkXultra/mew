@@ -36,6 +36,41 @@ ACCEPTANCE_CONSTRAINT_KEYWORDS = (
 
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
+_TOOL_ID_RE = re.compile(r"\btool\s*#?\s*(\d+)\b", re.IGNORECASE)
+
+_WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
+_GROUNDING_TOOLS = {
+    "git_diff",
+    "git_status",
+    "glob",
+    "read_file",
+    "run_command",
+    "run_tests",
+    "search_text",
+}
+
+_EDIT_SCOPE_MARKERS = (
+    "allowed edit",
+    "allowed edits",
+    "do not edit",
+    "do not modify",
+    "don't edit",
+    "don't modify",
+    "must not edit",
+    "must not modify",
+    "only edit",
+    "only edits",
+    "only change",
+    "only changes",
+    "only modify",
+    "only modification",
+    "only replacements",
+    "replace words",
+    "specified replacement",
+    "specified replacements",
+    "without editing",
+    "without modifying",
+)
 
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:
@@ -73,6 +108,11 @@ def extract_acceptance_constraints(text: object, *, limit: int = 8) -> list[str]
     return constraints
 
 
+def is_edit_scope_constraint(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _EDIT_SCOPE_MARKERS)
+
+
 def coerce_acceptance_checks(value: object, *, limit: int = 8) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []
@@ -103,7 +143,93 @@ def coerce_acceptance_checks(value: object, *, limit: int = 8) -> list[dict[str,
     return checks
 
 
-def acceptance_finish_blocker(task_description: object, action: object) -> str:
+def _completed_tool_calls(session: object) -> list[dict]:
+    if not isinstance(session, dict):
+        return []
+    calls = session.get("tool_calls")
+    if not isinstance(calls, list):
+        return []
+    return [
+        call
+        for call in calls
+        if isinstance(call, dict) and str(call.get("status") or "").casefold() == "completed"
+    ]
+
+
+def _latest_completed_write_tool_id(session: object) -> int | None:
+    latest: int | None = None
+    for call in _completed_tool_calls(session):
+        if call.get("tool") not in _WRITE_TOOLS:
+            continue
+        call_id = call.get("id")
+        if isinstance(call_id, int):
+            latest = max(latest or call_id, call_id)
+    return latest
+
+
+def _tool_call_by_id(session: object, tool_id: int) -> dict | None:
+    for call in _completed_tool_calls(session):
+        if call.get("id") == tool_id:
+            return call
+    return None
+
+
+def _evidence_tool_ids(text: object) -> list[int]:
+    ids: list[int] = []
+    for match in _TOOL_ID_RE.finditer(str(text or "")):
+        try:
+            tool_id = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if tool_id not in ids:
+            ids.append(tool_id)
+    return ids
+
+
+def _has_post_write_grounding_evidence(evidence: object, session: object) -> bool:
+    latest_write_id = _latest_completed_write_tool_id(session)
+    if latest_write_id is None:
+        return True
+    for tool_id in _evidence_tool_ids(evidence):
+        if tool_id <= latest_write_id:
+            continue
+        call = _tool_call_by_id(session, tool_id)
+        if call and call.get("tool") in _GROUNDING_TOOLS:
+            return True
+    return False
+
+
+def _edit_scope_grounding_blocker(
+    constraints: list[str],
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if _latest_completed_write_tool_id(session) is None:
+        return ""
+    if not any(is_edit_scope_constraint(constraint) for constraint in constraints):
+        return ""
+    edit_scope_checks = [
+        check
+        for check in checks
+        if is_edit_scope_constraint(check.get("constraint")) or is_edit_scope_constraint(check.get("evidence"))
+    ]
+    if not edit_scope_checks:
+        return (
+            "edit-scope acceptance evidence missing: constraints about only-allowed edits, "
+            "specified replacements, or do-not-edit surfaces must be checked explicitly"
+        )
+    for check in edit_scope_checks:
+        if _has_post_write_grounding_evidence(check.get("evidence"), session):
+            continue
+        return (
+            "edit-scope acceptance evidence ungrounded: constraints about only-allowed edits, "
+            "specified replacements, or do-not-edit surfaces must cite a completed validator, "
+            "diff, or final inspection tool after the latest write; write history alone is not enough"
+        )
+    return ""
+
+
+def acceptance_finish_blocker(task_description: object, action: object, *, session: object = None) -> str:
     action = action if isinstance(action, dict) else {}
     if not action.get("task_done"):
         return ""
@@ -119,6 +245,9 @@ def acceptance_finish_blocker(task_description: object, action: object) -> str:
         and str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
     ]
     if len(verified) >= len(constraints):
+        edit_scope_blocker = _edit_scope_grounding_blocker(constraints, verified, session)
+        if edit_scope_blocker:
+            return edit_scope_blocker
         return ""
     return (
         "acceptance constraints unchecked: finish with task_done=true must include "

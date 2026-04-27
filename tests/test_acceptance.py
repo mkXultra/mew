@@ -40,3 +40,114 @@ def test_acceptance_finish_blocker_accepts_complete_verified_checks():
 
     assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}) == ""
     assert coerce_acceptance_checks(checks) == checks
+
+
+def test_acceptance_finish_blocker_rejects_edit_scope_write_history_after_write():
+    text = (
+        "Ensure the output file exists. The only edits you may make are specified replacements. "
+        "Do not edit config.json."
+    )
+    checks = [
+        {"constraint": "Ensure the output file exists.", "status": "verified", "evidence": "tool #3 passed"},
+        {
+            "constraint": "The only edits you may make are specified replacements.",
+            "status": "verified",
+            "evidence": "Applied edit_file tool #2 with replacements from earlier read history.",
+        },
+        {
+            "constraint": "Do not edit config.json.",
+            "status": "verified",
+            "evidence": "Write history shows no write action for config.json.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {"id": 1, "tool": "read_file", "status": "completed"},
+            {"id": 2, "tool": "edit_file", "status": "completed"},
+            {"id": 3, "tool": "run_command", "status": "completed"},
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "edit-scope acceptance evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_requires_explicit_edit_scope_check_after_write():
+    text = "Ensure output exists. The only edits you may make are specified replacements."
+    checks = [
+        {"constraint": "Ensure output exists.", "status": "verified", "evidence": "tool #3 passed"},
+        {"constraint": "Task complete.", "status": "verified", "evidence": "tool #4 passed"},
+    ]
+    session = {
+        "tool_calls": [
+            {"id": 1, "tool": "read_file", "status": "completed"},
+            {"id": 2, "tool": "edit_file", "status": "completed"},
+            {"id": 3, "tool": "run_command", "status": "completed"},
+            {"id": 4, "tool": "run_command", "status": "completed"},
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "edit-scope acceptance evidence missing" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_post_write_edit_scope_validator():
+    text = (
+        "Ensure the output file exists. The only edits you may make are specified replacements. "
+        "Do not edit config.json."
+    )
+    checks = [
+        {"constraint": "Ensure the output file exists.", "status": "verified", "evidence": "tool #3 passed"},
+        {
+            "constraint": "The only edits you may make are specified replacements.",
+            "status": "verified",
+            "evidence": "Tool #4 run_command compared the final file against the allowed replacements and printed OK.",
+        },
+        {
+            "constraint": "Do not edit config.json.",
+            "status": "verified",
+            "evidence": "Tool #4 run_command confirmed config.json was unchanged.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {"id": 1, "tool": "read_file", "status": "completed"},
+            {"id": 2, "tool": "edit_file", "status": "completed"},
+            {"id": 3, "tool": "run_command", "status": "completed"},
+            {"id": 4, "tool": "run_command", "status": "completed"},
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_does_not_escalate_non_edit_scope_checks():
+    text = "Ensure the output file exists."
+    checks = [{"constraint": text, "status": "verified", "evidence": "tool #2 wrote the file"}]
+    session = {"tool_calls": [{"id": 2, "tool": "write_file", "status": "completed"}]}
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )

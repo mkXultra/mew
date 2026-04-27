@@ -33630,6 +33630,49 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("acceptance constraints unchecked", result["finished_note"])
         self.assertIn("Work session finish blocked", task["notes"])
 
+    def test_work_finish_blocks_ungrounded_edit_scope_acceptance_after_write(self):
+        from mew.commands import apply_work_control_action
+
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": "Ensure output exists. The only edits you may make are specified replacements.",
+            "tool_calls": [
+                {"id": 1, "tool": "read_file", "status": "completed"},
+                {"id": 2, "tool": "edit_file", "status": "completed"},
+                {"id": 3, "tool": "run_command", "status": "completed"},
+            ],
+        }
+        task = {
+            "id": 15,
+            "description": "Ensure output exists. The only edits you may make are specified replacements.",
+            "status": "ready",
+            "notes": "",
+        }
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {"constraint": "Ensure output exists.", "status": "verified", "evidence": "tool #3 passed"},
+                {
+                    "constraint": "The only edits you may make are specified replacements.",
+                    "status": "verified",
+                    "evidence": "Applied edit_file tool #2 using write history.",
+                },
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("edit-scope acceptance evidence ungrounded", result["finished_note"])
+        self.assertIn("Work session finish blocked", task["notes"])
+
     def test_repairable_wait_converts_to_remember_when_continuation_allowed(self):
         action = {
             "type": "wait",

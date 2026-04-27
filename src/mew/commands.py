@@ -3492,6 +3492,7 @@ def apply_work_control_action(state, session, task, action):
             acceptance_blocker = acceptance_finish_blocker(
                 (task or {}).get("description") or session.get("goal") or "",
                 action,
+                session=session,
             )
             if acceptance_blocker:
                 finish_blockers.append(acceptance_blocker)
