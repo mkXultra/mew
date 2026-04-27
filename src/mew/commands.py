@@ -4084,6 +4084,10 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             not write_batch
             and _recoverable_missing_read_file_error(action_type, parameters, error, args, index, batch_max_steps)
         )
+        recoverable_git_status_not_repo = (
+            not write_batch
+            and _recoverable_git_status_not_repo_error(action_type, error, result, index, batch_max_steps)
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
@@ -4091,8 +4095,11 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
                 recoverable_missing_read_file = False
+                recoverable_git_status_not_repo = False
             if recoverable_missing_read_file:
                 tool_call["recoverable_missing_read_file"] = True
+            if recoverable_git_status_not_repo:
+                tool_call["recoverable_git_status_not_repo"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             record_active_work_todo_executor_lifecycle(
@@ -4129,6 +4136,19 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 )
                 if progress:
                     progress(f"step #{index}: batch missing read target; continuing with partial observations")
+                error = ""
+                continue
+            if recoverable_git_status_not_repo and index < batch_max_steps:
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "cwd": parameters.get("cwd") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch git status unavailable; continuing with partial observations")
                 error = ""
                 continue
             break
