@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "task_id": 16,
+  "session_id": 35,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Add true foreground CLI and HTML watch mode to isolated mew-ghost while preserving explicit macOS live-probe opt-in and dry-run launcher safety.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 5,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/16-watch-mode-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "git diff --check",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --watch --watch-count 2 --interval 0 --format state",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-watch-review.html --watch-count 2 --interval 0",
+    "./mew side-dogfood append --input experiments/mew-ghost/.mew-dogfood/reports/16-watch-mode-practical.json --ledger /tmp/mew-side-dogfood-sp16-final-verify.jsonl --json"
+  ],
+  "reviewer_rejections": 2,
+  "verifier_failures": 2,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "watch_mode_report_schema_repair_after_overlapping_hunk_retry",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/35/snapshot.json",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/16-watch-mode-practical.json",
+    "/tmp/mew-ghost-watch-review.jsonl",
+    "/tmp/mew-ghost-watch-review.html",
+    "/tmp/mew-side-dogfood-sp16-final-verify.jsonl"
+  ],
+  "commit": "",
+  "notes": "Mew authored the SP16 product patch after one overlapping edit_file_hunks failure and a steer to use full-file write proposals. Focused pytest passed with 19 tests. Operator review confirmed watch-count emits multiple newline-delimited JSON records and HTML watch rewrites the output file with foreground-watch freshness metadata. The canonical report was operator-normalized after mew twice wrote noncanonical report JSON; this is evidence/report closeout, not product-code rescue, so rescue_edits remains 0. Real macOS Accessibility behavior and real launcher subprocess execution remain intentionally unverified in automation and gated behind explicit operator flags."
+}

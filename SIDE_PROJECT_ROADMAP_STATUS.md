@@ -1,6 +1,6 @@
 # Mew Side Project Implementation Status
 
-Last updated: 2026-04-26
+Last updated: 2026-04-27
 
 This file is the compact operational dashboard for side-project implementation
 dogfood. It is intentionally separate from `ROADMAP_STATUS.md`; the main
@@ -26,11 +26,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP13 mew-ghost Live macOS Probe Integration | `done` | Live probe integration landed practical: explicit `--live-active-window` opt-in, injectable `osascript` runner/provider, structured fallbacks, README usage, output proof, and hermetic tests are in place. |
 | SP14 mew-ghost Presence Loop | `done` | Presence loop landed practical: deterministic idle/attentive/coding/waiting/blocked classification, bounded refresh snapshots, README refresh contract, output proof, and focused tests are in place. |
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
-| SP16 mew-ghost Watch Mode | `planned` | Next slice: add bounded CLI/HTML watch mode so `idle`/`attentive`/`coding`/`waiting`/`blocked` presence can update continuously without background monitoring or implicit launcher execution. |
+| SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
 
 ## Active Focus
 
-Active side-project focus: **SP16 mew-ghost Watch Mode**.
+Active side-project focus: **post-SP16 side-project selection**.
 
 Current target:
 
@@ -40,12 +40,11 @@ Current target:
   `execution.status: "dry_run"`
 - direct launcher execution is gated behind explicit `--execute-launchers`;
   automated tests use an injected runner and do not spawn real `mew`
-- add `--watch` style behavior for CLI and HTML so presence can update
-  continuously until interrupted
-- include a bounded watch path such as `--watch-count` so tests do not rely on
-  infinite loops
-- keep HTML watch output safe for browser display, either by atomic rewrite
-  plus page refresh metadata or an equivalent local refresh contract
+- SP16 watch mode is now present: `--watch-count` runs exact bounded
+  foreground iterations, `--watch` runs until operator interrupt, `--interval`
+  controls injected/testable sleeping, CLI watch emits one JSONL record per
+  iteration, and HTML watch rewrites the same output file with freshness
+  metadata each iteration
 - live macOS probing remains explicit through `--live-active-window`
 - preserve the bounded deterministic presence loop without background
   monitoring or hidden capture
@@ -57,10 +56,13 @@ Current target:
   set for future product planning and contract checks
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
-- route the repeated stale failed-approval cleanup pattern as open issue `#10`
-  evidence for M6.16 implementation-lane hardening
-- route the SP15 report-schema closeout gap as open issue `#11` evidence for
-  M6.16 implementation-lane hardening
+- route the repeated stale failed-approval cleanup pattern as closed issue
+  `#10` evidence for M6.16 implementation-lane hardening
+- route the report-schema closeout gap as closed issue `#11` evidence for
+  M6.16 implementation-lane hardening; SP16 still needed operator report JSON
+  normalization, recorded in ledger row `17`
+- route watch-mode verifier semantics as closed issue `#12` evidence; SP16
+  operator review confirmed multiple CLI records and HTML rewrite behavior
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -73,9 +75,9 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
-  SP15 on 2026-04-26: `rows_total=16`, one `failed`, twelve `practical`,
-  three `clean`, `success_rate=0.938`, `structural_repairs_required=1`, and
-  `rescue_edits_total=0`.
+  SP16 on 2026-04-27: `rows_total=17`, one `failed`, thirteen `practical`,
+  three `clean`, `success_rate=0.941`, `structural_repairs_required=1`,
+  `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
   twelve `mew-companion-log` rows on 2026-04-26: `rows_total=12`, one `failed`,
   eight `practical`, three `clean`, `success_rate=0.917`,
@@ -405,6 +407,33 @@ Current target:
   temporary side-dogfood ledger append validation were also verified. Real
   `--execute-launchers` execution remains intentionally outside automated
   verification and requires local operator opt-in.
+- Task `#16` / session `#35` added the SP16 foreground watch mode with Codex
+  CLI as `operator` and mew as first implementer. After all side-pj issues were
+  closed and latest `origin/main` was pulled, mew authored the true watch-mode
+  product patch: `--watch-count` exact bounded iterations, interruptible
+  `--watch`, `--interval`, injectable sleeper/clock, one JSONL CLI record per
+  iteration, repeated HTML `--output` rewrites with freshness metadata, and
+  README usage. Launcher execution remains dry-run unless
+  `--execute-launchers` is explicitly supplied, and live macOS probing remains
+  gated by `--live-active-window`.
+- Session `#35` first failed with overlapping `ghost.py` edit hunks; after
+  operator steering, mew recovered with a full-file write proposal and the
+  focused verifier passed. Mew then twice wrote noncanonical report JSON; the
+  operator normalized only the local evidence report into the canonical
+  side-dogfood schema. No operator product-code rescue edits were made.
+- mew-ghost SP16 local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/16-watch-mode-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `17`;
+  outcome `practical`, failure class
+  `watch_mode_report_schema_repair_after_overlapping_hunk_retry`,
+  `rescue_edits=0`.
+- mew-ghost SP16 verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+  returned `19 passed`. `git diff --check`, CLI JSONL watch proof, HTML
+  rewrite/freshness proof, and temporary side-dogfood ledger append validation
+  also passed. Real macOS Accessibility behavior and real launcher subprocess
+  execution remain intentionally outside automated verification and require
+  explicit local operator opt-in.
 
 ## Missing Proof
 
@@ -413,26 +442,27 @@ Current target:
 - SP13 is closed for the second `mew-ghost` cohort.
 - SP14 is closed for the second `mew-ghost` cohort.
 - SP15 is closed for the second `mew-ghost` cohort.
-- SP16 has not started; continuous CLI/HTML watch behavior is not yet defined.
+- SP16 is closed for the second `mew-ghost` cohort.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
-- Open `[side-pj]` implementation-lane polish issues remain M6.16 input and do
-  not block the isolated `mew-ghost` scaffold unless the same failure repeats.
+- Real macOS Accessibility behavior for `--live-active-window` remains
+  intentionally unverified by automation; structured fallback and injected
+  provider paths are covered.
+- All known `[side-pj]` implementation-lane polish issues are closed as of
+  2026-04-27; any recurrence should be recorded as a new or reopened
+  one-problem issue before the next major side-project milestone.
 
 ## Next Action
 
-Start SP16 with mew as first implementer:
+Pick the next side-project milestone deliberately before coding:
 
-1. create a coding task for `mew-ghost` SP16
-2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
-   with `--model gpt-5.5`
-3. allow writes only under `experiments/mew-ghost`
-4. add bounded CLI and HTML watch mode while preserving live probe opt-in and
-   dry-run launcher safety
-5. verify with
-   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
-6. write a canonical local side-dogfood report and append it to the ledger
+1. either add SP17 to continue `mew-ghost` from the now-working watch surface,
+   likely a local status view/digest that consumes the watch JSONL/HTML output
+2. or pause side-project implementation and feed rows `13` through `17` into
+   core M6.16/M6.17 implementation-lane polish
+3. before any new mew coding operation, run the repo-root sync rule from
+   `/Users/mk/dev/personal-pj/mew_side_pj`
 
 ## Non-Goals
 
