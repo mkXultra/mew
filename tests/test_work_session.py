@@ -5059,6 +5059,118 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_reduces_model_timeout_to_fit_wall_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "finish after one bounded turn",
+                    "action": {
+                        "type": "finish",
+                        "status": "done",
+                        "summary": "done",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--no-auto-deliberation",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-wall-seconds",
+                                        "20",
+                                        "--max-steps",
+                                        "1",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertEqual(report["stop_reason"], "finish")
+                call_model.assert_called_once()
+                timeout = call_model.call_args.args[5]
+                self.assertGreaterEqual(timeout, 5.0)
+                self.assertLess(timeout, 60.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_keeps_model_timeout_when_wall_budget_has_room(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "finish after one normal turn",
+                    "action": {
+                        "type": "finish",
+                        "status": "done",
+                        "summary": "done",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output) as call_model:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--no-auto-deliberation",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-wall-seconds",
+                                        "1000",
+                                        "--max-steps",
+                                        "1",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                call_model.assert_called_once()
+                self.assertEqual(call_model.call_args.args[5], 60.0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_rejects_non_positive_wall_budget(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

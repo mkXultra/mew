@@ -1105,6 +1105,7 @@ def _work_deliberation_preflight_decision(
     guidance="",
     deliberation_requested=False,
     auto_deliberation=True,
+    timeout_ceiling=False,
 ):
     work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
     resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
@@ -1124,7 +1125,10 @@ def _work_deliberation_preflight_decision(
         draft_attempts = int(attempts.get("draft") or 0)
     except (TypeError, ValueError):
         draft_attempts = 0
-    deliberation_timeout = max(float(timeout or 0), WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS)
+    if timeout_ceiling:
+        deliberation_timeout = max(float(timeout or 0), 0.0)
+    else:
+        deliberation_timeout = max(float(timeout or 0), WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS)
     return evaluate_deliberation_request(
         todo=active_todo,
         blocker_code=blocker_code,
@@ -1209,6 +1213,7 @@ def _attempt_work_deliberation_lane(
     guidance="",
     deliberation_requested=False,
     auto_deliberation=True,
+    timeout_ceiling=False,
     progress=None,
     current_time="",
 ):
@@ -1220,6 +1225,7 @@ def _attempt_work_deliberation_lane(
         guidance=guidance,
         deliberation_requested=deliberation_requested,
         auto_deliberation=auto_deliberation,
+        timeout_ceiling=timeout_ceiling,
     )
     if not decision:
         return {}
@@ -6818,6 +6824,7 @@ def plan_work_model_turn(
     auto_deliberation=True,
     run_step_index=None,
     run_max_steps=None,
+    timeout_ceiling=False,
 ):
     current_time = now_iso()
     capabilities = {
@@ -6885,11 +6892,9 @@ def plan_work_model_turn(
     think_prompt_dynamic_chars = 0
     if write_ready_fast_path.get("active"):
         think_prompt_static_chars, think_prompt_dynamic_chars = _write_ready_draft_prompt_chars(think_prompt)
-    think_timeout = (
-        max(float(timeout), WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
-        if write_ready_context
-        else float(timeout)
-    )
+    think_timeout = float(timeout)
+    if write_ready_context and not timeout_ceiling:
+        think_timeout = max(think_timeout, WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
     tiny_write_ready_prompt = (
         build_work_write_ready_tiny_draft_prompt(tiny_write_ready_context)
         if tiny_write_ready_context
@@ -6934,8 +6939,9 @@ def plan_work_model_turn(
         model_backend=model_backend,
         timeout=timeout,
         guidance=guidance,
-        deliberation_requested=deliberation_requested,
-        auto_deliberation=auto_deliberation,
+        deliberation_requested=deliberation_requested and not timeout_ceiling,
+        auto_deliberation=auto_deliberation and not timeout_ceiling,
+        timeout_ceiling=timeout_ceiling,
         progress=progress,
         current_time=current_time,
     )
@@ -7211,6 +7217,38 @@ def plan_work_model_turn(
             return _work_plan_with_session_trace_patch(
                 {
                     "decision_plan": tiny_result.get("decision_plan") or {},
+                    "action_plan": action_plan,
+                    "action": action,
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": compact_model_stream(stream_deltas),
+                },
+                session_trace_patch,
+            )
+        if timeout_ceiling:
+            model_metrics["think"]["elapsed_seconds"] = _round_seconds(tiny_write_ready_elapsed)
+            model_metrics["act"] = {
+                "prompt_chars": 0,
+                "elapsed_seconds": 0.0,
+                "mode": "timeout_ceiling",
+            }
+            model_metrics["total_model_seconds"] = _round_seconds(tiny_write_ready_elapsed)
+            action = {
+                "type": "wait",
+                "reason": "wall-clock timeout ceiling prevented broad fallback after tiny write-ready draft",
+            }
+            action_plan = {
+                "summary": action["reason"],
+                "action": action,
+                "act_mode": "timeout_ceiling",
+            }
+            if pre_model_metrics_sink:
+                pre_model_metrics_sink(dict(model_metrics))
+            if progress:
+                progress(f"session #{session.get('id')}: timeout ceiling stopped broad fallback")
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": {"summary": action["reason"]},
                     "action_plan": action_plan,
                     "action": action,
                     "context": context,

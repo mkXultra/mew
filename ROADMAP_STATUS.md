@@ -353,6 +353,20 @@ M6.24 Batch 1:
   then rerun `build-cython-ext`. If the missing-directory stop disappears and
   score is still below target, move to same-family verifier sibling-set repair
   rather than a benchmark-specific Cython solver.
+- completed eighteenth repair:
+  commit `85eade0` made missing generated-directory observations recoverable
+  for `inspect_dir` and `read_file`, top-level and inside read-only batches,
+  while budget remains. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-missing-dir-observation-20260428-0731/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 10m 4s. The previous
+  missing-directory terminal stop did not recur; all attempts reached
+  `wall_timeout`.
+- current route:
+  repair generic max-wall scheduling. The latest runs show mew stops before
+  another model turn as soon as remaining wall time is less than the configured
+  300s model timeout, leaving usable wall time idle. Reduce the per-turn model
+  timeout to fit the remaining wall budget instead of stopping early, then
+  rerun `build-cython-ext`.
 
 Drift guard:
 

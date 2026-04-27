@@ -330,6 +330,8 @@ RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
 MAX_OUTBOX_TEXT_CHARS = 2000
 RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS = 0.5
 RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
+WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
+WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS = 5.0
 APPROVAL_MODE_ACCEPT_EDITS = "accept-edits"
 APPROVAL_MODES = ("default", APPROVAL_MODE_ACCEPT_EDITS)
 
@@ -5617,21 +5619,39 @@ def cmd_work_ai(args):
         return 1
 
     for index in range(1, max_steps + 1):
+        turn_model_timeout = float(getattr(effective_args, "model_timeout", 0) or 0)
+        turn_timeout_ceiling = False
         if max_wall_seconds is not None:
             elapsed = time.monotonic() - run_started_at
             remaining = max_wall_seconds - elapsed
             model_timeout = float(getattr(effective_args, "model_timeout", 0) or 0)
-            if remaining <= 0 or (model_timeout > 0 and remaining <= model_timeout):
+            model_call_count = 1 if (getattr(effective_args, "act_mode", "model") or "model") == "deterministic" else 2
+            available_model_timeout = max(
+                0.0,
+                (remaining - WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS) / model_call_count,
+            )
+            if remaining <= 0 or (
+                model_timeout > 0 and available_model_timeout < WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS
+            ):
                 report["stop_reason"] = "wall_timeout"
                 report["wall_timeout"] = {
                     "elapsed_seconds": round(elapsed, 3),
                     "remaining_seconds": round(max(0.0, remaining), 3),
                     "model_timeout_seconds": model_timeout,
+                    "available_model_timeout_seconds": round(max(0.0, available_model_timeout), 3),
+                    "reserve_seconds": WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS,
                     "reason": "not enough wall-clock budget remains for another model turn",
                 }
                 if progress:
                     progress(f"step #{index}: wall-clock budget exhausted before next model turn")
                 break
+            if model_timeout > 0:
+                reduced_timeout = min(
+                    model_timeout,
+                    max(WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS, available_model_timeout),
+                )
+                turn_timeout_ceiling = reduced_timeout < model_timeout
+                turn_model_timeout = reduced_timeout
         step_started = time.monotonic()
         live_thinking_open = False
         live_model_delta_seen = False
@@ -5793,7 +5813,7 @@ def cmd_work_ai(args):
                 model=model,
                 base_url=base_url,
                 model_backend=model_backend,
-                timeout=effective_args.model_timeout,
+                timeout=turn_model_timeout,
                 allowed_read_roots=effective_args.allow_read or [],
                 allowed_write_roots=effective_args.allow_write or [],
                 allow_shell=effective_args.allow_shell,
@@ -5813,6 +5833,7 @@ def cmd_work_ai(args):
                 compact_live=bool(getattr(effective_args, "compact_live", False)),
                 run_step_index=index,
                 run_max_steps=max_steps,
+                timeout_ceiling=turn_timeout_ceiling,
             )
             flush_live_model_delta()
         except KeyboardInterrupt:
