@@ -161,7 +161,8 @@ M6.24 Batch 1:
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far:
-  - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
+  - `build-cython-ext`: latest 0/5 after max-wall partial-report
+    observability, best observed 1/5, Codex target 5/5.
   - `chess-best-move`: latest 5/5 after all-valid answer gating plus
     acceptance-finish continuation, above Codex target 3/5; previous baseline
     and answer-artifact prompt repair were both 0/5, and post-`read_image`
@@ -324,6 +325,20 @@ M6.24 Batch 1:
   `acceptance_finish_block_terminal_stop` generically. Track the increased
   runtime as a later implementation-lane ergonomics issue, not as a reason to
   revert the correctness repair.
+- completed sixteenth measurement:
+  rerunning `build-cython-ext` with the existing generic
+  `mew work --oneshot --max-wall-seconds 780` path scored 0/5 with Harbor
+  errors 0 and runtime 10m 4s in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-max-wall-780-20260428-0637/result.json`.
+  This repaired the previous `AgentTimeoutError` opacity: every trial emitted
+  `mew-report.json`, `command-transcript.json`, `summary.json`, and verifier
+  output before stopping with `stop_reason = wall_timeout`. The remaining
+  primary structural reason is now
+  `multi_error_verifier_repair_not_closed_before_wall_timeout`, with secondary
+  `scattered_legacy_compatibility_sweep_incomplete` and
+  `dry_run_patch_not_converted_to_applied_patch_before_deadline`. Treat the
+  next repair as generic verifier-failure repair planning, not a
+  Cython-specific solver.
 
 Drift guard:
 
