@@ -4151,6 +4151,7 @@ def cmd_work_oneshot(args):
     work_args.follow = False
     work_args.oneshot = False
     work_args.json = True
+    work_args.continue_after_remember = True
     if getattr(work_args, "max_steps", None) is None:
         work_args.max_steps = 30
     if work_args.max_steps == 0:
@@ -5136,6 +5137,17 @@ def _refresh_step_tool_call_after_approval(step, approved_tool_call):
         step["pending_approval"] = bool(pending_ids)
 
 
+def _recoverable_approval_verification_failure(approval_data, index, max_steps):
+    tool_call = (approval_data or {}).get("tool_call") or {}
+    result = tool_call.get("result") or {}
+    return (
+        tool_call.get("status") == "failed"
+        and bool(result.get("rolled_back"))
+        and bool(result.get("verification"))
+        and index < max_steps
+    )
+
+
 def _work_task_verify_instruction_text(task):
     if not task:
         return ""
@@ -5882,6 +5894,11 @@ def cmd_work_ai(args):
                     ),
                 }
             )
+            if action_type == "remember" and getattr(effective_args, "continue_after_remember", False) and index < max_steps:
+                report["steps"][-1]["continued_after_remember"] = True
+                if progress:
+                    progress(f"step #{index}: remembered context; continuing")
+                continue
             report["stop_reason"] = action_type or "control"
             if progress:
                 progress(f"step #{index}: stop={report['stop_reason']}")
@@ -6313,6 +6330,8 @@ def cmd_work_ai(args):
                 )
                 approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
                 report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+                if approval_code != 0 and _recoverable_approval_verification_failure(approval_data, index, max_steps):
+                    report["steps"][-1]["inline_approval_recoverable_verification_failure"] = True
                 if approval_data:
                     _refresh_step_tool_call_after_approval(report["steps"][-1], approval_data.get("approved_tool_call"))
                     applied_tool = approval_data.get("tool_call") or {}
@@ -6342,6 +6361,10 @@ def cmd_work_ai(args):
             if report["steps"][-1].get("inline_approval") == "auto_applied":
                 continue
             if report["steps"][-1].get("inline_approval") == "auto_failed":
+                if report["steps"][-1].get("inline_approval_recoverable_verification_failure"):
+                    if progress:
+                        progress(f"step #{index}: auto-approved verification failed; continuing with repair context")
+                    continue
                 report["stop_reason"] = "tool_failed"
                 break
             if live_approval_prompt_enabled(effective_args):

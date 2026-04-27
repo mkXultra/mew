@@ -4701,6 +4701,57 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_continues_after_remember_note(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_outputs = [
+                    {
+                        "summary": "remember useful state",
+                        "action": {"type": "remember", "note": "looked at the workspace"},
+                    },
+                    {
+                        "summary": "finish after note",
+                        "action": {"type": "finish", "reason": "done after note"},
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(payload["work_report"]["stop_reason"], "finish")
+                self.assertTrue(payload["work_report"]["steps"][0]["continued_after_remember"])
+                self.assertEqual(payload["work_report"]["steps"][0]["work_note"]["text"], "looked at the workspace")
+            finally:
+                os.chdir(old_cwd)
+
     def test_detect_default_verify_command_prefers_instruction_backtick_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -21323,6 +21374,79 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual([call["tool"] for call in session["tool_calls"]], ["write_file", "read_file"])
                 self.assertTrue(session["tool_calls"][0]["result"]["rolled_back"])
                 self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_continues_after_auto_approval_verification_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                calls = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    calls.append(prompt)
+                    if len(calls) == 1:
+                        return {
+                            "summary": "preview then verify",
+                            "action": {
+                                "type": "edit_file",
+                                "path": "README.md",
+                                "old": "old text",
+                                "new": "bad text",
+                            },
+                        }
+                    return {"summary": "inspect after auto approval failure", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "false",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "max_steps")
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(report["steps"][0]["inline_approval"], "auto_failed")
+                self.assertTrue(report["steps"][0]["inline_approval_recoverable_verification_failure"])
+                self.assertEqual(report["steps"][0]["inline_approval_status"], "failed")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["edit_file", "edit_file", "read_file"])
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "failed")
+                self.assertTrue(session["tool_calls"][1]["result"]["rolled_back"])
             finally:
                 os.chdir(old_cwd)
 
