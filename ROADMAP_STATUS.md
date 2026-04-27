@@ -55,7 +55,7 @@ is tracked below.
 | 6.19 Terminal-Bench Compatibility | `done` | Close gate passed via `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`; mew and Codex both run the bounded Harbor smoke with comparable artifacts. |
 | 6.20 Terminal-Bench Driven Implement-Lane Debugging | `done` | Fixed two-task terminal gate closed on current head: both selected tasks reached 5/5 with Harbor errors 0. |
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
-| 6.22 Terminal-Bench Curated Subset Parity | `in_progress` | Active milestone: fixed multi-band subset selected; first selected task run recorded. |
+| 6.22 Terminal-Bench Curated Subset Parity | `in_progress` | Active milestone: fixed multi-band subset run completed; generic repair/rerun remains before close. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `not_started` | Convert curated-subset failures into ranked repair classes with rerun evidence. |
 | 6.24 Broad Terminal-Bench Parity Campaign | `not_started` | Full 89-task parity against Codex target 366/445 successes, 82.2% resolution. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
@@ -94,7 +94,7 @@ Current M6.22 target:
   `gcode-to-text` 2/5, `overfull-hbox` 3/5, `extract-elf` 4/5,
   `cancel-async-tasks` 5/5, and `fix-code-vulnerability` 5/5
 - aggregate Codex target: 20/35 successes, 57.14%
-- selected task runs so far:
+- selected task runs:
   `filter-js-from-html` completed 0/5 with 5 `VerifierTimeoutError`
   exceptions in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`;
@@ -104,8 +104,9 @@ Current M6.22 target:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json`.
   `overfull-hbox` completed 1/5 with Harbor errors 0 in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-python-bootstrap-20260427-2315/result.json`.
-  Current counted M6.22 total is 2/20, below the frozen Codex 6/20 target
-  for those four tasks.
+  `extract-elf` completed 5/5 with Harbor errors 0 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-extract-elf-5attempts-python-bootstrap-20260427-2334/result.json`.
+  Current full M6.22 total is 17/35, below the frozen Codex 20/35 target.
 - current below-target classification:
   `gcode-to-text` is classified as M6.18 `structural`, confidence medium,
   `structural_reason = missing_visual_decode_artifact_grounding`, with a
@@ -115,6 +116,10 @@ Current M6.22 target:
   confidence medium-high,
   `structural_reason = insufficient_acceptance_constraint_model`, with a
   secondary `repeat_action_after_partial_repair` signal.
+- selected first repair route:
+  generic acceptance-constraint ledger / final self-check before finish, using
+  `overfull-hbox` as the M6.22 rerun proof. Defer visual/OCR-specific gcode
+  repair to M6.23 failure-class ranking unless the same shape appears again.
 - M6.20 positive-control artifacts remain available for the two 100% tasks.
 
 Drift guard:

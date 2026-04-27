@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: first four selected task runs recorded.
+Status: all selected task runs recorded; below-target repair selection pending.
 
 ## Scope
 
@@ -23,12 +23,14 @@ Terminal-Bench-specific solver log.
 | `sanitize-git-repo` | 1/5 | 1/5 | 0 | 4m 41s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json` |
 | `gcode-to-text` | 2/5 | 0/5 | 1 | 15m 41s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json` |
 | `overfull-hbox` | 3/5 | 1/5 | 0 | 14m 33s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-python-bootstrap-20260427-2315/result.json` |
+| `extract-elf` | 4/5 | 5/5 | 0 | 4m 46s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-extract-elf-5attempts-python-bootstrap-20260427-2334/result.json` |
 
-Current counted subset total: **2/20**, below the 6/20 Codex target for the
-four counted M6.22 task runs so far.
+Current non-control subset total: **7/25**, below the 10/25 Codex target.
 
-Positive controls from M6.20 remain available but are not re-counted in this
-document until the five not-yet-run M6.22 tasks finish:
+Full M6.22 curated subset total, including the M6.20 positive controls:
+**17/35**, below the 20/35 Codex target.
+
+Positive controls from M6.20:
 
 - `cancel-async-tasks`: mew 5/5, Codex target 5/5
 - `fix-code-vulnerability`: mew 5/5, Codex target 5/5
@@ -170,6 +172,47 @@ M6.18 classification:
 No task-specific solver should be added for this task. The repair must improve
 generic work-session behavior.
 
+## `extract-elf`
+
+Artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-extract-elf-5attempts-python-bootstrap-20260427-2334/result.json`
+
+Observed result:
+
+- `n_total_trials`: 5
+- `n_trials`: 5
+- `n_errors`: 0
+- `mean`: 1.0
+- `pass@5`: 1.0
+- reward `1.0`: all 5 trials
+- started: `2026-04-27T23:33:50.827285`
+- finished: `2026-04-27T23:38:37.827171`
+
+Trial notes:
+
+- All five trials produced `mew-report.json`.
+- All five work sessions exited `0` with `stop_reason = finish`.
+- Step counts were 5, 5, 5, 6, and 10.
+
+Classification:
+
+- Against the frozen Codex target: no parity gap; mew exceeded the 4/5 Codex
+  target with 5/5.
+- Keep as positive evidence that the generic work-session path can solve
+  arbitrary binary/file-inspection benchmark workspaces without a
+  Terminal-Bench-specific solver.
+
+## Gap Table
+
+| Task | Gap vs Codex | M6.18 class | Selected route |
+|---|---:|---|---|
+| `gcode-to-text` | -2 | structural: `missing_visual_decode_artifact_grounding` | Defer task-specific visual/OCR work until M6.23; include in cohort ranking. |
+| `overfull-hbox` | -2 | structural: `insufficient_acceptance_constraint_model` | Use as the first M6.22 repair candidate: add a generic acceptance-constraint ledger / final self-check before finish, then rerun `overfull-hbox`. |
+
+M6.22 should not close yet: its Done-when requires at least one below-target
+task to be repaired and rerun against the same subset evidence.
+
 ## `overfull-hbox`
 
 Artifact:
@@ -242,9 +285,5 @@ generic work-session behavior.
 
 ## Next Tasks
 
-Run the remaining non-control M6.22 tasks:
-
-1. `extract-elf` (Codex target 4/5)
-
-If any task lands below the Codex target, classify it through M6.18 before
-choosing a repair.
+Implement the selected generic acceptance-constraint repair and rerun
+`overfull-hbox` before closing M6.22.

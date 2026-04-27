@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: subset selected, four non-control task runs recorded.
+Status: subset selected, all task runs recorded; first repair candidate selected.
 
 ## Source
 
@@ -60,13 +60,18 @@ normal work-session path.
 
 - Manifest exists with task names, checksums, Codex targets, and selection
   rationale: satisfied by this document and the JSON manifest.
-- Current action: run mew against the five not-yet-run curated tasks, then
-  combine those results with the M6.20 positive-control artifacts.
+- Current action: implement the selected generic repair and rerun the
+  below-target `overfull-hbox` task.
 - Runs recorded so far: `filter-js-from-html` completed 0/5 with 5
   `VerifierTimeoutError` exceptions, matching the 0/5 Codex target;
   `sanitize-git-repo` completed 1/5 with Harbor errors 0, matching the 1/5
   Codex target; `gcode-to-text` completed 0/5 with 1 `AgentTimeoutError`,
   below the 2/5 Codex target and classified in the run ledger;
   `overfull-hbox` completed 1/5 with Harbor errors 0, below the 3/5 Codex
-  target and classified in the run ledger.
+  target and classified in the run ledger; `extract-elf` completed 5/5 with
+  Harbor errors 0, exceeding the 4/5 Codex target.
+- Full subset total, including the M6.20 positive controls: mew 17/35 versus
+  Codex target 20/35.
+- Selected first repair route: generic acceptance-constraint ledger / final
+  self-check before finish, using `overfull-hbox` as the rerun proof.
 - Any below-target mew task must be classified through M6.18 before repair.
