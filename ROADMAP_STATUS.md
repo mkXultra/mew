@@ -53,9 +53,9 @@ is tracked below.
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
 | 6.18 Implementation Failure Diagnosis Gate | `done` | Close gate passed via `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`; M7+ dogfood now routes failures through diagnosis before M6.14 repair. |
 | 6.19 Terminal-Bench Compatibility | `done` | Close gate passed via `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`; mew and Codex both run the bounded Harbor smoke with comparable artifacts. |
-| 6.20 Terminal-Bench Driven Implement-Lane Debugging | `in_progress` | Active milestone: use Terminal-Bench scores and failure cohorts to drive implementation-lane repair from the M6.19 harness. |
+| 6.20 Terminal-Bench Driven Implement-Lane Debugging | `done` | Fixed two-task terminal gate closed on current head: both selected tasks reached 5/5 with Harbor errors 0. |
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
-| 6.22 Terminal-Bench Curated Subset Parity | `not_started` | Next parity expansion after M6.20: fixed multi-band subset from the Codex target registry. |
+| 6.22 Terminal-Bench Curated Subset Parity | `in_progress` | Active milestone: fixed multi-band subset selected; first selected task run recorded. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `not_started` | Convert curated-subset failures into ranked repair classes with rerun evidence. |
 | 6.24 Broad Terminal-Bench Parity Campaign | `not_started` | Full 89-task parity against Codex target 366/445 successes, 82.2% resolution. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
@@ -67,64 +67,54 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.20 Terminal-Bench Driven Implement-Lane Debugging**.
+Active work: **M6.22 Terminal-Bench Curated Subset Parity**.
 
-Why M6.20 is active:
+Why M6.22 is active:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
-- M6.19 closed the Harbor compatibility harness and produced comparable mew and
-  Codex smoke artifacts on `terminal-bench/make-mips-interpreter`.
-- Both smoke runs scored `0.0`, so the next value is not more compatibility
-  plumbing. It is a measured failure report, score target, and first
-  implementation-lane repair selected from benchmark evidence.
-- M6.18 can now classify mew-first failures, so benchmark failures should feed
-  diagnosis data instead of becoming free-form anecdotes.
+- M6.20 closed the first fixed terminal gate on current head:
+  `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
+  errors 0.
+- M6.21 froze the Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 target
+  registry as local JSON.
+- M6.22 now expands from two positive controls to a fixed multi-band subset
+  without jumping directly to the full 89-task campaign.
 
-Current M6.20 target:
+Current M6.22 target:
 
-- baseline report is now recorded in
-  `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
-- fresh Codex timing and failure evidence for the previous
-  `make-mips-interpreter` candidate is recorded in
-  `docs/M6_20_CODEX_REFERENCE_TIMING_2026-04-27.md`: the corrected
-  `-k 5 -n 5` run completed with Harbor errors 0 but scored 0/5 under local
-  Codex CLI 0.125.0. This makes it a useful later stretch task, not the first
-  M6.20 close gate.
-- instruction-consuming `mew-smoke` entrypoint and stdout report fallback are
-  implemented; rerun evidence is recorded in
-  `docs/M6_20_INSTRUCTION_RERUN_2026-04-27.md`
-- terminal gate is now explicit: on fixed tasks
-  `terminal-bench/fix-code-vulnerability` and
-  `terminal-bench/cancel-async-tasks`, match Codex `0.121.0` /
-  `gpt-5.5@openai` at **5 successes out of 5 trials, 100.0% per task**, with
-  Harbor errors at 0 and complete per-task artifacts
-- fresh local Codex CLI `0.125.0` checked the active gate tasks on 2026-04-27:
-  `fix-code-vulnerability` reproduced strict 5/5, while
-  `cancel-async-tasks` scored 4/5 with `pass@5 = 1.0`. Keep the close target
-  tied to the frozen registry unless the user explicitly changes it; use the
-  local 4/5 as variance evidence.
-- mew reached the fixed M6.20 terminal gate on current head. Evidence:
-  `docs/M6_20_MEW_TERMINAL_GATE_RUNS_2026-04-27.md`. Final runs:
-  `cancel-async-tasks` 5/5, mean 1.000, Harbor errors 0
-  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-cancel-async-tasks-5attempts-boundary-verifier-20260427-2201/result.json`);
-  `fix-code-vulnerability` 5/5, mean 1.000, Harbor errors 0
-  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-fix-code-vulnerability-5attempts-current-head-20260427-2207/result.json`)
-- scored failure cohorts were classified through M6.18 and repaired via
-  generic work-session changes: accept-edits defer propagation, recoverable
-  missing create-target reads, and cancellation/concurrency verifier planning
-- M6.20 close gate is satisfied. Next Terminal-Bench work should move to M6.22
-  curated subset parity unless the user explicitly reopens M6.20.
-- drift guard: do not create a Terminal-Bench-specific solver in mew core.
-  The next repair must improve generic `work_session` / implementation-lane
-  behavior for arbitrary workspace roots such as a benchmark task `/app`.
-  Harbor glue may adapt input/output capture, but benchmark execution should
+- curated subset manifest:
+  `docs/M6_22_CURATED_SUBSET_MANIFEST_2026-04-27.md`
+- local subset JSON:
+  `docs/data/terminal_bench_m6_22_curated_subset.json`
+- run ledger:
+  `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`
+- selected tasks and Codex targets:
+  `filter-js-from-html` 0/5, `sanitize-git-repo` 1/5,
+  `gcode-to-text` 2/5, `overfull-hbox` 3/5, `extract-elf` 4/5,
+  `cancel-async-tasks` 5/5, and `fix-code-vulnerability` 5/5
+- aggregate Codex target: 20/35 successes, 57.14%
+- first selected task run:
+  `filter-js-from-html` completed 0/5 with 5 `VerifierTimeoutError`
+  exceptions in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`;
+  this matches the 0/5 Codex target but is recorded as no-edit /
+  verifier-timeout cost evidence, not a core repair trigger.
+- M6.20 positive-control artifacts remain available for the two 100% tasks.
+
+Drift guard:
+
+- Do not create a Terminal-Bench-specific solver in mew core.
+- Repairs must improve generic `work_session` / implementation-lane behavior
+  for arbitrary workspace roots such as a benchmark task `/app`.
+- Harbor glue may adapt input/output capture, but benchmark execution should
   call the normal work path with explicit cwd, read/write roots, verifier, and
   bounded permissions.
+- Below-target M6.22 tasks must be classified through M6.18 before repair.
 
-Current M6.20 chain:
+Current M6.22 chain:
 
-`M6.20 closed -> fixed terminal gate reached on current head -> M6.22 curated subset parity`
+`M6.22 curated subset parity -> remaining selected task runs -> classify below-target gaps through M6.18`
 
 M7 pending evidence preserved:
 
@@ -1361,6 +1351,13 @@ Latest roadmap/status validation:
   `filter-js-from-html`, `sanitize-git-repo`, `gcode-to-text`,
   `overfull-hbox`, `extract-elf`, `cancel-async-tasks`, and
   `fix-code-vulnerability`. Aggregate Codex target: 20/35 successes.
+- First M6.22 run is recorded in
+  `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`:
+  `filter-js-from-html` scored 0/5 with 5 `VerifierTimeoutError` exceptions
+  in 32m 24s
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`).
+  This matches the frozen Codex 0/5 target for that task and is cost/no-op
+  evidence, not a standalone repair trigger.
 - M6.21 target registry is complete. The source leaderboard is
   `https://www.tbench.ai/leaderboard/terminal-bench/2.0/codex/0.121.0/gpt-5.5%40openai`.
   Local JSON:

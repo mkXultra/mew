@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: subset selected, benchmark execution not started.
+Status: subset selected, benchmark execution started.
 
 ## Source
 
@@ -10,6 +10,8 @@ Status: subset selected, benchmark execution not started.
   `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`
 - Subset JSON:
   `docs/data/terminal_bench_m6_22_curated_subset.json`
+- Run ledger:
+  `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`
 - Reference: Terminal-Bench 2.0 Codex `0.121.0` / `gpt-5.5@openai`
 
 ## Selection
@@ -58,6 +60,9 @@ normal work-session path.
 
 - Manifest exists with task names, checksums, Codex targets, and selection
   rationale: satisfied by this document and the JSON manifest.
-- Next action: run mew against the five not-yet-run curated tasks, then combine
-  those results with the M6.20 positive-control artifacts.
+- Current action: run mew against the five not-yet-run curated tasks, then
+  combine those results with the M6.20 positive-control artifacts.
+- First run recorded: `filter-js-from-html` completed 0/5 with 5
+  `VerifierTimeoutError` exceptions, matching the 0/5 Codex target but leaving
+  no implementation-lane repair signal by itself.
 - Any below-target mew task must be classified through M6.18 before repair.
