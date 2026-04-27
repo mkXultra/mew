@@ -160,10 +160,10 @@ M6.24 Batch 1:
   `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
-- measured so far: `build-cython-ext` best observed result is 1/5 against
-  Codex target 5/5 after the initial run and eight reruns. The latest rerun is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-run-tests-cd-prefix-20260428-0335/result.json`
-  with 0/5 and five `AgentTimeoutError` exceptions.
+- measured so far:
+  - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
+  - `fix-git`: 5/5, matched Codex target 5/5, no Harbor errors.
+  - measured latest task total: 5/10 against frozen Codex target 10/10.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
   read-only batches continue after missing paths under allowed write roots.
@@ -204,6 +204,11 @@ M6.24 Batch 1:
   stop spending more `build-cython-ext`-only repair cycles until either
   timeout partial-report observability is improved or another Batch 1 task
   confirms the same shape. Run the next Batch 1 task to keep M6.24 broad.
+- completed Batch 1 control:
+  `fix-git` matched Codex at 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-fix-git-5attempts-20260428-0353/result.json`.
+  This suggests the `build-cython-ext` timeout wall is task-shape-specific, not
+  a universal Harbor/mew execution failure.
 
 Drift guard:
 
