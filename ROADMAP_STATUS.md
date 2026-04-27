@@ -376,11 +376,13 @@ M6.24 Batch 1:
   unchanged, but attempts used more wall time and hidden verifier tails
   improved to 8/11 or 9/11 pass patterns in most trials.
 - current route:
-  rerun `build-cython-ext` after the generic verifier-agenda sibling-search
-  repair. The repair makes work-session resume expose explicit same-family
-  search queries (for example NumPy alias and `from fractions import gcd`
-  surfaces) so mew can search/repair the visible family before another
-  expensive install/verify loop.
+  commit the generic repair for duplicate same-path write-batch normalization
+  waits, then rerun `build-cython-ext`. The latest rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-sibling-search-20260428-0818/result.json`
+  improved from 0/5 to 1/5 with Harbor errors 0 and pass@5 1.000. Remaining
+  failures show mew often reaches README-smoke or near-repository-test-tail
+  success, but one run stopped on a repairable "collapse same-file hunks"
+  write-batch wait instead of continuing to a corrected batch.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_work_session.py -k verifier_failure_repair_agenda -q`,
   `uv run pytest --no-testmon tests/test_work_session.py -q`, and
@@ -388,6 +390,14 @@ M6.24 Batch 1:
   passed for the verifier-agenda sibling-search repair. Codex-ultra review
   session `019dd139-62f4-7872-9ad2-00d5c018d3e9` reported `STATUS: pass`
   with no blocking issues.
+- latest source/test validation:
+  `uv run pytest --no-testmon tests/test_work_session.py -k "repairable_wait or work_model_batch_refuses_same_path" -q`,
+  `uv run pytest --no-testmon tests/test_work_session.py -q`, and
+  `uv run ruff check src/mew/commands.py tests/test_work_session.py` passed
+  for the duplicate same-path write-batch wait repair. Codex-ultra review
+  session `019dd14c-c236-7d63-9705-44595068365a` reported `STATUS: pass`
+  after narrowing the marker to the specific `collapse same-file` reason and
+  adding a negative write-root wait test.
 
 Drift guard:
 

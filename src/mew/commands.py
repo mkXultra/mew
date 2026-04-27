@@ -3436,6 +3436,7 @@ def _work_wait_mentions_repairable_blocker(action):
         marker in text
         for marker in (
             "constraint",
+            "collapse same-file",
             "invalid",
             "repair",
             "revised",

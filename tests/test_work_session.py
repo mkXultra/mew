@@ -34745,6 +34745,41 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(converted["converted_from_wait"], "repairable_blocker")
         self.assertIn("unsafe under the stated constraint", converted["note"])
 
+    def test_repairable_wait_converts_write_batch_blocker_to_remember(self):
+        action = {
+            "type": "wait",
+            "reason": (
+                "write batch may include at most one write/edit per file path; "
+                "collapse same-file hunks into a single edit_file_hunks action"
+            ),
+        }
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            3,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_wait"], "repairable_blocker")
+        self.assertIn("write batch may include", converted["note"])
+
+    def test_repairable_wait_does_not_convert_generic_write_batch_blocker(self):
+        action = {
+            "type": "wait",
+            "reason": "write batch contains paths outside the declared allowed_write_roots",
+        }
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            3,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted, action)
+
     def test_work_finish_blocker_allows_acceptance_repair_continuation(self):
         self.assertTrue(
             work_finish_blocker_allows_continue(
