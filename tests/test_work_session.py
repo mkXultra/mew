@@ -4247,6 +4247,7 @@ class WorkSessionTests(unittest.TestCase):
                 '  File "/usr/local/lib/python3.13/site-packages/pkg/invariants.py", line 137, in run',
                 "    dtype = n.complex if isinstance(variable, n.complex) else n.float",
                 "AttributeError: module 'numpy' has no attribute 'complex'.",
+                "AttributeError: module 'numpy' has no attribute 'float'.",
                 "ImportError: cannot import name 'gcd' from 'fractions'",
                 "tests/test_widget.py:42: AssertionError: legacy alias still broken",
             ]
@@ -4288,7 +4289,19 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(agenda["source_tool_call_id"], 1)
         self.assertEqual(agenda["exit_code"], 1)
         self.assertIn("complex", agenda["symbols"])
+        self.assertIn("float", agenda["symbols"])
         self.assertIn("gcd", agenda["symbols"])
+        self.assertEqual(
+            agenda["sibling_search_queries"],
+            [
+                "numpy.complex",
+                "np.complex",
+                "numpy.float",
+                "np.float",
+                "from fractions import gcd",
+                "fractions.gcd",
+            ],
+        )
         self.assertEqual(
             agenda["source_locations"][0],
             {"path": "/usr/local/lib/python3.13/site-packages/pkg/invariants.py", "line": "137"},
@@ -4299,7 +4312,12 @@ class WorkSessionTests(unittest.TestCase):
 
         text = format_work_session_resume(resume)
         self.assertIn("verifier_failure_repair_agenda: tool=#1 exit=1 run_command", text)
-        self.assertIn("verifier_failure_symbols: complex, gcd", text)
+        self.assertIn("verifier_failure_symbols: complex, float, gcd", text)
+        self.assertIn(
+            "verifier_failure_sibling_searches: "
+            "numpy.complex, np.complex, numpy.float, np.float, from fractions import gcd, fractions.gcd",
+            text,
+        )
         self.assertIn("/usr/local/lib/python3.13/site-packages/pkg/invariants.py:137", text)
         self.assertIn("verifier_failure_latest_dry_run: #2 pkg/invariants.py", text)
 

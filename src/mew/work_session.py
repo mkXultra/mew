@@ -3307,6 +3307,18 @@ _VERIFIER_SYMBOL_PATTERNS = (
     re.compile(r"No module named ['\"]([^'\"]+)['\"]"),
     re.compile(r"NameError: name ['\"]([^'\"]+)['\"]"),
 )
+_VERIFIER_MISSING_ATTRIBUTE_RE = re.compile(
+    r"module ['\"]([^'\"]+)['\"] has no attribute ['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_VERIFIER_IMPORT_NAME_RE = re.compile(
+    r"cannot import name ['\"]([^'\"]+)['\"] from ['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_VERIFIER_MODULE_ALIAS_QUERIES = {
+    "numpy": ("np",),
+    "pandas": ("pd",),
+}
 
 
 def _latest_failed_command_call(calls):
@@ -3383,6 +3395,39 @@ def _extract_verifier_symbols(text, limit=8):
     return symbols
 
 
+def _extract_verifier_sibling_search_queries(text, limit=8):
+    queries = []
+
+    def add_query(query):
+        query = clip_inline_text(str(query or "").strip(), 160)
+        if query and query not in queries:
+            queries.append(query)
+        return len(queries) >= limit
+
+    for match in _VERIFIER_MISSING_ATTRIBUTE_RE.finditer(str(text or "")):
+        module = str(match.group(1) or "").strip()
+        attr = str(match.group(2) or "").strip()
+        if not module or not attr:
+            continue
+        if add_query(f"{module}.{attr}"):
+            return queries
+        for alias in _VERIFIER_MODULE_ALIAS_QUERIES.get(module, ()):
+            if add_query(f"{alias}.{attr}"):
+                return queries
+
+    for match in _VERIFIER_IMPORT_NAME_RE.finditer(str(text or "")):
+        symbol = str(match.group(1) or "").strip()
+        module = str(match.group(2) or "").strip()
+        if not symbol or not module:
+            continue
+        if add_query(f"from {module} import {symbol}"):
+            return queries
+        if add_query(f"{module}.{symbol}"):
+            return queries
+
+    return queries
+
+
 def _latest_changed_dry_run_write(calls, *, after_tool_call_id=None):
     try:
         after_id = int(after_tool_call_id) if after_tool_call_id is not None else None
@@ -3414,6 +3459,7 @@ def build_verifier_failure_repair_agenda(calls):
     error_lines = _extract_verifier_error_lines(text)
     source_locations = _extract_verifier_source_locations(text)
     symbols = _extract_verifier_symbols(text)
+    sibling_search_queries = _extract_verifier_sibling_search_queries(text)
     if not any((error_lines, source_locations, symbols)):
         return {}
     dry_run_call = _latest_changed_dry_run_write(calls, after_tool_call_id=call.get("id"))
@@ -3427,6 +3473,7 @@ def build_verifier_failure_repair_agenda(calls):
         "error_lines": error_lines,
         "source_locations": source_locations,
         "symbols": symbols,
+        "sibling_search_queries": sibling_search_queries,
         "suggested_next": (
             "turn this verifier output into one small applied edit batch before broader exploration; "
             "if multiple same-family errors are visible, repair the visible sibling set together"
@@ -7717,6 +7764,11 @@ def format_work_session_resume(resume):
         )
         if verifier_agenda.get("symbols"):
             lines.append(f"verifier_failure_symbols: {', '.join(verifier_agenda.get('symbols') or [])}")
+        if verifier_agenda.get("sibling_search_queries"):
+            lines.append(
+                "verifier_failure_sibling_searches: "
+                f"{', '.join(verifier_agenda.get('sibling_search_queries') or [])}"
+            )
         if verifier_agenda.get("source_locations"):
             refs = []
             for item in verifier_agenda.get("source_locations") or []:

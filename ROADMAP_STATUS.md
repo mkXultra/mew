@@ -367,6 +367,27 @@ M6.24 Batch 1:
   300s model timeout, leaving usable wall time idle. Reduce the per-turn model
   timeout to fit the remaining wall budget instead of stopping early, then
   rerun `build-cython-ext`.
+- completed nineteenth repair:
+  commit `84528a1` made max-wall scheduling reduce per-turn model timeout to
+  fit the remaining wall budget, while preserving normal write-ready and
+  deliberation timeout floors when the wall budget has room. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-wall-timeout-reduced-20260428-0755/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 14m 27s. The score stayed
+  unchanged, but attempts used more wall time and hidden verifier tails
+  improved to 8/11 or 9/11 pass patterns in most trials.
+- current route:
+  rerun `build-cython-ext` after the generic verifier-agenda sibling-search
+  repair. The repair makes work-session resume expose explicit same-family
+  search queries (for example NumPy alias and `from fractions import gcd`
+  surfaces) so mew can search/repair the visible family before another
+  expensive install/verify loop.
+- latest source/test validation:
+  `uv run pytest --no-testmon tests/test_work_session.py -k verifier_failure_repair_agenda -q`,
+  `uv run pytest --no-testmon tests/test_work_session.py -q`, and
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`
+  passed for the verifier-agenda sibling-search repair. Codex-ultra review
+  session `019dd139-62f4-7872-9ad2-00d5c018d3e9` reported `STATUS: pass`
+  with no blocking issues.
 
 Drift guard:
 
