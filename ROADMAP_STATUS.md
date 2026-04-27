@@ -160,10 +160,10 @@ M6.24 Batch 1:
   `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
-- measured so far: `build-cython-ext` improved to 1/5 against Codex target 5/5
-  after the initial run and six reruns. The latest rerun is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-run-tests-recover-20260428-0300/result.json`
-  with three `AgentTimeoutError` exceptions.
+- measured so far: `build-cython-ext` best observed result is 1/5 against
+  Codex target 5/5 after the initial run and seven reruns. The latest rerun is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-git-inspection-20260428-0312/result.json`
+  with 0/5 and three `AgentTimeoutError` exceptions.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
   read-only batches continue after missing paths under allowed write roots.
@@ -188,12 +188,17 @@ M6.24 Batch 1:
   become recoverable verifier observations while budget remains. The latest
   rerun improved `build-cython-ext` from 0/5 to 1/5. Commit `f91209e`
   implements the generic repair.
-- completed sixth repair, awaiting rerun:
+- completed sixth repair:
   `git_diff_not_repo_terminal_tool_failed`; read-only git inspection in
   filesystem-only workspaces should be recoverable generally, not only for
   `git_status`. Commit `dae6000` generalized the recovery for read-only
-  git-inspection tools. Rerun `build-cython-ext` before selecting another
-  Batch 1 task.
+  git-inspection tools. The targeted boundary did not recur in the next
+  non-timeout trials, but score regressed to 0/5.
+- completed seventh repair, awaiting rerun:
+  `run_tests_cd_prefix_shell_operator_terminal_tool_failed`; commit `3930af5`
+  normalizes only the safe `cd DIR && <verifier>` shape into `cwd=DIR` plus a
+  single verifier command, while preserving `run_tests` shell-chain rejection.
+  Rerun `build-cython-ext` before selecting another Batch 1 task.
 
 Drift guard:
 
