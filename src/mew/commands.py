@@ -6703,6 +6703,11 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: missing read target; continuing with create-file context")
                 continue
+            if _recoverable_stale_edit_file_error(action_type, parameters, error, effective_args, index, max_steps):
+                report["steps"][-1]["recoverable_stale_edit_file"] = True
+                if progress:
+                    progress(f"step #{index}: stale edit target; continuing with refresh context")
+                continue
             report["stop_reason"] = "tool_failed"
             break
 
@@ -6893,6 +6898,21 @@ def _recoverable_missing_read_file_error(action_type, parameters, error, args, i
         return False
     try:
         resolve_allowed_write_path(parameters.get("path") or "", allowed_write, create=True)
+        return True
+    except ValueError:
+        return False
+
+
+def _recoverable_stale_edit_file_error(action_type, parameters, error, args, index, max_steps):
+    if action_type not in {"edit_file", "edit_file_hunks"} or index >= max_steps:
+        return False
+    if "old text was not found" not in str(error or ""):
+        return False
+    allowed_write = getattr(args, "allow_write", None) or []
+    if not allowed_write:
+        return False
+    try:
+        resolve_allowed_write_path(parameters.get("path") or "", allowed_write, create=False)
         return True
     except ValueError:
         return False

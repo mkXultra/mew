@@ -31314,6 +31314,73 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_json_recovers_stale_edit_file_under_write_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("actual text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "try stale patch",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "README.md",
+                            "old": "missing text",
+                            "new": "new text",
+                        },
+                    },
+                    {
+                        "summary": "refresh after stale edit",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_stale_edit_file"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_json_accept_edits_batch_can_defer_verification_without_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

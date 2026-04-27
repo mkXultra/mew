@@ -161,17 +161,22 @@ M6.24 Batch 1:
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far: `build-cython-ext` remains 0/5 against Codex target 5/5
-  across the initial run and two reruns, Harbor errors 0. The latest rerun is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-allow-verify-20260428-0130/result.json`.
+  across the initial run and three reruns. The latest rerun is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-repeat-reset-20260428-0148/result.json`
+  with one `AgentTimeoutError`.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
   read-only batches continue after missing paths under allowed write roots.
   Score stayed 0/5 but progressed trials moved further.
+- completed second repair:
+  `repeat_command_after_source_edit_blocked_by_total_repeat_guard`; commit
+  `26a2647` reset repeat counts at the latest completed workspace-changing
+  write. Score stayed 0/5 but the progressed trial reached 9/11 verifier tests
+  before timing out.
 - current repair candidate:
-  `repeat_command_after_source_edit_blocked_by_total_repeat_guard`; after a
-  workspace-changing edit, repeating the same build/install/test command is a
-  valid verification move and should not count against stale-repeat limits.
-  Repair this generic repeat-guard boundary before running more Batch 1 tasks.
+  `stale_exact_text_edit_terminal_tool_failed`; exact old-text edit misses are
+  recoverable under allowed write roots while budget remains. Repair this
+  generic refresh boundary before running more Batch 1 tasks.
 
 Drift guard:
 
