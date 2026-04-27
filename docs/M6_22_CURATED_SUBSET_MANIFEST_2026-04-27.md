@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: subset selected, all task runs recorded; first repair candidate selected.
+Status: closed; see `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`.
 
 ## Source
 
@@ -60,8 +60,7 @@ normal work-session path.
 
 - Manifest exists with task names, checksums, Codex targets, and selection
   rationale: satisfied by this document and the JSON manifest.
-- Current action: implement the selected generic repair and rerun the
-  below-target `overfull-hbox` task.
+- Current action: closed. Continue residual failure-class work in M6.23.
 - Runs recorded so far: `filter-js-from-html` completed 0/5 with 5
   `VerifierTimeoutError` exceptions, matching the 0/5 Codex target;
   `sanitize-git-repo` completed 1/5 with Harbor errors 0, matching the 1/5
@@ -74,4 +73,6 @@ normal work-session path.
   Codex target 20/35.
 - Selected first repair route: generic acceptance-constraint ledger / final
   self-check before finish, using `overfull-hbox` as the rerun proof.
+- Repair rerun completed: `overfull-hbox` improved from 1/5 baseline to 2/5
+  after follow-up repair, still below Codex target 3/5.
 - Any below-target mew task must be classified through M6.18 before repair.

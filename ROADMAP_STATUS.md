@@ -55,8 +55,8 @@ is tracked below.
 | 6.19 Terminal-Bench Compatibility | `done` | Close gate passed via `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`; mew and Codex both run the bounded Harbor smoke with comparable artifacts. |
 | 6.20 Terminal-Bench Driven Implement-Lane Debugging | `done` | Fixed two-task terminal gate closed on current head: both selected tasks reached 5/5 with Harbor errors 0. |
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
-| 6.22 Terminal-Bench Curated Subset Parity | `in_progress` | Active milestone: fixed multi-band subset run completed; generic repair/rerun remains before close. |
-| 6.23 Terminal-Bench Failure-Class Coverage | `not_started` | Convert curated-subset failures into ranked repair classes with rerun evidence. |
+| 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
+| 6.23 Terminal-Bench Failure-Class Coverage | `in_progress` | Active milestone: convert curated-subset failures into ranked repair classes with rerun evidence. |
 | 6.24 Broad Terminal-Bench Parity Campaign | `not_started` | Full 89-task parity against Codex target 366/445 successes, 82.2% resolution. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
@@ -67,9 +67,9 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.22 Terminal-Bench Curated Subset Parity**.
+Active work: **M6.23 Terminal-Bench Failure-Class Coverage**.
 
-Why M6.22 is active:
+Why M6.23 is active:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
@@ -78,10 +78,10 @@ Why M6.22 is active:
   errors 0.
 - M6.21 froze the Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 target
   registry as local JSON.
-- M6.22 now expands from two positive controls to a fixed multi-band subset
-  without jumping directly to the full 89-task campaign.
+- M6.22 closed the fixed multi-band subset run and showed that mew remains
+  below Codex target on two structural failure classes.
 
-Current M6.22 target:
+Closed M6.22 result:
 
 - curated subset manifest:
   `docs/M6_22_CURATED_SUBSET_MANIFEST_2026-04-27.md`
@@ -89,6 +89,8 @@ Current M6.22 target:
   `docs/data/terminal_bench_m6_22_curated_subset.json`
 - run ledger:
   `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`
+- close audit:
+  `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`
 - selected tasks and Codex targets:
   `filter-js-from-html` 0/5, `sanitize-git-repo` 1/5,
   `gcode-to-text` 2/5, `overfull-hbox` 3/5, `extract-elf` 4/5,
@@ -107,26 +109,30 @@ Current M6.22 target:
   `extract-elf` completed 5/5 with Harbor errors 0 in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-extract-elf-5attempts-python-bootstrap-20260427-2334/result.json`.
   Current full M6.22 total is 17/35, below the frozen Codex 20/35 target.
-- current below-target classification:
+- below-target classification:
   `gcode-to-text` is classified as M6.18 `structural`, confidence medium,
-  `structural_reason = missing_visual_decode_artifact_grounding`, with a
-  secondary `agent_wall_timeout_without_report` signal. Continue remaining
-  M6.22 runs before choosing the repair so the repair can target a cohort, not
-  one anecdote. `overfull-hbox` is classified as M6.18 `structural`,
+  `structural_reason = missing_visual_decode_artifact_grounding`, with
+  secondary `agent_wall_timeout_without_report`. `overfull-hbox` is classified
+  as M6.18 `structural`,
   confidence medium-high,
   `structural_reason = insufficient_acceptance_constraint_model`, with a
   secondary `repeat_action_after_partial_repair` signal.
-- selected first repair route:
-  generic acceptance-constraint ledger / final self-check before finish, using
-  `overfull-hbox` as the M6.22 rerun proof. Defer visual/OCR-specific gcode
-  repair to M6.23 failure-class ranking unless the same shape appears again.
-- latest repair attempt:
-  commit `29335c9` added acceptance checks but regressed the `overfull-hbox`
-  rerun to 0/5 because repairable constraint blockers terminated as `wait`.
-  Follow-up repair converts unsafe/unsupported/constraint `wait` blockers into
-  continuity `remember` steps while current-run budget remains, then reruns
-  `overfull-hbox` again.
+- M6.22 repair rerun:
+  commit `29335c9` added acceptance checks and regressed `overfull-hbox` to
+  0/5 because repairable constraint blockers terminated as `wait`; commit
+  `2d0b5c4` converted those waits into continuity notes while budget remains
+  and reran `overfull-hbox` at 2/5. Remaining gap moves to M6.23.
 - M6.20 positive-control artifacts remain available for the two 100% tasks.
+
+Current M6.23 chain:
+
+`M6.23 failure-class coverage -> rank curated-subset failure classes -> choose first high-leverage repair`
+
+Initial M6.23 failure classes:
+
+- `self_reported_acceptance_evidence_not_grounded_in_diff_validator`
+- `missing_visual_decode_artifact_grounding`
+- `agent_wall_timeout_without_report`
 
 Drift guard:
 

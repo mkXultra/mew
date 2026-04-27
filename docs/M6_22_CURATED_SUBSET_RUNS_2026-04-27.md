@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: all selected task runs recorded; acceptance-check repair in progress.
+Status: closed; remaining below-target analysis continues in M6.23.
 
 ## Scope
 
@@ -263,6 +263,51 @@ M6.18 classification of the repair regression:
   current run still has remaining steps; continue after acceptance-finish blocks
   caused by unchecked constraints.
 
+## Repair Attempt 2: Continue Repairable Waits
+
+Commit: `2d0b5c4` (`Continue after repairable work waits`)
+
+Change:
+
+- Convert repairable unsafe/unsupported/constraint `wait` actions to
+  `remember` when `continue_after_remember` is enabled and current-run budget
+  remains.
+- Continue after acceptance-finish blocks caused by unchecked constraints.
+
+Rerun artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-repairable-wait-20260428-0007/result.json`
+
+Observed result:
+
+- `n_total_trials`: 5
+- `n_trials`: 5
+- `n_errors`: 0
+- `mean`: 0.4
+- `pass@5`: 1.0
+- reward `1.0`: `overfull-hbox__CgGvjTg`, `overfull-hbox__wLaxFKK`
+- reward `0.0`: `overfull-hbox__QTNJG7w`,
+  `overfull-hbox__TDjfW3D`, `overfull-hbox__DuKdEBh`
+- started: `2026-04-28T00:07:31.498390`
+- finished: `2026-04-28T00:19:27.766740`
+
+Delta:
+
+- Baseline `overfull-hbox`: 1/5
+- First repair rerun: 0/5
+- Second repair rerun: 2/5
+- Result: improved over baseline and fixed the terminal-wait regression, but
+  still below Codex target 3/5.
+
+Remaining M6.23 evidence:
+
+- All five second-rerun reports reached `stop_reason = finish`.
+- All five finish actions included structured `acceptance_checks`.
+- The three failed trials still failed the external `test_input_file_matches`
+  edit-scope verifier despite self-reported synonym-only evidence.
+- This remaining gap should move to M6.23 as a failure-class item:
+  `self_reported_acceptance_evidence_not_grounded_in_diff_validator`.
+
 ## `overfull-hbox`
 
 Artifact:
@@ -335,6 +380,6 @@ generic work-session behavior.
 
 ## Next Tasks
 
-Commit and rerun the follow-up repair for
-`repairable_constraint_blocker_terminal_wait`; M6.22 can close only after a
-below-target task is repaired and rerun with recorded outcome.
+M6.22 is closed by the recorded subset, gap table, selected repair route, and
+repair rerun. Continue with M6.23 failure-class coverage for the remaining
+below-target shapes.
