@@ -6577,6 +6577,52 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_tests_records_non_utf8_output_with_replacement(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                script = (
+                    "import sys; "
+                    "sys.stdout.buffer.write(bytes([0xe2,0x28])); "
+                    "sys.stderr.buffer.write(bytes([0xff])); "
+                    "sys.exit(1)"
+                )
+                command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertEqual(call["result"]["exit_code"], 1)
+                self.assertEqual(call["result"]["stdout"], "�(")
+                self.assertEqual(call["result"]["stderr"], "�")
+                self.assertIn("verification failed with exit_code=1", call["error"])
+                self.assertIn("stdout:\n�(", call["summary"])
+                self.assertIn("stderr:\n�", call["summary"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_run_tests_rejects_shell_control_operators(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
