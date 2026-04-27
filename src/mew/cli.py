@@ -1225,6 +1225,16 @@ def build_parser():
     work_parser.add_argument("--start-session", action="store_true", help="start or reuse a native work session")
     work_parser.add_argument("--session", action="store_true", help="show the active native work session")
     work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")
+    work_parser.add_argument(
+        "--oneshot",
+        action="store_true",
+        help="create a temporary coding task from --instruction and run a bounded generic work session",
+    )
+    work_parser.add_argument("--instruction", help="instruction text for --oneshot")
+    work_parser.add_argument("--instruction-file", help="UTF-8 instruction file for --oneshot")
+    work_parser.add_argument("--title", default="One-shot mew work task", help="task title for --oneshot")
+    work_parser.add_argument("--report", help="write a JSON report for --oneshot")
+    work_parser.add_argument("--artifacts", help="artifact directory recorded in the --oneshot report")
     work_parser.add_argument("--stop-session", action="store_true", help="request the active native work loop to stop at the next boundary")
     work_parser.add_argument("--stop-reason", help="reason recorded with --stop-session")
     work_parser.add_argument(

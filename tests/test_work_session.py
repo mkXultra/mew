@@ -4600,6 +4600,134 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_creates_generic_task_session_and_report(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            report_path = Path(tmp) / "report.json"
+            os.chdir(state_root)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "Inspect this workspace.",
+                                "--title",
+                                "Generic one-shot",
+                                "--cwd",
+                                str(workspace),
+                                "--allow-read",
+                                ".",
+                                "--max-steps",
+                                "0",
+                                "--report",
+                                str(report_path),
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["summary"], "mew work --oneshot completed generic work-session attempt")
+                self.assertEqual(payload["workspace_cwd"], str(workspace))
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertTrue(report_path.exists())
+                saved = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved["task_id"], payload["task_id"])
+
+                state = load_state()
+                task = state["tasks"][0]
+                self.assertEqual(task["title"], "Generic one-shot")
+                self.assertEqual(task["description"], "Inspect this workspace.")
+                self.assertEqual(task["cwd"], str(workspace))
+                self.assertEqual(state["work_sessions"][0]["task_id"], task["id"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_requires_instruction(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--oneshot", "--max-steps", "0"]), 1)
+                self.assertIn("--oneshot requires --instruction", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_reads_instruction_file(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            instruction_path = Path(tmp) / "instruction.txt"
+            state_root.mkdir()
+            workspace.mkdir()
+            instruction_path.write_text("Build the thing.\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction-file",
+                                str(instruction_path),
+                                "--cwd",
+                                str(workspace),
+                                "--allow-read",
+                                ".",
+                                "--max-steps",
+                                "0",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                task = load_state()["tasks"][0]
+                self.assertEqual(payload["task_id"], task["id"])
+                self.assertEqual(task["description"], "Build the thing.\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_rejects_ambiguous_inputs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            instruction_path = Path(tmp) / "instruction.txt"
+            instruction_path.write_text("Build the thing.\n", encoding="utf-8")
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "one",
+                                "--instruction-file",
+                                str(instruction_path),
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("accepts only one", stderr.getvalue())
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--oneshot", "--instruction", "one"]), 1)
+                self.assertIn("omit task_id", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_glob_skips_cache_and_virtualenv_dirs(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

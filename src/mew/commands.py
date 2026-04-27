@@ -9,7 +9,9 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
@@ -392,6 +394,35 @@ def cmd_task_add(args):
         return 0
     print(format_task(task))
     return 0
+
+
+def create_oneshot_work_task(state, *, title, instruction, cwd):
+    current_time = now_iso()
+    task = {
+        "id": next_id(state, "task"),
+        "title": title or "One-shot mew work task",
+        "kind": "coding",
+        "description": instruction or "",
+        "status": "ready",
+        "priority": "normal",
+        "notes": "Created by `mew work --oneshot`.",
+        "command": "",
+        "cwd": cwd or "",
+        "auto_execute": False,
+        "agent_backend": "",
+        "agent_model": "",
+        "agent_prompt": "",
+        "agent_run_id": None,
+        "scope": normalize_task_scope({}),
+        "plans": [],
+        "latest_plan_id": None,
+        "runs": [],
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+    state["tasks"].append(task)
+    return task
+
 
 def cmd_task_list(args):
     state = load_state()
@@ -4001,6 +4032,8 @@ def cmd_work(args):
         return cmd_work_reply_file(args)
     if getattr(args, "todo_list", False) or getattr(args, "todo_add", None) or getattr(args, "todo_update", None):
         return cmd_work_todo(args)
+    if getattr(args, "oneshot", False):
+        return cmd_work_oneshot(args)
     if getattr(args, "live", False) or getattr(args, "follow", False):
         args.ai = True
     if getattr(args, "ai", False):
@@ -4053,6 +4086,113 @@ def cmd_work(args):
         return 0
     print(format_workbench(data))
     return 0
+
+
+def _work_oneshot_instruction(args):
+    if getattr(args, "instruction", None) and getattr(args, "instruction_file", None):
+        raise MewError("--oneshot accepts only one of --instruction or --instruction-file")
+    if getattr(args, "instruction_file", None):
+        try:
+            return Path(args.instruction_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise MewError(f"cannot read --instruction-file: {exc}") from exc
+    return getattr(args, "instruction", None) or ""
+
+
+def _work_oneshot_report_path(args):
+    if not getattr(args, "report", None):
+        return None
+    return Path(args.report).expanduser().resolve(strict=False)
+
+
+def _work_oneshot_artifacts(args):
+    if not getattr(args, "artifacts", None):
+        return ""
+    return str(Path(args.artifacts).expanduser().resolve(strict=False))
+
+
+def _parse_json_object(text):
+    try:
+        value = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def cmd_work_oneshot(args):
+    try:
+        instruction = _work_oneshot_instruction(args)
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    if not instruction.strip():
+        print("mew: --oneshot requires --instruction or --instruction-file", file=sys.stderr)
+        return 1
+    if getattr(args, "task_id", None) is not None:
+        print("mew: --oneshot creates its own task; omit task_id", file=sys.stderr)
+        return 1
+
+    with state_lock():
+        state = load_state()
+        task = create_oneshot_work_task(
+            state,
+            title=getattr(args, "title", None),
+            instruction=instruction,
+            cwd=getattr(args, "cwd", None),
+        )
+        save_state(state)
+
+    work_args = SimpleNamespace(**vars(args))
+    work_args.task_id = task.get("id")
+    work_args.ai = True
+    work_args.live = False
+    work_args.follow = False
+    work_args.oneshot = False
+    work_args.json = True
+    if getattr(work_args, "max_steps", None) is None:
+        work_args.max_steps = 30
+    if work_args.max_steps == 0:
+        work_args.live = True
+
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cmd_work_ai(work_args)
+    work_stdout = stdout.getvalue()
+    work_report = _parse_json_object(work_stdout)
+
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task.get("id")) or task
+        session = latest_work_session_for_task(state, task.get("id"))
+        resume = build_work_session_resume(session, task=task, state=state) if session else {}
+
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": task.get("id"),
+        "session_id": session.get("id") if session else None,
+        "workspace_cwd": task.get("cwd") or "",
+        "artifacts": _work_oneshot_artifacts(args),
+        "work_exit_code": exit_code,
+        "work_report": work_report,
+        "work_stdout": work_stdout if not work_report else "",
+        "resume": resume,
+        "verification": {
+            "command": getattr(args, "verify_command", None) or "",
+            "reason": "external harness may run the final verifier",
+        },
+        "usage": "unavailable",
+    }
+    report_path = _work_oneshot_report_path(args)
+    if report_path:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if getattr(args, "json", False):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(work_stdout.rstrip())
+        if report_path:
+            print(f"report: {report_path}")
+    return exit_code
 
 
 def _work_todo_json_payload(session, todo=None):
