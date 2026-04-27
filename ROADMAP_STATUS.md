@@ -164,6 +164,7 @@ M6.24 Batch 1:
   - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
   - `chess-best-move`: latest 0/5 after generic answer-artifact semantic
     guidance, below Codex target 3/5; previous baseline was 0/5.
+  - `code-from-image`: 0/5, below Codex target 5/5; no Harbor errors.
   - `configure-git-webserver`: 0/5, matched Codex target 0/5, no Harbor
     errors.
   - `db-wal-recovery`: 2/5, above Codex target 1/5, no Harbor errors.
@@ -172,8 +173,8 @@ M6.24 Batch 1:
     target 4/5; previous baseline was 2/5.
   - `raman-fitting`: latest 0/5 after generic numeric plausibility guidance,
     below Codex target 2/5; previous baseline was 0/5.
-  - measured latest task total: 12/35 against frozen Codex target 20/35.
-  - best observed measured total: 13/35 if `build-cython-ext` uses its best
+  - measured latest task total: 12/40 against frozen Codex target 25/40.
+  - best observed measured total: 13/40 if `build-cython-ext` uses its best
     observed 1/5 rerun.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
@@ -272,6 +273,17 @@ M6.24 Batch 1:
   The repair did not improve score, so do not spend a third consecutive
   `chess-best-move` prompt-polish cycle. Continue to `code-from-image` to get
   broader visual/artifact evidence before choosing a heavier generic repair.
+- completed eleventh measurement:
+  `code-from-image` scored 0/5 against Codex target 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-code-from-image-5attempts-20260428-0526/result.json`.
+  There were no Harbor errors, but every trial failed because `/app/output.txt`
+  was missing. The dominant failure is structural
+  `visual_artifact_observation_missing`: mew tried to render and manually
+  inspect `/app/code.png`, but without a native visual-artifact observation
+  tool it stopped by max-step, remember, wait, or ask-user instead of computing
+  the requested output. The next repair should be a generic image/visual
+  artifact observation tool in the normal work path, not a benchmark-specific
+  solver or another prompt-only polish cycle.
 
 Drift guard:
 
