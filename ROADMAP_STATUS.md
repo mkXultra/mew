@@ -178,10 +178,14 @@ M6.24 Batch 1:
   exact-text edit misses recoverable under allowed write roots while budget
   remains. Score stayed 0/5 but stale edit misses no longer terminated the
   loop.
-- current repair candidate:
-  `git_status_not_repo_terminal_tool_failed`; unavailable git status in
-  non-git workspaces should be recoverable while budget remains. Repair this
-  generic workspace boundary before running more Batch 1 tasks.
+- completed fourth repair:
+  `git_status_not_repo_terminal_tool_failed`; commits `1ed31c7` and `fa82204`
+  made unavailable git status recoverable both as a top-level tool and inside
+  read-only batches. The observed M6.24 failure was the batch variant.
+- current next action:
+  rerun `build-cython-ext` from current head with generic `--allow-verify`,
+  then classify as improved, unchanged, or regressed before running more Batch
+  1 tasks.
 
 Drift guard:
 
