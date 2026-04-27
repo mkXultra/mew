@@ -94,12 +94,14 @@ Current M6.22 target:
   `gcode-to-text` 2/5, `overfull-hbox` 3/5, `extract-elf` 4/5,
   `cancel-async-tasks` 5/5, and `fix-code-vulnerability` 5/5
 - aggregate Codex target: 20/35 successes, 57.14%
-- first selected task run:
+- selected task runs so far:
   `filter-js-from-html` completed 0/5 with 5 `VerifierTimeoutError`
   exceptions in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`;
-  this matches the 0/5 Codex target but is recorded as no-edit /
-  verifier-timeout cost evidence, not a core repair trigger.
+  `sanitize-git-repo` completed 1/5 with Harbor errors 0 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`.
+  Current counted M6.22 total is 1/10, matching the frozen Codex 1/10 target
+  for those two tasks.
 - M6.20 positive-control artifacts remain available for the two 100% tasks.
 
 Drift guard:
@@ -1351,13 +1353,16 @@ Latest roadmap/status validation:
   `filter-js-from-html`, `sanitize-git-repo`, `gcode-to-text`,
   `overfull-hbox`, `extract-elf`, `cancel-async-tasks`, and
   `fix-code-vulnerability`. Aggregate Codex target: 20/35 successes.
-- First M6.22 run is recorded in
+- First M6.22 runs are recorded in
   `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`:
   `filter-js-from-html` scored 0/5 with 5 `VerifierTimeoutError` exceptions
   in 32m 24s
   (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`).
-  This matches the frozen Codex 0/5 target for that task and is cost/no-op
-  evidence, not a standalone repair trigger.
+  `sanitize-git-repo` scored 1/5 with Harbor errors 0 in 4m 41s
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`).
+  The combined counted result is 1/10, matching the frozen Codex 1/10 target
+  for those two tasks. Failed-trial heredoc/shell quoting evidence is retained
+  for M6.23 but is not a standalone repair trigger while the task is on target.
 - M6.21 target registry is complete. The source leaderboard is
   `https://www.tbench.ai/leaderboard/terminal-bench/2.0/codex/0.121.0/gpt-5.5%40openai`.
   Local JSON:

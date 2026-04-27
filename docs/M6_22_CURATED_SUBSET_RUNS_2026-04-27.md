@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: first selected task run recorded.
+Status: first two selected task runs recorded.
 
 ## Scope
 
@@ -20,9 +20,10 @@ Terminal-Bench-specific solver log.
 | Task | Codex target | Mew result | Harbor errors | Runtime | Artifact |
 |---|---:|---:|---:|---:|---|
 | `filter-js-from-html` | 0/5 | 0/5 | 5 | 32m 24s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json` |
+| `sanitize-git-repo` | 1/5 | 1/5 | 0 | 4m 41s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json` |
 
-Current counted subset total: **0/5**, matching the 0/5 Codex target for the
-only counted M6.22 task run so far.
+Current counted subset total: **1/10**, matching the 1/10 Codex target for the
+two counted M6.22 task runs so far.
 
 Positive controls from M6.20 remain available but are not re-counted in this
 document until the five not-yet-run M6.22 tasks finish:
@@ -73,14 +74,51 @@ Classification:
 - Harness note: the stuck Docker containers are environmental cleanup debt, not
   mew core evidence unless it recurs on non-Selenium tasks.
 
+## `sanitize-git-repo`
+
+Artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`
+
+Observed result:
+
+- `n_total_trials`: 5
+- `n_trials`: 5
+- `n_errors`: 0
+- `mean`: 0.2
+- `pass@5`: 1.0
+- reward `1.0`: `sanitize-git-repo__HdGFU9Y`
+- reward `0.0`: `sanitize-git-repo__899ZFZb`,
+  `sanitize-git-repo__C9TSKAr`, `sanitize-git-repo__gHAc6b3`,
+  `sanitize-git-repo__MSD6ApM`
+- started: `2026-04-27T22:45:20.586488`
+- finished: `2026-04-27T22:50:02.510378`
+
+Trial notes:
+
+- All five trials produced `mew-report.json`.
+- The successful trial reached `stop_reason = finish` after 17 steps and
+  verifier passed all 3 hidden tests.
+- Four failed trials reached `stop_reason = tool_failed` in 4-6 steps. One
+  inspected failed report shows a generated multiline Python heredoc command
+  failed with `No closing quotation`; its verifier still ran and found raw AWS
+  credentials remained.
+
+Classification:
+
+- Against the frozen Codex target: no parity gap for this task, because mew
+  matched the 1/5 Codex target.
+- Keep the failed-trial shape as M6.23 evidence. If the same heredoc/shell
+  quoting failure recurs on below-target tasks, classify through M6.18 as a
+  candidate generic work-session shell-command repair.
+
 ## Next Tasks
 
 Run the remaining non-control M6.22 tasks:
 
-1. `sanitize-git-repo` (Codex target 1/5)
-2. `gcode-to-text` (Codex target 2/5)
-3. `overfull-hbox` (Codex target 3/5)
-4. `extract-elf` (Codex target 4/5)
+1. `gcode-to-text` (Codex target 2/5)
+2. `overfull-hbox` (Codex target 3/5)
+3. `extract-elf` (Codex target 4/5)
 
 If any task lands below the Codex target, classify it through M6.18 before
 choosing a repair.

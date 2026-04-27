@@ -62,7 +62,8 @@ normal work-session path.
   rationale: satisfied by this document and the JSON manifest.
 - Current action: run mew against the five not-yet-run curated tasks, then
   combine those results with the M6.20 positive-control artifacts.
-- First run recorded: `filter-js-from-html` completed 0/5 with 5
-  `VerifierTimeoutError` exceptions, matching the 0/5 Codex target but leaving
-  no implementation-lane repair signal by itself.
+- Runs recorded so far: `filter-js-from-html` completed 0/5 with 5
+  `VerifierTimeoutError` exceptions, matching the 0/5 Codex target;
+  `sanitize-git-repo` completed 1/5 with Harbor errors 0, matching the 1/5
+  Codex target.
 - Any below-target mew task must be classified through M6.18 before repair.
