@@ -51,8 +51,8 @@ is tracked below.
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
-| 6.18 Implementation Failure Diagnosis Gate | `in_progress` | Active milestone: separate polish retry from structural repair before more mew-first product work. |
-| 7. Senses: Inbound Signals | `pending` | Immediate path is proven, but M7 is paused while M6.18 adds the failure-diagnosis gate needed for honest dogfood. |
+| 6.18 Implementation Failure Diagnosis Gate | `done` | Close gate passed via `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`; M7+ dogfood now routes failures through diagnosis before M6.14 repair. |
+| 7. Senses: Inbound Signals | `in_progress` | Active milestone: convert existing signal gates/journaling/RSS foundation into useful audited inbound observations. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
 | 10. Multi-Agent Residence | `not_started` | Multi-model shared residence remains future work. |
@@ -60,52 +60,41 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.18 Implementation Failure Diagnosis Gate**.
+Active work: **M7 Senses: Inbound Signals**.
 
-Why M6.18 is active:
+Why M7 is active:
 
-- M7 made useful progress, but recent mew-first implementation attempts still
-  mix ordinary polish, reviewer steering, supervisor rescue, and structural
-  loop substrate failures.
-- Without a diagnosis gate, future M7+ dogfood will keep blurring "retry this
-  task with better guidance" and "repair the body through M6.14".
-- M6.18 is intentionally short: it adds the evidence surface and routing rule
-  that decides whether a failure is polish, structural, invalid task spec,
-  transient model failure, or ambiguous.
+- M6.17 closed the reviewer-gated resident meta-loop v0: mew can propose the
+  next task/lane or a safe next action without losing the active gate.
+- M6.18 closed the failure-diagnosis gate, so future M7+ dogfood can route
+  polish, structural, invalid task spec, transient, and ambiguous failures
+  without hiding implementation-lane weakness behind supervisor rescue.
+- A resident that only rereads its own state is not meaningfully passive. The
+  next product gap is controlled inbound sensing: audited signals that let mew
+  notice the user's working world without becoming spam.
+- M7 already has foundation pieces, but the gate is not met until at least one
+  useful, provenance-backed unsolicited observation is produced from enabled
+  signal evidence.
 
-Current M6.18 target:
+Current M7 target:
 
-- record `failure_scope`, `confidence`, evidence signals, recommended route,
-  and optional `structural_reason` for mew-first implementation failures
-- expose polish/structural/ambiguous counts in implementation-lane metrics or a
-  report
-- update the mew-first operating contract so route decisions are durable:
+- keep inbound sources explicitly gated and budgeted
+- journal signal provenance, source, timestamp, and reason-for-use
+- start with local file/git signals, then one non-file-system source behind an
+  explicit gate
+- distinguish "noticed" from "acted" in passive turns
+- make every unsolicited observation explainable and disableable
+
+Current M7 chain:
+
+`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
+
+Current M7 evidence:
+
+- M6.18 close audit `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md` adds the
+  required diagnosis route for future M7 dogfood failures:
   polish -> same-task retry, structural -> M6.14 repair, invalid spec -> task
-  correction, transient -> retry, ambiguous -> replay/proof collection
-- use `docs/ADOPT_FROM_REFERENCES.md` and
-  `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` as structural-repair
-  evidence only after a recorded signal points there
-
-Current M6.18 chain:
-
-`mew-first failure -> diagnosis evidence -> polish retry or M6.14 repair`
-
-Current M6.18 evidence:
-
-- Current implementation-lane metrics show the need for triage: recent attempts
-  still include supervisor rescue/partial outcomes and high rejection rates,
-  while successful product progress and structural substrate fixes are mixed in
-  the same evidence stream.
-- M6.14 already defines the repair route after a structural failure, but the
-  pre-repair failure-scope diagnosis is not yet first-class.
-- `docs/ADOPT_FROM_REFERENCES.md` and
-  `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` identify structural
-  candidates such as structured approval/rejection, Todo/WorkTodo discipline,
-  patch lifecycle, context-window management, tool factory defaults, and
-  per-turn policy. M6.18 should not implement them all; it should route to them
-  only when the failure evidence supports it.
-
-Paused M7 evidence:
+  correction, transient -> retry, ambiguous -> replay/proof collection.
 
 - Existing signal gates, journaling, and RSS/feed surfaces provide foundation,
   but the M7 close proof is not yet present.
@@ -1256,6 +1245,8 @@ These caveats are preserved; they do not reopen the milestones by default.
 - Reopen M6.16 only if a fresh bounded implementation-lane cohort regresses
   below the recorded close gate, or if first-edit latency remains high on
   current-head samples after M6.17 has used it as lane-choice evidence.
+- Reopen M6.18 only if mew-first failure diagnosis stops emitting routeable
+  failure scopes or sends structural repairs to M6.14 without cited signals.
 - M6.14 remains the default home for future mew-first substrate repair
   episodes.
 
@@ -1263,34 +1254,39 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.18 -> mew-first failure diagnosis -> polish retry or M6.14 repair`
+`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
 
 Acceptable near-term work:
 
-- add a first-class failure-scope field for mew-first implementation attempts:
-  `polish`, `structural`, `invalid_task_spec`, `transient_model`, or
-  `ambiguous`
-- record confidence, evidence signals, recommended route, and optional
-  `structural_reason`
-- expose polish/structural/ambiguous counts in implementation-lane metrics or a
-  compact report
-- update the mew-first operating contract so M7+ dogfood routes failures
-  through diagnosis before product rescue or M6.14 substrate repair
-- reclassify at least one recent mew-first failure through the new surface
+- run or set up the intended passive proof window for the enabled signal source
+- preserve signal provenance, source, timestamp, budget, and reason-for-use
+- verify the passive observation stays "noticed, not acted" and remains
+  disableable
+- if M7 implementation fails, route the mew-first failure through M6.18
+  diagnosis before retrying or opening M6.14 repair
 
 Non-goals for the next session:
 
-- broad architecture adoption solely because a reference document recommends it
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
 - broad work-loop or work-session refactors without a recorded structural
   signal
-- resuming broad M7 feature work before the diagnosis gate can route failures
+- broad multi-source integrations before the first M7 proof window is closed
+- direct task/roadmap/memory mutation from inbound signals without reviewer approval
 - treating diagnosis output as automatic permission to perform structural
   repair without reviewer-visible evidence
 
 ## Latest Validation
+
+Latest M6.18 source/test validation:
+
+- Close audit: `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`.
+- Failure diagnosis slice:
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run ruff check src/mew/mew_first_calibration.py src/mew/implementation_lane_baseline.py tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py`,
+  `./mew metrics --mew-first --limit 10 --json`, and
+  `./mew metrics --implementation-lane --limit 10` passed.
 
 Latest M6.17 source/test validation:
 

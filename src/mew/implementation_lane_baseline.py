@@ -117,6 +117,9 @@ def summarize_implementation_lane_baseline_from_summaries(
     result_counts = _mapping(mew_first_counts.get("result_class"))
     drift_counts = _mapping(mew_first_counts.get("drift_class"))
     rejected_patch_counts = _mapping(mew_first_counts.get("rejected_patch_family"))
+    failure_scope_counts = _mapping(mew_first_counts.get("failure_scope"))
+    structural_reason_counts = _mapping(mew_first_counts.get("structural_reason"))
+    recommended_route_counts = _mapping(mew_first_counts.get("recommended_route"))
     gate_blocker_counts = _mapping(mew_first_gate.get("gate_blocker_result_class_counts"))
     attempts_total = _int(mew_first_summary.get("attempts_total"))
     partial_count = _int(result_counts.get("partial_mew_first"))
@@ -157,6 +160,11 @@ def summarize_implementation_lane_baseline_from_summaries(
                 "gate_blocker_result_class": dict(gate_blocker_counts),
                 "drift_class": dict(drift_counts),
                 "rejected_patch_family": dict(rejected_patch_counts),
+            },
+            "diagnosis": {
+                "failure_scope": dict(failure_scope_counts),
+                "structural_reason": dict(structural_reason_counts),
+                "recommended_route": dict(recommended_route_counts),
             },
         },
         "approval": {
@@ -228,6 +236,7 @@ def format_implementation_lane_baseline_report(summary: Mapping[str, Any]) -> st
     first_edit = _mapping(summary.get("first_edit_latency"))
     side_project = _mapping(summary.get("side_project"))
     recommendation = _mapping(summary.get("recommended_first_bottleneck"))
+    diagnosis = _mapping(mew_first.get("diagnosis"))
     lines = [
         "Implementation-lane baseline",
         f"source: {inputs.get('source_path')}",
@@ -244,6 +253,7 @@ def format_implementation_lane_baseline_report(summary: Mapping[str, Any]) -> st
             f"rejection_rate={approval.get('rejection_rate')}"
         ),
         f"failure_classes: {mew_first.get('failure_classes')}",
+        f"diagnosis: {dict(diagnosis)}",
         (
             "verifier: "
             f"failed={verifier.get('failed')}/{verifier.get('total')} "

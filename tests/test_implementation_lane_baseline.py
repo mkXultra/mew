@@ -32,6 +32,9 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
                 },
                 "drift_class": {"wrong_target_substitution": 1},
                 "rejected_patch_family": {"synthetic_schema_substitution": 1},
+                "failure_scope": {"structural": 2, "polish": 1},
+                "structural_reason": {"wrong_target_substitution": 1, "synthetic_schema_substitution": 1},
+                "recommended_route": {"m6_14_repair": 2, "same_task_retry_if_repeated": 1},
             },
         },
         observation_metrics={
@@ -81,6 +84,15 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
     assert summary["mew_first"]["gate_blocking_task_ids"] == [11, 12, 13]
     assert summary["mew_first"]["failure_classes"]["result_class"]["supervisor_owned"] == 1
     assert summary["mew_first"]["failure_classes"]["drift_class"] == {"wrong_target_substitution": 1}
+    assert summary["mew_first"]["diagnosis"]["failure_scope"] == {"structural": 2, "polish": 1}
+    assert summary["mew_first"]["diagnosis"]["structural_reason"] == {
+        "wrong_target_substitution": 1,
+        "synthetic_schema_substitution": 1,
+    }
+    assert summary["mew_first"]["diagnosis"]["recommended_route"] == {
+        "m6_14_repair": 2,
+        "same_task_retry_if_repeated": 1,
+    }
     assert summary["approval"] == {"total": 5, "rejected": 2, "rejection_rate": 0.4}
     assert summary["verifier"] == {"total": 4, "failed": 1, "failure_rate": 0.25}
     assert summary["first_edit_latency"]["count"] == 3
@@ -99,6 +111,8 @@ def test_implementation_lane_baseline_combines_real_summary_shapes() -> None:
     assert "Implementation-lane baseline" in text
     assert "mew_first: success=2/5 rescue_partial=3 rescue_partial_rate=0.6" in text
     assert "failure_classes:" in text
+    assert "diagnosis:" in text
+    assert "'failure_scope': {'structural': 2, 'polish': 1}" in text
     assert "approval: rejected=2/5 rejection_rate=0.4" in text
     assert "verifier: failed=1/4 failure_rate=0.25" in text
     assert "first_edit_latency: count=3 median=12.0 p95=30.0 max=44.0" in text
