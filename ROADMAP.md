@@ -1202,17 +1202,22 @@ Why it matters:
 
 Terminal gate:
 
-- M6.20 uses the fixed `terminal-bench/make-mips-interpreter` slice as its first
-  parity target.
+- M6.20 uses a fixed two-task implementation gate as its first parity target:
+  `terminal-bench/fix-code-vulnerability` and
+  `terminal-bench/cancel-async-tasks`.
 - The reference target is Codex `0.121.0` with `gpt-5.5@openai` on
-  Terminal-Bench 2.0: 5 trials, 3 successes, 60.0% resolution rate.
-- M6.20 parity close requires mew to reach at least 3 successes out of 5 trials
-  on the same fixed task, with Harbor errors at 0 and complete per-task
-  artifacts.
+  Terminal-Bench 2.0: each task has 5 trials, 5 successes, 100.0% resolution
+  rate.
+- M6.20 parity close requires mew to reach 5 successes out of 5 trials on both
+  fixed tasks, with Harbor errors at 0 and complete per-task artifacts.
 - If mew scores below the reference target, the run can still satisfy a
   diagnostic subgate only when the failure is classified through M6.18, a
   bounded implementation-lane or task-spec repair is chosen from the evidence,
   and the same subset is rerun.
+- `terminal-bench/make-mips-interpreter` remains useful as a later stretch task,
+  but it is no longer the M6.20 close gate. A fresh local Codex CLI 0.125.0 run
+  scored 0/5 on that task, so it is too noisy as the first implement-lane
+  calibration gate.
 - Broader Terminal-Bench parity is not squeezed into M6.20; it is prepared by
   the target registry milestone below.
 
@@ -1249,7 +1254,7 @@ Done when:
 
 - the JSON target registry exists under `docs/data/`
 - ROADMAP_STATUS records the source URL, aggregate score, and the
-  `make-mips-interpreter` target used by M6.20
+  fixed M6.20 terminal-gate targets selected from the registry
 - future Terminal-Bench parity work can select cohorts directly from the JSON
   instead of scraping the web or copying leaderboard rows by hand
 

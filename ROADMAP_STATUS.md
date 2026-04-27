@@ -74,7 +74,7 @@ Why M6.20 is active:
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
 - M6.19 closed the Harbor compatibility harness and produced comparable mew and
-  Codex artifacts on `terminal-bench/make-mips-interpreter`.
+  Codex smoke artifacts on `terminal-bench/make-mips-interpreter`.
 - Both smoke runs scored `0.0`, so the next value is not more compatibility
   plumbing. It is a measured failure report, score target, and first
   implementation-lane repair selected from benchmark evidence.
@@ -85,13 +85,20 @@ Current M6.20 target:
 
 - baseline report is now recorded in
   `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
+- fresh Codex timing and failure evidence for the previous
+  `make-mips-interpreter` candidate is recorded in
+  `docs/M6_20_CODEX_REFERENCE_TIMING_2026-04-27.md`: the corrected
+  `-k 5 -n 5` run completed with Harbor errors 0 but scored 0/5 under local
+  Codex CLI 0.125.0. This makes it a useful later stretch task, not the first
+  M6.20 close gate.
 - instruction-consuming `mew-smoke` entrypoint and stdout report fallback are
   implemented; rerun evidence is recorded in
   `docs/M6_20_INSTRUCTION_RERUN_2026-04-27.md`
-- terminal gate is now explicit: on fixed task
-  `terminal-bench/make-mips-interpreter`, match Codex `0.121.0` /
-  `gpt-5.5@openai` at **3 successes out of 5 trials, 60.0%**, with Harbor
-  errors at 0 and complete per-task artifacts
+- terminal gate is now explicit: on fixed tasks
+  `terminal-bench/fix-code-vulnerability` and
+  `terminal-bench/cancel-async-tasks`, match Codex `0.121.0` /
+  `gpt-5.5@openai` at **5 successes out of 5 trials, 100.0% per task**, with
+  Harbor errors at 0 and complete per-task artifacts
 - classify at least one scored failure cohort through the M6.18 taxonomy
 - choose one implementation-lane or task-spec repair from benchmark evidence
 - rerun the same bounded subset after the repair and record improved,
@@ -105,7 +112,7 @@ Current M6.20 target:
 
 Current M6.20 chain:
 
-`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to make-mips-interpreter 3/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
+`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to fix-code-vulnerability 5/5 + cancel-async-tasks 5/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
 
 M7 pending evidence preserved:
 
@@ -1175,8 +1182,12 @@ First M6.20 slice:
 
 - baseline report completed:
   `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
-- next: run an instruction-consuming mew entrypoint on the same bounded
-  `terminal-bench/make-mips-interpreter` smoke before optimizing
+- instruction-consuming `mew-smoke` entrypoint and host-side report capture are
+  implemented and validated; the previous `make-mips-interpreter` candidate is
+  retained as stretch evidence, not the close gate
+- next: run real implementation-lane attempts on the two active M6.20 gate
+  tasks, `terminal-bench/fix-code-vulnerability` and
+  `terminal-bench/cancel-async-tasks`
 - classify any failed mew task through M6.18
 - route only cited structural failures into M6.14 repair episodes
 - rerun the same subset and record whether the repair improved, regressed, or
@@ -1281,22 +1292,24 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to make-mips-interpreter 3/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
+`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to fix-code-vulnerability 5/5 + cancel-async-tasks 5/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
 
 Acceptable near-term work:
 
 - remove generic `work_session` repo-root assumptions so read/write/run/git and
   verification defaults can target an arbitrary workspace root such as
   Terminal-Bench `/app`
-- run a real implementation-lane attempt against the bounded
-  `terminal-bench/make-mips-interpreter` slice through that normal work path,
-  now that instruction ingestion and host report capture are proven
+- run real implementation-lane attempts against the bounded
+  `terminal-bench/fix-code-vulnerability` and
+  `terminal-bench/cancel-async-tasks` slices through that normal work path, now
+  that instruction ingestion and host report capture are proven
 - classify the resulting implementation failure shape through M6.18 with cited
   Harbor evidence
 - implement only the smallest repair needed to make the next rerun more
   informative
-- do not close M6.20 parity until mew reaches at least 3/5 successes on
-  `make-mips-interpreter`, matching the frozen Codex target
+- do not close M6.20 parity until mew reaches 5/5 successes on both
+  `fix-code-vulnerability` and `cancel-async-tasks`, matching the frozen Codex
+  targets
 
 Non-goals for the next session:
 
@@ -1324,10 +1337,12 @@ Latest roadmap/status validation:
   Local JSON:
   `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
   Extracted aggregate: 89 tasks, 445 trials, 366 successes, 82.2% overall
-  resolution rate. M6.20 fixed-task gate target:
-  `make-mips-interpreter`, checksum
-  `8c83716ee4cc62408b9d9bb2fb2a59dad434305da76b32d3186e7da1c106efe3`,
-  5 trials, 3 successes, 60.0%.
+  resolution rate. M6.20 fixed-task gate targets:
+  `fix-code-vulnerability`, checksum
+  `13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119`,
+  5 trials, 5 successes, 100.0%; and `cancel-async-tasks`, checksum
+  `283c70ca90688dc09a969d24e3ed137ba0f00d23018df68771bdf86526b82047`,
+  5 trials, 5 successes, 100.0%.
 - M6.20 task `#694` repaired Harbor report capture after task `#693` proved
   instruction ingestion but exposed missing host-side report metadata. Direct
   supervisor implementation was used by user decision because this is
