@@ -162,7 +162,8 @@ M6.24 Batch 1:
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far:
   - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
-  - `chess-best-move`: 0/5, below Codex target 3/5, no Harbor errors.
+  - `chess-best-move`: latest 0/5 after generic answer-artifact semantic
+    guidance, below Codex target 3/5; previous baseline was 0/5.
   - `configure-git-webserver`: 0/5, matched Codex target 0/5, no Harbor
     errors.
   - `db-wal-recovery`: 2/5, above Codex target 1/5, no Harbor errors.
@@ -256,7 +257,7 @@ M6.24 Batch 1:
   third consecutive `raman-fitting` prompt-polish cycle. Continue broad Batch 1
   measurement; if another numeric/data task shows the same shape, prefer a
   reusable artifact-quality verifier scaffold over another prompt sentence.
-- current repair candidate:
+- completed tenth repair:
   `chess-best-move` scored 0/5 against Codex target 3/5 in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-20260428-0452/result.json`.
   The dominant failure is `answer_artifact_readback_false_green`: all trials
@@ -264,7 +265,13 @@ M6.24 Batch 1:
   `e2e4` and `g2g4` while observed outputs were incomplete or wrong. The
   generic repair is semantic answer-from-artifact verification for images,
   boards, puzzles, diagrams, screenshots, and data files, including
-  completeness proof when all winning/valid answers are requested.
+  completeness proof when all winning/valid answers are requested. Commit
+  `db91b79` implemented that prompt repair and reran the task at 0/5 with one
+  `AgentTimeoutError` in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-answer-artifact-20260428-0508/result.json`.
+  The repair did not improve score, so do not spend a third consecutive
+  `chess-best-move` prompt-polish cycle. Continue to `code-from-image` to get
+  broader visual/artifact evidence before choosing a heavier generic repair.
 
 Drift guard:
 
