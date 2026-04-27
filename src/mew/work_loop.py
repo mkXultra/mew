@@ -124,6 +124,14 @@ WORK_TASK_GOAL_TERM_STOPWORDS = {
 WORK_TASK_GOAL_REQUIRED_TERMS_LIMIT = 10
 WORK_TASK_GOAL_MILESTONE_TERMS_LIMIT = 4
 WORK_TASK_GOAL_PATH_FRAGMENT_RE = re.compile(r"\b(?:src|tests)/[A-Za-z0-9_./-]+")
+WORK_TASK_GOAL_DESCRIPTION_APPENDIX_MARKERS = (
+    "\n\nRecently completed git commits.",
+    "\n\nCurrent coding focus:",
+    "\n\nRecent friction",
+    "\n\nActive work sessions",
+    "\n\nTasks",
+    "\n\nConstraints:",
+)
 
 
 def _work_model_timeout_guard_available():
@@ -3193,7 +3201,7 @@ def _write_ready_task_goal_required_terms(context, resume=None):
     task = context.get("task") if isinstance(context.get("task"), dict) else {}
     text_parts = [
         str(task.get("title") or ""),
-        str(task.get("description") or ""),
+        _write_ready_task_goal_description_text(task.get("description") or ""),
         str(context.get("guidance") or ""),
     ]
     pending_steer = resume.get("pending_steer") if isinstance(resume.get("pending_steer"), dict) else {}
@@ -3247,6 +3255,18 @@ def _write_ready_task_goal_required_terms(context, resume=None):
                     return selected
         return selected
     return terms[:4]
+
+
+def _write_ready_task_goal_description_text(description):
+    text = str(description or "")
+    focus_match = re.search(r"(?:^|\n)Focus:\n", text)
+    if focus_match:
+        text = text[focus_match.end() :]
+    for marker in WORK_TASK_GOAL_DESCRIPTION_APPENDIX_MARKERS:
+        marker_index = text.find(marker)
+        if marker_index >= 0:
+            text = text[:marker_index]
+    return text.strip()
 
 
 def _work_write_ready_fast_path_latest_completed_verifier_tool_call(context):

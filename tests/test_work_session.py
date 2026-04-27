@@ -7215,7 +7215,15 @@ class WorkSessionTests(unittest.TestCase):
             "Improve mew through one small, reviewable code or documentation change. "
             "Advance M7 Senses: close the passive proof-window gate for audited "
             "signal-observation provenance. Route any mew-first failure through "
-            "M6.18 diagnosis before M6.14 repair. Created by mew self-improve."
+            "M6.18 diagnosis before M6.14 repair.\n\n"
+            "Current coding focus:\n"
+            "Next: start a native self-improvement session with "
+            "`./mew self-improve --start-session --focus 'Advance M7 Senses'`\n\n"
+            "Recent friction (historical; no active blockers)\n"
+            "- approval_rejection=0.667 verification_failure=0.111\n\n"
+            "Constraints:\n"
+            "- Keep the change small.\n"
+            "Created by mew self-improve."
         )
         context["guidance"] = "Native self-improvement work session. Draft the paired patch."
 
@@ -7225,6 +7233,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("mew-first", required_terms)
         self.assertNotIn("self-improve", required_terms)
         self.assertNotIn("self-improvement", required_terms)
+        self.assertNotIn("start-session", required_terms)
+        self.assertNotIn("approval_rejection", required_terms)
+        self.assertNotIn("verification_failure", required_terms)
         self.assertIn("proof-window", required_terms)
         self.assertIn("signal-observation", required_terms)
 
