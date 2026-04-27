@@ -1066,6 +1066,65 @@ Why it matters:
   what to work on, which body to use, when to ask, when to repair itself, and
   how to feed outcomes back into memory without drifting from the roadmap.
 
+## Milestone 6.18: Implementation Failure Diagnosis Gate
+
+Make mew-first implementation failures route through evidence-based diagnosis
+before either same-task polish retry or M6.14 substrate repair.
+
+Target:
+
+- classify bounded mew-first implementation failures with a reviewer-visible
+  `failure_scope`: `polish`, `structural`, `invalid_task_spec`,
+  `transient_model`, or `ambiguous`
+- record the evidence behind that scope: signals, confidence, recommended
+  route, and a `structural_reason` when applicable
+- treat diagnosis as triage, not omniscience: v0 recommends a route and keeps
+  reviewer approval in the loop
+- route `polish` to same-task retry, `structural` to a bounded M6.14 repair
+  episode, `invalid_task_spec` to task/spec correction, `transient_model` to
+  retry, and `ambiguous` to replay/proof collection before structural claims
+- use `docs/ADOPT_FROM_REFERENCES.md`,
+  `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, and related reference
+  reviews as evidence for structural repair candidates, not as automatic
+  authority to perform broad architecture work
+- keep larger structural changes such as structured approval/rejection,
+  WorkTodo/patch lifecycle hardening, task-contract context bundles, and tool
+  factory/per-turn policy behind named structural signals unless the change is
+  needed to build the diagnosis surface itself
+
+Start when:
+
+- recent mew-first implementation attempts mix product progress, reviewer
+  steering, supervisor rescue, and high rejection rates enough that ordinary
+  polish and substrate failure are hard to distinguish
+- M7 or later product work would otherwise keep generating implementation-lane
+  evidence without a durable route decision
+
+Done when:
+
+- the mew-first attempt evidence model can record `failure_scope`,
+  `confidence`, `signals`, `recommended_route`, and optional
+  `structural_reason`
+- implementation-lane metrics or reports expose polish/structural/ambiguous
+  counts for recent attempts
+- the `mew-first-implementation-loop` operating contract states the route:
+  polish -> same-task retry, structural -> M6.14 repair, invalid spec -> task
+  correction, transient -> retry, ambiguous -> collect replay/proof
+- at least one recent mew-first failure is reclassified through the new
+  diagnosis surface with cited evidence and a reviewer-visible route
+- no structural repair is launched solely from model opinion; it must cite at
+  least one recorded signal such as wrong target, task-goal miss, missing patch
+  artifact, lost retry frontier, cached-window failure, policy/scope ambiguity,
+  first-edit latency, or supervisor product rescue
+
+Why it matters:
+
+- M6.14 repairs are valuable only when the failure really belongs to the body.
+  M6.18 prevents mew from treating every rejection as architecture work and
+  every architecture smell as prompt polish. It is the gate that lets future
+  M7+ dogfood produce either product progress or actionable implementation-lane
+  repair data.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only
