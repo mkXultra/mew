@@ -144,6 +144,19 @@ Current M7 evidence:
   `./mew signals disable hn`. This proves the immediate end-to-end M7 path, but
   the real-day useful-observation gate remains open until the observation
   survives an intended passive proof window without spam.
+- Task `#685` added the first M7 no-spam guard. `record_signal_observation`
+  now suppresses duplicates in the current budget window before budget
+  consumption and before queueing `signal_observed`: same source/kind/summary
+  duplicates and same payload URL duplicates are blocked with
+  `duplicate_suppressed`, with payload URL suppression working across sources.
+  Mew session `#675` hit `task_goal_term_missing` once, then produced the core
+  source/test patch after explicit reviewer steer. Supervisor fixed a
+  codex-ultra finding that URL suppression was accidentally source-scoped.
+  Validation passed: `uv run python -m unittest tests.test_signals
+  tests.test_signal_fetch tests.test_commands`, `uv run ruff check
+  src/mew/signals.py tests/test_signals.py`, and `git diff --check`.
+  Codex-ultra review `019dcc4b-c380-77e3-acf5-26cd146e7935` failed initially;
+  re-review `019dcc4f-1032-7f22-9a6f-d4610bd92e9a` returned `STATUS: pass`.
 
 M6.17 close evidence:
 
