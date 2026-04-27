@@ -2098,7 +2098,7 @@ def run_command_for_work(command, cwd=".", timeout=300, on_output=None):
     return run_command_record(command, cwd=cwd, timeout=timeout)
 
 
-def first_unquoted_shell_operator(command):
+def first_unquoted_shell_operator_span(command):
     text = command or ""
     in_single = False
     in_double = False
@@ -2127,17 +2127,17 @@ def first_unquoted_shell_operator(command):
             continue
 
         if char in {"\n", "\r"}:
-            return char, "chain"
+            return char, "chain", index, index + 1
         two_chars = text[index : index + 2]
         if two_chars == "&>":
             end = index + 2
             if end < len(text) and text[end] == ">":
                 end += 1
-            return text[index:end], "redirection"
+            return text[index:end], "redirection", index, end
         if two_chars in SHELL_CHAIN_OPERATORS:
-            return two_chars, "chain"
+            return two_chars, "chain", index, index + 2
         if char in SHELL_CHAIN_OPERATORS:
-            return char, "chain"
+            return char, "chain", index, index + 1
         if char in {">", "<"}:
             end = index + 1
             if end < len(text) and text[end] == char:
@@ -2146,7 +2146,7 @@ def first_unquoted_shell_operator(command):
                 end += 1
                 while end < len(text) and text[end].isdigit():
                     end += 1
-            return text[index:end], "redirection"
+            return text[index:end], "redirection", index, end
         if char.isdigit() and index + 1 < len(text) and text[index + 1] in {">", "<"}:
             end = index + 2
             if end < len(text) and text[end] == text[index + 1]:
@@ -2155,9 +2155,34 @@ def first_unquoted_shell_operator(command):
                 end += 1
                 while end < len(text) and text[end].isdigit():
                     end += 1
-            return text[index:end], "redirection"
+            return text[index:end], "redirection", index, end
         index += 1
-    return None, ""
+    return None, "", -1, -1
+
+
+def first_unquoted_shell_operator(command):
+    operator, kind, _start, _end = first_unquoted_shell_operator_span(command)
+    return operator, kind
+
+
+def normalize_run_tests_cd_prefix(command, cwd):
+    operator, kind, start, end = first_unquoted_shell_operator_span(command)
+    if kind != "chain" or operator != "&&":
+        return command, cwd, False
+    prefix = command[:start].strip()
+    suffix = command[end:].strip()
+    if not prefix or not suffix:
+        return command, cwd, False
+    try:
+        prefix_tokens = shlex.split(prefix)
+    except ValueError:
+        return command, cwd, False
+    if len(prefix_tokens) != 2 or prefix_tokens[0] != "cd":
+        return command, cwd, False
+    target_cwd = prefix_tokens[1]
+    if not Path(target_cwd).is_absolute():
+        target_cwd = str(Path(cwd or ".") / target_cwd)
+    return suffix, target_cwd, True
 
 
 def reject_shell_control_tokens(command, *, tool_name="run_tests"):
@@ -2246,10 +2271,15 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
         command = parameters.get("command") or ""
         if not command:
             raise ValueError("run_tests command is empty")
+        command, cwd, normalized_cd_prefix = normalize_run_tests_cd_prefix(command, parameters.get("cwd") or ".")
+        if normalized_cd_prefix:
+            parameters["normalized_cd_prefix"] = True
+            parameters["command"] = command
+            parameters["cwd"] = cwd
         reject_shell_control_tokens(command, tool_name="run_tests")
         return run_command_for_work(
             command,
-            cwd=parameters.get("cwd") or ".",
+            cwd=cwd,
             timeout=parameters.get("timeout", 300),
             on_output=on_output,
         )
