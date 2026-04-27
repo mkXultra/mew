@@ -160,12 +160,18 @@ M6.24 Batch 1:
   `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
-- measured so far: `build-cython-ext` 0/5 against Codex target 5/5, Harbor
-  errors 0, artifact
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-20260428-0054/result.json`
-- current first repair candidate:
-  `batch_missing_read_path_terminal_tool_failed`; repair generic read-only
-  batch semantics before running more Batch 1 tasks.
+- measured so far: `build-cython-ext` remains 0/5 against Codex target 5/5
+  across the initial run and two reruns, Harbor errors 0. The latest rerun is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-allow-verify-20260428-0130/result.json`.
+- completed first repair:
+  `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
+  read-only batches continue after missing paths under allowed write roots.
+  Score stayed 0/5 but progressed trials moved further.
+- current repair candidate:
+  `repeat_command_after_source_edit_blocked_by_total_repeat_guard`; after a
+  workspace-changing edit, repeating the same build/install/test command is a
+  valid verification move and should not count against stale-repeat limits.
+  Repair this generic repeat-guard boundary before running more Batch 1 tasks.
 
 Drift guard:
 

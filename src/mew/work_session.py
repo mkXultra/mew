@@ -1347,6 +1347,14 @@ def work_tool_repeat_guard(
     for call in reversed(session.get("tool_calls") or []):
         if not isinstance(call, dict):
             continue
+        result = call.get("result") or {}
+        if (
+            call.get("tool") in WRITE_WORK_TOOLS
+            and call.get("status") == "completed"
+            and result.get("changed")
+            and result.get("written")
+        ):
+            break
         call_signature = work_tool_signature(call.get("tool"), call.get("parameters") or {})
         is_match = call_signature == signature
         if is_match:

@@ -55,7 +55,7 @@ env PYTHONPATH=.harbor harbor run \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command='apt-get update && apt-get install -y python3 python3-pip python3-venv && python3 -m pip install --break-system-packages -e /mew' \
   --ak command_cwd=/app \
-  --ak command_template='mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-write . --allow-shell --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json' \
+  --ak command_template='mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-write . --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json' \
   --mounts-json '[{"type":"bind","source":"/Users/mk/dev/personal-pj/mew","target":"/mew"},{"type":"bind","source":"/Users/mk/.codex/auth.json","target":"/codex-auth/auth.json"}]'
 ```
 
@@ -69,3 +69,7 @@ Run Batch 1 task by task. After each result:
 - classify below-target or runner-error shapes through M6.18/M6.23 before
   selecting repairs.
 
+Note: `--allow-verify` is part of the generic implementation-lane capability,
+not a Terminal-Bench-specific solver. Without it, model-selected `run_tests`
+actions are blocked even when the same command would be executable through the
+less structured `run_command` path.

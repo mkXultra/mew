@@ -1208,6 +1208,52 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(search_guard["reason"], "consecutive_repeat")
 
+    def test_work_tool_repeat_guard_resets_after_workspace_write(self):
+        command = "python -m pip install --no-build-isolation /app/pkg"
+        session = {
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "parameters": {"command": command, "cwd": "/app"},
+                    "status": "completed",
+                    "result": {"exit_code": 0},
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "parameters": {"path": "/app/pkg/module.py"},
+                    "status": "completed",
+                    "result": {"changed": True, "written": True},
+                },
+            ]
+        }
+
+        guard = work_tool_repeat_guard(session, "run_command", {"command": command, "cwd": "/app"})
+
+        self.assertEqual(guard, {})
+
+    def test_work_tool_repeat_guard_still_blocks_repeats_after_latest_write(self):
+        command = "python -m pip install --no-build-isolation /app/pkg"
+        session = {
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "parameters": {"path": "/app/pkg/module.py"},
+                    "status": "completed",
+                    "result": {"changed": True, "written": True},
+                },
+                {"id": 2, "tool": "run_command", "parameters": {"command": command, "cwd": "/app"}},
+                {"id": 3, "tool": "run_command", "parameters": {"command": command, "cwd": "/app"}},
+            ]
+        }
+
+        guard = work_tool_repeat_guard(session, "run_command", {"command": command, "cwd": "/app"})
+
+        self.assertEqual(guard["reason"], "consecutive_repeat")
+        self.assertEqual(guard["matching_tool_call_ids"], [2, 3])
+
     def test_first_unquoted_shell_operator_respects_quotes_and_adjacency(self):
         self.assertEqual(first_unquoted_shell_operator("python -V&& python -V"), ("&&", "chain"))
         self.assertEqual(first_unquoted_shell_operator("python -V >out.txt"), (">", "redirection"))
