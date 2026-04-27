@@ -26,6 +26,7 @@ from mew.commands import (
     format_work_live_step_result,
     pause_work_session_after_user_interrupt,
     remember_successful_work_verification,
+    recoverable_work_model_error,
     work_cockpit_recovery_command,
     work_recovery_suggestion_from_plan,
     work_session_default_verify_command,
@@ -4982,6 +4983,117 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_recoverable_work_model_error_detects_transient_backend_errors(self):
+        self.assertTrue(recoverable_work_model_error("Codex Web API error: IncompleteRead(3116 bytes read)"))
+        self.assertTrue(recoverable_work_model_error("request timed out"))
+        self.assertTrue(recoverable_work_model_error("HTTP 503 temporarily unavailable"))
+        self.assertTrue(recoverable_work_model_error("HTTP 500 backend unavailable"))
+        self.assertTrue(recoverable_work_model_error("upstream returned 529"))
+        self.assertTrue(recoverable_work_model_error("HTTP/1.1 502 Bad Gateway"))
+        self.assertFalse(recoverable_work_model_error("model returned invalid JSON"))
+        self.assertFalse(recoverable_work_model_error("model returned invalid JSON at char 500"))
+        self.assertFalse(recoverable_work_model_error("permission denied"))
+        self.assertFalse(recoverable_work_model_error("read 5000 bytes"))
+
+    def test_work_oneshot_continues_after_recoverable_model_error(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                from mew.errors import ModelBackendError
+
+                model_outputs = [
+                    ModelBackendError("Codex Web API error: IncompleteRead(3116 bytes read)"),
+                    {
+                        "summary": "finish after transient backend error",
+                        "action": {"type": "finish", "reason": "done after retry"},
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["stop_reason"], "finish")
+                self.assertTrue(report["steps"][0]["recoverable_model_error"])
+                self.assertTrue(report["steps"][0]["continued_after_model_error"])
+                self.assertEqual(report["steps"][1]["action"]["type"], "finish")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_does_not_continue_after_recoverable_model_error_without_oneshot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import MewError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch(
+                        "mew.work_loop.call_model_json_with_retries",
+                        side_effect=MewError("HTTP 503 temporarily unavailable"),
+                    ) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 1)
+                self.assertEqual(report["stop_reason"], "model_error")
+                self.assertTrue(recoverable_work_model_error(report["steps"][0]["error"]))
+                self.assertNotIn("recoverable_model_error", report["steps"][0])
+                self.assertNotIn("continued_after_model_error", report["steps"][0])
+            finally:
+                os.chdir(old_cwd)
+
     def test_detect_default_verify_command_prefers_instruction_backtick_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -8266,8 +8378,9 @@ class WorkSessionTests(unittest.TestCase):
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         self.assertEqual(
             set(tiny_context.keys()),
-            {"active_work_todo", "write_ready_fast_path", "allowed_roots", "task_goal"},
+            {"current_run", "active_work_todo", "write_ready_fast_path", "allowed_roots", "task_goal"},
         )
+        self.assertEqual(tiny_context["current_run"], {})
         self.assertEqual(tiny_context["task_goal"]["required_terms"], ["Scope-limited"])
         self.assertEqual(set(tiny_context["active_work_todo"].keys()), {"source"})
         self.assertEqual(

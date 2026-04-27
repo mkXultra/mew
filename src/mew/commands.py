@@ -5216,6 +5216,36 @@ def _recoverable_approval_verification_failure(approval_data, index, max_steps):
     )
 
 
+def recoverable_work_model_error(error):
+    lowered = str(error or "").casefold()
+    if not lowered:
+        return False
+    if any(
+        re.search(pattern, lowered)
+        for pattern in (
+            r"\bhttp(?:/\d+(?:\.\d+)?)?(?:\s+status)?\s*5\d\d\b",
+            r"\bstatus(?:\s+code)?\s*5\d\d\b",
+            r"\bresponse(?:\s+status)?\s*5\d\d\b",
+            r"\b(?:backend|server|upstream|gateway)\D{0,32}\b5\d\d\b",
+            r"\b5\d\d\b\D{0,32}\b(?:backend|server|upstream|gateway|unavailable|bad gateway|gateway timeout)\b",
+        )
+    ):
+        return True
+    return any(
+        marker in lowered
+        for marker in (
+            "incompleteread",
+            "incomplete read",
+            "connection reset",
+            "connection aborted",
+            "temporarily unavailable",
+            "request timed out",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
 def _work_task_verify_instruction_text(task):
     if not task:
         return ""
@@ -5657,6 +5687,17 @@ def cmd_work_ai(args):
                     "error": error,
                 }
             )
+            if (
+                index < max_steps
+                and getattr(effective_args, "continue_after_remember", False)
+                and recoverable_work_model_error(error)
+            ):
+                report["steps"][-1]["recoverable_model_error"] = True
+                report["steps"][-1]["continued_after_model_error"] = True
+                report["stop_reason"] = "max_steps"
+                if progress:
+                    progress(f"step #{index}: recoverable model error; continuing")
+                continue
             report["stop_reason"] = "model_error"
             if progress:
                 progress(f"step #{index}: model failed")
