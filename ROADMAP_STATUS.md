@@ -168,8 +168,9 @@ M6.24 Batch 1:
   - `fix-git`: 5/5, matched Codex target 5/5, no Harbor errors.
   - `kv-store-grpc`: latest 5/5 after generic exact-schema repair, above Codex
     target 4/5; previous baseline was 2/5.
-  - measured latest task total: 12/25 against frozen Codex target 15/25.
-  - best observed measured total: 13/25 if `build-cython-ext` uses its best
+  - `raman-fitting`: 0/5, below Codex target 2/5, no Harbor errors.
+  - measured latest task total: 12/30 against frozen Codex target 17/30.
+  - best observed measured total: 13/30 if `build-cython-ext` uses its best
     observed 1/5 rerun.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
@@ -239,6 +240,14 @@ M6.24 Batch 1:
   errors in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-db-wal-recovery-5attempts-20260428-0421/result.json`.
   This is measurement coverage only, not a repair candidate.
+- current repair candidate:
+  `raman-fitting` scored 0/5 against Codex target 2/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-raman-fitting-5attempts-20260428-0426/result.json`.
+  The dominant failure is `numeric_artifact_schema_only_false_green`: all
+  trials produced `/app/results.json`, but internal checks only proved JSON
+  shape or finite values while hidden tests rejected the fitted peak
+  parameters. The generic repair is numeric plausibility verification for
+  fitting/optimization/scientific scripting tasks before finish.
 
 Drift guard:
 
