@@ -80,6 +80,8 @@ Why M6.19 is active:
 Current M6.19 target:
 
 - make mew runnable as a Harbor / Terminal-Bench custom agent
+- make Harbor factory construction work with `logs_dir`, `model_name`, and
+  wrapper kwargs, and install mounted local mew before the smoke command
 - run a small Terminal-Bench smoke subset through mew
 - run the same subset with at least one reference agent such as Codex CLI or
   Claude Code
@@ -1299,6 +1301,16 @@ Latest roadmap/status validation:
   mew-first close.
 - Remaining M6.19 gap: live Harbor execution against a Terminal-Bench smoke
   subset and a comparable reference-agent run are not yet complete.
+- M6.19 task `#688` repaired Harbor factory/install compatibility. Focused
+  validation passed:
+  `uv run pytest -q tests/test_harbor_terminal_bench_agent.py --no-testmon`,
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  `git diff --check`, and a real Harbor tool-env
+  `AgentFactory.create_agent_from_import_path(...)` smoke.
+- Remaining M6.19 gap after `#688`: run a real Harbor Terminal-Bench smoke.
+  The documented current smoke uses existing `mew doctor --json`; a true
+  instruction-consuming benchmark entrypoint is still a candidate if live smoke
+  needs actual task-solving instead of compatibility proof.
 - M7 task `#686` pending dry-run tools `#6644/#6645` were rejected without
   applying because M7 is now pending behind Terminal-Bench milestones.
 - Earlier roadmap-only M6.19/M6.20 setup remains historical; current M6.19

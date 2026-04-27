@@ -13,11 +13,33 @@ except Exception:  # pragma: no cover - exercised by import-without-Harbor tests
         return func
 
     class BaseInstalledAgent:  # type: ignore[no-redef]
+        def __init__(self, logs_dir: str | Path | None = None, model_name: str | None = None, **kwargs: Any) -> None:
+            self.logs_dir = logs_dir
+            self.model_name = model_name
+            self.extra_env = kwargs.pop("extra_env", None)
+            self.prompt_template_path = kwargs.pop("prompt_template_path", None)
+            self._version = kwargs.pop("version", "local")
+            self._base_agent_kwargs = kwargs
+
+        @staticmethod
+        def version() -> str:
+            return "local"
+
         async def install(self, environment: Any) -> None:
             return None
 
-        async def exec_as_agent(self, environment: Any, command: str, timeout: int | None = None) -> Any:
-            return environment.exec_as_agent(command, timeout=timeout)
+        async def exec_as_agent(
+            self,
+            environment: Any,
+            command: str,
+            env: dict[str, str] | None = None,
+            cwd: str | Path | None = None,
+            timeout_sec: int | None = None,
+        ) -> Any:
+            try:
+                return environment.exec_as_agent(command, env=env, cwd=cwd, timeout_sec=timeout_sec)
+            except TypeError:
+                return environment.exec_as_agent(command, timeout=timeout_sec)
 
 
 class MewTerminalBenchAgent(BaseInstalledAgent):
@@ -30,27 +52,54 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
     prompt/tool debugging belongs to the next milestone.
     """
 
+    @staticmethod
+    def name() -> str:
+        return "mew"
+
     def __init__(
         self,
+        logs_dir: str | Path | None = None,
+        model_name: str | None = None,
         *,
         command_template: str = "mew-smoke --instruction {instruction_shell} --report {report_path} --artifacts {artifact_dir}",
         artifact_root: str | Path = "artifacts/terminal-bench-harbor-smoke",
         timeout_seconds: int | None = 900,
+        install_command: str | None = None,
+        install_env: dict[str, str] | None = None,
+        **kwargs: Any,
     ) -> None:
-        super().__init__()
+        base_kwargs: dict[str, Any] = {}
+        if logs_dir is not None:
+            base_kwargs["logs_dir"] = logs_dir
+        if model_name is not None:
+            base_kwargs["model_name"] = model_name
+        for name in ("extra_env", "version", "prompt_template_path"):
+            if name in kwargs:
+                base_kwargs[name] = kwargs.pop(name)
+
+        super().__init__(**base_kwargs)
+        if not hasattr(self, "logs_dir"):
+            self.logs_dir = logs_dir
+        if not hasattr(self, "model_name"):
+            self.model_name = model_name
+        self._harbor_base_kwargs = dict(base_kwargs)
+        self._extra_agent_kwargs = dict(kwargs)
         self.command_template = command_template
         self.artifact_root = Path(artifact_root)
         self.timeout_seconds = timeout_seconds
+        self.install_command = install_command
+        self.install_env = install_env
         self._last_task_dir: Path | None = None
         self._last_summary: dict[str, Any] | None = None
 
     async def install(self, environment: Any) -> None:
         parent_install = getattr(super(), "install", None)
-        if parent_install is None:
-            return None
-        result = parent_install(environment)
-        if inspect.isawaitable(result):
-            await result
+        if parent_install is not None:
+            result = parent_install(environment)
+            if inspect.isawaitable(result):
+                await result
+        if self.install_command:
+            await self._exec_as_agent(environment, self.install_command, env=self.install_env, timeout_sec=None)
         return None
 
     @with_prompt_template
@@ -74,7 +123,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             report_path=shlex.quote(str(report_path)),
             instruction_json=shlex.quote(str(task_dir / "instruction.json")),
         )
-        result = await self._exec_as_agent(environment, command, timeout=self.timeout_seconds)
+        result = await self._exec_as_agent(environment, command, timeout_sec=self.timeout_seconds)
         exit_code, stdout, stderr, timed_out = self._normalize_result(result)
 
         self._write_json(
@@ -93,31 +142,25 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         self.populate_context_post_run(context)
         return stdout
 
-    async def _exec_as_agent(self, environment: Any, command: str, timeout: int | None = None) -> Any:
+    async def _exec_as_agent(
+        self,
+        environment: Any,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        cwd: str | Path | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
         """Test seam around Harbor/BaseInstalledAgent exec_as_agent semantics."""
         helper = getattr(super(), "exec_as_agent", None)
+        if helper is not None:
+            result = helper(environment, command=command, env=env, cwd=cwd, timeout_sec=timeout_sec)
+        else:
+            result = environment.exec_as_agent(command=command, env=env, cwd=cwd, timeout_sec=timeout_sec)
 
-        async def invoke(*, include_timeout: bool) -> Any:
-            if helper is not None:
-                if include_timeout:
-                    result = helper(environment, command=command, timeout=timeout)
-                else:
-                    result = helper(environment, command=command)
-            elif include_timeout:
-                result = environment.exec_as_agent(command=command, timeout=timeout)
-            else:
-                result = environment.exec_as_agent(command=command)
-
-            if inspect.isawaitable(result):
-                return await result
-            return result
-
-        try:
-            return await invoke(include_timeout=True)
-        except TypeError:
-            if timeout is None:
-                raise
-            return await invoke(include_timeout=False)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     def populate_context_post_run(self, context: Any) -> None:
         task_dir = self._last_task_dir

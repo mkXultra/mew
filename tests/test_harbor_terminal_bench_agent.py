@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,11 +24,11 @@ class FakeEnvironment:
     def __init__(self, result):
         self.result = result
         self.commands = []
-        self.timeouts = []
+        self.exec_kwargs = []
 
-    def exec_as_agent(self, command, timeout=None):
+    def exec_as_agent(self, command, **kwargs):
         self.commands.append(command)
-        self.timeouts.append(timeout)
+        self.exec_kwargs.append(kwargs)
         return self.result
 
 
@@ -39,15 +40,50 @@ class SeamAgentMixin:
 
     async def install(self, environment):
         self.installed_with = environment
+        result = super().install(environment)
+        if inspect.isawaitable(result):
+            await result
 
-    async def _exec_as_agent(self, environment, command, timeout=None):
-        self.seam_calls.append((environment, command, timeout))
-        return environment.exec_as_agent(command, timeout=timeout)
+    async def _exec_as_agent(self, environment, command, *, env=None, cwd=None, timeout_sec=None):
+        self.seam_calls.append((environment, command, {"env": env, "cwd": cwd, "timeout_sec": timeout_sec}))
+        return environment.exec_as_agent(command, env=env, cwd=cwd, timeout_sec=timeout_sec)
 
 
 def test_agent_imports_without_harbor_installed():
     module = load_agent_module()
     assert module.MewTerminalBenchAgent.__name__ == "MewTerminalBenchAgent"
+
+
+def test_harbor_factory_kwargs_and_metadata_are_preserved(tmp_path):
+    module = load_agent_module()
+
+    agent = module.MewTerminalBenchAgent(
+        logs_dir=tmp_path / "logs",
+        model_name="test-model",
+        extra_env={"MEW_TEST": "1"},
+        version="test-version",
+        prompt_template_path="prompt.txt",
+        install_command="python -m pip install -e /mew",
+        install_env={"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+        unknown_agent_kwarg="preserved",
+    )
+
+    assert module.MewTerminalBenchAgent.name() == "mew"
+    assert callable(module.MewTerminalBenchAgent.name)
+    assert agent.logs_dir == tmp_path / "logs"
+    assert agent.model_name == "test-model"
+    assert agent.extra_env == {"MEW_TEST": "1"}
+    assert agent.prompt_template_path == "prompt.txt"
+    assert agent._harbor_base_kwargs == {
+        "logs_dir": tmp_path / "logs",
+        "model_name": "test-model",
+        "extra_env": {"MEW_TEST": "1"},
+        "version": "test-version",
+        "prompt_template_path": "prompt.txt",
+    }
+    assert agent._extra_agent_kwargs == {"unknown_agent_kwarg": "preserved"}
+    assert agent.install_command == "python -m pip install -e /mew"
+    assert agent.install_env == {"PIP_DISABLE_PIP_VERSION_CHECK": "1"}
 
 
 def test_async_install_and_run_record_required_artifact_contract(tmp_path):
@@ -65,6 +101,8 @@ def test_async_install_and_run_record_required_artifact_contract(tmp_path):
         command_template=command_template,
         artifact_root=tmp_path / "artifacts",
         timeout_seconds=17,
+        install_command="python -m pip install -e /mew",
+        install_env={"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
     )
     environment = FakeEnvironment(
         SimpleNamespace(
@@ -96,12 +134,22 @@ def test_async_install_and_run_record_required_artifact_contract(tmp_path):
 
     assert stdout == "mew stdout"
     assert agent.installed_with is environment
-    assert len(agent.seam_calls) == 1
+    assert len(agent.seam_calls) == 2
     assert agent.seam_calls[0][0] is environment
-    assert agent.seam_calls[0][2] == 17
-    assert environment.timeouts == [17]
-    assert "solve this task" in environment.commands[0]
-    assert "--report" in environment.commands[0]
+    assert agent.seam_calls[0][1] == "python -m pip install -e /mew"
+    assert agent.seam_calls[0][2] == {
+        "env": {"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+        "cwd": None,
+        "timeout_sec": None,
+    }
+    assert agent.seam_calls[1][0] is environment
+    assert agent.seam_calls[1][2] == {"env": None, "cwd": None, "timeout_sec": 17}
+    assert environment.exec_kwargs == [
+        {"env": {"PIP_DISABLE_PIP_VERSION_CHECK": "1"}, "cwd": None, "timeout_sec": None},
+        {"env": None, "cwd": None, "timeout_sec": 17},
+    ]
+    assert "solve this task" in environment.commands[1]
+    assert "--report" in environment.commands[1]
 
     instruction = json.loads((task_dir / "instruction.json").read_text(encoding="utf-8"))
     transcript = json.loads((task_dir / "command-transcript.json").read_text(encoding="utf-8"))
@@ -152,14 +200,13 @@ def test_missing_optional_metadata_is_unavailable_and_context_dict_supported(tmp
     assert context["mew_terminal_bench_summary"] == summary
 
 
-def test_exec_as_agent_retries_base_helper_without_timeout_keyword(tmp_path, monkeypatch):
+def test_exec_as_agent_uses_harbor_timeout_sec_keyword(tmp_path, monkeypatch):
     module = load_agent_module()
     calls = []
 
     async def fake_exec_as_agent(self, environment, *, command, **kwargs):
         calls.append((environment, command, kwargs))
-        if "timeout" in kwargs:
-            raise TypeError("unexpected keyword argument 'timeout'")
+        assert "timeout" not in kwargs
         return SimpleNamespace(exit_code=0, stdout="retry stdout", stderr="retry stderr")
 
     monkeypatch.setattr(module.BaseInstalledAgent, "exec_as_agent", fake_exec_as_agent, raising=False)
@@ -178,13 +225,10 @@ def test_exec_as_agent_retries_base_helper_without_timeout_keyword(tmp_path, mon
     transcript = json.loads((task_dir / "command-transcript.json").read_text(encoding="utf-8"))
 
     assert stdout == "retry stdout"
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert calls[0][0] is environment
-    assert calls[0][2] == {"timeout": 5}
-    assert calls[1][0] is environment
-    assert calls[1][1] == calls[0][1]
-    assert calls[1][2] == {}
-    assert "instruction with spaces" in calls[1][1]
+    assert calls[0][2] == {"env": None, "cwd": None, "timeout_sec": 5}
+    assert "instruction with spaces" in calls[0][1]
     assert transcript["stdout"] == "retry stdout"
     assert transcript["stderr"] == "retry stderr"
     assert summary["timeout_status"] == {"timed_out": False, "timeout_seconds": 5}
