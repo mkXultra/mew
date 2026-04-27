@@ -4084,9 +4084,9 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             not write_batch
             and _recoverable_missing_read_file_error(action_type, parameters, error, args, index, batch_max_steps)
         )
-        recoverable_git_status_not_repo = (
+        recoverable_git_inspection_unavailable = (
             not write_batch
-            and _recoverable_git_status_not_repo_error(action_type, error, result, index, batch_max_steps)
+            and _recoverable_git_inspection_unavailable_error(action_type, error, result, index, batch_max_steps)
         )
         with state_lock():
             state = load_state()
@@ -4095,11 +4095,11 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
                 recoverable_missing_read_file = False
-                recoverable_git_status_not_repo = False
+                recoverable_git_inspection_unavailable = False
             if recoverable_missing_read_file:
                 tool_call["recoverable_missing_read_file"] = True
-            if recoverable_git_status_not_repo:
-                tool_call["recoverable_git_status_not_repo"] = True
+            if recoverable_git_inspection_unavailable:
+                tool_call["recoverable_git_inspection_unavailable"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             record_active_work_todo_executor_lifecycle(
@@ -4138,7 +4138,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                     progress(f"step #{index}: batch missing read target; continuing with partial observations")
                 error = ""
                 continue
-            if recoverable_git_status_not_repo and index < batch_max_steps:
+            if recoverable_git_inspection_unavailable and index < batch_max_steps:
                 recoverable_errors.append(
                     {
                         "tool_call_id": tool_call_id,
@@ -4148,7 +4148,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                     }
                 )
                 if progress:
-                    progress(f"step #{index}: batch git status unavailable; continuing with partial observations")
+                    progress(f"step #{index}: batch git inspection unavailable; continuing with partial observations")
                 error = ""
                 continue
             break
@@ -6733,10 +6733,10 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: stale edit target; continuing with refresh context")
                 continue
-            if _recoverable_git_status_not_repo_error(action_type, error, result, index, max_steps):
-                report["steps"][-1]["recoverable_git_status_not_repo"] = True
+            if _recoverable_git_inspection_unavailable_error(action_type, error, result, index, max_steps):
+                report["steps"][-1]["recoverable_git_inspection_unavailable"] = True
                 if progress:
-                    progress(f"step #{index}: git status unavailable; continuing with filesystem context")
+                    progress(f"step #{index}: git inspection unavailable; continuing with filesystem context")
                 continue
             report["stop_reason"] = "tool_failed"
             break
@@ -6948,8 +6948,8 @@ def _recoverable_stale_edit_file_error(action_type, parameters, error, args, ind
         return False
 
 
-def _recoverable_git_status_not_repo_error(action_type, error, result, index, max_steps):
-    if action_type != "git_status" or index >= max_steps:
+def _recoverable_git_inspection_unavailable_error(action_type, error, result, index, max_steps):
+    if action_type not in GIT_WORK_TOOLS or index >= max_steps:
         return False
     result = result or {}
     normalized = "\n".join(

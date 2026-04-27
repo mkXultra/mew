@@ -31435,7 +31435,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 report = json.loads(stdout.getvalue())
                 self.assertEqual(call_model.call_count, 2)
-                self.assertTrue(report["steps"][0]["recoverable_git_status_not_repo"])
+                self.assertTrue(report["steps"][0]["recoverable_git_inspection_unavailable"])
                 self.assertEqual(report["steps"][1]["status"], "completed")
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["tool_calls"][0]["status"], "failed")
@@ -31511,7 +31511,81 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(report["steps"][1]["status"], "completed")
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["tool_calls"][0]["status"], "failed")
-                self.assertTrue(session["tool_calls"][0]["recoverable_git_status_not_repo"])
+                self.assertTrue(session["tool_calls"][0]["recoverable_git_inspection_unavailable"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertEqual(session["tool_calls"][2]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_batch_git_diff_outside_repository(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect git diff and files",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "git_diff",
+                                    "cwd": ".",
+                                },
+                                {
+                                    "type": "inspect_dir",
+                                    "path": ".",
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "continue from files",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "git_diff")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_git_inspection_unavailable"])
                 self.assertEqual(session["tool_calls"][1]["status"], "completed")
                 self.assertEqual(session["tool_calls"][2]["status"], "completed")
             finally:
