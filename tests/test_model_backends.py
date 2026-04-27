@@ -4,6 +4,7 @@ from unittest.mock import patch
 import mew.model_backends as backends
 from mew.errors import ModelBackendError, MewError
 from mew.model_backends import (
+    call_model_text,
     call_model_json,
     load_model_auth,
     model_backend_default_base_url,
@@ -55,6 +56,30 @@ class ModelBackendTests(unittest.TestCase):
 
         self.assertEqual(result, expected)
         call.assert_called_once_with({"access_token": "x"}, "prompt", "model", "url", 10)
+
+    def test_call_model_text_delegates_to_codex_web_api_with_images(self):
+        expected = "image observation"
+        image_inputs = [{"image_url": "data:image/png;base64,AAAA", "detail": "high"}]
+        with patch("mew.model_backends.call_codex_web_api", return_value=expected) as call:
+            result = call_model_text(
+                "codex",
+                {"access_token": "x"},
+                "prompt",
+                "model",
+                "url",
+                10,
+                image_inputs=image_inputs,
+            )
+
+        self.assertEqual(result, expected)
+        call.assert_called_once_with(
+            {"access_token": "x"},
+            "prompt",
+            "model",
+            "url",
+            10,
+            image_inputs=image_inputs,
+        )
 
     def test_call_model_json_forwards_stream_callback_to_codex(self):
         expected = {"summary": "ok"}

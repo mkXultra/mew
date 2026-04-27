@@ -8068,7 +8068,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
         self.assertIn(
-            '"type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
+            '"type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
             fast_prompt,
         )
         self.assertNotIn("patch_proposal", fast_prompt)
@@ -8131,7 +8131,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Use current_run as the active invocation budget", tiny_prompt)
         self.assertIn("task_goal.required_terms", tiny_prompt)
         self.assertIn('"kind": "patch_proposal|patch_blocker"', tiny_prompt)
-        self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
+        self.assertNotIn('"type": "batch|inspect_dir|read_file|read_image|search_text|glob', tiny_prompt)
         assert_behavior_verifier_guidance(tiny_prompt)
         assert_rollback_repair_guidance(tiny_prompt)
         self.assertLess(len(tiny_prompt), len(fast_prompt))
@@ -31857,6 +31857,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("For answer-from-artifact tasks such as images, boards, puzzles", prompt)
         self.assertIn("reading back the output file or checking output format is not enough", prompt)
         self.assertIn("prove completeness instead of writing a single plausible answer", prompt)
+        self.assertIn("When a source artifact is an image, screenshot, diagram", prompt)
+        self.assertIn("prefer read_image before lossy ASCII rendering or manual OCR commands", prompt)
         self.assertIn("preserve exact literal contract names from the task text", prompt)
         self.assertIn("Do not substitute synonyms or nearby response-field names", prompt)
         self.assertIn("using val when the task says value", prompt)

@@ -3662,10 +3662,16 @@ def work_tool_output_progress(progress, tool_call_id, session_id=None, on_state_
     return emit
 
 
-def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_progress=None):
+def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
     if output_progress:
-        return execute_work_tool(tool, parameters, allowed_read_roots, on_output=output_progress)
-    return execute_work_tool(tool, parameters, allowed_read_roots)
+        return execute_work_tool(
+            tool,
+            parameters,
+            allowed_read_roots,
+            on_output=output_progress,
+            model_context=model_context,
+        )
+    return execute_work_tool(tool, parameters, allowed_read_roots, model_context=model_context)
 
 
 def compact_work_tool_guard_action(action):
@@ -4070,14 +4076,30 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
         try:
-            result = execute_work_tool_with_output(
-                action_type,
-                parameters,
-                args.allow_read or [],
-                work_tool_output_progress(progress, tool_call_id),
-            )
+            output_progress = work_tool_output_progress(progress, tool_call_id)
+            if action_type == "read_image":
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    args.allow_read or [],
+                    output_progress,
+                    model_context={
+                        "model_backend": getattr(args, "model_backend", "codex"),
+                        "model_auth": getattr(args, "model_auth", None),
+                        "model": getattr(args, "model", None),
+                        "base_url": getattr(args, "base_url", None),
+                        "timeout": getattr(args, "model_timeout", None),
+                    },
+                )
+            else:
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    args.allow_read or [],
+                    output_progress,
+                )
             error = work_tool_result_error(action_type, result)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, MewError) as exc:
             result = None
             error = str(exc)
         recoverable_missing_read_file = (
@@ -5564,6 +5586,7 @@ def cmd_work_ai(args):
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
+    effective_args.model_auth = model_auth
 
     live_cells_seen = len(build_work_session_cells(session, limit=None, include_startup_status=False))
     if getattr(args, "live", False) and not session.get("stop_requested_at") and not work_ai_has_tool_gates(options):
@@ -6505,21 +6528,37 @@ def cmd_work_ai(args):
             progress(f"step #{index}: tool #{tool_call_id} {action_type} start")
 
         try:
-            result = execute_work_tool_with_output(
-                action_type,
-                parameters,
-                effective_args.allow_read or [],
-                work_tool_output_progress(
-                    progress,
-                    tool_call_id,
-                    session_id=session_id if getattr(args, "live", False) else None,
-                    on_state_update=(
-                        (lambda: refresh_work_follow_snapshot(args, report, session_id, task_id))
-                        if getattr(args, "live", False)
-                        else None
-                    ),
+            output_progress = work_tool_output_progress(
+                progress,
+                tool_call_id,
+                session_id=session_id if getattr(args, "live", False) else None,
+                on_state_update=(
+                    (lambda: refresh_work_follow_snapshot(args, report, session_id, task_id))
+                    if getattr(args, "live", False)
+                    else None
                 ),
             )
+            if action_type == "read_image":
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    effective_args.allow_read or [],
+                    output_progress,
+                    model_context={
+                        "model_backend": model_backend,
+                        "model_auth": model_auth,
+                        "model": model,
+                        "base_url": base_url,
+                        "timeout": getattr(effective_args, "model_timeout", None),
+                    },
+                )
+            else:
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    effective_args.allow_read or [],
+                    output_progress,
+                )
             error = work_tool_result_error(action_type, result)
         except KeyboardInterrupt:
             interrupt = pause_work_session_after_user_interrupt(session_id, index)
@@ -6539,7 +6578,7 @@ def cmd_work_ai(args):
             if progress:
                 progress(f"step #{index}: interrupted by user")
             break
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, MewError) as exc:
             result = None
             error = str(exc)
 
@@ -7309,7 +7348,7 @@ def _apply_work_approval(args, approve_tool_id):
             "interrupted": True,
             "repairs": repairs,
         }
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, MewError) as exc:
         result = None
         error = str(exc)
 
@@ -10435,7 +10474,16 @@ def _work_tool_edits(args):
 
 
 def _work_tool_parameters(args, session=None, gate_options=None, task=None):
-    path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file", "edit_file_hunks"}
+    path_tools = {
+        "inspect_dir",
+        "read_file",
+        "read_image",
+        "search_text",
+        "glob",
+        "write_file",
+        "edit_file",
+        "edit_file_hunks",
+    }
     options = gate_options if gate_options is not None else _work_tool_gate_options(args, session)
     effective_cwd = _work_tool_effective_cwd(args, task=task, session=session)
     explicit_verify_cwd = getattr(args, "verify_cwd", None)
@@ -10468,6 +10516,8 @@ def _work_tool_parameters(args, session=None, gate_options=None, task=None):
         "offset": getattr(args, "offset", None),
         "line_start": getattr(args, "line_start", None),
         "line_count": getattr(args, "line_count", None),
+        "detail": getattr(args, "detail", None),
+        "prompt": getattr(args, "prompt", None),
         "max_matches": getattr(args, "max_matches", None),
         "context_lines": getattr(args, "context_lines", None),
     }
@@ -10518,12 +10568,35 @@ def cmd_work_tool(args):
         progress(f"tool #{tool_call_id} {args.tool} start")
 
     try:
-        result = execute_work_tool_with_output(
-            args.tool,
-            parameters,
-            gate_options.get("allow_read") or [],
-            work_tool_output_progress(progress, tool_call_id),
-        )
+        output_progress = work_tool_output_progress(progress, tool_call_id)
+        if args.tool == "read_image":
+            try:
+                model_backend = normalize_model_backend(args.model_backend)
+                model = args.model or model_backend_default_model(model_backend)
+                base_url = args.base_url or model_backend_default_base_url(model_backend)
+                model_auth = load_model_auth(model_backend, args.auth)
+            except MewError as exc:
+                raise ValueError(str(exc)) from exc
+            result = execute_work_tool_with_output(
+                args.tool,
+                parameters,
+                gate_options.get("allow_read") or [],
+                output_progress,
+                model_context={
+                    "model_backend": model_backend,
+                    "model_auth": model_auth,
+                    "model": model,
+                    "base_url": base_url,
+                    "timeout": getattr(args, "model_timeout", None),
+                },
+            )
+        else:
+            result = execute_work_tool_with_output(
+                args.tool,
+                parameters,
+                gate_options.get("allow_read") or [],
+                output_progress,
+            )
         error = work_tool_result_error(args.tool, result)
     except KeyboardInterrupt:
         with state_lock():

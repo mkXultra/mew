@@ -1301,6 +1301,7 @@ def build_parser():
         choices=(
             "inspect_dir",
             "read_file",
+            "read_image",
             "search_text",
             "glob",
             "git_status",
@@ -1342,6 +1343,8 @@ def build_parser():
     work_parser.add_argument("--offset", type=int, default=0, help="character offset for read_file")
     work_parser.add_argument("--line-start", type=int, help="1-based starting line for read_file")
     work_parser.add_argument("--line-count", type=int, help="number of lines to read with --line-start")
+    work_parser.add_argument("--detail", choices=("low", "high", "auto"), help="detail level for read_image")
+    work_parser.add_argument("--prompt", help="inspection prompt for read_image")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
     work_parser.add_argument("--context-lines", type=int, default=3, help="context lines around search_text matches")
     work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")

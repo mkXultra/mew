@@ -245,9 +245,39 @@ def _set_response_read_timeout(response, timeout):
     return False
 
 
-def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=None):
+def call_codex_web_api(
+    auth,
+    prompt,
+    model,
+    base_url,
+    timeout,
+    on_text_delta=None,
+    image_inputs=None,
+):
     url = base_url.rstrip("/") + "/responses"
     reasoning_effort = os.environ.get("MEW_CODEX_REASONING_EFFORT", DEFAULT_CODEX_REASONING_EFFORT).strip()
+    content = [
+        {
+            "type": "input_text",
+            "text": prompt,
+        }
+    ]
+    for image in image_inputs or []:
+        if not isinstance(image, dict):
+            continue
+        image_item = {"type": "input_image"}
+        image_url = image.get("image_url")
+        file_id = image.get("file_id")
+        if image_url:
+            image_item["image_url"] = image_url
+        elif file_id:
+            image_item["file_id"] = file_id
+        else:
+            continue
+        detail = str(image.get("detail") or "").strip()
+        if detail:
+            image_item["detail"] = detail
+        content.append(image_item)
     body = {
         "model": model,
         "instructions": (
@@ -258,12 +288,7 @@ def call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=Non
         "input": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": prompt,
-                    }
-                ],
+                "content": content,
             }
         ],
         "stream": True,

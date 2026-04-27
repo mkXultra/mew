@@ -694,6 +694,12 @@ def summarize_read_result(action_type, result):
             f"Read file {result.get('path')} size={result.get('size')} chars "
             f"offset={offset}{next_text}{suffix}\n{result.get('text') or ''}"
         )
+    if action_type == "read_image":
+        return (
+            f"Read image {result.get('path')} size={result.get('size')} "
+            f"mime={result.get('mime_type')} detail={result.get('detail')}\n"
+            f"{result.get('text') or ''}"
+        )
     if action_type == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
         pattern = f" pattern={result.get('pattern')!r}" if result.get("pattern") else ""

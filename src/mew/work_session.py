@@ -17,6 +17,7 @@ from .read_tools import (
     search_text,
     summarize_read_result,
 )
+from .image_tools import read_image_with_model
 from .state import next_id
 from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
@@ -236,6 +237,7 @@ def _apply_tiny_write_ready_draft_outcome_to_active_work_todo(
 WORK_TOOLS = {
     "inspect_dir",
     "read_file",
+    "read_image",
     "search_text",
     "glob",
     "run_command",
@@ -252,7 +254,7 @@ APPROVAL_WAIT_RE = re.compile(
     r"|\b(?:approval|approve|rejection|reject)\b.*\b(?:wait|waiting|await|awaiting)\b",
     re.IGNORECASE,
 )
-READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
+READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "read_image", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
@@ -2209,7 +2211,7 @@ def reject_resident_mew_loop_command(command, *, tool_name="run_command"):
     )
 
 
-def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
+def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, model_context=None):
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
@@ -2233,6 +2235,19 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
             offset=parameters.get("offset", 0),
             line_start=parameters.get("line_start"),
             line_count=parameters.get("line_count"),
+        )
+    if tool == "read_image":
+        context = model_context or {}
+        return read_image_with_model(
+            parameters.get("path") or "",
+            allowed_read_roots,
+            model_backend=context.get("model_backend") or "codex",
+            model_auth=context.get("model_auth"),
+            model=context.get("model"),
+            base_url=context.get("base_url"),
+            timeout=context.get("timeout") or parameters.get("timeout") or 300,
+            prompt=parameters.get("prompt"),
+            detail=parameters.get("detail"),
         )
     if tool == "search_text":
         return search_text(

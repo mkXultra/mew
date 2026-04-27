@@ -179,6 +179,43 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
         self.assertTrue(captured["body"]["stream"])
 
+    def test_call_codex_web_api_sends_image_inputs(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeUrlopenResponse(
+                [json.dumps({"output_text": "image text"}).encode("utf-8")],
+                headers={"content-type": "application/json"},
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            text = call_codex_web_api(
+                {"access_token": "token"},
+                "describe",
+                "gpt-5.5",
+                "https://example.invalid",
+                1,
+                image_inputs=[
+                    {
+                        "image_url": "data:image/png;base64,AAAA",
+                        "detail": "high",
+                    }
+                ],
+            )
+
+        self.assertEqual(text, "image text")
+        content = captured["body"]["input"][0]["content"]
+        self.assertEqual(content[0], {"type": "input_text", "text": "describe"})
+        self.assertEqual(
+            content[1],
+            {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,AAAA",
+                "detail": "high",
+            },
+        )
+
     def test_call_codex_web_api_raises_refusal_for_streamed_refusal_only(self):
         response = FakeUrlopenResponse(
             [
