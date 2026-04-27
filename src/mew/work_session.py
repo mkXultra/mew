@@ -3199,7 +3199,8 @@ def build_low_yield_observation_warnings(calls, *, threshold=3, limit=3):
     return warnings[-limit:]
 
 
-def _search_result_first_match_line(result):
+def _search_result_first_match_anchor(result):
+    result = result or {}
     matches = (result or {}).get("matches") or []
     for match in matches:
         if isinstance(match, dict):
@@ -3207,17 +3208,117 @@ def _search_result_first_match_line(result):
                 value = match.get(key)
                 try:
                     if value is not None:
-                        return max(1, int(value))
+                        return str(match.get("path") or result.get("path") or ""), max(1, int(value))
                 except (TypeError, ValueError):
                     continue
         if isinstance(match, str):
             parts = match.split(":", 2)
             if len(parts) >= 2:
                 try:
-                    return max(1, int(parts[1]))
+                    return str(parts[0] or result.get("path") or ""), max(1, int(parts[1]))
                 except (TypeError, ValueError):
                     continue
-    return None
+    snippets = (result or {}).get("snippets") or []
+    for snippet in snippets:
+        if not isinstance(snippet, dict):
+            continue
+        for key in ("line", "start_line"):
+            value = snippet.get(key)
+            try:
+                if value is not None:
+                    return str(snippet.get("path") or result.get("path") or ""), max(1, int(value))
+            except (TypeError, ValueError):
+                continue
+    return "", None
+
+
+def _search_result_first_match_line(result):
+    _path, line = _search_result_first_match_anchor(result)
+    return line
+
+
+def _work_paths_refer_to_same_file(left, right):
+    left = _working_memory_target_path_text(left)
+    right = _working_memory_target_path_text(right)
+    if not left or not right:
+        return False
+    return left == right or left.endswith(f"/{right}") or right.endswith(f"/{left}")
+
+
+def _read_file_calls_cover_line(calls, path, line, *, after_tool_call_id=None):
+    try:
+        line = int(line or 0)
+    except (TypeError, ValueError):
+        return False
+    if line <= 0:
+        return False
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") != "read_file" or call.get("status") != "completed":
+            continue
+        call_id = call.get("id")
+        if after_tool_call_id is not None:
+            try:
+                if int(call_id or 0) <= int(after_tool_call_id or 0):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if not _work_paths_refer_to_same_file(work_call_path(call), path):
+            continue
+        window = _read_file_call_line_window(call)
+        if window is None:
+            continue
+        start, end = window
+        if start <= line <= end:
+            return True
+    return False
+
+
+def build_search_anchor_observations(calls, *, limit=5, read_line_count=80):
+    observations = []
+    seen = set()
+    calls = list(calls or [])
+    for call in reversed(calls):
+        if not isinstance(call, dict) or call.get("tool") != "search_text" or call.get("status") != "completed":
+            continue
+        result = call.get("result") or {}
+        matches = result.get("matches")
+        snippets = result.get("snippets")
+        if not matches and not snippets:
+            continue
+        match_path, first_match_line = _search_result_first_match_anchor(result)
+        path = match_path or result.get("path") or (call.get("parameters") or {}).get("path") or ""
+        query = result.get("query") or (call.get("parameters") or {}).get("query") or ""
+        pattern = result.get("pattern") or (call.get("parameters") or {}).get("pattern") or ""
+        if first_match_line is None:
+            continue
+        key = (path, query, pattern)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _read_file_calls_cover_line(calls, path, first_match_line, after_tool_call_id=call.get("id")):
+            continue
+        line_start = max(1, first_match_line - 5)
+        observations.append(
+            {
+                "tool": "search_text",
+                "path": path,
+                "query": query,
+                "pattern": pattern,
+                "tool_call_id": call.get("id"),
+                "first_match_line": first_match_line,
+                "reason": (
+                    "successful search_text returned a line anchor that has not yet been converted into "
+                    "a narrow read_file window"
+                ),
+                "suggested_next": (
+                    f"read_file path={path} line_start={line_start} line_count={read_line_count}"
+                ).strip(),
+            }
+        )
+        if len(observations) >= limit:
+            break
+    observations.sort(key=lambda item: item.get("tool_call_id") or 0)
+    return observations[-limit:]
 
 
 def build_redundant_search_observations(calls, *, limit=3, read_line_count=20):
@@ -7123,6 +7224,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
+        "search_anchor_observations": build_search_anchor_observations(calls, limit=5),
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": adjacent_read_observations,
         "demoted_adjacent_read_observations": demoted_adjacent_read_observations,
@@ -7499,6 +7601,22 @@ def format_work_session_resume(resume):
             )
             if queries:
                 lines.append(f"  queries: {queries}")
+            if item.get("suggested_next"):
+                lines.append(f"  suggested_next: {item.get('suggested_next')}")
+
+    search_anchors = resume.get("search_anchor_observations") or []
+    if search_anchors:
+        lines.extend(["", "Search anchor observations"])
+        for item in search_anchors:
+            target = f" {item.get('path')}" if item.get("path") else ""
+            pattern = f" pattern={item.get('pattern')}" if item.get("pattern") else ""
+            query = f" query={item.get('query')}" if item.get("query") else ""
+            line = item.get("first_match_line")
+            line_text = f" first_match_line={line}" if line else ""
+            lines.append(
+                f"- {item.get('tool')}{target}{pattern}{query} found matches; "
+                f"tool=#{item.get('tool_call_id')}{line_text}"
+            )
             if item.get("suggested_next"):
                 lines.append(f"  suggested_next: {item.get('suggested_next')}")
 

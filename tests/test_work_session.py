@@ -4180,6 +4180,117 @@ class WorkSessionTests(unittest.TestCase):
             text,
         )
 
+    def test_work_session_search_anchor_observations_capture_single_match(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Search anchor",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "query": "build_work_think_prompt"},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "query": "build_work_think_prompt",
+                        "matches": ["src/mew/work_loop.py:897:def build_work_think_prompt"],
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        anchor = resume["search_anchor_observations"][0]
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(anchor["path"], "src/mew/work_loop.py")
+        self.assertEqual(anchor["query"], "build_work_think_prompt")
+        self.assertEqual(anchor["tool_call_id"], 1)
+        self.assertEqual(anchor["first_match_line"], 897)
+        self.assertEqual(
+            anchor["suggested_next"],
+            "read_file path=src/mew/work_loop.py line_start=892 line_count=80",
+        )
+        self.assertIn("Search anchor observations", text)
+        self.assertIn(
+            "search_text src/mew/work_loop.py query=build_work_think_prompt found matches; tool=#1 first_match_line=897",
+            text,
+        )
+        self.assertIn(
+            "suggested_next: read_file path=src/mew/work_loop.py line_start=892 line_count=80",
+            text,
+        )
+
+    def test_work_session_search_anchor_observations_clear_after_covering_read(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Search anchor consumed",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "query": "build_work_think_prompt"},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "query": "build_work_think_prompt",
+                        "matches": ["src/mew/work_loop.py:897:def build_work_think_prompt"],
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "line_start": 880, "line_count": 40},
+                    "result": {"path": "src/mew/work_loop.py", "line_start": 880, "line_end": 919, "text": "window"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["search_anchor_observations"], [])
+
+    def test_work_session_search_anchor_observations_use_match_path_for_directory_search(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Directory search anchor",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew", "query": "def cmd_proof_summary"},
+                    "result": {
+                        "path": "src/mew",
+                        "query": "def cmd_proof_summary",
+                        "matches": ["src/mew/commands.py:12040:def cmd_proof_summary(args):"],
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        anchor = resume["search_anchor_observations"][0]
+
+        self.assertEqual(anchor["path"], "src/mew/commands.py")
+        self.assertEqual(
+            anchor["suggested_next"],
+            "read_file path=src/mew/commands.py line_start=12035 line_count=80",
+        )
+
     def test_work_session_adjacent_read_observations_capture_merge_candidate(self):
         session = {
             "id": 1,
@@ -29808,6 +29919,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Drop a working_memory.target_paths entry once it is no longer needed for the next step", prompt)
         self.assertIn("do not rerun that same search_text", prompt)
         self.assertIn("switch to a narrow read_file on the anchored window instead", prompt)
+        self.assertIn("work_session.resume.search_anchor_observations", prompt)
+        self.assertIn("use its suggested_next read_file before repeating that same search_text", prompt)
         self.assertIn("work_session.resume.low_yield_observations", prompt)
         self.assertIn("do not keep searching that same path/pattern", prompt)
         self.assertIn("work_session.resume.redundant_search_observations", prompt)

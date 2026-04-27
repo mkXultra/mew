@@ -1617,6 +1617,7 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         "continuity",
         "effort",
         "low_yield_observations",
+        "search_anchor_observations",
         "failures",
         "unresolved_failure",
         "recurring_failures",
@@ -6070,6 +6071,7 @@ def build_work_think_prompt(context):
         "To reduce first-edit-latency, do not spend another turn on same-surface rediscovery when the first-edit old text is already available in cached windows for the scoped source/test slice. "
         "Drop a working_memory.target_paths entry once it is no longer needed for the next step instead of carrying stale paths forward. "
         "If the latest search_text already returned the same path/query with the line anchor you need, do not rerun that same search_text; switch to a narrow read_file on the anchored window instead. "
+        "If work_session.resume.search_anchor_observations lists successful search_text anchors, use its suggested_next read_file before repeating that same search_text. "
         "If work_session.resume.low_yield_observations lists repeated zero-match searches, do not keep searching that same path/pattern; use the suggested_next to switch to a targeted read, a single broader path, an edit from known context, or finish with a concrete replan. "
         "If work_session.resume.redundant_search_observations shows that the same successful search_text was already repeated on this surface, use its suggested_next read_file replacement instead of rerunning search_text again. "
         "If work_session.resume.adjacent_read_observations shows overlapping or near-adjacent read_file windows on the same path, use its suggested_next merged read instead of inching through more small reads. "
