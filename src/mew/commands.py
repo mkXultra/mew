@@ -3933,7 +3933,9 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
 
     tool_calls = []
     pending_approval_ids = []
+    recoverable_errors = []
     error = ""
+    batch_max_steps = getattr(args, "max_steps", 999999)
     for sub_action in sub_actions:
         with state_lock():
             state = load_state()
@@ -4078,12 +4080,19 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         except (OSError, ValueError) as exc:
             result = None
             error = str(exc)
+        recoverable_missing_read_file = (
+            not write_batch
+            and _recoverable_missing_read_file_error(action_type, parameters, error, args, index, batch_max_steps)
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
             if not tool_call:
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
+                recoverable_missing_read_file = False
+            if recoverable_missing_read_file:
+                tool_call["recoverable_missing_read_file"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             record_active_work_todo_executor_lifecycle(
@@ -4109,6 +4118,19 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {tool_call.get('status')}")
         if error:
+            if recoverable_missing_read_file and index < batch_max_steps:
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "path": parameters.get("path") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch missing read target; continuing with partial observations")
+                error = ""
+                continue
             break
 
     if error and write_batch and pending_approval_ids:
@@ -4148,8 +4170,12 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         "tool_calls": tool_calls,
         "pending_approval_ids": pending_approval_ids,
         "pending_approval": bool(pending_approval_ids),
+        "recoverable_errors": recoverable_errors,
         "error": error,
-        "summary": f"ran {len(tool_calls)} batch tool(s)",
+        "summary": (
+            f"ran {len(tool_calls)} batch tool(s)"
+            + (f" with {len(recoverable_errors)} recoverable error(s)" if recoverable_errors else "")
+        ),
     }
 
 
