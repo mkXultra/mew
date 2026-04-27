@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 This file is the compact operational roadmap dashboard. It is intentionally
 short enough to survive context compression and long-session reentry.
@@ -56,7 +56,7 @@ is tracked below.
 | 6.20 Terminal-Bench Driven Implement-Lane Debugging | `done` | Fixed two-task terminal gate closed on current head: both selected tasks reached 5/5 with Harbor errors 0. |
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
-| 6.23 Terminal-Bench Failure-Class Coverage | `in_progress` | Active milestone: convert curated-subset failures into ranked repair classes with rerun evidence. |
+| 6.23 Terminal-Bench Failure-Class Coverage | `in_progress` | Active milestone: failure classes are ranked in `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`; first repair is grounded edit-scope acceptance evidence. |
 | 6.24 Broad Terminal-Bench Parity Campaign | `not_started` | Full 89-task parity against Codex target 366/445 successes, 82.2% resolution. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
@@ -126,13 +126,21 @@ Closed M6.22 result:
 
 Current M6.23 chain:
 
-`M6.23 failure-class coverage -> rank curated-subset failure classes -> choose first high-leverage repair`
+`M6.23 failure-class coverage -> grounded edit-scope acceptance validator -> rerun overfull-hbox and mark improved/unchanged/regressed`
 
-Initial M6.23 failure classes:
+M6.23 failure-class coverage:
 
-- `self_reported_acceptance_evidence_not_grounded_in_diff_validator`
-- `missing_visual_decode_artifact_grounding`
-- `agent_wall_timeout_without_report`
+- `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md` ranks the observed
+  curated-subset failure classes and selects the first repair.
+- Selected first repair:
+  `self_reported_acceptance_evidence_not_grounded_in_diff_validator` ->
+  grounded edit-scope acceptance validator.
+- Deferred ranked classes:
+  `missing_visual_decode_artifact_grounding`,
+  `agent_wall_timeout_without_report`, `shell_quoting_multiline_command`, and
+  `verifier_timeout_no_edit`.
+- Already repaired class:
+  `repairable_constraint_blocker_terminal_wait` by commit `2d0b5c4`.
 
 Drift guard:
 
@@ -143,10 +151,6 @@ Drift guard:
   call the normal work path with explicit cwd, read/write roots, verifier, and
   bounded permissions.
 - Below-target M6.22 tasks must be classified through M6.18 before repair.
-
-Current M6.22 chain:
-
-`M6.22 curated subset parity -> remaining selected task runs -> classify below-target gaps through M6.18`
 
 M7 pending evidence preserved:
 
