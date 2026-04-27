@@ -7203,6 +7203,31 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("user-facing", required_terms)
         self.assertIn("output-file", required_terms)
 
+    def test_tiny_write_ready_draft_context_ignores_self_improve_boilerplate_terms(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def record_signal_observation():\n    return {'noticed': True}\n",
+            test_text="def test_signal_observation():\n    assert True\n",
+        )
+        context["task"]["title"] = "Improve mew itself from native self-improve"
+        context["task"]["description"] = (
+            "Improve mew through one small, reviewable code or documentation change. "
+            "Advance M7 Senses: close the passive proof-window gate for audited "
+            "signal-observation provenance. Route any mew-first failure through "
+            "M6.18 diagnosis before M6.14 repair. Created by mew self-improve."
+        )
+        context["guidance"] = "Native self-improvement work session. Draft the paired patch."
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        required_terms = tiny_context["task_goal"]["required_terms"]
+
+        self.assertNotIn("mew-first", required_terms)
+        self.assertNotIn("self-improve", required_terms)
+        self.assertNotIn("self-improvement", required_terms)
+        self.assertIn("proof-window", required_terms)
+        self.assertIn("signal-observation", required_terms)
+
     def test_tiny_write_ready_draft_context_keeps_milestone_and_required_field_terms(self):
         from mew.work_loop import build_write_ready_tiny_draft_model_context
 
