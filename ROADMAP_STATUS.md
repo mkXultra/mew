@@ -100,8 +100,16 @@ Current M6.22 target:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`;
   `sanitize-git-repo` completed 1/5 with Harbor errors 0 in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`.
-  Current counted M6.22 total is 1/10, matching the frozen Codex 1/10 target
-  for those two tasks.
+  `gcode-to-text` completed 0/5 with 1 `AgentTimeoutError` in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json`.
+  Current counted M6.22 total is 1/15, below the frozen Codex 3/15 target
+  for those three tasks.
+- current below-target classification:
+  `gcode-to-text` is classified as M6.18 `structural`, confidence medium,
+  `structural_reason = missing_visual_decode_artifact_grounding`, with a
+  secondary `agent_wall_timeout_without_report` signal. Continue remaining
+  M6.22 runs before choosing the repair so the repair can target a cohort, not
+  one anecdote.
 - M6.20 positive-control artifacts remain available for the two 100% tasks.
 
 Drift guard:
@@ -1360,9 +1368,12 @@ Latest roadmap/status validation:
   (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`).
   `sanitize-git-repo` scored 1/5 with Harbor errors 0 in 4m 41s
   (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`).
-  The combined counted result is 1/10, matching the frozen Codex 1/10 target
-  for those two tasks. Failed-trial heredoc/shell quoting evidence is retained
-  for M6.23 but is not a standalone repair trigger while the task is on target.
+  `gcode-to-text` scored 0/5 with 1 `AgentTimeoutError` in 15m 41s
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json`).
+  The combined counted result is 1/15, below the frozen Codex 3/15 target for
+  those three tasks. `gcode-to-text` is classified through M6.18 as structural
+  visual/geometric artifact-grounding failure; repair selection waits for the
+  remaining M6.22 tasks so the repair can target a cohort.
 - M6.21 target registry is complete. The source leaderboard is
   `https://www.tbench.ai/leaderboard/terminal-bench/2.0/codex/0.121.0/gpt-5.5%40openai`.
   Local JSON:
