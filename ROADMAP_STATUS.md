@@ -162,9 +162,10 @@ M6.24 Batch 1:
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far:
   - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
-  - `chess-best-move`: latest 1/5 after the generic `read_image` repair,
-    below Codex target 3/5; previous baseline and answer-artifact prompt
-    repair were both 0/5.
+  - `chess-best-move`: latest 5/5 after all-valid answer gating plus
+    acceptance-finish continuation, above Codex target 3/5; previous baseline
+    and answer-artifact prompt repair were both 0/5, and post-`read_image`
+    validation was 1/5.
   - `code-from-image`: latest 5/5 after the generic `read_image` repair,
     matched Codex target 5/5; previous baseline was 0/5.
   - `configure-git-webserver`: 0/5, matched Codex target 0/5, no Harbor
@@ -175,8 +176,8 @@ M6.24 Batch 1:
     target 4/5; previous baseline was 2/5.
   - `raman-fitting`: latest 0/5 after generic numeric plausibility guidance,
     below Codex target 2/5; previous baseline was 0/5.
-  - measured latest task total: 18/40 against frozen Codex target 25/40.
-  - best observed measured total: 19/40 if `build-cython-ext` uses its best
+  - measured latest task total: 22/40 against frozen Codex target 25/40.
+  - best observed measured total: 23/40 if `build-cython-ext` uses its best
     observed 1/5 rerun.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
@@ -307,6 +308,22 @@ M6.24 Batch 1:
   The next repair should improve generic answer-space completeness proof for
   all-valid/all-winning answer tasks rather than adding a chess-specific
   solver.
+- completed fourteenth repair:
+  commit `6db7116` added a generic all-valid answer completion gate. It
+  improved `chess-best-move` to 2/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-all-valid-gate-20260428-0613/result.json`,
+  but blocked finishes could still become terminal stops with incomplete
+  answer artifacts.
+- completed fifteenth repair:
+  commit `ce44a95` made acceptance finish blockers continue the work loop
+  while budget remains. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-finish-block-continue-20260428-0620/result.json`
+  improved `chess-best-move` to 5/5 with Harbor errors 0 and runtime 14m 9s,
+  exceeding the frozen Codex target 3/5. This repairs
+  `all_valid_answers_completeness_not_enforced` and
+  `acceptance_finish_block_terminal_stop` generically. Track the increased
+  runtime as a later implementation-lane ergonomics issue, not as a reason to
+  revert the correctness repair.
 
 Drift guard:
 
