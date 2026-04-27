@@ -80,6 +80,8 @@ Current M6.20 target:
 
 - baseline report is now recorded in
   `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
+- instruction-consuming `mew-smoke` entrypoint is implemented locally; next
+  evidence is the bounded Harbor rerun
 - classify at least one scored failure cohort through the M6.18 taxonomy
 - write an explicit small score target before prompt/tool optimization
 - choose one implementation-lane or task-spec repair from benchmark evidence
@@ -1257,9 +1259,8 @@ The next implementation task should map to this chain:
 
 Acceptable near-term work:
 
-- implement the smallest instruction-consuming mew Terminal-Bench entrypoint or
-  command path needed for the next one-task smoke rerun
-- run that bounded rerun against `terminal-bench/make-mips-interpreter`
+- run the bounded instruction-consuming smoke rerun against
+  `terminal-bench/make-mips-interpreter`
 - classify the resulting `make-mips-interpreter` failure shape through M6.18
   with cited Harbor evidence
 - implement only the smallest repair needed to make the next rerun more
@@ -1283,6 +1284,15 @@ Non-goals for the next session:
 
 Latest roadmap/status validation:
 
+- M6.20 task `#692` added the installed `mew-smoke` entrypoint for
+  instruction-consuming Terminal-Bench smoke runs. It accepts `--instruction`,
+  `--report`, and `--artifacts`, records instruction/report JSON, registers the
+  console script in `pyproject.toml`, and updates
+  `docs/terminal-bench-harbor-smoke.md`. Focused validation passed:
+  `uv run pytest -q tests/test_terminal_bench_smoke.py tests/test_harbor_terminal_bench_agent.py --no-testmon`,
+  `uv run ruff check src/mew/terminal_bench_smoke.py tests/test_terminal_bench_smoke.py .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  `uv run mew-smoke --instruction 'diagnostic instruction' --report /tmp/mew-smoke-report.json --artifacts /tmp/mew-smoke-artifacts`,
+  and `git diff --check`.
 - M6.20 task `#691` created
   `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md` from the M6.19 mew and
   Codex Harbor smoke artifacts. Verifier passed:
