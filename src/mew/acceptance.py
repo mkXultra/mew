@@ -43,6 +43,7 @@ _GROUNDING_TOOLS = {
     "git_diff",
     "git_status",
     "glob",
+    "read_image",
     "read_file",
     "run_command",
     "run_tests",
@@ -70,6 +71,41 @@ _EDIT_SCOPE_MARKERS = (
     "specified replacements",
     "without editing",
     "without modifying",
+)
+
+_ALL_VALID_ANSWER_TASK_MARKERS = (
+    "all valid",
+    "all winning",
+    "all possible",
+    "all matching",
+    "all legal",
+    "multiple valid",
+    "multiple winning",
+    "multiple possible",
+    "print them all",
+    "write them all",
+    "list them all",
+    "one per line",
+)
+
+_COMPLETENESS_EVIDENCE_MARKERS = (
+    "all legal",
+    "all valid",
+    "all winning",
+    "all possible",
+    "both",
+    "candidate",
+    "complete",
+    "completeness",
+    "enumerat",
+    "exhaust",
+    "found all",
+    "list them all",
+    "mates [",
+    "multiple",
+    "no other",
+    "one per line",
+    "winning moves",
 )
 
 
@@ -174,6 +210,25 @@ def _tool_call_by_id(session: object, tool_id: int) -> dict | None:
     return None
 
 
+def _tool_call_text(call: object) -> str:
+    if not isinstance(call, dict):
+        return ""
+    chunks: list[str] = []
+    for key in ("summary", "error"):
+        value = call.get(key)
+        if value:
+            chunks.append(str(value))
+    result = call.get("result")
+    if isinstance(result, dict):
+        for key in ("text", "stdout", "stderr", "summary", "output"):
+            value = result.get(key)
+            if value:
+                chunks.append(str(value))
+    elif result:
+        chunks.append(str(result))
+    return "\n".join(chunks)
+
+
 def _evidence_tool_ids(text: object) -> list[int]:
     ids: list[int] = []
     for match in _TOOL_ID_RE.finditer(str(text or "")):
@@ -197,6 +252,59 @@ def _has_post_write_grounding_evidence(evidence: object, session: object) -> boo
         if call and call.get("tool") in _GROUNDING_TOOLS:
             return True
     return False
+
+
+def is_all_valid_answer_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not any(marker in lowered for marker in _ALL_VALID_ANSWER_TASK_MARKERS):
+        return False
+    return any(marker in lowered for marker in ("all", "multiple", "one per line"))
+
+
+def _has_completeness_marker(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _COMPLETENESS_EVIDENCE_MARKERS)
+
+
+def _has_all_valid_answer_grounding_evidence(evidence: object, session: object) -> bool:
+    if not _has_completeness_marker(evidence):
+        return False
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in _GROUNDING_TOOLS:
+            continue
+        if _has_completeness_marker(_tool_call_text(call)):
+            return True
+    return False
+
+
+def _all_valid_answer_grounding_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if not is_all_valid_answer_task(task_description):
+        return ""
+    completeness_checks = [
+        check
+        for check in checks
+        if _has_completeness_marker(check.get("constraint"))
+        or _has_completeness_marker(check.get("evidence"))
+    ]
+    if not completeness_checks:
+        return (
+            "all-valid answer completeness evidence missing: tasks asking for all, "
+            "multiple, or one-per-line valid answers must cite independent enumeration "
+            "or completeness proof before task_done=true"
+        )
+    for check in completeness_checks:
+        if _has_all_valid_answer_grounding_evidence(check.get("evidence"), session):
+            return ""
+    return (
+        "all-valid answer completeness evidence ungrounded: completeness checks must "
+        "cite a completed grounding tool whose output independently enumerates or "
+        "proves the full answer set"
+    )
 
 
 def _edit_scope_grounding_blocker(
@@ -233,10 +341,13 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     action = action if isinstance(action, dict) else {}
     if not action.get("task_done"):
         return ""
+    checks = coerce_acceptance_checks(action.get("acceptance_checks"))
+    all_valid_answer_blocker = _all_valid_answer_grounding_blocker(task_description, checks, session)
+    if all_valid_answer_blocker:
+        return all_valid_answer_blocker
     constraints = extract_acceptance_constraints(task_description)
     if not constraints:
         return ""
-    checks = coerce_acceptance_checks(action.get("acceptance_checks"))
     verified = [
         check
         for check in checks

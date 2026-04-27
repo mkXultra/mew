@@ -34189,6 +34189,135 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("edit-scope acceptance evidence ungrounded", result["finished_note"])
         self.assertIn("Work session finish blocked", task["notes"])
 
+    def test_work_finish_blocks_all_valid_answer_without_completeness_evidence(self):
+        from mew.commands import apply_work_control_action
+
+        state = {}
+        description = (
+            "The file chess_board.png has an image of a chess board. It is currently white to move. "
+            "Write the best move for white to play to /app/move.txt. "
+            "If there are multiple winning moves, print them all, one per line."
+        )
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_image",
+                    "status": "completed",
+                    "summary": "Read board image and found a likely best move.",
+                },
+                {"id": 2, "tool": "write_file", "status": "completed"},
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "summary": "Read file /app/move.txt size=5 chars\ne2e4\n",
+                },
+            ],
+        }
+        task = {
+            "id": 15,
+            "title": "Solve chess board",
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Print all winning moves, one per line.",
+                    "status": "verified",
+                    "evidence": "tool #3 read move.txt and found e2e4.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("all-valid answer completeness evidence ungrounded", result["finished_note"])
+        self.assertIn("Work session finish blocked", task["notes"])
+
+    def test_work_finish_allows_all_valid_answer_with_enumeration_evidence(self):
+        from mew.commands import apply_work_control_action
+
+        state = {"tasks": [], "questions": []}
+        description = (
+            "The file chess_board.png has an image of a chess board. It is currently white to move. "
+            "Write the best move for white to play to /app/move.txt. "
+            "If there are multiple winning moves, print them all, one per line."
+        )
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_image",
+                    "status": "completed",
+                    "summary": "Read board image and derived the FEN.",
+                },
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {
+                        "stdout": "Enumerated all legal moves; mates ['e2e4', 'g2g4']; no other mate moves."
+                    },
+                },
+                {"id": 3, "tool": "write_file", "status": "completed"},
+                {
+                    "id": 4,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "summary": "Read file /app/move.txt size=10 chars\ne2e4\ng2g4\n",
+                },
+            ],
+        }
+        task = {
+            "id": 15,
+            "title": "Solve chess board",
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        state["tasks"].append(task)
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "completion_summary": "wrote all winning moves",
+            "acceptance_checks": [
+                {
+                    "constraint": "Print all winning moves, one per line.",
+                    "status": "verified",
+                    "evidence": (
+                        "tool #2 enumerated all legal moves and found both e2e4 and g2g4; "
+                        "tool #4 read move.txt."
+                    ),
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_called_once_with(session)
+        self.assertTrue(result["task_done"])
+        self.assertIn("Work session finished: implemented and verified", task["notes"])
+        self.assertIn("done: wrote all winning moves", task["notes"])
+
     def test_repairable_wait_converts_to_remember_when_continuation_allowed(self):
         action = {
             "type": "wait",
