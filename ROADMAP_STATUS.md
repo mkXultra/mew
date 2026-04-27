@@ -162,8 +162,9 @@ M6.24 Batch 1:
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far:
   - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
-  - `chess-best-move`: latest 0/5 after generic answer-artifact semantic
-    guidance, below Codex target 3/5; previous baseline was 0/5.
+  - `chess-best-move`: latest 1/5 after the generic `read_image` repair,
+    below Codex target 3/5; previous baseline and answer-artifact prompt
+    repair were both 0/5.
   - `code-from-image`: latest 5/5 after the generic `read_image` repair,
     matched Codex target 5/5; previous baseline was 0/5.
   - `configure-git-webserver`: 0/5, matched Codex target 0/5, no Harbor
@@ -174,8 +175,8 @@ M6.24 Batch 1:
     target 4/5; previous baseline was 2/5.
   - `raman-fitting`: latest 0/5 after generic numeric plausibility guidance,
     below Codex target 2/5; previous baseline was 0/5.
-  - measured latest task total: 17/40 against frozen Codex target 25/40.
-  - best observed measured total: 18/40 if `build-cython-ext` uses its best
+  - measured latest task total: 18/40 against frozen Codex target 25/40.
+  - best observed measured total: 19/40 if `build-cython-ext` uses its best
     observed 1/5 rerun.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
@@ -295,6 +296,17 @@ M6.24 Batch 1:
   2m 51s. This repairs `visual_artifact_observation_missing` for this task and
   gives a reusable visual-artifact observation surface for screenshots,
   diagrams, boards, plots, and code screenshots.
+- completed thirteenth cross-task validation:
+  rerunning `chess-best-move` after the generic `read_image` repair scored
+  1/5 with Harbor errors 0 and runtime 4m 28s in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-read-image-20260428-0603/result.json`.
+  The pass case read the board image, derived the FEN, enumerated both
+  mate-in-one moves, wrote `e2e4` and `g2g4`, and read the file back. The four
+  failures still wrote only `e2e4`, so the remaining structural reason is
+  `all_valid_answers_completeness_not_enforced`, not missing image access.
+  The next repair should improve generic answer-space completeness proof for
+  all-valid/all-winning answer tasks rather than adding a chess-specific
+  solver.
 
 Drift guard:
 
