@@ -160,10 +160,10 @@ M6.24 Batch 1:
   `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
-- measured so far: `build-cython-ext` remains 0/5 against Codex target 5/5
-  across the initial run and five reruns. The latest rerun is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-batch-git-status-20260428-0234/result.json`
-  with two `AgentTimeoutError` exceptions.
+- measured so far: `build-cython-ext` improved to 1/5 against Codex target 5/5
+  after the initial run and six reruns. The latest rerun is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-run-tests-recover-20260428-0300/result.json`
+  with three `AgentTimeoutError` exceptions.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
   read-only batches continue after missing paths under allowed write roots.
@@ -183,13 +183,17 @@ M6.24 Batch 1:
   made unavailable git status recoverable both as a top-level tool and inside
   read-only batches. Commit `184ee1f` recorded the repair path. Score stayed
   0/5, but the terminal git-status boundary did not recur in the rerun.
-- current repair candidate:
+- completed fifth repair:
   `run_tests_failure_terminal_tool_failed`; direct `run_tests` failures should
   become recoverable verifier observations while budget remains. The latest
-  rerun has near-solution trials that reached the README snippet with compiled
-  extensions and NumPy `2.3.0`, then stopped on `No module named pytest`.
-  Commit `f91209e` implements the generic repair; rerun current head before
-  selecting more Batch 1 tasks.
+  rerun improved `build-cython-ext` from 0/5 to 1/5. Commit `f91209e`
+  implements the generic repair.
+- completed sixth repair, awaiting rerun:
+  `git_diff_not_repo_terminal_tool_failed`; read-only git inspection in
+  filesystem-only workspaces should be recoverable generally, not only for
+  `git_status`. Commit `dae6000` generalized the recovery for read-only
+  git-inspection tools. Rerun `build-cython-ext` before selecting another
+  Batch 1 task.
 
 Drift guard:
 
