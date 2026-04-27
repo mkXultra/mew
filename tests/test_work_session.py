@@ -29,6 +29,7 @@ from mew.commands import (
     remember_successful_work_verification,
     recoverable_work_model_error,
     work_cockpit_recovery_command,
+    work_finish_blocker_allows_continue,
     work_recovery_suggestion_from_plan,
     work_session_default_verify_command,
 )
@@ -34334,6 +34335,20 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(converted["type"], "remember")
         self.assertEqual(converted["converted_from_wait"], "repairable_blocker")
         self.assertIn("unsafe under the stated constraint", converted["note"])
+
+    def test_work_finish_blocker_allows_acceptance_repair_continuation(self):
+        self.assertTrue(
+            work_finish_blocker_allows_continue(
+                "finish blocked: all-valid answer completeness evidence ungrounded"
+            )
+        )
+        self.assertTrue(
+            work_finish_blocker_allows_continue("finish blocked: edit-scope acceptance evidence missing")
+        )
+        self.assertTrue(
+            work_finish_blocker_allows_continue("finish blocked: acceptance constraints unchecked")
+        )
+        self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))
 
     def test_repairable_wait_does_not_convert_on_final_step(self):
         action = {"type": "wait", "reason": "unsupported replacement"}

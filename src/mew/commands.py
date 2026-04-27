@@ -3471,6 +3471,20 @@ def convert_repairable_wait_to_remember(action, index, max_steps, *, continue_af
     }
 
 
+def work_finish_blocker_allows_continue(finished_note):
+    text = str(finished_note or "").casefold()
+    if not text.startswith("finish blocked:"):
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "acceptance constraints unchecked",
+            "edit-scope acceptance evidence",
+            "all-valid answer completeness evidence",
+        )
+    )
+
+
 def apply_work_control_action(state, session, task, action):
     action = action or {}
     action_type = action.get("type") or ""
@@ -6195,13 +6209,13 @@ def cmd_work_ai(args):
             finished_note = str(control_effect.get("finished_note") or "")
             if (
                 action_type == "finish"
-                and "acceptance constraints unchecked" in finished_note
+                and work_finish_blocker_allows_continue(finished_note)
                 and getattr(effective_args, "continue_after_remember", False)
                 and index < max_steps
             ):
                 report["steps"][-1]["continued_after_finish_block"] = True
                 if progress:
-                    progress(f"step #{index}: acceptance finish blocked; continuing")
+                    progress(f"step #{index}: finish blocked; continuing")
                 continue
             report["stop_reason"] = action_type or "control"
             if progress:
