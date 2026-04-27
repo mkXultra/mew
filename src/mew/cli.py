@@ -1181,6 +1181,11 @@ def build_parser():
     work_parser.add_argument("--model", help="model name for --ai")
     work_parser.add_argument("--base-url", help="model API base URL for --ai")
     work_parser.add_argument("--model-timeout", type=float, default=60.0, help="model timeout for --ai")
+    work_parser.add_argument(
+        "--max-wall-seconds",
+        type=float,
+        help="maximum wall-clock seconds for this --ai run before stopping with a report",
+    )
     work_parser.add_argument("--max-steps", type=int, help="maximum model tool turns for --ai")
     work_parser.add_argument(
         "--act-mode",

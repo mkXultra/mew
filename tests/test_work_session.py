@@ -4819,6 +4819,97 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_stops_before_model_when_wall_budget_too_small(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-wall-seconds",
+                                        "0.001",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                call_model.assert_not_called()
+                self.assertEqual(payload["work_exit_code"], 1)
+                self.assertEqual(report["stop_reason"], "wall_timeout")
+                self.assertEqual(report["max_wall_seconds"], 0.001)
+                self.assertEqual(report["steps"], [])
+                self.assertEqual(report["wall_timeout"]["model_timeout_seconds"], 60.0)
+                self.assertIn("not enough wall-clock budget remains", report["wall_timeout"]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_rejects_non_positive_wall_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "Inspect this workspace.",
+                                "--max-wall-seconds",
+                                "0",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--max-wall-seconds must be > 0", stderr.getvalue())
+                self.assertEqual(load_state()["tasks"], [])
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "Inspect this workspace.",
+                                "--max-wall-seconds",
+                                "nan",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--max-wall-seconds must be a finite number", stderr.getvalue())
+                self.assertEqual(load_state()["tasks"], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_reads_instruction_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

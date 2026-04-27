@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import select
@@ -1881,6 +1882,13 @@ def format_work_ai_report(report, compact=False):
         lines.append(f"interrupt_note: {report.get('interrupt_note')}")
     if report.get("max_steps_note"):
         lines.append(f"max_steps_note: {report.get('max_steps_note')}")
+    wall_timeout = report.get("wall_timeout") or {}
+    if wall_timeout:
+        lines.append(
+            "wall_timeout: "
+            f"remaining={wall_timeout.get('remaining_seconds')}s "
+            f"model_timeout={wall_timeout.get('model_timeout_seconds')}s"
+        )
     return "\n".join(lines)
 
 
@@ -4192,6 +4200,7 @@ def _parse_json_object(text):
 def cmd_work_oneshot(args):
     try:
         instruction = _work_oneshot_instruction(args)
+        positive_float_option(getattr(args, "max_wall_seconds", None), "--max-wall-seconds")
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
@@ -4602,6 +4611,20 @@ def positive_int_option(value, flag):
         raise MewError(f"{flag} must be an integer") from exc
     if option < 1:
         raise MewError(f"{flag} must be >= 1")
+    return option
+
+
+def positive_float_option(value, flag):
+    if value is None:
+        return None
+    try:
+        option = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MewError(f"{flag} must be a number") from exc
+    if not math.isfinite(option):
+        raise MewError(f"{flag} must be a finite number")
+    if option <= 0:
+        raise MewError(f"{flag} must be > 0")
     return option
 
 
@@ -5295,6 +5318,7 @@ def cmd_work_ai(args):
             default=1,
             allow_zero=bool(getattr(args, "live", False) or getattr(args, "follow", False)),
         )
+        max_wall_seconds = positive_float_option(getattr(args, "max_wall_seconds", None), "--max-wall-seconds")
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
@@ -5368,6 +5392,9 @@ def cmd_work_ai(args):
         "stop_reason": "max_steps",
         "steps": [],
     }
+    run_started_at = time.monotonic()
+    if max_wall_seconds is not None:
+        report["max_wall_seconds"] = max_wall_seconds
     if auto_verify_command:
         report["auto_verify_command"] = auto_verify_command
     if max_steps == 0:
@@ -5449,6 +5476,21 @@ def cmd_work_ai(args):
         return 1
 
     for index in range(1, max_steps + 1):
+        if max_wall_seconds is not None:
+            elapsed = time.monotonic() - run_started_at
+            remaining = max_wall_seconds - elapsed
+            model_timeout = float(getattr(effective_args, "model_timeout", 0) or 0)
+            if remaining <= 0 or (model_timeout > 0 and remaining <= model_timeout):
+                report["stop_reason"] = "wall_timeout"
+                report["wall_timeout"] = {
+                    "elapsed_seconds": round(elapsed, 3),
+                    "remaining_seconds": round(max(0.0, remaining), 3),
+                    "model_timeout_seconds": model_timeout,
+                    "reason": "not enough wall-clock budget remains for another model turn",
+                }
+                if progress:
+                    progress(f"step #{index}: wall-clock budget exhausted before next model turn")
+                break
         step_started = time.monotonic()
         live_thinking_open = False
         live_model_delta_seen = False
@@ -6587,6 +6629,7 @@ def cmd_work_ai(args):
         "tool_failed",
         "no_active_session",
         "work_already_running",
+        "wall_timeout",
     ) else 1
 
 
@@ -15254,6 +15297,7 @@ def _parse_chat_work_ai_args(parts):
         "--model",
         "--base-url",
         "--model-timeout",
+        "--max-wall-seconds",
         "--max-steps",
         "--act-mode",
         "--work-guidance",
@@ -15270,6 +15314,7 @@ def _parse_chat_work_ai_args(parts):
         "model": None,
         "base_url": None,
         "model_timeout": 60.0,
+        "max_wall_seconds": None,
         "max_steps": None,
         "act_mode": None,
         "work_guidance": "",
@@ -15315,6 +15360,11 @@ def _parse_chat_work_ai_args(parts):
                     args["model_timeout"] = float(value)
                 except ValueError:
                     return None, f"mew: invalid --model-timeout: {value}"
+            elif name == "--max-wall-seconds":
+                try:
+                    args["max_wall_seconds"] = float(value)
+                except ValueError:
+                    return None, f"mew: invalid --max-wall-seconds: {value}"
             elif name == "--max-steps":
                 try:
                     args["max_steps"] = int(value)
@@ -15460,6 +15510,7 @@ def _split_continue_options_and_guidance(rest):
         "--model",
         "--base-url",
         "--model-timeout",
+        "--max-wall-seconds",
         "--max-steps",
         "--act-mode",
         "--work-guidance",
