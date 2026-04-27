@@ -164,11 +164,12 @@ M6.24 Batch 1:
   - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
   - `configure-git-webserver`: 0/5, matched Codex target 0/5, no Harbor
     errors.
+  - `db-wal-recovery`: 2/5, above Codex target 1/5, no Harbor errors.
   - `fix-git`: 5/5, matched Codex target 5/5, no Harbor errors.
   - `kv-store-grpc`: latest 5/5 after generic exact-schema repair, above Codex
     target 4/5; previous baseline was 2/5.
-  - measured latest task total: 10/20 against frozen Codex target 14/20.
-  - best observed measured total: 11/20 if `build-cython-ext` uses its best
+  - measured latest task total: 12/25 against frozen Codex target 15/25.
+  - best observed measured total: 13/25 if `build-cython-ext` uses its best
     observed 1/5 rerun.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
@@ -232,6 +233,11 @@ M6.24 Batch 1:
 - completed low-target measurement:
   `configure-git-webserver` matched Codex target 0/5 with no Harbor errors in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-configure-git-webserver-5attempts-20260428-0415/result.json`.
+  This is measurement coverage only, not a repair candidate.
+- completed low-band measurement:
+  `db-wal-recovery` exceeded Codex target 1/5 by scoring 2/5 with no Harbor
+  errors in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-db-wal-recovery-5attempts-20260428-0421/result.json`.
   This is measurement coverage only, not a repair candidate.
 
 Drift guard:
