@@ -8004,6 +8004,13 @@ class WorkSessionTests(unittest.TestCase):
             self.assertIn("bounded-loop or repeated-observation proof", verifier_prompt)
             self.assertIn("interval/interrupt handling or output-rewrite evidence", verifier_prompt)
             self.assertIn("do not accept internal mode flags alone", verifier_prompt)
+            self.assertIn("KeyboardInterrupt, Ctrl-C, SIGINT", verifier_prompt)
+            self.assertIn("process-level cancellation/interrupt behavior", verifier_prompt)
+            self.assertIn("in-process coroutine cancellation", verifier_prompt)
+            self.assertIn("structured concurrency such as asyncio.TaskGroup", verifier_prompt)
+            self.assertIn("gather/semaphore code cancels and awaits only the started work", verifier_prompt)
+            self.assertIn("below-limit, exactly-at-limit, and above-limit", verifier_prompt)
+            self.assertIn("one happy-path concurrency check is not enough", verifier_prompt)
 
         def assert_rollback_repair_guidance(repair_prompt):
             self.assertIn(
@@ -30991,6 +30998,269 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(step["inline_approval_status"], "completed")
                 self.assertEqual(report["stop_reason"], "max_steps")
                 self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_accept_edits_can_defer_verification_without_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview edit for external verifier",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "README.md",
+                        "old": "old text",
+                        "new": "new text",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                step = report["steps"][0]
+                self.assertEqual(step["inline_approval"], "auto_applied")
+                self.assertEqual(step["inline_approval_status"], "completed")
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
+                session = load_state()["work_sessions"][0]
+                apply_call = session["tool_calls"][1]
+                self.assertTrue(apply_call["parameters"]["defer_verify"])
+                self.assertTrue(apply_call["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", apply_call["result"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_direct_applied_write_can_defer_verification_without_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "write implementation for external verifier",
+                    "action": {
+                        "type": "write_file",
+                        "path": "run.py",
+                        "content": "print('ok')\n",
+                        "create": True,
+                        "apply": True,
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                step = report["steps"][0]
+                self.assertEqual(step["status"], "completed")
+                self.assertEqual(Path("run.py").read_text(encoding="utf-8"), "print('ok')\n")
+                session = load_state()["work_sessions"][0]
+                tool_call = session["tool_calls"][0]
+                self.assertTrue(tool_call["parameters"]["apply"])
+                self.assertTrue(tool_call["parameters"]["defer_verify"])
+                self.assertTrue(tool_call["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", tool_call["result"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_missing_read_file_under_write_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect target before create",
+                        "action": {
+                            "type": "read_file",
+                            "path": "run.py",
+                        },
+                    },
+                    {
+                        "summary": "create missing target",
+                        "action": {
+                            "type": "write_file",
+                            "path": "run.py",
+                            "content": "print('ok')\n",
+                            "create": True,
+                            "apply": True,
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_missing_read_file"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                self.assertEqual(Path("run.py").read_text(encoding="utf-8"), "print('ok')\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertTrue(session["tool_calls"][1]["result"]["verification_deferred"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_accept_edits_batch_can_defer_verification_without_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview batch for external verifier",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": "README.md",
+                                "old": "old text",
+                                "new": "new text",
+                            },
+                            {
+                                "type": "write_file",
+                                "path": "report.jsonl",
+                                "content": "{}\n",
+                                "create": True,
+                            },
+                        ],
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                step = report["steps"][0]
+                self.assertEqual(step["inline_approval"], "auto_applied")
+                self.assertEqual(step["inline_approval_count"], 2)
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
+                self.assertEqual(Path("report.jsonl").read_text(encoding="utf-8"), "{}\n")
+                session = load_state()["work_sessions"][0]
+                apply_results = [call["result"] for call in session["tool_calls"][2:4]]
+                self.assertEqual(sum(1 for result in apply_results if result.get("verification_deferred")), 2)
+                self.assertTrue(all("verification_exit_code" not in result for result in apply_results))
             finally:
                 os.chdir(old_cwd)
 

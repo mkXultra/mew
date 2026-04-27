@@ -41,8 +41,8 @@ PYTHONPATH=.harbor harbor run \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command="python -m pip install -e /mew" \
   --ak command_cwd="/app" \
-  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-write . --allow-shell --allow-verify --auth /mew/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json" \
-  --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"}]"
+  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-write . --allow-shell --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json" \
+  --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"},{\"type\":\"bind\",\"source\":\"/Users/mk/.codex/auth.json\",\"target\":\"/codex-auth/auth.json\"}]"
 ```
 
 This is still a generic work-session run: Terminal-Bench only provides the

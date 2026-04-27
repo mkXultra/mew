@@ -83,8 +83,10 @@ mew work --oneshot \
   --allow-read . \
   --allow-write . \
   --allow-shell \
-  --allow-verify \
-  --auth /mew/auth.json \
+  --approval-mode accept-edits \
+  --defer-verify \
+  --no-prompt-approval \
+  --auth /codex-auth/auth.json \
   --model-backend codex \
   --model gpt-5.5 \
   --model-timeout 300 \

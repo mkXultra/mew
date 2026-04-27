@@ -104,10 +104,17 @@ Current M6.20 target:
   `cancel-async-tasks` scored 4/5 with `pass@5 = 1.0`. Keep the close target
   tied to the frozen registry unless the user explicitly changes it; use the
   local 4/5 as variance evidence.
-- classify at least one scored failure cohort through the M6.18 taxonomy
-- choose one implementation-lane or task-spec repair from benchmark evidence
-- rerun the same bounded subset after the repair and record improved,
-  regressed, or unchanged outcome
+- mew reached the fixed M6.20 terminal gate on current head. Evidence:
+  `docs/M6_20_MEW_TERMINAL_GATE_RUNS_2026-04-27.md`. Final runs:
+  `cancel-async-tasks` 5/5, mean 1.000, Harbor errors 0
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-cancel-async-tasks-5attempts-boundary-verifier-20260427-2201/result.json`);
+  `fix-code-vulnerability` 5/5, mean 1.000, Harbor errors 0
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-fix-code-vulnerability-5attempts-current-head-20260427-2207/result.json`)
+- scored failure cohorts were classified through M6.18 and repaired via
+  generic work-session changes: accept-edits defer propagation, recoverable
+  missing create-target reads, and cancellation/concurrency verifier planning
+- M6.20 close gate is satisfied. Next Terminal-Bench work should move to M6.22
+  curated subset parity unless the user explicitly reopens M6.20.
 - drift guard: do not create a Terminal-Bench-specific solver in mew core.
   The next repair must improve generic `work_session` / implementation-lane
   behavior for arbitrary workspace roots such as a benchmark task `/app`.
@@ -117,7 +124,7 @@ Current M6.20 target:
 
 Current M6.20 chain:
 
-`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to fix-code-vulnerability 5/5 + cancel-async-tasks 5/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
+`M6.20 closed -> fixed terminal gate reached on current head -> M6.22 curated subset parity`
 
 M7 pending evidence preserved:
 
@@ -1177,7 +1184,7 @@ M6.8.5 close result: **done**. The recorded audit is
 
 ## Next Milestone
 
-Current scheduled milestone: **M6.20 Terminal-Bench Driven Implement-Lane Debugging**.
+Current scheduled milestone: **M6.22 Terminal-Bench Curated Subset Parity**.
 
 M6.20 starts after M6.19 proves that Harbor / Terminal-Bench can execute mew
 and at least one reference agent on the same smoke subset. M6.20 should not
@@ -1197,13 +1204,17 @@ First M6.20 slice:
 - route only cited structural failures into M6.14 repair episodes
 - rerun the same subset and record whether the repair improved, regressed, or
   did not affect the score
+- closed on 2026-04-27 JST by
+  `docs/M6_20_MEW_TERMINAL_GATE_RUNS_2026-04-27.md`: both fixed gate tasks
+  reached 5/5 successes with Harbor errors 0 on current head
 
 Planned future milestones:
 
 - **M6.21 Terminal-Bench Codex Target Registry**: done. The frozen target data
   is `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
-- **M6.22 Terminal-Bench Curated Subset Parity**: run a fixed multi-band
-  subset from the registry and match or explain the Codex success target.
+- **M6.22 Terminal-Bench Curated Subset Parity**: active next. Run a fixed
+  multi-band subset from the registry and match or explain the Codex success
+  target.
 - **M6.23 Terminal-Bench Failure-Class Coverage**: classify below-target
   benchmark failures into repair classes and rerun at least one ranked repair.
 - **M6.24 Broad Terminal-Bench Parity Campaign**: run all 89 registry tasks and
@@ -1297,24 +1308,16 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to fix-code-vulnerability 5/5 + cancel-async-tasks 5/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
+`M6.20 closed -> M6.21 registry done -> M6.22 curated subset parity`
 
 Acceptable near-term work:
 
-- remove generic `work_session` repo-root assumptions so read/write/run/git and
-  verification defaults can target an arbitrary workspace root such as
-  Terminal-Bench `/app`
-- run real implementation-lane attempts against the bounded
-  `terminal-bench/fix-code-vulnerability` and
-  `terminal-bench/cancel-async-tasks` slices through that normal work path, now
-  that instruction ingestion and host report capture are proven
-- classify the resulting implementation failure shape through M6.18 with cited
-  Harbor evidence
-- implement only the smallest repair needed to make the next rerun more
-  informative
-- do not close M6.20 parity until mew reaches 5/5 successes on both
-  `fix-code-vulnerability` and `cancel-async-tasks`, matching the frozen Codex
-  targets
+- define the M6.22 curated subset directly from
+  `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`
+- keep `mew work --oneshot` as the implementation path and preserve the
+  no-Terminal-Bench-specific-solver constraint
+- run the subset, classify below-target tasks through M6.18, then choose the
+  next generic implementation-lane repair from cited benchmark evidence
 
 Non-goals for the next session:
 
@@ -1323,8 +1326,8 @@ Non-goals for the next session:
   harness for generic `mew work`
 - broad prompt tuning before instruction ingestion and failure classification
   are proven
-- resuming M7 inbound signal work before the Terminal-Bench milestones are
-  addressed or explicitly reprioritized
+- resuming M7 inbound signal work before M6.22 is addressed or explicitly
+  reprioritized
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
@@ -1337,6 +1340,14 @@ Non-goals for the next session:
 
 Latest roadmap/status validation:
 
+- M6.20 fixed terminal gate is closed. Current-head mew runs matched the
+  frozen Codex target on both fixed tasks with Harbor errors 0:
+  `terminal-bench/cancel-async-tasks` 5/5
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-cancel-async-tasks-5attempts-boundary-verifier-20260427-2201/result.json`)
+  and `terminal-bench/fix-code-vulnerability` 5/5
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-fix-code-vulnerability-5attempts-current-head-20260427-2207/result.json`).
+  Evidence and failure classification:
+  `docs/M6_20_MEW_TERMINAL_GATE_RUNS_2026-04-27.md`.
 - M6.21 target registry is complete. The source leaderboard is
   `https://www.tbench.ai/leaderboard/terminal-bench/2.0/codex/0.121.0/gpt-5.5%40openai`.
   Local JSON:

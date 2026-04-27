@@ -5933,6 +5933,7 @@ def cmd_work_ai(args):
                         verify_timeout=effective_args.verify_timeout,
                         progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
                         json=False,
+                        defer_verify=bool(getattr(effective_args, "defer_verify", False)),
                         allow_unpaired_source_edit=False,
                     )
                     approval_code, approval_data = _apply_work_approval_batch(approve_args, pending_ids)
@@ -6073,6 +6074,8 @@ def cmd_work_ai(args):
             verify_timeout=effective_args.verify_timeout,
             default_cwd=getattr(effective_args, "cwd", "") or "",
         )
+        if action_type in WRITE_WORK_TOOLS and parameters.get("apply") and getattr(effective_args, "defer_verify", False):
+            parameters["defer_verify"] = True
         coerced_test_dry_run = _force_paired_test_steer_write_to_dry_run(
             pending_steer,
             action_type,
@@ -6485,7 +6488,7 @@ def cmd_work_ai(args):
                     verify_timeout=effective_args.verify_timeout,
                     progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
                     json=False,
-                    defer_verify=False,
+                    defer_verify=bool(getattr(effective_args, "defer_verify", False)),
                     allow_unpaired_source_edit=False,
                 )
                 approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
@@ -6594,6 +6597,11 @@ def cmd_work_ai(args):
                 report["steps"][-1]["recoverable_verification_failure"] = True
                 if progress:
                     progress(f"step #{index}: verification failed; continuing with repair context")
+                continue
+            if _recoverable_missing_read_file_error(action_type, parameters, error, effective_args, index, max_steps):
+                report["steps"][-1]["recoverable_missing_read_file"] = True
+                if progress:
+                    progress(f"step #{index}: missing read target; continuing with create-file context")
                 continue
             report["stop_reason"] = "tool_failed"
             break
@@ -6773,6 +6781,21 @@ def _latest_work_session_for_task(state, task_id):
         if latest is None:
             latest = candidate
     return latest
+
+
+def _recoverable_missing_read_file_error(action_type, parameters, error, args, index, max_steps):
+    if action_type != "read_file" or index >= max_steps:
+        return False
+    if "path does not exist" not in str(error or ""):
+        return False
+    allowed_write = getattr(args, "allow_write", None) or []
+    if not allowed_write:
+        return False
+    try:
+        resolve_allowed_write_path(parameters.get("path") or "", allowed_write, create=True)
+        return True
+    except ValueError:
+        return False
 
 
 def _approval_parameters_from_call(call, args):
@@ -7308,7 +7331,7 @@ def _apply_work_approval_batch(args, approve_ids=None):
     for approve_id in ordered_ids:
         approve_args = SimpleNamespace(**vars(args))
         approve_args.approve_tool = approve_id
-        approve_args.defer_verify = approve_id in deferred_verify_ids
+        approve_args.defer_verify = bool(getattr(args, "defer_verify", False)) or approve_id in deferred_verify_ids
         code, data = _apply_work_approval(approve_args, approve_id)
         if data is not None:
             approved.append(data)
