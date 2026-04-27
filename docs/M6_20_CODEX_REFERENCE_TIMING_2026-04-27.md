@@ -212,6 +212,75 @@ CODEX_AUTH_JSON_PATH=/Users/mk/.codex/auth.json harbor run \
   --ak reasoning_effort=high
 ```
 
+## Fresh Local Codex Check For Active Gate Tasks
+
+After the gate moved to the two Codex-frozen 5/5 tasks, both were rerun through
+the same Harbor shape with local Codex CLI `0.125.0` and `gpt-5.5`.
+
+### `fix-code-vulnerability`
+
+Artifacts:
+
+- job result:
+  `proof-artifacts/terminal-bench/harbor-smoke/codex-reference-fix-code-vulnerability-5attempts-20260427-2052-auth/result.json`
+- per-trial results:
+  `proof-artifacts/terminal-bench/harbor-smoke/codex-reference-fix-code-vulnerability-5attempts-20260427-2052-auth/fix-code-vulnerability__*/result.json`
+
+Observed result:
+
+| Metric | Value |
+| --- | ---: |
+| Harbor total runtime | 3m 1s |
+| Started -> finished | 2026-04-27 20:52:13 -> 20:55:14 JST |
+| Attempts | 5 |
+| Concurrent attempts | 5 |
+| Harbor errors | 0 |
+| Mean score | 1.0 |
+| Pass@5 | 1.0 |
+| Reward distribution | `1.0: 5` |
+
+Interpretation: the fresh local Codex run reproduced the strict 5/5 target for
+this task.
+
+### `cancel-async-tasks`
+
+Artifacts:
+
+- job result:
+  `proof-artifacts/terminal-bench/harbor-smoke/codex-reference-cancel-async-tasks-5attempts-20260427-2055-auth/result.json`
+- per-trial results:
+  `proof-artifacts/terminal-bench/harbor-smoke/codex-reference-cancel-async-tasks-5attempts-20260427-2055-auth/cancel-async-tasks__*/result.json`
+
+Observed result:
+
+| Metric | Value |
+| --- | ---: |
+| Harbor total runtime | 2m 35s |
+| Started -> finished | 2026-04-27 20:55:27 -> 20:58:03 JST |
+| Attempts | 5 |
+| Concurrent attempts | 5 |
+| Harbor errors | 0 |
+| Mean score | 0.8 |
+| Pass@5 | 1.0 |
+| Reward distribution | `1.0: 4`, `0.0: 1` |
+
+Failed trial:
+
+- `cancel-async-tasks__qteAkPq`: verifier passed 5/6 tests and failed
+  `test_tasks_cancel_below_max_concurrent` because captured stdout contained
+  zero `Task started.` lines before SIGINT.
+
+Interpretation:
+
+- The task is still valid as a benchmark target: local Codex solved it in at
+  least one attempt and achieved `pass@5 = 1.0`.
+- The fresh local Codex run did **not** reproduce the frozen leaderboard's
+  strict 5/5 result for Codex `0.121.0` / `gpt-5.5@openai`.
+- Until the user changes the gate, keep M6.20's stated parity target tied to
+  the frozen registry, not this fresh local Codex `0.125.0` sample. Treat this
+  sample as variance evidence and as a warning that strict 5/5 may be harsher
+  than the local reference run.
+
 ## Next Comparison
 
 Run the mew `mew work --oneshot` Harbor proof on

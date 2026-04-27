@@ -99,6 +99,11 @@ Current M6.20 target:
   `terminal-bench/cancel-async-tasks`, match Codex `0.121.0` /
   `gpt-5.5@openai` at **5 successes out of 5 trials, 100.0% per task**, with
   Harbor errors at 0 and complete per-task artifacts
+- fresh local Codex CLI `0.125.0` checked the active gate tasks on 2026-04-27:
+  `fix-code-vulnerability` reproduced strict 5/5, while
+  `cancel-async-tasks` scored 4/5 with `pass@5 = 1.0`. Keep the close target
+  tied to the frozen registry unless the user explicitly changes it; use the
+  local 4/5 as variance evidence.
 - classify at least one scored failure cohort through the M6.18 taxonomy
 - choose one implementation-lane or task-spec repair from benchmark evidence
 - rerun the same bounded subset after the repair and record improved,
