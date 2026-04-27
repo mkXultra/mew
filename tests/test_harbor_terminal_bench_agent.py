@@ -32,6 +32,17 @@ class FakeEnvironment:
         return self.result
 
 
+class MetadataOnlyContext:
+    def __init__(self, task_id, metadata=None):
+        object.__setattr__(self, "task_id", task_id)
+        object.__setattr__(self, "metadata", metadata)
+
+    def __setattr__(self, name, value):
+        if name not in {"task_id", "metadata"}:
+            raise ValueError(f"AgentContext object has no field {name}")
+        object.__setattr__(self, name, value)
+
+
 class SeamAgentMixin:
     def __init__(self, *args, **kwargs):
         self.installed_with = None
@@ -71,6 +82,7 @@ def test_harbor_factory_kwargs_and_metadata_are_preserved(tmp_path):
     assert module.MewTerminalBenchAgent.name() == "mew"
     assert callable(module.MewTerminalBenchAgent.name)
     assert agent.logs_dir == tmp_path / "logs"
+    assert agent.artifact_root == tmp_path / "logs" / "terminal-bench-harbor-smoke"
     assert agent.model_name == "test-model"
     assert agent.extra_env == {"MEW_TEST": "1"}
     assert agent.prompt_template_path == "prompt.txt"
@@ -106,7 +118,7 @@ def test_async_install_and_run_record_required_artifact_contract(tmp_path):
     )
     environment = FakeEnvironment(
         SimpleNamespace(
-            exit_code=0,
+            return_code=0,
             stdout="mew stdout",
             stderr="mew stderr",
         )
@@ -171,6 +183,28 @@ def test_async_install_and_run_record_required_artifact_contract(tmp_path):
     }
     assert context.mew_terminal_bench_artifact_dir == str(task_dir)
     assert context.mew_terminal_bench_summary == summary
+
+
+def test_run_writes_harbor_agent_context_metadata_when_attributes_rejected(tmp_path):
+    module = load_agent_module()
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew-smoke {instruction_shell}",
+        artifact_root=tmp_path,
+        timeout_seconds=5,
+    )
+    environment = FakeEnvironment((0, "out", "", False))
+    context = MetadataOnlyContext("metadata/task", metadata=None)
+
+    stdout = asyncio.run(agent.run("instruction", environment, context))
+
+    task_dir = tmp_path / "metadata-task"
+    summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert stdout == "out"
+    assert context.metadata == {
+        "mew_terminal_bench_artifact_dir": str(task_dir),
+        "mew_terminal_bench_summary": summary,
+    }
 
 
 def test_missing_optional_metadata_is_unavailable_and_context_dict_supported(tmp_path):

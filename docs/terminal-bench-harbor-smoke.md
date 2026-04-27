@@ -11,15 +11,19 @@ MEW_REPO="$(pwd)"
 PYTHONPATH=.harbor harbor run \
   -d terminal-bench/terminal-bench-2 \
   -l 1 \
+  -n 1 \
+  -y \
+  --job-name mew-smoke-help-fixed-return-code \
+  --jobs-dir proof-artifacts/terminal-bench/harbor-smoke \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command="python -m pip install -e /mew" \
-  --ak command_template="mew doctor --json" \
+  --ak command_template="mew --help" \
   --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"}]"
 ```
 
-`-l 1` keeps the smoke bounded. Add `--include-task-name <name>` or `--task <name>` only when you want to pin the selected task. `--mounts-json` is a JSON array of Docker Compose service volumes; the example bind-mounts the local checkout at `/mew` so `install_command` can install the same code under test.
+`-l 1` bounds the selected Terminal-Bench task subset, and `-n 1` bounds trials, so the smoke cannot accidentally run the whole dataset. `-y` keeps the smoke non-interactive. Add `--include-task-name <name>` or `--task <name>` only when you want to pin the selected task. `--mounts-json` is a JSON array of Docker Compose service volumes; the example bind-mounts the local checkout at `/mew` so `install_command` can install the same code under test.
 
-The smoke command above intentionally uses `mew doctor --json`, which exists today and is enough to prove Harbor can instantiate the wrapper, mount/install mew, execute a command in the task environment, and record wrapper artifacts. A true instruction-consuming mew benchmark entrypoint remains the next M6.19 gap if `command_template` needs to solve Terminal-Bench tasks rather than run a compatibility smoke.
+The successful live smoke used `command_template="mew --help"` and produced `Exceptions=0`, transcript `exit_code=0`, and Harbor job output under `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-help-fixed-return-code/result.json`. This proves Harbor can instantiate the wrapper, mount/install mew, execute a command in the task environment, and record wrapper artifacts. It is not a score-optimization run; a true instruction-consuming mew benchmark entrypoint remains M6.20 work if `command_template` needs to solve Terminal-Bench tasks.
 
 The agent class lives at `.harbor/mew_terminal_bench_agent.py` and follows Harbor's installed-agent shape:
 
@@ -28,12 +32,12 @@ The agent class lives at `.harbor/mew_terminal_bench_agent.py` and follows Harbo
 - remains importable in local tests when Harbor is not installed;
 - defines static `name()` plus async `install(environment)` and async `run(instruction, environment, context)`;
 - can run an optional `install_command` with optional `install_env` before the task command;
-- keeps `populate_context_post_run(context)` synchronous;
+- keeps `populate_context_post_run(context)` synchronous and writes through metadata-compatible context handling;
 - executes the configured mew smoke command through a BaseInstalledAgent-compatible `exec_as_agent` helper seam.
 
 ## Artifact contract
 
-For each Terminal-Bench task, the wrapper creates a task directory under `artifacts/terminal-bench-harbor-smoke/` by default and records:
+For each Terminal-Bench task, the wrapper creates a task directory under Harbor `logs_dir/terminal-bench-harbor-smoke/` when Harbor supplies `logs_dir`. Outside Harbor, it falls back to local `artifacts/terminal-bench-harbor-smoke/`. Each task directory records:
 
 - `instruction.json`: task id and instruction text;
 - `command-transcript.json`: command, stdout, stderr, exit code, timeout flag, and timeout seconds;

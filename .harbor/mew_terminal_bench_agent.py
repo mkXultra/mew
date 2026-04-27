@@ -62,7 +62,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         model_name: str | None = None,
         *,
         command_template: str = "mew-smoke --instruction {instruction_shell} --report {report_path} --artifacts {artifact_dir}",
-        artifact_root: str | Path = "artifacts/terminal-bench-harbor-smoke",
+        artifact_root: str | Path | None = None,
         timeout_seconds: int | None = 900,
         install_command: str | None = None,
         install_env: dict[str, str] | None = None,
@@ -85,6 +85,12 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         self._harbor_base_kwargs = dict(base_kwargs)
         self._extra_agent_kwargs = dict(kwargs)
         self.command_template = command_template
+        resolved_logs_dir = getattr(self, "logs_dir", logs_dir)
+        if artifact_root is None:
+            if resolved_logs_dir is not None:
+                artifact_root = Path(resolved_logs_dir) / "terminal-bench-harbor-smoke"
+            else:
+                artifact_root = Path("artifacts/terminal-bench-harbor-smoke")
         self.artifact_root = Path(artifact_root)
         self.timeout_seconds = timeout_seconds
         self.install_command = install_command
@@ -199,8 +205,13 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             stderr = result[2] if len(result) > 2 else ""
             timed_out = bool(result[3]) if len(result) > 3 else False
             return exit_code, str(stdout), str(stderr), timed_out
+        exit_code = getattr(result, "exit_code", None)
+        if exit_code is None:
+            exit_code = getattr(result, "return_code", None)
+        if exit_code is None:
+            exit_code = getattr(result, "returncode", None)
         return (
-            getattr(result, "exit_code", getattr(result, "returncode", None)),
+            exit_code,
             str(getattr(result, "stdout", "")),
             str(getattr(result, "stderr", "")),
             bool(getattr(result, "timed_out", False)),
@@ -227,5 +238,26 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
     def _context_set(context: Any, name: str, value: Any) -> None:
         if isinstance(context, dict):
             context[name] = value
-        else:
+            return
+
+        metadata = getattr(context, "metadata", None)
+        if isinstance(metadata, dict):
+            metadata[name] = value
+            return
+        if hasattr(context, "metadata"):
+            metadata = {}
+            setattr(context, "metadata", metadata)
+            metadata[name] = value
+            return
+
+        try:
             setattr(context, name, value)
+        except (AttributeError, ValueError):
+            metadata = getattr(context, "metadata", None)
+            if metadata is None:
+                metadata = {}
+                setattr(context, "metadata", metadata)
+            if isinstance(metadata, dict):
+                metadata[name] = value
+                return
+            raise

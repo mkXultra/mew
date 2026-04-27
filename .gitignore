@@ -5,6 +5,7 @@ auth.pro.json
 .venv/
 __pycache__/
 .testmondata
+artifacts/
 proof-artifacts/
 proof-workspace/
 
