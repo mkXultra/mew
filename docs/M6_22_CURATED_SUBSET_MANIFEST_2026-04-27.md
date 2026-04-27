@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: subset selected, benchmark execution started.
+Status: subset selected, four non-control task runs recorded.
 
 ## Source
 
@@ -66,5 +66,7 @@ normal work-session path.
   `VerifierTimeoutError` exceptions, matching the 0/5 Codex target;
   `sanitize-git-repo` completed 1/5 with Harbor errors 0, matching the 1/5
   Codex target; `gcode-to-text` completed 0/5 with 1 `AgentTimeoutError`,
-  below the 2/5 Codex target and classified in the run ledger.
+  below the 2/5 Codex target and classified in the run ledger;
+  `overfull-hbox` completed 1/5 with Harbor errors 0, below the 3/5 Codex
+  target and classified in the run ledger.
 - Any below-target mew task must be classified through M6.18 before repair.

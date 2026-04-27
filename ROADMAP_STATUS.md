@@ -102,14 +102,19 @@ Current M6.22 target:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`.
   `gcode-to-text` completed 0/5 with 1 `AgentTimeoutError` in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json`.
-  Current counted M6.22 total is 1/15, below the frozen Codex 3/15 target
-  for those three tasks.
+  `overfull-hbox` completed 1/5 with Harbor errors 0 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-python-bootstrap-20260427-2315/result.json`.
+  Current counted M6.22 total is 2/20, below the frozen Codex 6/20 target
+  for those four tasks.
 - current below-target classification:
   `gcode-to-text` is classified as M6.18 `structural`, confidence medium,
   `structural_reason = missing_visual_decode_artifact_grounding`, with a
   secondary `agent_wall_timeout_without_report` signal. Continue remaining
   M6.22 runs before choosing the repair so the repair can target a cohort, not
-  one anecdote.
+  one anecdote. `overfull-hbox` is classified as M6.18 `structural`,
+  confidence medium-high,
+  `structural_reason = insufficient_acceptance_constraint_model`, with a
+  secondary `repeat_action_after_partial_repair` signal.
 - M6.20 positive-control artifacts remain available for the two 100% tasks.
 
 Drift guard:

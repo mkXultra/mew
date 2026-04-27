@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: first three selected task runs recorded.
+Status: first four selected task runs recorded.
 
 ## Scope
 
@@ -22,9 +22,10 @@ Terminal-Bench-specific solver log.
 | `filter-js-from-html` | 0/5 | 0/5 | 5 | 32m 24s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json` |
 | `sanitize-git-repo` | 1/5 | 1/5 | 0 | 4m 41s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json` |
 | `gcode-to-text` | 2/5 | 0/5 | 1 | 15m 41s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json` |
+| `overfull-hbox` | 3/5 | 1/5 | 0 | 14m 33s | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-python-bootstrap-20260427-2315/result.json` |
 
-Current counted subset total: **1/15**, below the 3/15 Codex target for the
-three counted M6.22 task runs so far.
+Current counted subset total: **2/20**, below the 6/20 Codex target for the
+four counted M6.22 task runs so far.
 
 Positive controls from M6.20 remain available but are not re-counted in this
 document until the five not-yet-run M6.22 tasks finish:
@@ -169,12 +170,81 @@ M6.18 classification:
 No task-specific solver should be added for this task. The repair must improve
 generic work-session behavior.
 
+## `overfull-hbox`
+
+Artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-python-bootstrap-20260427-2315/result.json`
+
+Harness setup note:
+
+- Two earlier attempts failed before mew ran because the task image did not
+  include `python` or `python3`.
+- The counted run bootstrapped Python generically in the Harbor install command:
+  `apt-get install ... python3 python3-pip python3-venv` followed by
+  `python3 -m pip install --break-system-packages -e /mew`.
+- This is harness compatibility glue, not a Terminal-Bench-specific solver.
+
+Observed result:
+
+- `n_total_trials`: 5
+- `n_trials`: 5
+- `n_errors`: 0
+- `mean`: 0.2
+- `pass@5`: 1.0
+- reward `1.0`: `overfull-hbox__E8y5Cdd`
+- reward `0.0`: `overfull-hbox__Cq6XyMs`,
+  `overfull-hbox__YUpmmJm`, `overfull-hbox__7WjQ3DR`,
+  `overfull-hbox__mgoxXJo`
+- started: `2026-04-27T23:15:37.013629`
+- finished: `2026-04-27T23:30:10.847560`
+
+Trial notes:
+
+- All five trials produced `mew-report.json`.
+- Stop reasons:
+  - `finish`: `overfull-hbox__E8y5Cdd`,
+    `overfull-hbox__YUpmmJm`, `overfull-hbox__mgoxXJo`
+  - `tool_failed`: `overfull-hbox__Cq6XyMs`
+  - `wait`: `overfull-hbox__7WjQ3DR`
+- `overfull-hbox__E8y5Cdd` passed the hidden verifier: 4 tests passed.
+- `overfull-hbox__7WjQ3DR` rejected its own candidate edit because it violated
+  the synonym-only constraint, then stopped without a valid patch; the external
+  verifier still saw the original overfull hboxes.
+- `overfull-hbox__Cq6XyMs` reduced but did not eliminate all overfull hboxes and
+  then hit the repeat-action guard after repeated identical compile attempts.
+- `overfull-hbox__YUpmmJm` and `overfull-hbox__mgoxXJo` locally verified the
+  LaTeX no-overfull condition, but the external verifier rejected the final
+  file because edits were not limited to allowed `synonyms.txt` substitutions.
+
+M6.18 classification:
+
+- `failure_scope`: `structural`
+- `confidence`: medium-high
+- `diagnosis_signals`:
+  - below frozen Codex target by 2 successes
+  - two failures passed local task-specific checks but failed the external
+    verifier's edit-constraint check
+  - one failure recognized an invalid candidate but had no repair path before
+    stopping
+  - one failure looped on the same compile command until the repeat-action guard
+    stopped it
+- `structural_reason`: `insufficient_acceptance_constraint_model`
+- secondary structural signal: `repeat_action_after_partial_repair`
+- `recommended_route`: continue the final M6.22 selected task first, then choose
+  a bounded generic repair across the gcode/overfull cohort. Candidate surfaces
+  are stronger task-contract extraction, explicit acceptance-constraint ledgers,
+  and a self-check that distinguishes "local compile condition passed" from
+  "all stated edit constraints are satisfied".
+
+No task-specific solver should be added for this task. The repair must improve
+generic work-session behavior.
+
 ## Next Tasks
 
 Run the remaining non-control M6.22 tasks:
 
-1. `overfull-hbox` (Codex target 3/5)
-2. `extract-elf` (Codex target 4/5)
+1. `extract-elf` (Codex target 4/5)
 
 If any task lands below the Codex target, classify it through M6.18 before
 choosing a repair.
