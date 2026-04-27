@@ -92,3 +92,43 @@ Done for this repair when:
 - `overfull-hbox` is rerun against the same evidence and marked improved,
   unchanged, or regressed.
 
+## Repair Result
+
+Implemented by commit `47a3393`.
+
+Local validation:
+
+- `uv run pytest tests/test_acceptance.py tests/test_work_session.py::WorkSessionTests::test_work_finish_blocks_task_done_without_acceptance_checks tests/test_work_session.py::WorkSessionTests::test_work_finish_blocks_ungrounded_edit_scope_acceptance_after_write tests/test_work_session.py::WorkSessionTests::test_repairable_wait_converts_to_remember_when_continuation_allowed tests/test_work_session.py::WorkSessionTests::test_repairable_wait_does_not_convert_on_final_step -q`
+- `uv run ruff check src/mew/acceptance.py src/mew/work_loop.py src/mew/commands.py tests/test_acceptance.py tests/test_work_session.py`
+
+Rerun artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-23-overfull-hbox-5attempts-edit-scope-grounding-20260428-0032/result.json`
+
+Rerun result:
+
+- trials: 5
+- Harbor errors: 1 `AgentTimeoutError`
+- mean: 0.600
+- pass@5: 1.000
+- reward `1.0`: `overfull-hbox__oKJ3xQW`,
+  `overfull-hbox__qw5xNKm`, `overfull-hbox__bM36EYw`
+- reward `0.0`: `overfull-hbox__g3D3Kxf`,
+  `overfull-hbox__KpuMvNa`
+
+Verdict: **improved**.
+
+Comparison:
+
+- M6.22 baseline: 1/5
+- M6.22 acceptance-check repair after repairable wait fix: 2/5
+- M6.23 grounded edit-scope evidence repair: 3/5
+- frozen Codex target for `overfull-hbox`: 3/5
+
+Caveat:
+
+- The run still has one `AgentTimeoutError`, even though that trial's external
+  verifier passed. Keep timeout reporting as a later repair class rather than
+  treating this repair as a complete loop-stability fix.
+- Two failed trials still failed `test_input_file_matches`; the edit-scope
+  grounding repair improved the aggregate but did not eliminate the class.

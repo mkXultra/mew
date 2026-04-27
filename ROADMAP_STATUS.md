@@ -56,8 +56,8 @@ is tracked below.
 | 6.20 Terminal-Bench Driven Implement-Lane Debugging | `done` | Fixed two-task terminal gate closed on current head: both selected tasks reached 5/5 with Harbor errors 0. |
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
-| 6.23 Terminal-Bench Failure-Class Coverage | `in_progress` | Active milestone: failure classes are ranked in `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`; first repair is grounded edit-scope acceptance evidence. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `not_started` | Full 89-task parity against Codex target 366/445 successes, 82.2% resolution. |
+| 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Active milestone: broaden from curated subset to the frozen Codex target registry without Terminal-Bench-specific solvers. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -67,9 +67,9 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.23 Terminal-Bench Failure-Class Coverage**.
+Active work: **M6.24 Broad Terminal-Bench Parity Campaign**.
 
-Why M6.23 is active:
+Why M6.24 is active:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
@@ -80,6 +80,9 @@ Why M6.23 is active:
   registry as local JSON.
 - M6.22 closed the fixed multi-band subset run and showed that mew remains
   below Codex target on two structural failure classes.
+- M6.23 closed failure-class coverage and proved one ranked generic repair:
+  grounded edit-scope evidence improved `overfull-hbox` from 2/5 to 3/5,
+  matching its frozen Codex target.
 
 Closed M6.22 result:
 
@@ -124,23 +127,29 @@ Closed M6.22 result:
   and reran `overfull-hbox` at 2/5. Remaining gap moves to M6.23.
 - M6.20 positive-control artifacts remain available for the two 100% tasks.
 
-Current M6.23 chain:
-
-`M6.23 failure-class coverage -> grounded edit-scope acceptance validator -> rerun overfull-hbox and mark improved/unchanged/regressed`
-
-M6.23 failure-class coverage:
+Closed M6.23 result:
 
 - `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md` ranks the observed
   curated-subset failure classes and selects the first repair.
-- Selected first repair:
+- close audit:
+  `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`
+- selected first repair:
   `self_reported_acceptance_evidence_not_grounded_in_diff_validator` ->
-  grounded edit-scope acceptance validator.
+  grounded edit-scope acceptance validator, implemented by commit `47a3393`.
+- rerun artifact:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-23-overfull-hbox-5attempts-edit-scope-grounding-20260428-0032/result.json`
+- rerun result: `overfull-hbox` 3/5, mean 0.600, pass@5 1.000,
+  1 `AgentTimeoutError`; verdict improved vs M6.22's 2/5 repair rerun.
 - Deferred ranked classes:
   `missing_visual_decode_artifact_grounding`,
   `agent_wall_timeout_without_report`, `shell_quoting_multiline_command`, and
   `verifier_timeout_no_edit`.
 - Already repaired class:
   `repairable_constraint_blocker_terminal_wait` by commit `2d0b5c4`.
+
+Current M6.24 chain:
+
+`M6.24 broad parity -> choose first registry batch -> run mew with generic work path -> compare against frozen Codex target -> feed failures through M6.18/M6.23 repair economy`
 
 Drift guard:
 
