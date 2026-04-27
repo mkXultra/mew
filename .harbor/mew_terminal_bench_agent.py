@@ -62,6 +62,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         model_name: str | None = None,
         *,
         command_template: str = "mew-smoke --instruction {instruction_shell} --report {report_path} --artifacts {artifact_dir}",
+        command_cwd: str | Path | None = None,
         artifact_root: str | Path | None = None,
         timeout_seconds: int | None = 900,
         install_command: str | None = None,
@@ -85,6 +86,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         self._harbor_base_kwargs = dict(base_kwargs)
         self._extra_agent_kwargs = dict(kwargs)
         self.command_template = command_template
+        self.command_cwd = str(command_cwd) if command_cwd is not None else None
         resolved_logs_dir = getattr(self, "logs_dir", logs_dir)
         if artifact_root is None:
             if resolved_logs_dir is not None:
@@ -128,8 +130,15 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             artifact_dir=shlex.quote(str(task_dir)),
             report_path=shlex.quote(str(report_path)),
             instruction_json=shlex.quote(str(task_dir / "instruction.json")),
+            command_cwd=self.command_cwd or "",
+            command_cwd_shell=shlex.quote(self.command_cwd or ""),
         )
-        result = await self._exec_as_agent(environment, command, timeout_sec=self.timeout_seconds)
+        result = await self._exec_as_agent(
+            environment,
+            command,
+            cwd=self.command_cwd,
+            timeout_sec=self.timeout_seconds,
+        )
         exit_code, stdout, stderr, timed_out = self._normalize_result(result)
 
         self._write_json(
@@ -141,6 +150,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
                 "exit_code": exit_code,
                 "timed_out": timed_out,
                 "timeout_seconds": self.timeout_seconds,
+                "cwd": self.command_cwd,
             },
         )
 

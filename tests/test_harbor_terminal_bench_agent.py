@@ -76,6 +76,7 @@ def test_harbor_factory_kwargs_and_metadata_are_preserved(tmp_path):
         prompt_template_path="prompt.txt",
         install_command="python -m pip install -e /mew",
         install_env={"PIP_DISABLE_PIP_VERSION_CHECK": "1"},
+        command_cwd="/app",
         unknown_agent_kwarg="preserved",
     )
 
@@ -96,6 +97,7 @@ def test_harbor_factory_kwargs_and_metadata_are_preserved(tmp_path):
     assert agent._extra_agent_kwargs == {"unknown_agent_kwarg": "preserved"}
     assert agent.install_command == "python -m pip install -e /mew"
     assert agent.install_env == {"PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+    assert agent.command_cwd == "/app"
 
 
 def test_async_install_and_run_record_required_artifact_contract(tmp_path):
@@ -173,6 +175,7 @@ def test_async_install_and_run_record_required_artifact_contract(tmp_path):
     assert transcript["exit_code"] == 0
     assert transcript["timed_out"] is False
     assert transcript["timeout_seconds"] == 17
+    assert transcript["cwd"] is None
     assert summary["work_session_or_report_summary"] == "session summary"
     assert summary["verifier_result"] == {"passed": True, "command": "pytest smoke"}
     assert summary["timeout_status"] == {"timed_out": False, "timeout_seconds": 17}
@@ -183,6 +186,29 @@ def test_async_install_and_run_record_required_artifact_contract(tmp_path):
     }
     assert context.mew_terminal_bench_artifact_dir == str(task_dir)
     assert context.mew_terminal_bench_summary == summary
+
+
+def test_run_passes_configured_command_cwd_and_template_placeholder(tmp_path):
+    module = load_agent_module()
+
+    class Agent(SeamAgentMixin, module.MewTerminalBenchAgent):
+        pass
+
+    agent = Agent(
+        command_template="mew work --oneshot --instruction {instruction_shell} --cwd {command_cwd_shell}",
+        command_cwd="/app",
+        artifact_root=tmp_path,
+        timeout_seconds=19,
+    )
+    environment = FakeEnvironment((0, "out", "", False))
+    context = SimpleNamespace(task_id="cwd-task")
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    assert agent.seam_calls[0][2] == {"env": None, "cwd": "/app", "timeout_sec": 19}
+    assert "--cwd /app" in environment.commands[0]
+    transcript = json.loads((tmp_path / "cwd-task" / "command-transcript.json").read_text(encoding="utf-8"))
+    assert transcript["cwd"] == "/app"
 
 
 def test_run_writes_harbor_agent_context_metadata_when_attributes_rejected(tmp_path):

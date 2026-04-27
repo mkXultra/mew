@@ -67,6 +67,33 @@ instruction-consuming implementation attempt or a deliberately bounded
 task-spec repair. Broad prompt/tool optimization is still premature until the
 next run uses a real implementation lane rather than capture-only `mew-smoke`.
 
+## Next Generic Work-Session Attempt
+
+The next Harbor run should use the same custom-agent wrapper with
+`command_template` set to `mew work --oneshot`, not a Terminal-Bench-specific
+solver. The wrapper supplies instruction text, `/app` as the task cwd, artifact
+paths, and bounded permissions; `mew work` remains the implementation path.
+
+Expected command shape:
+
+```sh
+mew work --oneshot \
+  --instruction {instruction_shell} \
+  --cwd /app \
+  --allow-read . \
+  --allow-write . \
+  --allow-shell \
+  --allow-verify \
+  --auth /mew/auth.json \
+  --model-backend codex \
+  --model gpt-5.5 \
+  --model-timeout 300 \
+  --max-steps 30 \
+  --report {report_path} \
+  --artifacts {artifact_dir} \
+  --json
+```
+
 ## Validation
 
 Focused local validation:
