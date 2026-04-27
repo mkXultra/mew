@@ -54,6 +54,11 @@ is tracked below.
 | 6.18 Implementation Failure Diagnosis Gate | `done` | Close gate passed via `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`; M7+ dogfood now routes failures through diagnosis before M6.14 repair. |
 | 6.19 Terminal-Bench Compatibility | `done` | Close gate passed via `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`; mew and Codex both run the bounded Harbor smoke with comparable artifacts. |
 | 6.20 Terminal-Bench Driven Implement-Lane Debugging | `in_progress` | Active milestone: use Terminal-Bench scores and failure cohorts to drive implementation-lane repair from the M6.19 harness. |
+| 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
+| 6.22 Terminal-Bench Curated Subset Parity | `not_started` | Next parity expansion after M6.20: fixed multi-band subset from the Codex target registry. |
+| 6.23 Terminal-Bench Failure-Class Coverage | `not_started` | Convert curated-subset failures into ranked repair classes with rerun evidence. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `not_started` | Full 89-task parity against Codex target 366/445 successes, 82.2% resolution. |
+| 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
@@ -83,15 +88,18 @@ Current M6.20 target:
 - instruction-consuming `mew-smoke` entrypoint and stdout report fallback are
   implemented; rerun evidence is recorded in
   `docs/M6_20_INSTRUCTION_RERUN_2026-04-27.md`
+- terminal gate is now explicit: on fixed task
+  `terminal-bench/make-mips-interpreter`, match Codex `0.121.0` /
+  `gpt-5.5@openai` at **3 successes out of 5 trials, 60.0%**, with Harbor
+  errors at 0 and complete per-task artifacts
 - classify at least one scored failure cohort through the M6.18 taxonomy
-- write an explicit small score target before prompt/tool optimization
 - choose one implementation-lane or task-spec repair from benchmark evidence
 - rerun the same bounded subset after the repair and record improved,
   regressed, or unchanged outcome
 
 Current M6.20 chain:
 
-`M6.20 -> baseline report done -> instruction-consuming rerun done -> report-capture repair done -> real implementation attempt/failure cohort -> bounded repair rerun`
+`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to make-mips-interpreter 3/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
 
 M7 pending evidence preserved:
 
@@ -1170,6 +1178,17 @@ First M6.20 slice:
 
 Planned future milestones:
 
+- **M6.21 Terminal-Bench Codex Target Registry**: done. The frozen target data
+  is `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
+- **M6.22 Terminal-Bench Curated Subset Parity**: run a fixed multi-band
+  subset from the registry and match or explain the Codex success target.
+- **M6.23 Terminal-Bench Failure-Class Coverage**: classify below-target
+  benchmark failures into repair classes and rerun at least one ranked repair.
+- **M6.24 Broad Terminal-Bench Parity Campaign**: run all 89 registry tasks and
+  match or exceed Codex's 366/445 successes, 82.2% aggregate target.
+- **M6.25 Codex-Plus Resident Advantage**: preserve Terminal-Bench parity while
+  proving mew's persistence, memory, and repair loops make it preferable to
+  inhabit over a reactive terminal-agent CLI.
 - **M7 Senses: Inbound Signals**: resume after M6.19/M6.20 give the
   implementation lane an external benchmark and failure-debug loop.
 - **M8 Identity: Cross-Project Self**: user-scope identity and cross-project
@@ -1256,7 +1275,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.20 -> baseline report done -> instruction-consuming rerun done -> report-capture repair done -> real implementation attempt/failure cohort -> bounded repair rerun`
+`M6.20 -> baseline report done -> Codex target registry done -> terminal gate set to make-mips-interpreter 3/5 -> real implementation attempt/failure cohort -> bounded repair rerun`
 
 Acceptable near-term work:
 
@@ -1267,6 +1286,8 @@ Acceptable near-term work:
   Harbor evidence
 - implement only the smallest repair needed to make the next rerun more
   informative
+- do not close M6.20 parity until mew reaches at least 3/5 successes on
+  `make-mips-interpreter`, matching the frozen Codex target
 
 Non-goals for the next session:
 
@@ -1286,6 +1307,15 @@ Non-goals for the next session:
 
 Latest roadmap/status validation:
 
+- M6.21 target registry is complete. The source leaderboard is
+  `https://www.tbench.ai/leaderboard/terminal-bench/2.0/codex/0.121.0/gpt-5.5%40openai`.
+  Local JSON:
+  `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
+  Extracted aggregate: 89 tasks, 445 trials, 366 successes, 82.2% overall
+  resolution rate. M6.20 fixed-task gate target:
+  `make-mips-interpreter`, checksum
+  `8c83716ee4cc62408b9d9bb2fb2a59dad434305da76b32d3186e7da1c106efe3`,
+  5 trials, 3 successes, 60.0%.
 - M6.20 task `#694` repaired Harbor report capture after task `#693` proved
   instruction ingestion but exposed missing host-side report metadata. Direct
   supervisor implementation was used by user decision because this is

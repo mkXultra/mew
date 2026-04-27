@@ -1200,6 +1200,176 @@ Why it matters:
   over standard agent CLIs. Terminal-Bench-driven debugging turns that goal into
   a scoreboard and a failure-science loop.
 
+Terminal gate:
+
+- M6.20 uses the fixed `terminal-bench/make-mips-interpreter` slice as its first
+  parity target.
+- The reference target is Codex `0.121.0` with `gpt-5.5@openai` on
+  Terminal-Bench 2.0: 5 trials, 3 successes, 60.0% resolution rate.
+- M6.20 parity close requires mew to reach at least 3 successes out of 5 trials
+  on the same fixed task, with Harbor errors at 0 and complete per-task
+  artifacts.
+- If mew scores below the reference target, the run can still satisfy a
+  diagnostic subgate only when the failure is classified through M6.18, a
+  bounded implementation-lane or task-spec repair is chosen from the evidence,
+  and the same subset is rerun.
+- Broader Terminal-Bench parity is not squeezed into M6.20; it is prepared by
+  the target registry milestone below.
+
+## Milestone 6.21: Terminal-Bench Codex Target Registry
+
+Freeze the Codex leaderboard target as local structured data so mew can compare
+its implementation-lane results task-by-task instead of relying on prose or
+memory.
+
+Target:
+
+- store the official Terminal-Bench 2.0 Codex `0.121.0` / `gpt-5.5@openai`
+  task breakdown as JSON
+- preserve task name, checksum, trial count, success count, and resolution rate
+- compute aggregate task/trial/success totals for a stable parity scoreboard
+- use the JSON as the source for future curated-subset and full-suite parity
+  milestones
+
+Done when:
+
+- the JSON target registry exists under `docs/data/`
+- ROADMAP_STATUS records the source URL, aggregate score, and the
+  `make-mips-interpreter` target used by M6.20
+- future Terminal-Bench parity work can select cohorts directly from the JSON
+  instead of scraping the web or copying leaderboard rows by hand
+
+Why it matters:
+
+- The long-term goal is Codex-level implementation quality across all
+  Terminal-Bench tasks, not a single cherry-picked proof. A local registry makes
+  that goal measurable while keeping each milestone small enough to close.
+
+## Milestone 6.22: Terminal-Bench Curated Subset Parity
+
+Use the Codex target registry to move beyond a single task without jumping
+straight to the full benchmark.
+
+Target:
+
+- choose a fixed curated subset from
+  `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`
+- include multiple difficulty bands, at minimum tasks where Codex scored
+  0%, 20%, 40%, 60%, 80%, and 100%
+- run mew on the same tasks with the same trial count as the Codex registry
+- compare per-task successes, aggregate successes, Harbor errors, timeouts,
+  cost/token metadata, verifier failures, and rescue/approval outcomes
+- feed every below-target task into M6.18 classification before any repair
+
+Done when:
+
+- a curated-subset manifest exists with task names, checksums, Codex targets,
+  and why each task was selected
+- mew has a 5-trial result for every selected task with complete artifacts
+- mew matches or exceeds the Codex total success count on the curated subset
+  or records an explicit below-target gap table with M6.18 classifications and
+  selected repair routes
+- at least one below-target task is repaired and rerun against the same subset
+  or, if no below-target task exists, the milestone records why the subset is
+  too easy and expands the subset
+
+Why it matters:
+
+- A single task can overfit. A curated subset proves that implementation-lane
+  repairs generalize across task shapes before the full Terminal-Bench campaign.
+
+## Milestone 6.23: Terminal-Bench Failure-Class Coverage
+
+Turn benchmark failures into a repair economy instead of a pile of red tasks.
+
+Target:
+
+- group mew Terminal-Bench failures by M6.18 class:
+  `polish`, `structural`, `invalid_task_spec`, `transient_model`, and
+  `ambiguous`
+- preserve the benchmark evidence that led to each class
+- identify which failures point to M6.14 substrate repair, task-spec repair,
+  prompt/tool policy, dependency/setup, context-window, verifier, or timeout
+  work
+- estimate repair leverage: how many tasks each repair could plausibly improve
+
+Done when:
+
+- every failed task in the curated subset has an M6.18 classification with
+  cited artifacts
+- at least one task from each observed failure class has a replayable evidence
+  bundle or a clear reason why replay is unavailable
+- repair candidates are ranked by expected benchmark leverage and risk
+- at least one ranked repair is implemented, rerun, and marked improved,
+  unchanged, or regressed against the same task evidence
+
+Why it matters:
+
+- Full Codex parity will not come from hand-fixing tasks one by one. mew needs
+  to see which failures share a shape, repair the shared mechanism, and prove
+  the repair with benchmark deltas.
+
+## Milestone 6.24: Broad Terminal-Bench Parity Campaign
+
+Run the full target registry and close the gap to Codex on Terminal-Bench 2.0.
+
+Target:
+
+- run mew against all tasks in the frozen Codex target registry
+- keep the trial count aligned with the registry, currently 5 trials per task
+- compare task-level and aggregate resolution against Codex `0.121.0` /
+  `gpt-5.5@openai`
+- iterate benchmark-driven repairs without losing per-task evidence
+- keep parity work bounded by artifacts, classifications, and reruns, not
+  impressionistic prompt tuning
+
+Done when:
+
+- all 89 registry tasks have mew results with complete artifacts and no
+  unexplained Harbor runner errors
+- mew aggregate successes match or exceed the Codex target of 366 successes out
+  of 445 trials, 82.2% resolution rate
+- every task where mew is below Codex has a recorded classification and either
+  a selected repair route or a written decision to defer it
+- the final parity report includes aggregate score, per-task deltas, cost/token
+  data when available, timeout/error rates, and the top remaining gaps
+
+Why it matters:
+
+- This is the milestone where "mew can replace Codex CLI for terminal-agent
+  implementation quality" becomes measurable rather than aspirational.
+
+## Milestone 6.25: Codex-Plus Resident Advantage
+
+After matching Codex-level terminal task quality, prove that mew's resident
+properties make it preferable to inhabit.
+
+Target:
+
+- preserve Terminal-Bench parity while using mew-native persistence, memory,
+  reentry, diagnosis, and repair loops
+- show that repeated work benefits from previous classified failures and repair
+  history instead of starting cold each time
+- compare not only score, but also recovery quality, auditability, user burden,
+  repair reuse, and context-compression resilience
+
+Done when:
+
+- mew remains at or above the Codex Terminal-Bench aggregate target after at
+  least one additional repair cycle
+- at least three previously failed or below-target tasks improve through
+  mew-native memory/diagnosis/reentry rather than one-off supervisor rescue
+- a resident-advantage report shows where mew is equal to Codex, where it is
+  better because of persistence, and where it still loses
+- future roadmap work can resume outside Terminal-Bench with a clear answer to:
+  "Would I rather be inside mew than Codex CLI for coding work?"
+
+Why it matters:
+
+- Matching Codex is not the final product goal. The product goal is a resident
+  coding body that frontier models would choose because it keeps context, sees
+  failures, repairs itself, and continues safely over time.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only
