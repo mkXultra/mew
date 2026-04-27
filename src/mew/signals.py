@@ -53,6 +53,12 @@ def _refresh_budget_window(source, current_time):
     return budget
 
 
+def _non_negative_int(value, default=0):
+    if value is None or value == "":
+        value = default
+    return max(0, int(value))
+
+
 def enable_signal_source(state, name, *, kind, reason, budget_limit=None, config=None, current_time=None):
     current_time = current_time or now_iso()
     name = (name or "").strip()
@@ -111,6 +117,74 @@ def list_signal_sources(state):
 def list_signal_journal(state, limit=20):
     journal = ensure_signal_state(state).get("journal", [])
     return list(journal[-max(0, int(limit)) :])
+
+
+def select_signal_proof_source(state, *, current_time=None):
+    """Choose the smallest deterministic read-only signal source for M7 proof."""
+    current_time = current_time or now_iso()
+    selected = None
+    candidates = []
+    for source in list_signal_sources(state):
+        kind = (source.get("kind") or "").strip()
+        config = source.get("config") or {}
+        url = (config.get("url") or "").strip()
+        budget = source.get("budget") or {}
+        window = budget.get("window") or "day"
+        window_key = budget.get("window_key") or _today(current_time)
+        limit = _non_negative_int(budget.get("limit"), DEFAULT_SIGNAL_BUDGET_LIMIT)
+        used = _non_negative_int(budget.get("used"), 0)
+        if window == "day" and window_key != _today(current_time):
+            window_key = _today(current_time)
+            used = 0
+        remaining = max(0, limit - used)
+        blockers = []
+        if not source.get("enabled"):
+            blockers.append("source_disabled")
+        if kind not in {"rss", "atom"}:
+            blockers.append("unsupported_source_kind")
+        if not url:
+            blockers.append("missing_url")
+        if remaining <= 0:
+            blockers.append("budget_exhausted")
+        candidate = {
+            "name": source.get("name"),
+            "kind": kind,
+            "enabled": bool(source.get("enabled")),
+            "has_url": bool(url),
+            "budget": {
+                "window": window,
+                "window_key": window_key,
+                "limit": limit,
+                "used": used,
+                "remaining": remaining,
+            },
+            "reason": source.get("reason") or "",
+            "status": "eligible" if not blockers else "blocked",
+            "blockers": blockers,
+        }
+        candidates.append(candidate)
+        if selected is None and not blockers:
+            selected = (source, candidate, url)
+    if selected is None:
+        return {
+            "status": "blocked",
+            "reason": "no_eligible_source",
+            "source": None,
+            "candidates": candidates,
+        }
+    source, candidate, url = selected
+    return {
+        "status": "selected",
+        "source": deepcopy(source),
+        "proof": {
+            "source": candidate["name"],
+            "kind": candidate["kind"],
+            "url": url,
+            "reason_for_use": candidate["reason"] or f"read-only proof candidate from {url}",
+            "budget_remaining": candidate["budget"]["remaining"],
+        },
+        "candidates": candidates,
+    }
 
 
 def record_signal_observation(
@@ -249,6 +323,14 @@ def fetch_signal_source(state, source_name, *, opener=None, current_time=None):
     url = ((source.get("config") or {}).get("url") or "").strip()
     if not url:
         return {"status": "blocked", "reason": "missing_url", "source": source}
+    budget = _refresh_budget_window(source, current_time or now_iso())
+    if budget["used"] + 1 > budget["limit"]:
+        return {
+            "status": "blocked",
+            "reason": "budget_exhausted",
+            "source": source,
+            "budget": deepcopy(budget),
+        }
 
     opener = opener or urlopen
     with opener(url, timeout=10) as response:

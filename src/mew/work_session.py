@@ -2939,6 +2939,167 @@ def build_failed_patch_repair(session, calls, turns, failures, task=None):
     return {}
 
 
+def _latest_retry_context_source_call(calls):
+    for call in reversed(list(calls or [])):
+        if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("rolled_back"):
+            return call, "rolled_back_write"
+        if str(call.get("approval_status") or "") == "rejected":
+            return call, "rejected_write"
+        if (
+            call.get("status") == "completed"
+            and result.get("changed")
+            and (
+                result.get("written")
+                or (result.get("dry_run") and str(call.get("approval_status") or "") not in RESOLVED_APPROVAL_MEMORY_STATUSES)
+            )
+        ):
+            return {}, ""
+    return {}, ""
+
+
+def _retry_context_target_windows(active_work_todo, target_path_cached_window_observations, *, limit=6):
+    windows = []
+
+    def append_window(item):
+        if not isinstance(item, dict):
+            return
+        path = str(item.get("path") or "").strip()
+        if not path:
+            return
+        window = {
+            "path": path,
+            "tool_call_id": item.get("tool_call_id") or item.get("last_tool_call_id"),
+            "line_start": item.get("line_start"),
+            "line_end": item.get("line_end"),
+            "context_truncated": bool(item.get("context_truncated")),
+        }
+        if item.get("reason"):
+            window["reason"] = clip_inline_text(item.get("reason"), 160)
+        key = (
+            window.get("path"),
+            window.get("tool_call_id"),
+            window.get("line_start"),
+            window.get("line_end"),
+        )
+        for existing in windows:
+            existing_key = (
+                existing.get("path"),
+                existing.get("tool_call_id"),
+                existing.get("line_start"),
+                existing.get("line_end"),
+            )
+            if existing_key == key:
+                return
+        windows.append(window)
+
+    active_work_todo = active_work_todo if isinstance(active_work_todo, dict) else {}
+    for item in active_work_todo.get("cached_window_refs") or []:
+        append_window(item)
+    for item in target_path_cached_window_observations or []:
+        append_window(item)
+    return windows[: max(1, int(limit or 1))]
+
+
+def _retry_context_pending_constraints(pending_approvals, active_rejection_frontier):
+    constraints = []
+    if pending_approvals:
+        constraints.append(
+            {
+                "kind": "pending_approvals",
+                "count": len(pending_approvals),
+                "items": [
+                    {
+                        "tool_call_id": approval.get("tool_call_id"),
+                        "path": approval.get("path"),
+                        "approval_status": approval.get("approval_status") or "",
+                        "approval_blocked_reason": approval.get("approval_blocked_reason") or "",
+                        "pairing_status": (approval.get("pairing_status") or {}).get("status") or "",
+                    }
+                    for approval in pending_approvals[:4]
+                    if isinstance(approval, dict)
+                ],
+            }
+        )
+    frontier = active_rejection_frontier if isinstance(active_rejection_frontier, dict) else {}
+    if frontier and str(frontier.get("status") or "active") == "active":
+        constraints.append(
+            {
+                "kind": "active_rejection_frontier",
+                "id": frontier.get("id") or "",
+                "drift_class": frontier.get("drift_class") or "",
+                "patch_family": frontier.get("rejected_patch_family") or "",
+                "next_action": clip_inline_text(frontier.get("next_action") or "", 180),
+            }
+        )
+    return constraints
+
+
+def build_compact_retry_context(
+    calls,
+    *,
+    pending_approvals=None,
+    active_work_todo=None,
+    target_path_cached_window_observations=None,
+    active_rejection_frontier=None,
+    latest_safe_reobserve=None,
+):
+    """Summarize retry state after rejected or rolled-back writes without raw patch bodies."""
+    source_call, trigger = _latest_retry_context_source_call(calls)
+    if not trigger:
+        return {}
+    result = source_call.get("result") if isinstance(source_call.get("result"), dict) else {}
+    parameters = source_call.get("parameters") if isinstance(source_call.get("parameters"), dict) else {}
+    verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+    context = {
+        "kind": "compact_retry_context",
+        "trigger": trigger,
+        "source_tool_call_id": source_call.get("id"),
+        "tool": source_call.get("tool") or "",
+        "path": work_call_path(source_call) or result.get("path") or parameters.get("path") or "",
+        "status": source_call.get("status") or "",
+        "approval_status": source_call.get("approval_status") or "",
+        "rejection_reason": clip_inline_text(source_call.get("rejection_reason") or "", 240),
+        "rolled_back": bool(result.get("rolled_back")),
+        "body_policy": (
+            "Resolved rejected/rolled-back write bodies are intentionally omitted; "
+            "retry from current cached windows, latest failure output, and pending constraints."
+        ),
+    }
+    if result.get("batch_rollback_reason"):
+        context["batch_rollback_reason"] = clip_inline_text(result.get("batch_rollback_reason"), 240)
+    if result.get("rollback_error"):
+        context["rollback_error"] = clip_inline_text(result.get("rollback_error"), 240)
+    verification_exit_code = result.get("verification_exit_code")
+    if verification.get("exit_code") is not None:
+        verification_exit_code = verification.get("exit_code")
+    if verification_exit_code is not None:
+        context["verification_exit_code"] = verification_exit_code
+    verification_command = verification.get("command") or result.get("verification_command") or ""
+    if verification_command:
+        context["verification_command"] = clip_inline_text(verification_command, 240)
+    stdout_tail = verification.get("stdout") or result.get("verification_stdout") or ""
+    stderr_tail = verification.get("stderr") or result.get("verification_stderr") or ""
+    if stdout_tail:
+        context["verification_stdout_tail"] = clip_output(stdout_tail, 500)
+    if stderr_tail:
+        context["verification_stderr_tail"] = clip_output(stderr_tail, 500)
+    windows = _retry_context_target_windows(
+        active_work_todo,
+        target_path_cached_window_observations,
+    )
+    if windows:
+        context["target_windows"] = windows
+    constraints = _retry_context_pending_constraints(pending_approvals or [], active_rejection_frontier or {})
+    if constraints:
+        context["pending_constraints"] = constraints
+    if latest_safe_reobserve:
+        context["suggested_safe_reobserve"] = latest_safe_reobserve
+    return context
+
+
 def _work_call_repeat_target(call):
     result = call.get("result") or {}
     parameters = call.get("parameters") or {}
@@ -6901,6 +7062,14 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         failures,
         task=task,
     )
+    retry_context = build_compact_retry_context(
+        calls,
+        pending_approvals=pending_approvals,
+        active_work_todo=active_work_todo,
+        target_path_cached_window_observations=target_path_cached_window_observations,
+        active_rejection_frontier=session.get("active_rejection_frontier") or {},
+        latest_safe_reobserve=latest_safe_reobserve,
+    )
     user_preferences = build_work_user_preferences(state, limit=limit)
     active_memory = build_work_active_memory(session=session, task=task, limit=limit)
     effort = build_work_session_effort(session, current_time=current_time)
@@ -6962,6 +7131,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "skipped_exact_read_plan_items": skipped_exact_read_plan_items,
         "repair_anchor_observations": repair_anchor_observations,
         "failed_patch_repair": failed_patch_repair,
+        "retry_context": retry_context,
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
         "queued_followups": queued_followups[:limit],
@@ -7106,6 +7276,21 @@ def format_work_session_resume(resume):
             lines.append(f"failed_patch_repair_terms: {terms}")
         if failed_patch_repair.get("repair_instruction"):
             lines.append(f"failed_patch_repair_instruction: {failed_patch_repair.get('repair_instruction')}")
+    retry_context = resume.get("retry_context") or {}
+    if retry_context:
+        lines.append(
+            "retry_context: "
+            f"trigger={retry_context.get('trigger') or ''} "
+            f"tool=#{retry_context.get('source_tool_call_id') or '-'} "
+            f"path={retry_context.get('path') or '-'} "
+            f"status={retry_context.get('approval_status') or retry_context.get('status') or '-'}"
+        )
+        if retry_context.get("rejection_reason"):
+            lines.append(f"retry_rejection_reason: {retry_context.get('rejection_reason')}")
+        if retry_context.get("verification_exit_code") is not None:
+            lines.append(f"retry_verification_exit_code: {retry_context.get('verification_exit_code')}")
+        if retry_context.get("body_policy"):
+            lines.append(f"retry_body_policy: {retry_context.get('body_policy')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)

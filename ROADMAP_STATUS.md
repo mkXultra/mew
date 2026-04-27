@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-26
+Last updated: 2026-04-27
 
 This file is the compact operational roadmap dashboard. It is intentionally
 short enough to survive context compression and long-session reentry.
@@ -49,9 +49,9 @@ is tracked below.
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
 | 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
-| 6.16 Codex-Grade Implementation Lane | `in_progress` | Baseline surface is landing; first measured bottleneck is mew-first rescue/partial implementation attempts. |
-| 6.17 Resident Meta Loop / Lane Chooser | `not_started` | Future supervisor milestone after lane telemetry, mirror/deliberation boundaries, and implementation-lane reliability are proven. |
-| 7. Senses: Inbound Signals | `foundation` | Signal gates/journaling/RSS pieces exist; deeper work deferred. |
+| 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
+| 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
+| 7. Senses: Inbound Signals | `in_progress` | Active milestone: convert existing signal gates/journaling/RSS foundation into useful audited inbound observations. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
 | 10. Multi-Agent Residence | `not_started` | Multi-model shared residence remains future work. |
@@ -59,38 +59,133 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.16 Codex-Grade Implementation Lane**.
+Active work: **M7 Senses: Inbound Signals**.
 
-Why M6.16 is active:
+Why M7 is active:
 
-- M6.13 closed the deliberation/mirror/internalization gate with both
-  deterministic and live gpt-5.5 proof.
-- The next resident capability gap is not another helper lane; it is the
-  ordinary authoritative implementation lane. Mew needs reliable hands before
-  lane composition or a meta loop can be valuable.
-- M6.13.2 side-project dogfood telemetry, mew-first attempt history, and
-  M6.14 repair records now provide enough evidence to choose measured
-  implementation-lane bottlenecks instead of guessing.
+- M6.17 closed the reviewer-gated resident meta-loop v0: mew can propose the
+  next task/lane or a safe next action without losing the active gate.
+- A resident that only rereads its own state is not meaningfully passive. The
+  next product gap is controlled inbound sensing: audited signals that let mew
+  notice the user's working world without becoming spam.
+- M7 already has foundation pieces, but the gate is not met until at least one
+  useful, provenance-backed unsolicited observation is produced from enabled
+  signal evidence.
 
-Current M6.16 target:
+Current M7 target:
 
-- treat persisted `tiny` as the authoritative implementation lane while using
-  `implementation` as the product-facing concept
-- measure recent mew-first attempts by rescue rate, approval rejection,
-  verifier failure, first-edit latency, retry path, and failure class
-- consume the M6.13.2 side-project dogfood ledger only as evidence; do not let
-  side-project control preempt the main milestone unless it exposes a core
-  blocker
-- reduce measured friction with narrow changes and focused replay/test proof
-- keep M6.14 as the repair path for structural mew-first failures
-- avoid broad work-loop/work-session refactors unless a measured recurring
-  failure class names the bottleneck
+- keep inbound sources explicitly gated and budgeted
+- journal signal provenance, source, timestamp, and reason-for-use
+- start with local file/git signals, then one non-file-system source behind an
+  explicit gate
+- distinguish "noticed" from "acted" in passive turns
+- make every unsolicited observation explainable and disableable
 
-Current M6.16 chain:
+Current M7 chain:
 
-`M6.16 -> measured bottleneck: mew_first_rescue_partial -> reduce ordinary implementation-lane rescue/partial rate`
+`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
 
-Current M6.16 evidence:
+Current M7 evidence:
+
+- Existing signal gates, journaling, and RSS/feed surfaces provide foundation,
+  but the M7 close proof is not yet present.
+- Next work should define the smallest enabled inbound source and proof window,
+  then produce or simulate one auditable passive observation.
+- Selector proposal `#26` chose task `#682` as the first M7 bounded task with
+  lane dispatch, calibration refs, failure cluster, and preference refs. This
+  proves the closed M6.17 lane chooser can hand off into M7 without falling
+  back to stale paused M6 work.
+- Task `#682` completed the first M7 bounded slice. Mew session `#672`
+  selected the existing signal source registry as the smallest deterministic
+  proof-source surface and added `select_signal_proof_source(state,
+  current_time=...)` in `src/mew/signals.py`. The helper is read-only: it
+  inspects configured RSS/Atom sources, returns candidate blockers, proof
+  metadata, reason-for-use, URL, and remaining budget, and does not fetch,
+  record, queue, or save state. Reviewer follow-up fixed zero-budget and
+  stale day-window edge cases, preserving source state while refreshing the
+  returned budget view. Validation passed: `uv run python -m unittest
+  tests.test_signals`, `uv run ruff check src/mew/signals.py
+  tests/test_signals.py`, and `git diff --check`. Codex-ultra review
+  `019dcc07-6515-71d0-afe0-d280a002c6a9` returned `STATUS: pass`.
+- Task `#683` added the first explicit gated non-file signal fetch surface as
+  product-progress supervisor rescue after mew session `#673` drifted into
+  help/proof-source-only edits. `mew signals fetch <source> [--json]` now uses
+  existing `fetch_signal_source` gates and budgets, saves state only after a
+  recorded observation, and reports blocked sources without queueing or saving.
+  `mew signals proof-source [--json]` exposes the read-only selector from task
+  `#682`. Reviewer correction moved budget checking before network access and
+  added proof that exhausted budgets do not call the opener. Validation passed:
+  `uv run python -m unittest tests.test_signals tests.test_signal_fetch
+  tests.test_commands`, `uv run ruff check src/mew/signals.py src/mew/cli.py
+  src/mew/commands.py tests/test_signals.py tests/test_signal_fetch.py`, and
+  `git diff --check`. Codex-ultra review
+  `019dcc19-8fa5-72c3-b88c-7030398e3cc1` initially failed the pre-network
+  budget gate, then passed after the fix.
+- Task `#684` added the first deterministic passive surface for queued inbound
+  signal evidence. A `signal_observed` event now produces one unread
+  reviewer-visible `send_message` that says mew noticed but did not act,
+  includes source, summary, `reason_for_use`, and an explicit
+  `./mew signals disable <source>` command, and does not mutate tasks or
+  roadmap state. Mew session `#674` first drifted into reflex-observation
+  metadata, then produced the core signal path after reviewer steer; supervisor
+  cleanup removed residual wrong-target reflex changes. Count as mixed/product
+  progress after steer, not clean autonomy credit. Validation passed:
+  `uv run python -m unittest tests.test_commands tests.test_autonomy
+  tests.test_signals tests.test_signal_fetch`, `uv run ruff check
+  src/mew/agent.py tests/test_autonomy.py`, and `git diff --check`.
+  Codex-ultra review `019dcc36-658f-72b0-8371-f24eae6a863e` returned
+  `STATUS: pass`.
+- Runtime proof `2026-04-27 09:00 JST`: enabled gated non-file RSS source
+  `hn` with daily budget `1`, selected it through `mew signals proof-source`,
+  fetched one HN RSS item through `mew signals fetch hn --json`, and processed
+  the queued event with `mew run --once --echo-outbox`. The runtime produced
+  outbox `#156`: `signal-observed noticed, not acted`, with source `hn`,
+  fetched summary, `reason_for_use`, and disable command
+  `./mew signals disable hn`. This proves the immediate end-to-end M7 path, but
+  the real-day useful-observation gate remains open until the observation
+  survives an intended passive proof window without spam.
+
+M6.17 close evidence:
+
+- Task `#679` landed the first reviewer-visible lane-dispatch proposal slice as
+  mixed mew-first plus supervisor review-fix evidence. Mew sessions `#668` and
+  `#669` produced the initial `lane_dispatch` schema, human formatter exposure,
+  and paired tests, but codex-ultra review
+  `019dcbbe-33bb-7313-80bd-9ef159edd697` found two acceptance gaps:
+  missing `repair_route` and missing `lane_dispatch` on no-candidate selector
+  responses. The supervisor applied only those review fixes after the mew work
+  session exhausted its failure budget, so this is product progress but not
+  clean mew-first autonomy credit. Validation passed:
+  `uv run python -m unittest tests.test_tasks tests.test_commands`,
+  `uv run ruff check src/mew/tasks.py src/mew/commands.py tests/test_tasks.py tests/test_commands.py`,
+  and `git diff --check`. Codex-ultra re-review
+  `019dcbc5-974b-7fc3-955b-b2bc869c74c3` returned `STATUS: pass`.
+- Task `#680` fixed a reentry drift path where `mew next --kind coding` could
+  prefer a stale paused older milestone work session over the active M6.17
+  roadmap gate. Mew session `#670` attempted the task first, but produced three
+  failing or too-broad drafts, so the final patch is supervisor rescue with no
+  mew autonomy credit. The fix parses `Active work: **M6.17 ...**.` from
+  `ROADMAP_STATUS.md`, keeps current/non-milestone paused sessions paused, and
+  routes older `M6.x` paused sessions to the active native self-improve focus.
+  Validation passed: `uv run python -m unittest tests.test_brief`,
+  `uv run ruff check src/mew/brief.py tests/test_brief.py`, and
+  `git diff --check`. Codex-ultra review
+  `019dcbd8-e9bb-7880-9009-7efb152bc3eb` returned `STATUS: pass` after the
+  punctuation/current-milestone test gaps were fixed.
+- Task `#681` added `next_action` to no-candidate selector proposals so a
+  reviewer still sees the active native self-improve path when no safe bounded
+  task candidate exists. Mew session `#671` authored the source/test patch and
+  verification passed; the supervisor applied a tiny formatter follow-up so
+  normal candidate proposals do not show `next_action: null`. After M7 became
+  active, `./mew task propose-next 681 --json` returns a blocked no-candidate
+  proposal with `lane_dispatch` plus `next_action: ./mew self-improve
+  --start-session --focus 'Advance M7 Senses: Inbound Signals'`. Validation
+  passed: `uv run python -m unittest
+  tests.test_commands`, `uv run ruff check src/mew/commands.py
+  tests/test_commands.py`, and `git diff --check`. Codex-ultra review
+  `019dcbe9-aae6-75d1-a17d-fb613f1ef4c3` returned `STATUS: pass`.
+
+M6.16 close evidence:
 
 - Task `#656` produced the first M6.16 baseline slice as supervisor-owned
   rescue after failed mew-first attempts. Sessions `#642` and `#643` did not
@@ -264,6 +359,205 @@ Current M6.16 evidence:
   timing flake. Codex-ultra re-review session
   `019dca8b-7797-7760-b628-100e80455aa5` reported no findings after the
   reviewer fixes.
+- Task `#668` landed the GitHub issue `#9` behavior-verifier prompt slice as
+  practical mew-first evidence. The work think prompt now tells tests and
+  verifier commands to prefer behavior, contract, output, state, or
+  docs-visible assertions over exact source text phrase assertions unless the
+  task explicitly requires a literal public string or security-sensitive marker.
+  Count this as practical mew-first without rescue edits: mew authored the
+  paired source/test patch, codex-ultra review session
+  `019dcab7-b73d-7bf2-b4a5-994e8c940a62` found the missing write-ready and
+  tiny-draft prompt surfaces, and mew session `#651` repaired them without
+  supervisor product-code rescue. The supervisor only corrected an invalid
+  pytest `-k` verifier expression in the task invocation. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or write_ready_tiny_draft or behavior' --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`. The invalid original verifier
+  `work_think_prompt or source_literal or behavior verifier` was a task-spec
+  operator error, not a product regression. Codex-ultra re-review reported no
+  findings after the write-ready and tiny-draft repair.
+- Task `#669` landed the GitHub issue `#5` scoped-verifier-repair slice as
+  supervisor-owned M6.16/M6.14 repair evidence after a partial mew-first
+  attempt. The normal, write-ready, and tiny-draft work prompts now tell the
+  implementation lane to keep one compact in-session repair when a rollback
+  verifier failure has one small clear localized cause and a clean worktree,
+  centering that repair on the failed assertion/output and target path before
+  switching to remember, checkpoint, or stop due pressure. Count this as
+  loop-substrate/product progress, not mew-first autonomy credit: mew session
+  `#652` authored the first normal-prompt patch, codex-ultra review session
+  `019dcace-ebe2-7422-98d9-553dc259e1b2` found missing write-ready/tiny
+  coverage, mew session `#653` added model-specific wording and then hit
+  `old_text_not_found`, and the supervisor repaired the final generic
+  three-surface prompt/test shape. Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k 'verifier_failure or failed_patch_repair or work_think_prompt or write_ready_tiny_draft or write_ready' --no-testmon`,
+  `env -u MEW_CODEX_REASONING_EFFORT uv run python -m unittest tests.test_work_session.WorkSessionTests.test_work_ai_compact_live_forces_compact_prompt_context_on_high_risk_task tests.test_work_session.WorkSessionTests.test_work_session_steer_is_consumed_by_next_model_step`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and
+  `git diff --check`. The broader `uv run python -m unittest tests.test_work_session`
+  failure inside the mew run inherited `MEW_CODEX_REASONING_EFFORT=high` and is
+  not counted as a product regression. Codex-ultra re-review reported no
+  findings after the generic three-surface repair.
+- Task `#670` landed the GitHub issue `#4` rejected/rolled-back retry-context
+  compaction slice as supervisor-owned M6.16/M6.14 repair evidence after a
+  mew-first attempt failed to produce a patch. Session `#654` spent ten steps
+  on targeted inspection and write-ready cached-window refresh, then reached
+  `max_steps` without drafting. The supervisor-owned repair adds
+  `resume.retry_context` for rejected and rolled-back writes, omits raw
+  `old`/`new`/`content`/`edits` and `diff` bodies from resolved rejected or
+  rolled-back write tool calls in model prompts, propagates the compact
+  retry context into write-ready and deliberation focused contexts, and drops
+  stale retry context after a newer changed write supersedes it. Count this as
+  loop-substrate/product progress, not mew-first autonomy credit. Valid proof
+  passed:
+  `uv run pytest -q tests/test_work_session.py -k 'rejected or rolled_back or retry_context or patch_body or pending_approval or work_session_resume' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'write_ready or failed_patch_repair or rejection_frontier or retry_context' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py --no-testmon`,
+  `uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check`. Codex-ultra review session
+  `019dcaf1-2534-7a12-8812-e6927b62d586` first found stale supersession and
+  empty-diff-key issues, then re-review reported no findings after both
+  regressions were covered.
+- Task `#671` landed the GitHub issue `#11` side-dogfood append-validation
+  slice as practical mew-first evidence. `mew side-dogfood validate --input
+  ... [--json]` now validates one local side-project dogfood report against the
+  canonical append schema without mutating the ledger, so side-project
+  closeout can catch descriptive/non-appendable reports before finish. Count
+  this as practical mew-first without rescue edits: session `#655` authored
+  the source/CLI/test patch, codex-ultra review session
+  `019dcb09-266b-7a22-8db7-9eead609e51b` found a missing-input `OSError`
+  path, and mew session `#656` repaired it with a focused regression. Valid
+  proof passed:
+  `uv run pytest -q tests/test_side_project_dogfood.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run python -m unittest tests.test_commands tests.test_work_deliberation_cli`,
+  `uv run ruff check src/mew/cli.py src/mew/commands.py tests/test_side_project_dogfood.py`,
+  and `git diff --check`. Codex-ultra re-review reported no findings after
+  the missing-input regression.
+- Task `#672` landed the GitHub issue `#12` watch/continuous-mode verifier
+  guidance slice as practical mew-first evidence. The normal, write-ready,
+  and tiny-draft work prompts now tell the implementation lane that tasks
+  involving watch, continuous, polling, listen, or other repeated modes must
+  include bounded-loop or repeated-observation proof of external behavior, plus
+  interval/interrupt handling or output-rewrite evidence where relevant, and
+  must not accept internal mode flags alone. Count this as practical
+  mew-first without rescue edits: session `#657` authored the paired
+  source/test patch, hit one stale `old_text_not_found` draft, then repaired
+  the same proposal after reviewer steer to retry exact anchors. Valid proof
+  passed:
+  `uv run pytest -q tests/test_work_session.py -k 'watch or continuous or behavior or verifier' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or write_ready_tiny_draft or write_ready or behavior or verifier' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py --no-testmon`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check`. Codex-ultra review session
+  `019dcb20-3fec-7043-b508-a3ec5e8ceac4` reported no findings.
+- Task `#673` landed the GitHub issue `#7` contract/docs-heading proof
+  guidance slice as practical mew-first evidence. The normal, write-ready,
+  and tiny-draft work prompts now tell the implementation lane that
+  contract/docs-heavy slices must compare documented headings/surfaces against
+  actual renderer or CLI output instead of treating file creation as proof.
+  Count this as practical mew-first without rescue edits: session `#658`
+  authored the paired source/test patch. The mew-run broad unittest verifier
+  initially failed two unrelated reasoning-effort tests, but the same full
+  module passed immediately when re-run outside the failed follow snapshot.
+  Valid proof passed:
+  `uv run pytest -q tests/test_work_session.py -k 'contract or heading or behavior or verifier' --no-testmon`,
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or write_ready_tiny_draft or write_ready or contract or heading or behavior or verifier' --no-testmon`,
+  `uv run python -m unittest tests.test_work_session`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check`. Codex-ultra review session
+  `019dcb2f-dcd3-79e1-b069-4919e7e21c6d` reported no findings.
+- Task `#674` landed the GitHub issue `#6` side-dogfood ledger-semantics
+  slice as practical mew-first evidence. `mew side-dogfood report` now states
+  that `rescue_edits` is a numeric Codex product-code rescue count and excludes
+  operator steering, reviewer rejection, verifier follow-up, and generic
+  repair. The implementation-lane baseline text labels the side-project
+  aggregate as `codex_product_code_rescue_edits`, while JSON keeps the
+  backward-compatible `rescue_edits_total` key and adds the same semantic alias.
+  Count this as practical mew-first without supervisor product-code rescue:
+  session `#659` authored the initial paired source/test patch and sibling
+  digest label; codex-ultra review session
+  `019dcb3e-a3f6-7423-ac91-981e1396c86c` found a non-integral float truncation
+  bug and missing machine-readable alias; session `#660` repaired both. Valid
+  proof passed:
+  `uv run pytest -q tests/test_side_project_dogfood.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/side_project_dogfood.py src/mew/implementation_lane_baseline.py tests/test_side_project_dogfood.py tests/test_implementation_lane_baseline.py`,
+  and `git diff --check`. Codex-ultra re-review reported no findings.
+- Task `#675` landed an M6.16 measurement-quality slice as practical
+  mew-first evidence. The mew-first calibration now treats reviewer-mediated
+  mew-first repairs with no supervisor product-code rescue as
+  `practical_mew_first`, while preserving clean credit for no-review
+  `without rescue edits` entries. Sessions `#661`, `#662`, and `#663`
+  authored the paired source/test patch and repaired two codex-ultra review
+  findings plus the live `#671` wording gap. Valid proof passed:
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/mew_first_calibration.py tests/test_mew_first_calibration.py`,
+  `git diff --check`,
+  `./mew metrics --mew-first --limit 100 --json`,
+  and `./mew metrics --implementation-lane --json`. Metrics now classify
+  tasks `#671` and `#674` as practical, keep clean/practical successes at
+  `11`, and reduce the measured rescue/partial count from `29` to `28`.
+  Codex-ultra review session `019dcb59-5c67-7e12-9169-500867c5e80c` ended with
+  `NO FINDINGS`.
+- Task `#676` landed an M6.16 measurement-window slice as practical
+  mew-first evidence. `extract_mew_first_attempts(limit=N)` now sorts attempt
+  records by descending task id before applying the limit, so recent cohort
+  metrics select the newest task ids instead of the oldest tail of
+  `ROADMAP_STATUS.md`; M6.16 headings are also recognized by the default
+  attempt-section list for fixture/doc compatibility. Session `#664` authored
+  the paired source/test patch. It hit one expected shell-permission stop while
+  trying to run `./mew metrics` from inside the work session, but no
+  supervisor product-code rescue was needed. Valid proof passed:
+  `uv run pytest -q tests/test_mew_first_calibration.py --no-testmon`,
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/mew_first_calibration.py tests/test_mew_first_calibration.py`,
+  `git diff --check`,
+  `./mew metrics --mew-first --limit 10 --json`,
+  and `./mew metrics --implementation-lane --limit 20 --json`. Current
+  `--limit 10` now reports task window `#676 #675 #674 #673 #672 #671 #670
+  #669 #668 #667` and passes the gate at `8/10`; `--limit 20` reduces the
+  measured rescue/partial rate to `0.5`. Codex-ultra review session
+  `019dcb76-a4a1-7803-b29c-d9a888edae14` reported `NO FINDINGS`.
+- Task `#677` landed an M6.16 first-edit-latency instrumentation slice as
+  practical mew-first evidence. Metrics diagnostics now expose
+  `slow_first_edit_proposals` samples with session/task fields, first-edit
+  seconds, first write tool id/tool/path, start time, and first model-turn
+  summary; the implementation-lane baseline carries those samples under
+  `first_edit_latency.samples` and prints them in the text report. Session
+  `#665` authored the read-only telemetry/reporting patch, and session `#666`
+  repaired the codex-ultra threshold finding so exactly-at-threshold `30.0s`
+  samples are not treated as slow. Valid proof passed:
+  `uv run pytest -q tests/test_metrics.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/metrics.py src/mew/implementation_lane_baseline.py tests/test_metrics.py tests/test_implementation_lane_baseline.py`,
+  `git diff --check`,
+  `./mew metrics --implementation-lane --limit 20 --json`,
+  and `./mew metrics --implementation-lane --limit 20`. Current samples name
+  concrete first-edit latency targets including sessions `#665`, `#652`, and
+  `#649`. Codex-ultra review session
+  `019dcb8a-8e66-71b3-b488-203fb4f5eb4f` ended with `NO FINDINGS`. No
+  supervisor product-code rescue occurred.
+- Task `#678` landed an M6.16 first-edit-latency reduction slice as clean
+  mew-first evidence. The normal THINK prompt now treats first-edit latency as
+  an operational budget: when scoped source/test cached windows already contain
+  first-edit old text, mew should avoid another same-surface rediscovery turn
+  and prefer the bounded paired edit path while preserving exact-old-text,
+  pairing, scope, and verifier gates. Session `#667` authored the patch,
+  produced a patch-draft replay on the write-ready surface, and passed both
+  the focused prompt verifier and the full work-session unittest module:
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or first_edit_latency' --no-testmon`
+  and `uv run python -m unittest tests.test_work_session`. Additional local
+  checks passed: `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`
+  and `git diff --check`. Codex-ultra review session
+  `019dcb9d-ddf7-7f30-8605-7b603f048ba8` reported `STATUS: pass` with
+  `NO FINDINGS`; this was mew-first without rescue edits. After the `#677`
+  and `#678` evidence-classification notes, `./mew metrics --mew-first --limit 10 --json`
+  passes at `8/10`; `./mew metrics --implementation-lane --limit 20 --json`
+  reports `clean_or_practical_successes=12/20`, `rescue_partial_rate=0.4`,
+  `approval.rejection_rate=0.143`, `verifier.failure_rate=0.0`, and
+  first-edit latency `median=285.5s`, `p95=536.55s`, `max=704.0s`.
 - M6.13 close gate passed via
   `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. The proof records
   reviewer-approved deliberation internalization, M6.9 ranked recall, normal
@@ -926,6 +1220,9 @@ These caveats are preserved; they do not reopen the milestones by default.
   using the closed residual surfaces.
 - Reopen M6.12 only if the read-only report stops parsing the canonical ledger
   or gives incorrect missing-bundle/citation results.
+- Reopen M6.16 only if a fresh bounded implementation-lane cohort regresses
+  below the recorded close gate, or if first-edit latency remains high on
+  current-head samples after M6.17 has used it as lane-choice evidence.
 - M6.14 remains the default home for future mew-first substrate repair
   episodes.
 
@@ -933,21 +1230,16 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.16 -> measured bottleneck: mew_first_rescue_partial -> reduce ordinary implementation-lane rescue/partial rate`
+`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
 
 Acceptable near-term work:
 
-- build a compact M6.16 baseline report from recent mew-first attempts,
-  M6.13 lane telemetry, M6.13.2 side-project ledger entries, and M6.14 repair
-  records
-- classify the first implementation-lane bottleneck by rescue rate, approval
-  rejection, verifier failure, first-edit latency, retry path, or failure class
-- make one narrow implementation-lane change tied to that measured bottleneck
-  and record before/after evidence
-- if the bottleneck is structural, open or append an M6.14 repair episode
-  instead of hiding it behind supervisor edits
-- keep deliberation as helper evidence only; do not use it to mask weak normal
-  implementation-lane behavior
+- inventory existing signal gates, journals, and feed/RSS surfaces
+- define the smallest M7 proof source and opt-in gate
+- record signal provenance with source, timestamp, budget, and reason-for-use
+- produce one reviewer-visible passive observation from real or deterministic
+  fixture signal evidence
+- expose why the observation was made and how the source can be disabled
 
 Non-goals for the next session:
 
@@ -955,24 +1247,37 @@ Non-goals for the next session:
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
-- side-project dogfood control; user controls side-project launch and M6.16
-  only consumes the resulting ledger/problem evidence
-- M7 inbound-signal work
-- broad refactors not tied to a measured implementation-lane bottleneck
-- polish not mapped to the M6.16 gate
+- broad refactors not tied to the first M7 inbound-signal proof
+- direct task/roadmap/memory mutation from inbound signals without reviewer approval
+- broad multi-source integrations before the first M7 proof source is selected
+- polish not mapped to the M7 gate
 
 ## Latest Validation
 
-Latest M6.13 source/test validation:
+Latest M6.17 source/test validation:
 
-- M6.13 deliberation preflight/budget primitive slice:
-  `uv run pytest -q tests/test_deliberation.py --no-testmon`,
-  `uv run pytest -q tests/test_deliberation.py tests/test_work_session.py -k "deliberation" --no-testmon`,
-  `uv run pytest -q tests/test_deliberation.py tests/test_work_lanes.py --no-testmon`,
-  `uv run pytest -q tests/test_work_session.py -k "deliberation or active_work_todo or lane" --no-testmon`,
-  and
-  `uv run ruff check src/mew/deliberation.py src/mew/work_session.py tests/test_deliberation.py tests/test_work_session.py`
-  passed.
+- Task `#679` lane-dispatch proposal slice:
+  `uv run python -m unittest tests.test_tasks tests.test_commands`,
+  `uv run ruff check src/mew/tasks.py src/mew/commands.py tests/test_tasks.py tests/test_commands.py`,
+  and `git diff --check` passed.
+- Task `#680` active roadmap gate slice:
+  `uv run python -m unittest tests.test_brief`,
+  `uv run ruff check src/mew/brief.py tests/test_brief.py`, and
+  `git diff --check` passed.
+- Task `#681` no-candidate next-action fallback slice:
+  `uv run python -m unittest tests.test_commands`,
+  `uv run ruff check src/mew/commands.py tests/test_commands.py`, and
+  `git diff --check` passed.
+
+Earlier M6.16 source/test validation:
+
+- Task `#678` first-edit latency budget slice:
+  `uv run pytest -q tests/test_work_session.py -k 'work_think_prompt or first_edit_latency' --no-testmon`,
+  `uv run python -m unittest tests.test_work_session`,
+  `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`,
+  and `git diff --check` passed. Codex-ultra review session
+  `019dcb9d-ddf7-7f30-8605-7b603f048ba8` reported `STATUS: pass` with
+  `NO FINDINGS`.
 - M6.13 deliberation work-loop call-boundary slice:
   `uv run pytest -q tests/test_work_deliberation_loop.py --no-testmon`,
   `uv run pytest -q tests/test_deliberation.py tests/test_work_deliberation_loop.py --no-testmon`,

@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping
 
 DEFAULT_MILESTONE_STATUS_PATH = Path("ROADMAP_STATUS.md")
 SUCCESS_CLASSES = frozenset({"clean_mew_first", "practical_mew_first"})
-DEFAULT_ATTEMPT_SECTION_HEADINGS = ("### M6.9:", "### M6.10:")
+DEFAULT_ATTEMPT_SECTION_HEADINGS = ("### M6.9:", "### M6.10:", "### M6.16:")
 
 
 @dataclass(frozen=True)
@@ -124,7 +124,37 @@ def _result_class(block: str) -> str:
         return "supervisor_owned"
     if "not mew-first" in lowered or "not autonomy credit" in lowered:
         return "supervisor_rescue"
-    if "mew-first" in lowered and "without rescue edits" in lowered:
+
+    has_mew_first = "mew-first" in lowered
+    has_no_supervisor_product_rescue = (
+        "without supervisor product-code rescue" in lowered
+        or "no supervisor product-code rescue" in lowered
+    )
+    reviewer_mediated_repair = (
+        (
+            "review found" in lowered
+            or "reviewer found" in lowered
+            or "codex-ultra review found" in lowered
+        )
+        and ("repaired" in lowered or "repair" in lowered)
+    ) or (
+        "re-review reported no findings" in lowered
+        and ("repaired" in lowered or "repair" in lowered)
+    )
+    explicit_practical_credit = (
+        "practical mew-first" in lowered
+        or "practical mew first" in lowered
+        or "practical autonomy" in lowered
+    )
+    if (
+        has_mew_first
+        and has_no_supervisor_product_rescue
+        and (reviewer_mediated_repair or explicit_practical_credit)
+    ):
+        return "practical_mew_first"
+    if has_mew_first and "without rescue edits" in lowered:
+        if reviewer_mediated_repair and explicit_practical_credit:
+            return "practical_mew_first"
         if (
             "reviewer steer" in lowered
             or "steer was needed" in lowered
@@ -136,7 +166,7 @@ def _result_class(block: str) -> str:
         return "clean_mew_first"
     if "bounded mew-first implementation evidence" in lowered:
         return "practical_mew_first"
-    if "mew-first" in lowered:
+    if has_mew_first:
         return "partial_mew_first"
     return "supervisor_owned_or_unknown"
 
@@ -247,7 +277,7 @@ def extract_mew_first_attempts(text: str, *, limit: int = 10) -> list[MewFirstAt
                     source_excerpt=_excerpt(block),
                 )
             )
-    return attempts[-limit:]
+    return sorted(attempts, key=lambda attempt: attempt.task_id, reverse=True)[:limit]
 
 
 def summarize_mew_first_calibration(

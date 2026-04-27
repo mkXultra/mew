@@ -82,3 +82,32 @@ class SignalFetchTests(unittest.TestCase):
         self.assertEqual(result["signal"]["payload"]["feed_url"], "https://example.test/feed.xml")
         self.assertEqual(result["signal"]["event_id"], 1)
         self.assertEqual(state["inbox"][0]["type"], "signal_observed")
+
+    def test_fetch_signal_source_checks_budget_before_network(self):
+        state = default_state()
+        enable_signal_source(
+            state,
+            "hn",
+            kind="rss",
+            reason="track engineering stories",
+            budget_limit=0,
+            config={"url": "https://example.test/feed.xml"},
+            current_time="2026-04-20T00:00:00Z",
+        )
+        calls = []
+
+        def fake_open(url, timeout=10):
+            calls.append((url, timeout))
+            raise AssertionError("budget-exhausted source should not be fetched")
+
+        result = fetch_signal_source(
+            state,
+            "hn",
+            opener=fake_open,
+            current_time="2026-04-20T00:01:00Z",
+        )
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason"], "budget_exhausted")
+        self.assertEqual(calls, [])
+        self.assertEqual(state["signals"]["journal"], [])

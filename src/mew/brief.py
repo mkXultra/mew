@@ -36,6 +36,62 @@ def current_project_looks_like_mew():
     )
 
 
+def _clean_roadmap_label(value):
+    return " ".join(str(value or "").replace("*", "").replace("`", "").strip().split()).rstrip(".")
+
+
+def _leading_milestone_token(value):
+    text = _clean_roadmap_label(value)
+    if not text:
+        return ""
+    first = text.split()[0].strip(",:;()[]")
+    if not first.startswith("M") or len(first) == 1 or not first[1].isdigit():
+        return ""
+    major = []
+    index = 1
+    while index < len(first) and first[index].isdigit():
+        major.append(first[index])
+        index += 1
+    minor = []
+    if index < len(first) and first[index] == ".":
+        index += 1
+    for char in first[index:]:
+        if not char.isdigit():
+            break
+        minor.append(char)
+    suffix = f".{''.join(minor)}" if minor else ""
+    return f"M{''.join(major)}{suffix}"
+
+
+def _milestone_token_from_text(value):
+    for raw_word in _clean_roadmap_label(value).split():
+        token = _leading_milestone_token(raw_word)
+        if token:
+            return token
+    return ""
+
+
+def _milestone_token_parts(token):
+    token = str(token or "")
+    if not token.startswith("M") or len(token) == 1:
+        return None
+    raw = token[1:].split(".", 1)
+    try:
+        major = int(raw[0])
+        minor = int(raw[1]) if len(raw) > 1 else 0
+        return major, minor
+    except (TypeError, ValueError):
+        return None
+
+
+def _older_milestone_token(candidate, current):
+    candidate_parts = _milestone_token_parts(candidate)
+    current_parts = _milestone_token_parts(current)
+    if candidate_parts is None or current_parts is None:
+        return False
+    return candidate_parts < current_parts
+
+
 def active_roadmap_self_improve_focus(root=None):
     root = Path.cwd() if root is None else Path(root)
     status_path = root / "ROADMAP_STATUS.md"
@@ -45,9 +101,14 @@ def active_roadmap_self_improve_focus(root=None):
         return ""
     active = ""
     for line in text.splitlines():
-        if line.startswith("Active milestone:"):
-            active = line.split(":", 1)[1].strip()
+        if line.startswith("Active work:"):
+            active = _clean_roadmap_label(line.split(":", 1)[1])
             break
+        if line.startswith("Active milestone:"):
+            active = _clean_roadmap_label(line.split(":", 1)[1])
+            break
+    if _milestone_token_from_text(active):
+        return f"Advance {active}"
     if "Milestone 3" in active:
         return "Prove M3 persistent advantage in resident reentry"
     if "Milestone 4" in active:
@@ -1308,6 +1369,17 @@ def coding_self_improve_focus_from_friction(state, kind=None):
     return roadmap_focus or "Close the remaining M2 continuous coding cockpit parity gap"
 
 
+def stale_paused_work_roadmap_focus(session, kind=None):
+    if kind != "coding" or not (session.get("stop_request") or {}):
+        return ""
+    roadmap_focus = active_roadmap_self_improve_focus()
+    current_token = _milestone_token_from_text(roadmap_focus)
+    paused_token = _leading_milestone_token(session.get("title"))
+    if roadmap_focus and _older_milestone_token(paused_token, current_token):
+        return roadmap_focus
+    return ""
+
+
 def next_move(state, kind=None):
     tasks = filter_tasks_by_kind(sorted(open_tasks(state), key=task_sort_key), kind=kind)
     action_tasks = actionable_open_tasks(tasks)
@@ -1373,6 +1445,12 @@ def next_move(state, kind=None):
         session = active_work[0]
         stop_request = session.get("stop_request") or {}
         if stop_request:
+            roadmap_focus = stale_paused_work_roadmap_focus(session, kind=kind)
+            if roadmap_focus:
+                return (
+                    "start a native self-improvement session with "
+                    f"`{mew_command('self-improve', '--start-session', '--focus', roadmap_focus)}`"
+                )
             command = session.get("resume_command") or session.get("continue_command")
             return (
                 f"leave paused work session #{session.get('id')} task #{session.get('task_id')} paused "

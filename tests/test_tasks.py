@@ -101,6 +101,43 @@ class TaskKindTests(unittest.TestCase):
         self.assertEqual(proposal["preference_signal_refs"], ["preference://small-patches"])
         self.assertTrue(proposal["approval_required"])
 
+    def test_task_selector_proposal_formats_detail_reason(self):
+        proposal = build_task_selector_proposal(
+            {"id": 10},
+            {
+                "id": 11,
+                "title": "Dispatch next selector slice",
+                "scope": {"target_paths": ["src/mew/tasks.py", "tests/test_tasks.py"]},
+            },
+            {
+                "lane-dispatch": "choose the active implementation lane",
+                "reviewer-gated": "wait for approval before switching tasks",
+                "meta-loop": "avoid recursive selector churn",
+                "expected-value": "prefer the highest bounded payoff",
+            },
+        )
+
+        self.assertEqual(
+            proposal["selector_reason"],
+            "lane-dispatch: choose the active implementation lane\n"
+            "reviewer-gated: wait for approval before switching tasks\n"
+            "meta-loop: avoid recursive selector churn\n"
+            "expected-value: prefer the highest bounded payoff",
+        )
+        self.assertTrue(proposal["approval_required"])
+        lane_dispatch = proposal["lane_dispatch"]
+        self.assertEqual(lane_dispatch["authoritative_lane"], "tiny")
+        self.assertEqual(lane_dispatch["helper_lanes"], ["deliberation", "mirror"])
+        self.assertEqual(lane_dispatch["fallback_lane"], "tiny")
+        self.assertEqual(lane_dispatch["verifier"], "uv run python -m unittest tests.test_tasks")
+        self.assertIn("reviewer approval", lane_dispatch["budget"])
+        self.assertIn("tiny is the implementation default", lane_dispatch["expected_value_rationale"])
+        self.assertEqual(
+            lane_dispatch["repair_route"],
+            "M6.14 repair episode for structural implementation-lane failures",
+        )
+        self.assertEqual(lane_dispatch["reviewer_gate"], "approval_required")
+
     def test_task_selector_proposal_blocks_governance_and_status_targets(self):
         proposal = build_task_selector_proposal(
             {"id": 10},

@@ -101,9 +101,11 @@ def dogfood_record_template() -> dict[str, Any]:
 def _coerce_int(value: Any, *, field: str) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{field} must be an integer")
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"{field} must be an integer")
     try:
         number = int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{field} must be an integer") from exc
     if number < 0:
         raise ValueError(f"{field} must be non-negative")
@@ -255,6 +257,9 @@ def summarize_side_project_dogfood(
             "failed": len(failures),
             "structural_repairs_required": sum(1 for row in rows if bool(row.field("repair_required"))),
             "rescue_edits_total": sum(_coerce_int(row.field("rescue_edits", 0), field="rescue_edits") for row in rows),
+            "codex_product_code_rescue_edits": sum(
+                _coerce_int(row.field("rescue_edits", 0), field="rescue_edits") for row in rows
+            ),
         },
         "counts": {
             "side_project": dict(Counter(row.text_field("side_project") for row in rows)),
@@ -298,6 +303,10 @@ def format_side_project_dogfood_report(summary: Mapping[str, Any]) -> str:
             f"clean_or_practical success_rate={gate.get('success_rate')} "
             f"failed={gate.get('failed')} rescue_edits_total={gate.get('rescue_edits_total')} "
             f"structural_repairs_required={gate.get('structural_repairs_required')}"
+        ),
+        (
+            "field semantics: rescue_edits is a numeric Codex product-code rescue count; "
+            "exclude operator steering, reviewer rejection, verifier follow-up, or generic repair"
         ),
         (
             "latency: "

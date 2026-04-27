@@ -154,11 +154,13 @@ from .signals import (
     disable_signal_source,
     enable_signal_source,
     find_signal_source,
+    fetch_signal_source,
     format_signal_journal,
     format_signal_sources,
     list_signal_journal,
     list_signal_sources,
     record_signal_observation,
+    select_signal_proof_source,
 )
 from .state import (
     add_attention_item,
@@ -783,6 +785,7 @@ def format_task_selector_proposal(proposal):
         "proposed_task_id",
         "proposed_task_title",
         "selector_reason",
+        "lane_dispatch",
         "approval_required",
         "memory_signal_refs",
         "failure_cluster_reason",
@@ -791,26 +794,27 @@ def format_task_selector_proposal(proposal):
         "blocked_reason",
         "governance_violation",
     ]
+    if "next_action" in proposal:
+        keys.insert(5, "next_action")
     return "\n".join(
         f"{key}: {_task_selector_display_value(proposal.get(key))}"
         for key in keys
     )
 
 
-def _task_selector_no_candidate_response(previous_task, message):
-    return {
-        "previous_task_id": previous_task.get("id"),
-        "proposed_task_id": None,
-        "proposed_task_title": "",
-        "selector_reason": message,
-        "approval_required": True,
-        "memory_signal_refs": [],
-        "failure_cluster_reason": "",
-        "preference_signal_refs": [],
-        "blocked": True,
-        "blocked_reason": message,
-        "governance_violation": False,
-    }
+def _task_selector_no_candidate_response(state, previous_task, message):
+    proposal = build_task_selector_proposal(previous_task, {}, message)
+    proposal.update(
+        {
+            "proposed_task_id": None,
+            "proposed_task_title": "",
+            "blocked": True,
+            "blocked_reason": message,
+            "governance_violation": False,
+            "next_action": next_move(state, kind="coding"),
+        }
+    )
+    return proposal
 
 
 def _next_task_selector_proposal_id(state):
@@ -1172,7 +1176,7 @@ def _build_task_selector_next_proposal(state, args):
         elif not _task_selector_candidate_is_open_coding(candidate_task):
             message = "candidate task is not a ready/todo coding task"
         if message:
-            return _task_selector_no_candidate_response(previous_task, message), 1, None
+            return _task_selector_no_candidate_response(state, previous_task, message), 1, None
 
         selector_reason = (
             f"explicit candidate task #{candidate_task.get('id')} after previous task #{previous_task.get('id')}"
@@ -1202,7 +1206,7 @@ def _build_task_selector_next_proposal(state, args):
             proposal["failure_cluster_reason"] = failure_cluster_reason
         return proposal, 0, None
 
-    return _task_selector_no_candidate_response(previous_task, "no safe selector candidate found"), 1, None
+    return _task_selector_no_candidate_response(state, previous_task, "no safe selector candidate found"), 1, None
 
 
 def cmd_task_propose_next(args):
@@ -10010,6 +10014,24 @@ def cmd_signals(args):
             print(format_signal_journal(items))
         return 0
 
+    if command == "proof-source":
+        with state_lock():
+            state = load_state()
+            result = select_signal_proof_source(state)
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif result.get("status") == "selected":
+            proof = result.get("proof") or {}
+            print(
+                "selected signal proof source "
+                f"{proof.get('source')} [{proof.get('kind')}] "
+                f"url={proof.get('url')} budget_remaining={proof.get('budget_remaining')}"
+            )
+        else:
+            print(f"mew: signal proof source blocked: {result.get('reason')}", file=sys.stderr)
+            return 1
+        return 0
+
     if command == "enable":
         try:
             config = parse_event_payload(getattr(args, "config", ""))
@@ -10049,6 +10071,26 @@ def cmd_signals(args):
             print(json.dumps({"source": source}, ensure_ascii=False, indent=2))
         else:
             print(f"disabled signal source {source['name']}")
+        return 0
+
+    if command == "fetch":
+        with state_lock():
+            state = load_state()
+            result = fetch_signal_source(state, args.source)
+            if result.get("status") == "recorded":
+                save_state(state)
+        if result.get("status") != "recorded":
+            if getattr(args, "json", False):
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(f"mew: signal blocked: {result.get('reason')}", file=sys.stderr)
+            return 1
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            signal_item = result.get("signal") or {}
+            event_text = f" event=#{signal_item.get('event_id')}" if signal_item.get("event_id") else ""
+            print(f"fetched signal #{signal_item.get('id')} source={args.source}{event_text}")
         return 0
 
     if command == "record":
@@ -11262,6 +11304,35 @@ def cmd_side_dogfood(args):
     action = getattr(args, "side_dogfood_action", None) or "report"
     if action == "template":
         print(json.dumps(dogfood_record_template(), ensure_ascii=False, indent=2))
+        return 0
+    if action == "validate":
+        source = getattr(args, "input", None)
+        if not source:
+            print("mew: side-dogfood validate requires --input", file=sys.stderr)
+            return 2
+        from .side_project_dogfood import normalize_side_project_dogfood_record
+
+        try:
+            if source == "-":
+                payload = json.load(sys.stdin)
+            else:
+                with Path(source).open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            if not isinstance(payload, dict):
+                raise ValueError("expected JSON object")
+            normalized = normalize_side_project_dogfood_record(payload)
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            print(f"mew: side-dogfood validate failed: {exc}", file=sys.stderr)
+            return 1
+        result = {
+            "kind": "side_project_dogfood_validation",
+            "valid": True,
+            "record": normalized,
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print("side-project dogfood record is valid")
         return 0
     if action == "append":
         source = getattr(args, "input", None)

@@ -359,7 +359,7 @@ def _compact_tool_result(
             "stderr": clip_output(result.get("stderr") or "", result_text_limit),
         }
     if tool in WRITE_WORK_TOOLS:
-        return {
+        compact = {
             "operation": result.get("operation"),
             "path": result.get("path"),
             "changed": result.get("changed"),
@@ -367,9 +367,13 @@ def _compact_tool_result(
             "written": result.get("written"),
             "rolled_back": result.get("rolled_back"),
             "verification_exit_code": result.get("verification_exit_code"),
+            "batch_rollback_reason": result.get("batch_rollback_reason"),
             "rollback_error": result.get("rollback_error"),
-            "diff": clip_output(result.get("diff") or "", result_text_limit),
+            "diff_omitted": result.get("diff_omitted"),
         }
+        if not result.get("diff_omitted"):
+            compact["diff"] = clip_output(result.get("diff") or "", result_text_limit)
+        return compact
     return {"raw": _json_clip(result)}
 
 
@@ -381,6 +385,42 @@ def _compact_parameters(parameters, *, text_limit=1000):
         else:
             compact[key] = value
     return compact
+
+
+WRITE_BODY_PARAMETER_KEYS = {"old", "new", "content", "edits"}
+
+
+def _write_call_body_should_be_omitted(call):
+    if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("rolled_back"):
+        return True
+    return str(call.get("approval_status") or "") == "rejected"
+
+
+def _compact_resolved_write_parameters(parameters, *, text_limit=1000):
+    compact = {}
+    omitted = []
+    for key, value in dict(parameters or {}).items():
+        if key in WRITE_BODY_PARAMETER_KEYS:
+            omitted.append(key)
+            continue
+        if isinstance(value, str):
+            compact[key] = clip_output(value, text_limit)
+        else:
+            compact[key] = value
+    if omitted:
+        compact["omitted_write_body_fields"] = sorted(omitted)
+    return compact
+
+
+def _omit_resolved_write_result_body(result):
+    result = dict(result or {})
+    if result.get("diff"):
+        result.pop("diff", None)
+        result["diff_omitted"] = True
+    return result
 
 
 def _reasoning_value_text(value):
@@ -440,20 +480,32 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
         WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT
     )
     list_item_limit = WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT if compact_prompt else WORK_LIST_CONTEXT_ITEM_LIMIT
+    omit_write_body = _write_call_body_should_be_omitted(call)
+    result_for_prompt = call.get("result") or {}
+    if omit_write_body:
+        result_for_prompt = _omit_resolved_write_result_body(result_for_prompt)
     item = {
         "id": call.get("id"),
         "tool": tool,
         "status": call.get("status"),
-        "parameters": _compact_parameters(
-            call.get("parameters") or {},
-            text_limit=400 if compact_prompt else 1000,
+        "parameters": (
+            _compact_resolved_write_parameters(
+                call.get("parameters") or {},
+                text_limit=400 if compact_prompt else 1000,
+            )
+            if omit_write_body
+            else _compact_parameters(
+                call.get("parameters") or {},
+                text_limit=400 if compact_prompt else 1000,
+            )
         ),
         "summary": clip_output(call.get("summary") or "", result_text_limit),
         "error": clip_output(call.get("error") or "", result_text_limit),
         "approval_status": call.get("approval_status") or "",
+        "rejection_reason": clip_output(call.get("rejection_reason") or "", result_text_limit),
         "result": _compact_tool_result(
             tool,
-            call.get("result") or {},
+            result_for_prompt,
             read_file_text_limit=read_file_text_limit,
             result_text_limit=result_text_limit,
             list_item_text_limit=list_item_text_limit,
@@ -462,6 +514,8 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
         "started_at": call.get("started_at"),
         "finished_at": call.get("finished_at"),
     }
+    if omit_write_body:
+        item["resolved_write_body_omitted"] = True
     if compact_prompt:
         item["prompt_context_compacted"] = True
     if call.get("repeat_guard"):
@@ -1105,6 +1159,7 @@ def build_work_deliberation_prompt(context, decision):
         "recent_decisions": list((resume or {}).get("recent_decisions") or [])[-3:],
         "working_memory": (resume or {}).get("working_memory") or {},
         "failed_patch_repair": (resume or {}).get("failed_patch_repair") or {},
+        "retry_context": (resume or {}).get("retry_context") or {},
     }
     return (
         "You are the read-only deliberation lane for mew work mode.\n"
@@ -1556,6 +1611,7 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         "recurring_failures",
         "repair_anchor_observations",
         "suggested_safe_reobserve",
+        "retry_context",
         "world_state",
         "files_touched",
         "queued_followups",
@@ -5789,6 +5845,9 @@ def build_write_ready_work_model_context(context):
     }
     if failed_patch_repair:
         result["failed_patch_repair"] = failed_patch_repair
+    retry_context = resume.get("retry_context") if isinstance(resume.get("retry_context"), dict) else {}
+    if retry_context:
+        result["retry_context"] = retry_context
     return result
 
 
@@ -5909,6 +5968,9 @@ def build_write_ready_tiny_draft_model_context(context):
         )
     if failed_patch_repair:
         result["failed_patch_repair"] = failed_patch_repair
+    retry_context = resume.get("retry_context") if isinstance(resume.get("retry_context"), dict) else {}
+    if retry_context:
+        result["retry_context"] = retry_context
     return result
 
 
@@ -5982,6 +6044,7 @@ def build_work_think_prompt(context):
         "If work_session.resume.target_path_cached_window_observations already names a recent read_file window for that target_path, prefer refreshing that direct cached window before repeating same-surface search_text to rediscover the file. "
         "If work_session.resume.plan_item_observations lists a first remaining plan item paired to a target path or cached window, prefer that resume-side observation before broader search_text or rediscovery, and prune completed working_memory.plan_items as the task advances. "
         "If work_session.resume.plan_item_observations[0].edit_ready is true and cached_windows already cover the current paired target paths, prefer one paired dry-run edit over another same-path reread on those cached paths. "
+        "To reduce first-edit-latency, do not spend another turn on same-surface rediscovery when the first-edit old text is already available in cached windows for the scoped source/test slice. "
         "Drop a working_memory.target_paths entry once it is no longer needed for the next step instead of carrying stale paths forward. "
         "If the latest search_text already returned the same path/query with the line anchor you need, do not rerun that same search_text; switch to a narrow read_file on the anchored window instead. "
         "If work_session.resume.low_yield_observations lists repeated zero-match searches, do not keep searching that same path/pattern; use the suggested_next to switch to a targeted read, a single broader path, an edit from known context, or finish with a concrete replan. "
@@ -5989,6 +6052,7 @@ def build_work_think_prompt(context):
         "If work_session.resume.adjacent_read_observations shows overlapping or near-adjacent read_file windows on the same path, use its suggested_next merged read instead of inching through more small reads. "
         "If work_session.resume.repair_anchor_observations lists source/test windows from a failed batch or repair loop, prefer those exact anchors before fresh same-surface search_text or broader rereads. "
         "If work_session.resume.failed_patch_repair is present, the previous write proposal was on-task but failed on exact old text; repair that same proposal using current anchors, preserve its must_preserve_terms/proposal_snippets, and do not substitute a nearby patch. "
+        "If work_session.resume.retry_context is present, treat it as the authoritative compact state after a rejected or rolled-back write: use its latest failure/status, target_windows, and pending_constraints, and do not reuse raw patch bodies from rejected or rolled-back tool_calls. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
@@ -6000,7 +6064,8 @@ def build_work_think_prompt(context):
         "If work_session.resume.suggested_verify_command.command is present and no verify_command is configured, prefer that suggested command before inventing a broader verifier. "
         "If verification_confidence.status is narrow after source edits and suggested_verify_command.command exists, prefer run_tests with that broader suggested verifier before finish unless guidance explicitly says the task is narrow-only. "
         "If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user. "
-        "Do not invent test-only assertions for behavior you have not observed in source, command output, or current tests; inspect the producer first or make the paired source change in the same plan. "
+        "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure. "
+        "Do not invent test-only assertions for behavior you have not observed in source, command output, or current tests; inspect the producer first or make the paired source change in the same plan. For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone. "
         "If investigation shows the task premise is false, already covered, or intentionally handled by existing tests, do not force a source edit; prefer run_tests to validate the conclusion, then finish with a no-change summary and task_done=true only if the investigation task is complete. "
         "For unittest verification, prefer a module-level command unless you have confirmed the exact class and method name in the current file or just created that method in the applied write. "
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
@@ -6035,6 +6100,9 @@ def build_work_write_ready_think_prompt(context):
         "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
         "If a required term cannot naturally appear in the scoped source/test edit, return wait with blocker task_goal_term_missing instead of inventing schema or switching to a nearby helper.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
+        "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
+        "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
+        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone.\n"
         "Prefer one scoped dry-run batch under active_work_todo.source.target_paths now. Prefer one paired dry-run batch for mew core target paths: paired tests/** plus src/mew/**. For non-core allowed roots, stay inside the declared product root and include local tests when they are in scope.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
         "Do not add read, search, glob, git, shell, or verification actions on this fast path.\n"
@@ -6061,6 +6129,9 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "Never persist a key named required_terms unless the task explicitly asks to add a required_terms API.\n"
         "If a required term cannot naturally appear in the scoped source/test edit, return patch_blocker with code task_goal_term_missing instead of inventing schema or proposing a nearby patch.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
+        "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
+        "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
+        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone.\n"
         "Stay inside allowed_roots.write and do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
         "For mew core target paths, keep the patch paired across src/mew/** and tests/**. For non-core target paths, stay inside active_work_todo.source.target_paths and allowed_roots.write. If one file needs multiple hunks, express them in one files[i].edits array.\n"

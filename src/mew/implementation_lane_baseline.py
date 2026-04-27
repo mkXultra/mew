@@ -52,12 +52,15 @@ def _dedupe_preserving_order(values: Any) -> list[Any]:
 
 def _first_edit_latency(observation_metrics: Mapping[str, Any]) -> dict[str, Any]:
     self_hosting = _mapping(observation_metrics.get("self_hosting"))
+    diagnostics = _mapping(observation_metrics.get("diagnostics"))
     first_edit = _mapping(self_hosting.get("first_edit_proposal_seconds"))
+    samples = diagnostics.get("slow_first_edit_proposals")
     return {
         "count": _int(first_edit.get("count")),
         "median": _number(first_edit.get("median")),
         "p95": _number(first_edit.get("p95")),
         "max": _number(first_edit.get("max")),
+        "samples": samples if isinstance(samples, list) else [],
     }
 
 
@@ -134,7 +137,7 @@ def summarize_implementation_lane_baseline_from_summaries(
     side_gate = _mapping(side_project_summary.get("gate"))
     side_rows_total = _int(side_project_summary.get("rows_total"))
     side_success = _int(side_gate.get("clean_or_practical"))
-    side_rescue_edits = _int(side_gate.get("rescue_edits_total"))
+    side_rescue_edits = _int(side_gate.get("codex_product_code_rescue_edits", side_gate.get("rescue_edits_total")))
 
     summary: dict[str, Any] = {
         "kind": "implementation_lane_baseline",
@@ -175,6 +178,7 @@ def summarize_implementation_lane_baseline_from_summaries(
             "failed": _int(side_gate.get("failed")),
             "structural_repairs_required": _int(side_gate.get("structural_repairs_required")),
             "rescue_edits_total": side_rescue_edits,
+            "codex_product_code_rescue_edits": side_rescue_edits,
             "rescue_rate": _rate(side_rescue_edits, side_rows_total),
         },
     }
@@ -257,7 +261,7 @@ def format_implementation_lane_baseline_report(summary: Mapping[str, Any]) -> st
             f"success_rate={side_project.get('success_rate')} "
             f"failed={side_project.get('failed')} "
             f"structural_repairs={side_project.get('structural_repairs_required')} "
-            f"rescue_edits={side_project.get('rescue_edits_total')} "
+            f"codex_product_code_rescue_edits={side_project.get('rescue_edits_total')} "
             f"rescue_rate={side_project.get('rescue_rate')}"
         ),
         (
@@ -266,4 +270,21 @@ def format_implementation_lane_baseline_report(summary: Mapping[str, Any]) -> st
             f"reason={recommendation.get('reason')}"
         ),
     ]
+    for sample in first_edit.get("samples") or []:
+        if not isinstance(sample, Mapping):
+            continue
+        lines.append(
+            "  slow_first_edit_proposal: "
+            f"session={sample.get('session_id')} "
+            f"task={sample.get('task_id')} "
+            f"status={sample.get('task_status')} "
+            f"seconds={sample.get('first_edit_proposal_seconds')} "
+            f"first_write=#{sample.get('first_write_tool_call_id')} "
+            f"tool={sample.get('first_write_tool')} "
+            f"path={sample.get('first_write_path')} "
+            f"started_at={sample.get('started_at')}"
+        )
+        first_model_summary = sample.get("first_model_summary")
+        if first_model_summary:
+            lines.append(f"    first_model_summary: {first_model_summary}")
     return "\n".join(lines)

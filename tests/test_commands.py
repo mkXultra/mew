@@ -177,6 +177,12 @@ class CommandTests(unittest.TestCase):
         self.assertIn(f"previous_task_id: {previous['id']}", output)
         self.assertIn(f"proposed_task_id: {candidate['id']}", output)
         self.assertIn("proposed_task_title: Candidate", output)
+        self.assertIn("lane_dispatch:", output)
+        self.assertIn("authoritative_lane", output)
+        self.assertIn("reviewer-gated", output)
+        self.assertIn("meta-loop", output)
+        self.assertIn("expected-value", output)
+        self.assertNotIn("next_action:", output)
         self.assertIn("approval_required: true", output)
         self.assertIn("blocked: false", output)
 
@@ -294,6 +300,8 @@ class CommandTests(unittest.TestCase):
         self.assertNotEqual(proposal["proposed_task_id"], safe_candidate["id"])
         self.assertTrue(proposal["blocked"])
         self.assertTrue(proposal["governance_violation"])
+        self.assertIn("repair_route", proposal["lane_dispatch"])
+        self.assertIn("M6.14 repair episode", proposal["lane_dispatch"]["repair_route"])
         records = state.get("selector_proposals") or []
         self.assertEqual(len(records), 1)
         record = records[0]
@@ -303,6 +311,41 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(record["status"], "blocked")
         self.assertEqual(state.get("agent_runs") or [], [])
         self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready", "ready"])
+
+    def test_task_propose_next_missing_candidate_keeps_lane_dispatch_schema(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]), 0)
+                previous = json.loads(stdout.getvalue())["task"]
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "task",
+                            "propose-next",
+                            str(previous["id"]),
+                            "--candidate-task-id",
+                            "999",
+                            "--record",
+                            "--json",
+                        ]
+                    )
+                state = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        proposal = json.loads(stdout.getvalue())
+        self.assertTrue(proposal["blocked"])
+        self.assertEqual(proposal["blocked_reason"], "candidate task not found: 999")
+        self.assertEqual(proposal["lane_dispatch"]["fallback_lane"], "tiny")
+        self.assertIn("M6.14 repair episode", proposal["lane_dispatch"]["repair_route"])
+        records = state.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["proposal"]["lane_dispatch"], proposal["lane_dispatch"])
 
     def test_task_propose_next_record_persists_proposed_selector_record(self):
         old_cwd = os.getcwd()
@@ -825,8 +868,56 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(record["proposal"]["blocked"])
         self.assertTrue(record["proposal"]["governance_violation"])
         self.assertIn("ROADMAP_STATUS.md", record["proposal"]["blocked_reason"])
+        self.assertIn("repair_route", record["proposal"]["lane_dispatch"])
+        self.assertIn("M6.14 repair episode", record["proposal"]["lane_dispatch"]["repair_route"])
         self.assertEqual(state.get("agent_runs") or [], [])
         self.assertEqual([task["status"] for task in state["tasks"]], ["ready", "ready"])
+
+    def test_task_propose_next_no_candidate_exposes_next_action_json_record_and_human(self):
+        old_cwd = os.getcwd()
+        expected_next_action = "start a native self-improvement session for M6.17"
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["task", "add", "Previous", "--kind", "coding", "--ready", "--json"]),
+                        0,
+                    )
+                previous = json.loads(stdout.getvalue())["task"]
+
+                with patch.object(commands_module, "next_move", return_value=expected_next_action) as next_move:
+                    with redirect_stdout(StringIO()) as stdout:
+                        json_code = main(["task", "propose-next", str(previous["id"]), "--record", "--json"])
+                    json_output = stdout.getvalue()
+                    state_after_record = commands_module.load_state()
+
+                    with redirect_stdout(StringIO()) as stdout:
+                        human_code = main(["task", "propose-next", str(previous["id"])])
+                    human_output = stdout.getvalue()
+                    state_after_human = commands_module.load_state()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(json_code, 1)
+        proposal = json.loads(json_output)
+        self.assertTrue(proposal["blocked"])
+        self.assertIsNone(proposal["proposed_task_id"])
+        self.assertEqual(proposal["blocked_reason"], "no safe selector candidate found")
+        self.assertIn("lane_dispatch", proposal)
+        self.assertTrue(proposal["approval_required"])
+        self.assertEqual(proposal["next_action"], expected_next_action)
+        records = state_after_record.get("selector_proposals") or []
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["status"], "blocked")
+        self.assertEqual(records[0]["proposal"]["next_action"], expected_next_action)
+        self.assertEqual(human_code, 1)
+        self.assertIn(f"next_action: {expected_next_action}", human_output)
+        self.assertEqual(state_after_human, state_after_record)
+        self.assertEqual(state_after_record.get("agent_runs") or [], [])
+        self.assertEqual([task["status"] for task in state_after_record["tasks"]], ["ready"])
+        self.assertEqual(next_move.call_count, 2)
+        self.assertTrue(all(call.kwargs == {"kind": "coding"} for call in next_move.call_args_list))
 
     def test_task_propose_next_record_only_mutates_selector_records(self):
         old_cwd = os.getcwd()

@@ -9,6 +9,7 @@ WORK_WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 DEFAULT_SAMPLE_LIMIT = 3
 SAMPLE_TEXT_MAX_CHARS = 240
 SLOW_FIRST_TOOL_SECONDS = 30.0
+SLOW_FIRST_EDIT_PROPOSAL_SECONDS = 30.0
 SLOW_MODEL_RESUME_SECONDS = 30.0
 HIGH_IDLE_RATIO = 0.8
 UPDATED_AT_ACTIVITY_GRACE_SECONDS = 300.0
@@ -167,6 +168,40 @@ def _first_edit_proposal_seconds(session, model_turns, tool_calls):
     if not starts:
         return None
     return _duration_seconds(baseline, min(starts))
+
+
+def _first_edit_proposal_sample(state, session, model_turns, tool_calls):
+    started_turns = [turn for turn in model_turns or [] if isinstance(turn, dict) and turn.get("started_at")]
+    baseline = min((turn.get("started_at") for turn in started_turns), default=session.get("created_at"))
+    candidates = [
+        call
+        for call in tool_calls or []
+        if isinstance(call, dict)
+        and call.get("tool") in WORK_WRITE_TOOLS
+        and call.get("started_at")
+        and (call.get("result") or {}).get("dry_run")
+        and (call.get("result") or {}).get("changed")
+    ]
+    if not candidates:
+        return None
+    first_call = min(candidates, key=lambda call: call.get("started_at") or "")
+    seconds = _duration_seconds(baseline, first_call.get("started_at"))
+    if seconds is None or seconds <= SLOW_FIRST_EDIT_PROPOSAL_SECONDS:
+        return None
+    first_model_turn = min(started_turns, key=lambda turn: turn.get("started_at")) if started_turns else {}
+    sample = {
+        "session_id": session.get("id"),
+        "session_status": session.get("status") or "",
+        "first_edit_proposal_seconds": _round(seconds),
+        "first_write_tool_call_id": first_call.get("id"),
+        "first_write_tool": first_call.get("tool") or "",
+        "first_write_path": _call_path(first_call),
+        "started_at": first_call.get("started_at") or "",
+        "first_model_turn_id": first_model_turn.get("id"),
+        "first_model_summary": _clip_text(first_model_turn.get("summary")),
+    }
+    sample.update(_sample_task(state, session.get("task_id")))
+    return sample
 
 
 def _model_metric(turn, *keys):
@@ -816,6 +851,7 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT, successf
         "retired_verification_failures": [],
         "retired_approval_friction": [],
         "slow_first_tools": [],
+        "slow_first_edit_proposals": [],
         "slow_model_resumes": [],
         "approval_bound_waits": [],
         "high_idle_sessions": [],
@@ -825,6 +861,7 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT, successf
 
     slow_model_resumes = []
     slow_first_tools = []
+    slow_first_edit_proposals = []
     approval_bound_waits = []
     high_idle_sessions = []
     successful_verifications = successful_verifications or []
@@ -834,6 +871,9 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT, successf
         first_tool_sample = _first_tool_start_sample(state, session, model_turns, tool_calls)
         if first_tool_sample:
             slow_first_tools.append(first_tool_sample)
+        first_edit_sample = _first_edit_proposal_sample(state, session, model_turns, tool_calls)
+        if first_edit_sample:
+            slow_first_edit_proposals.append(first_edit_sample)
         slow_model_resumes.extend(
             _tool_to_next_model_wait_samples(
                 state,
@@ -888,6 +928,11 @@ def _diagnostic_samples(state, sessions, *, limit=DEFAULT_SAMPLE_LIMIT, successf
     samples["slow_first_tools"] = sorted(
         slow_first_tools,
         key=lambda item: item.get("first_tool_start_seconds") or 0,
+        reverse=True,
+    )[:limit]
+    samples["slow_first_edit_proposals"] = sorted(
+        slow_first_edit_proposals,
+        key=lambda item: item.get("first_edit_proposal_seconds") or 0,
         reverse=True,
     )[:limit]
     samples["slow_model_resumes"] = sorted(
