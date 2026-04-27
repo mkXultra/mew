@@ -80,8 +80,9 @@ Current M6.20 target:
 
 - baseline report is now recorded in
   `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
-- instruction-consuming `mew-smoke` entrypoint is implemented locally; next
-  evidence is the bounded Harbor rerun
+- instruction-consuming `mew-smoke` entrypoint and stdout report fallback are
+  implemented; rerun evidence is recorded in
+  `docs/M6_20_INSTRUCTION_RERUN_2026-04-27.md`
 - classify at least one scored failure cohort through the M6.18 taxonomy
 - write an explicit small score target before prompt/tool optimization
 - choose one implementation-lane or task-spec repair from benchmark evidence
@@ -90,7 +91,7 @@ Current M6.20 target:
 
 Current M6.20 chain:
 
-`M6.20 -> baseline report done -> instruction-consuming rerun -> failure cohort -> bounded repair rerun`
+`M6.20 -> baseline report done -> instruction-consuming rerun done -> report-capture repair done -> real implementation attempt/failure cohort -> bounded repair rerun`
 
 M7 pending evidence preserved:
 
@@ -1255,14 +1256,15 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.20 -> baseline report done -> instruction-consuming rerun -> failure cohort -> bounded repair rerun`
+`M6.20 -> baseline report done -> instruction-consuming rerun done -> report-capture repair done -> real implementation attempt/failure cohort -> bounded repair rerun`
 
 Acceptable near-term work:
 
-- run the bounded instruction-consuming smoke rerun against
-  `terminal-bench/make-mips-interpreter`
-- classify the resulting `make-mips-interpreter` failure shape through M6.18
-  with cited Harbor evidence
+- run a real implementation-lane attempt against the bounded
+  `terminal-bench/make-mips-interpreter` slice, now that instruction ingestion
+  and host report capture are proven
+- classify the resulting implementation failure shape through M6.18 with cited
+  Harbor evidence
 - implement only the smallest repair needed to make the next rerun more
   informative
 
@@ -1284,6 +1286,29 @@ Non-goals for the next session:
 
 Latest roadmap/status validation:
 
+- M6.20 task `#694` repaired Harbor report capture after task `#693` proved
+  instruction ingestion but exposed missing host-side report metadata. Direct
+  supervisor implementation was used by user decision because this is
+  Terminal-Bench harness substrate, not the mew-first autonomy proof target.
+  New report:
+  `docs/M6_20_INSTRUCTION_RERUN_2026-04-27.md`. Validation passed:
+  `uv run pytest -q tests/test_terminal_bench_smoke.py tests/test_harbor_terminal_bench_agent.py --no-testmon`
+  (`9 passed`),
+  `uv run ruff check src/mew/terminal_bench_smoke.py tests/test_terminal_bench_smoke.py .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  `uv run mew-smoke --instruction 'diagnostic instruction' --report /tmp/mew-smoke-report.json --artifacts /tmp/mew-smoke-artifacts`,
+  `git diff --check`, and a bounded Harbor rerun:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-stdout-report-fallback/result.json`.
+  The rerun has `n_errors=0`, mean score `0.0`, and host-side
+  `mew-report.json` / `summary.json` with recovered report fields. The score
+  remains expectedly zero because `mew-smoke` is capture-only; next M6.20 value
+  is a real implementation-lane attempt or task-spec repair, not more smoke
+  wrapper plumbing.
+- M6.20 task `#693` ran the first instruction-consuming Harbor rerun:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-instruction-entrypoint/result.json`.
+  It had one trial, no Harbor exceptions, mean score `0.0`, and a command
+  transcript proving the full `make-mips-interpreter` instruction reached
+  `mew-smoke`. It also exposed that `mew-report.json` was not visible to the
+  host artifact directory, which task `#694` repaired.
 - M6.20 task `#692` added the installed `mew-smoke` entrypoint for
   instruction-consuming Terminal-Bench smoke runs. It accepts `--instruction`,
   `--report`, and `--artifacts`, records instruction/report JSON, registers the

@@ -234,6 +234,40 @@ def test_missing_optional_metadata_is_unavailable_and_context_dict_supported(tmp
     assert context["mew_terminal_bench_summary"] == summary
 
 
+def test_stdout_report_fallback_writes_report_and_context_summary(tmp_path):
+    module = load_agent_module()
+    stdout_report = {
+        "status": "smoke-complete",
+        "summary": "stdout recovered summary",
+        "verification": {
+            "passed": None,
+            "command": "mew-smoke",
+            "reason": "Terminal-Bench verifier runs outside mew-smoke",
+        },
+    }
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew-smoke {instruction_shell}",
+        artifact_root=tmp_path,
+        timeout_seconds=5,
+    )
+    environment = FakeEnvironment((0, json.dumps(stdout_report), "", False))
+    context = {"task_id": "stdout-task"}
+
+    stdout = asyncio.run(agent.run("instruction", environment, context))
+
+    task_dir = tmp_path / "stdout-task"
+    report = json.loads((task_dir / "mew-report.json").read_text(encoding="utf-8"))
+    summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert stdout == json.dumps(stdout_report)
+    assert report == stdout_report
+    assert summary["work_session_or_report_summary"] == "stdout recovered summary"
+    assert summary["verifier_result"] == stdout_report["verification"]
+    assert summary["timeout_status"] == {"timed_out": False, "timeout_seconds": 5}
+    assert context["mew_terminal_bench_artifact_dir"] == str(task_dir)
+    assert context["mew_terminal_bench_summary"] == summary
+
+
 def test_exec_as_agent_uses_harbor_timeout_sec_keyword(tmp_path, monkeypatch):
     module = load_agent_module()
     calls = []

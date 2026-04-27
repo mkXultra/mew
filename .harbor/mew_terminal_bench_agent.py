@@ -174,7 +174,12 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             return None
 
         transcript = self._read_json(task_dir / "command-transcript.json")
-        report = self._read_json(task_dir / "mew-report.json")
+        report_path = task_dir / "mew-report.json"
+        report = self._read_json(report_path)
+        if not report:
+            report = self._report_from_stdout(transcript)
+            if report:
+                self._write_json(report_path, report)
         summary = {
             "task_id": self._context_get(context, "task_id"),
             "artifact_dir": str(task_dir),
@@ -227,6 +232,30 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         if not path.exists():
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _report_from_stdout(transcript: dict[str, Any]) -> dict[str, Any]:
+        stdout = transcript.get("stdout", "")
+        if not isinstance(stdout, str):
+            return {}
+        stdout = stdout.strip()
+        if not stdout or stdout == "None":
+            return {}
+
+        candidates = [stdout]
+        candidates.extend(line.strip() for line in reversed(stdout.splitlines()) if line.strip())
+        seen = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return {}
 
     @staticmethod
     def _context_get(context: Any, name: str, default: Any = None) -> Any:

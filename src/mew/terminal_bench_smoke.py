@@ -42,8 +42,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "instruction": args.instruction,
         "artifacts": str(artifact_dir),
         "instruction_path": str(instruction_path),
+        "summary": "mew-smoke completed instruction capture",
+        "verification": {
+            "passed": None,
+            "command": "mew-smoke",
+            "reason": "Terminal-Bench verifier runs outside mew-smoke",
+        },
     }
     _write_json(report_path, report_payload)
+    print(json.dumps(report_payload, sort_keys=True))
     return 0
 
 

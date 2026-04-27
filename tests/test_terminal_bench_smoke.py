@@ -5,7 +5,7 @@ import json
 from mew.terminal_bench_smoke import main
 
 
-def test_main_records_instruction_report_and_artifact_json(tmp_path):
+def test_main_records_instruction_report_and_artifact_json(tmp_path, capsys):
     report_path = tmp_path / "nested" / "mew-report.json"
     artifact_dir = tmp_path / "artifacts"
 
@@ -23,15 +23,24 @@ def test_main_records_instruction_report_and_artifact_json(tmp_path):
     assert exit_code == 0
     instruction = json.loads((artifact_dir / "instruction.json").read_text(encoding="utf-8"))
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    stdout_report = json.loads(capsys.readouterr().out)
 
     assert instruction["instruction"] == "solve this Terminal-Bench task"
     assert isinstance(instruction["recorded_at"], str)
-    assert report == {
+    expected_report = {
         "artifacts": str(artifact_dir),
         "instruction": "solve this Terminal-Bench task",
         "instruction_path": str(artifact_dir / "instruction.json"),
         "status": "smoke-complete",
+        "summary": "mew-smoke completed instruction capture",
+        "verification": {
+            "passed": None,
+            "command": "mew-smoke",
+            "reason": "Terminal-Bench verifier runs outside mew-smoke",
+        },
     }
+    assert report == expected_report
+    assert stdout_report == expected_report
 
 
 def test_main_creates_missing_report_parent_and_artifacts_dir(tmp_path):
