@@ -163,9 +163,10 @@ M6.24 Batch 1:
 - measured so far:
   - `build-cython-ext`: latest 0/5, best observed 1/5, Codex target 5/5.
   - `fix-git`: 5/5, matched Codex target 5/5, no Harbor errors.
-  - `kv-store-grpc`: 2/5, below Codex target 4/5, no Harbor errors.
-  - measured latest task total: 7/15 against frozen Codex target 14/15.
-  - best observed measured total: 8/15 if `build-cython-ext` uses its best
+  - `kv-store-grpc`: latest 5/5 after generic exact-schema repair, above Codex
+    target 4/5; previous baseline was 2/5.
+  - measured latest task total: 10/15 against frozen Codex target 14/15.
+  - best observed measured total: 11/15 if `build-cython-ext` uses its best
     observed 1/5 rerun.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
@@ -212,14 +213,20 @@ M6.24 Batch 1:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-fix-git-5attempts-20260428-0353/result.json`.
   This suggests the `build-cython-ext` timeout wall is task-shape-specific, not
   a universal Harbor/mew execution failure.
-- current repair candidate:
+- completed eighth repair:
   `kv-store-grpc` scored 2/5 against Codex target 4/5 in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-kv-store-grpc-5attempts-20260428-0359/result.json`.
   The dominant failure is `schema_field_name_substitution_false_green`: failed
   trials implemented `SetValRequest.val` even though the task specified request
   field `value`, while response fields used `val`. The generic repair is exact
-  contract-name preservation in implementation prompts and self-verifiers, not
-  a benchmark-specific gRPC solver.
+  contract-name preservation in implementation prompts and self-verifiers.
+  Commit `098d1e9` implemented that prompt repair and reran the task at 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-kv-store-grpc-5attempts-schema-contract-20260428-0410/result.json`.
+- current route:
+  continue broad Batch 1 measurement with the next unmeasured manifest task.
+  Do not revisit `build-cython-ext` until timeout partial-report observability
+  is selected as the active repair or another task confirms the same
+  timeout-dominated shape.
 
 Drift guard:
 
