@@ -161,9 +161,9 @@ M6.24 Batch 1:
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far: `build-cython-ext` remains 0/5 against Codex target 5/5
-  across the initial run and four reruns. The latest rerun is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-stale-edit-20260428-0208/result.json`
-  with Harbor errors 0.
+  across the initial run and five reruns. The latest rerun is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-batch-git-status-20260428-0234/result.json`
+  with two `AgentTimeoutError` exceptions.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
   read-only batches continue after missing paths under allowed write roots.
@@ -181,11 +181,13 @@ M6.24 Batch 1:
 - completed fourth repair:
   `git_status_not_repo_terminal_tool_failed`; commits `1ed31c7` and `fa82204`
   made unavailable git status recoverable both as a top-level tool and inside
-  read-only batches. The observed M6.24 failure was the batch variant.
-- current next action:
-  rerun `build-cython-ext` from current head with generic `--allow-verify`,
-  then classify as improved, unchanged, or regressed before running more Batch
-  1 tasks.
+  read-only batches. Commit `184ee1f` recorded the repair path. Score stayed
+  0/5, but the terminal git-status boundary did not recur in the rerun.
+- current repair candidate:
+  `run_tests_failure_terminal_tool_failed`; direct `run_tests` failures should
+  become recoverable verifier observations while budget remains. The latest
+  rerun has near-solution trials that reached the README snippet with compiled
+  extensions and NumPy `2.3.0`, then stopped on `No module named pytest`.
 
 Drift guard:
 
