@@ -161,8 +161,8 @@ M6.24 Batch 1:
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far:
-  - `build-cython-ext`: latest 0/5 after max-wall partial-report
-    observability, best observed 1/5, Codex target 5/5.
+  - `build-cython-ext`: latest 0/5 after the same-file batch-blocker
+    continuation repair, best observed 1/5, Codex target 5/5.
   - `chess-best-move`: latest 5/5 after all-valid answer gating plus
     acceptance-finish continuation, above Codex target 3/5; previous baseline
     and answer-artifact prompt repair were both 0/5, and post-`read_image`
@@ -376,13 +376,29 @@ M6.24 Batch 1:
   unchanged, but attempts used more wall time and hidden verifier tails
   improved to 8/11 or 9/11 pass patterns in most trials.
 - current route:
-  commit the generic repair for duplicate same-path write-batch normalization
-  waits, then rerun `build-cython-ext`. The latest rerun
+  rerun `build-cython-ext` after committing the generic duplicate same-path
+  write-batch wait repair, then pivot unless the result exposes a small generic
+  repair. The sibling-search rerun
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-sibling-search-20260428-0818/result.json`
   improved from 0/5 to 1/5 with Harbor errors 0 and pass@5 1.000. Remaining
   failures show mew often reaches README-smoke or near-repository-test-tail
   success, but one run stopped on a repairable "collapse same-file hunks"
   write-batch wait instead of continuing to a corrected batch.
+- completed twentieth repair:
+  commit `11f521f` converted the specific duplicate same-path write-batch
+  normalization wait into recoverable continuity, without converting broad
+  write-root blockers. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-same-file-batch-wait-20260428-0841/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 13m 53s. The targeted same-file
+  wait did not recur, but all trials stopped through `wall_timeout` with only
+  a few seconds available for the last model call and hidden verifier tails
+  still concentrated around repository tests and NumPy alias compatibility.
+- current route:
+  stop spending `build-cython-ext`-only repair cycles unless a small generic
+  repair is obvious or another task confirms the same shape. Continue M6.24 by
+  selecting the next reusable Batch 1 target-deficit repair, likely a
+  data/numeric artifact-quality verifier scaffold for `raman-fitting` or the
+  next broad-parity candidate, not a benchmark-specific Cython closeout.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_work_session.py -k verifier_failure_repair_agenda -q`,
   `uv run pytest --no-testmon tests/test_work_session.py -q`, and
@@ -398,6 +414,9 @@ M6.24 Batch 1:
   session `019dd14c-c236-7d63-9705-44595068365a` reported `STATUS: pass`
   after narrowing the marker to the specific `collapse same-file` reason and
   adding a negative write-root wait test.
+- latest proof validation:
+  the post-`11f521f` Harbor rerun completed with errors 0 but scored 0/5, so
+  the repair removed its targeted blocker without closing the Batch 1 deficit.
 
 Drift guard:
 
