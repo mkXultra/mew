@@ -18,6 +18,8 @@ from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
     broad_read_guard_replacement_parameters,
+    detect_default_verify_command,
+    detect_instruction_verify_command,
     format_work_cli_controls,
     format_work_cockpit_controls,
     format_work_live_step_result,
@@ -4696,6 +4698,131 @@ class WorkSessionTests(unittest.TestCase):
                 task = load_state()["tasks"][0]
                 self.assertEqual(payload["task_id"], task["id"])
                 self.assertEqual(task["description"], "Build the thing.\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_detect_default_verify_command_prefers_instruction_backtick_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+                Path("tests").mkdir()
+                instruction = "Implement the program and verify it with `node vm.js`."
+                self.assertEqual(detect_instruction_verify_command(instruction), "node vm.js")
+                self.assertEqual(detect_default_verify_command(cwd=".", instruction=instruction), "node vm.js")
+                avoid_setup = "Do not run `npm install`; verify the change with `pytest`."
+                self.assertEqual(detect_instruction_verify_command(avoid_setup), "pytest")
+                later_verify = "The app runs with `node vm.js`. Verify with `pytest`."
+                self.assertEqual(detect_instruction_verify_command(later_verify), "pytest")
+                inline_python = "Verify with `python -I -c \"print(1)\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_python), "")
+                inline_python_cluster = "Verify with `python3 -qIc \"print(1)\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_python_cluster), "")
+                inline_node = "Verify with `node --eval \"console.log(1)\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_node), "")
+                inline_node_joined = "Verify with `node --eval=console.log(1)`."
+                self.assertEqual(detect_instruction_verify_command(inline_node_joined), "")
+                inline_node_cluster = "Verify with `node -pe \"1+1\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_node_cluster), "")
+                wrapper_install = "Verify with `uv run python -m pip install -e .`."
+                self.assertEqual(detect_instruction_verify_command(wrapper_install), "")
+                npm_update = "Verify with `npm run update:snapshots`."
+                self.assertEqual(detect_instruction_verify_command(npm_update), "")
+                npm_ci = "Verify with `npm ci`."
+                self.assertEqual(detect_instruction_verify_command(npm_ci), "")
+                npm_i = "Verify with `npm i`."
+                self.assertEqual(detect_instruction_verify_command(npm_i), "")
+                make_update = "Verify with `make update-snapshots`."
+                self.assertEqual(detect_instruction_verify_command(make_update), "")
+                make_deploy = "Verify with `make deploy`."
+                self.assertEqual(detect_instruction_verify_command(make_deploy), "")
+                make_test = "Verify with `make test`."
+                self.assertEqual(detect_instruction_verify_command(make_test), "make test")
+                local_deploy = "Verify with `./deploy`."
+                self.assertEqual(detect_instruction_verify_command(local_deploy), "")
+                local_update = "Verify with `./updateSnapshots`."
+                self.assertEqual(detect_instruction_verify_command(local_update), "")
+                yarn_build = "Verify with `yarn build:ci`."
+                self.assertEqual(detect_instruction_verify_command(yarn_build), "")
+                npm_deploy = "Verify with `npm run deploy`."
+                self.assertEqual(detect_instruction_verify_command(npm_deploy), "")
+                npm_test_default = "Verify with `npm test`."
+                self.assertEqual(detect_instruction_verify_command(npm_test_default), "npm test")
+                npm_test = "Verify with `npm run test:unit`."
+                self.assertEqual(detect_instruction_verify_command(npm_test), "npm run test:unit")
+                jest_update_snapshot = "Verify with `npm test -- --updateSnapshot`."
+                self.assertEqual(detect_instruction_verify_command(jest_update_snapshot), "")
+                eslint_fix = "Verify with `npm run lint -- --fix`."
+                self.assertEqual(detect_instruction_verify_command(eslint_fix), "")
+                address_script = "Verify with `npm run test:address`."
+                self.assertEqual(detect_instruction_verify_command(address_script), "npm run test:address")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_auto_detects_verify_command_from_instruction(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            report_path = Path(tmp) / "report.json"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "write verifier target",
+                    "action": {
+                        "type": "write_file",
+                        "path": "check.py",
+                        "content": "print('ok')\n",
+                        "create": True,
+                        "apply": True,
+                    },
+                }
+                instruction = "Create check.py and verify it with `python3 check.py`."
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        instruction,
+                                        "--cwd",
+                                        str(workspace),
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "1",
+                                        "--report",
+                                        str(report_path),
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["verification"]["command"], "python3 check.py")
+                self.assertEqual(payload["verification"]["source"], "auto_detected")
+                self.assertEqual(payload["auto_verify_command"], "python3 check.py")
+                self.assertEqual((workspace / "check.py").read_text(encoding="utf-8"), "print('ok')\n")
+
+                state = load_state()
+                defaults = state["work_sessions"][0]["default_options"]
+                self.assertTrue(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command"], "python3 check.py")
+                tool_call = state["work_sessions"][0]["tool_calls"][0]
+                self.assertEqual(tool_call["status"], "completed")
+                self.assertEqual(tool_call["parameters"]["verify_command"], "python3 check.py")
             finally:
                 os.chdir(old_cwd)
 
@@ -21129,6 +21256,76 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_continues_after_rolled_back_write_verification_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("repair context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                calls = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    calls.append(prompt)
+                    if len(calls) == 1:
+                        return {
+                            "summary": "write then verify",
+                            "action": {
+                                "type": "write_file",
+                                "path": "out.txt",
+                                "content": "bad\n",
+                                "create": True,
+                                "apply": True,
+                            },
+                        }
+                    return {"summary": "inspect after failed verify", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "false",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "max_steps")
+                self.assertEqual(len(calls), 2)
+                self.assertTrue(report["steps"][0]["recoverable_verification_failure"])
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                self.assertFalse(Path("out.txt").exists())
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["write_file", "read_file"])
+                self.assertTrue(session["tool_calls"][0]["result"]["rolled_back"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_replay_bundle_written_for_write_ready_timeout_failure(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -30866,6 +31063,63 @@ class WorkSessionTests(unittest.TestCase):
             self.assertIn("tests/test_app.py", matches)
             self.assertIn("docs/note.md", matches)
             self.assertNotIn("outside.txt", matches)
+
+    def test_search_text_falls_back_when_rg_is_missing(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / ".mew").mkdir()
+            (root / "src" / "app.py").write_text("before\nneedle here\nafter\n", encoding="utf-8")
+            (root / ".mew" / "state.json").write_text("needle hidden\n", encoding="utf-8")
+
+            with patch("mew.read_tools.subprocess.run", side_effect=FileNotFoundError()):
+                result = search_text(
+                    "needle",
+                    str(root),
+                    [str(root)],
+                    max_matches=5,
+                    context_lines=1,
+                    pattern="src/**",
+                )
+
+            self.assertEqual(result["engine"], "python")
+            self.assertEqual(len(result["matches"]), 1)
+            self.assertIn("src/app.py", result["matches"][0])
+            self.assertNotIn(".mew", "\n".join(result["matches"]))
+            self.assertEqual(result["snippets"][0]["start_line"], 1)
+            self.assertEqual(result["snippets"][0]["end_line"], 3)
+
+    def test_search_text_python_fallback_skips_symlink_targets(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            outside = Path(tmp) / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (root / "visible.txt").write_text("ordinary text\n", encoding="utf-8")
+            secret = outside / "secret.txt"
+            secret.write_text("needle outside root\n", encoding="utf-8")
+            try:
+                (root / "linked-secret.txt").symlink_to(secret)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+
+            with patch("mew.read_tools.subprocess.run", side_effect=FileNotFoundError()):
+                result = search_text(
+                    "needle",
+                    str(root),
+                    [str(root)],
+                    max_matches=5,
+                    context_lines=0,
+                    pattern="*.txt",
+                )
+
+            self.assertEqual(result["engine"], "python")
+            self.assertEqual(result["matches"], [])
+            self.assertGreaterEqual(result["skipped_sensitive"], 1)
 
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action

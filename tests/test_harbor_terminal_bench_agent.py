@@ -32,6 +32,18 @@ class FakeEnvironment:
         return self.result
 
 
+class FakeHarborEnvironment:
+    def __init__(self, result):
+        self.result = result
+        self.commands = []
+        self.exec_kwargs = []
+
+    def exec(self, **kwargs):
+        self.commands.append(kwargs["command"])
+        self.exec_kwargs.append(kwargs)
+        return self.result
+
+
 class MetadataOnlyContext:
     def __init__(self, task_id, metadata=None):
         object.__setattr__(self, "task_id", task_id)
@@ -256,6 +268,53 @@ def test_missing_optional_metadata_is_unavailable_and_context_dict_supported(tmp
     assert summary["verifier_result"] == "unavailable"
     assert summary["timeout_status"] == {"timed_out": True, "timeout_seconds": 5}
     assert summary["cost_token_metadata"] == "unavailable"
+    assert context["mew_terminal_bench_artifact_dir"] == str(task_dir)
+    assert context["mew_terminal_bench_summary"] == summary
+
+
+def test_run_captures_nonzero_command_exit_without_harbor_exception(tmp_path):
+    module = load_agent_module()
+    stdout_report = {
+        "summary": "work attempt ended with model error",
+        "work_exit_code": 1,
+        "work_report": {"stop_reason": "model_error"},
+    }
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew work --oneshot --instruction {instruction_shell}",
+        artifact_root=tmp_path,
+        timeout_seconds=5,
+    )
+    environment = FakeHarborEnvironment(
+        SimpleNamespace(
+            return_code=1,
+            stdout=json.dumps(stdout_report),
+            stderr="token expired",
+        )
+    )
+    context = {"task_id": "nonzero-task"}
+
+    stdout = asyncio.run(agent.run("instruction", environment, context))
+
+    task_dir = tmp_path / "nonzero-task"
+    transcript = json.loads((task_dir / "command-transcript.json").read_text(encoding="utf-8"))
+    report = json.loads((task_dir / "mew-report.json").read_text(encoding="utf-8"))
+    summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert stdout == json.dumps(stdout_report)
+    assert environment.commands == ["set -o pipefail; mew work --oneshot --instruction instruction"]
+    assert environment.exec_kwargs == [
+        {
+            "command": "set -o pipefail; mew work --oneshot --instruction instruction",
+            "user": None,
+            "env": None,
+            "cwd": None,
+            "timeout_sec": 5,
+        }
+    ]
+    assert transcript["exit_code"] == 1
+    assert transcript["stderr"] == "token expired"
+    assert report == stdout_report
+    assert summary["work_session_or_report_summary"] == "work attempt ended with model error"
     assert context["mew_terminal_bench_artifact_dir"] == str(task_dir)
     assert context["mew_terminal_bench_summary"] == summary
 

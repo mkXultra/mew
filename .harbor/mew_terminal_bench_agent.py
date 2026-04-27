@@ -67,6 +67,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         timeout_seconds: int | None = 900,
         install_command: str | None = None,
         install_env: dict[str, str] | None = None,
+        capture_nonzero_command_exit: bool = True,
         **kwargs: Any,
     ) -> None:
         base_kwargs: dict[str, Any] = {}
@@ -97,6 +98,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         self.timeout_seconds = timeout_seconds
         self.install_command = install_command
         self.install_env = install_env
+        self.capture_nonzero_command_exit = capture_nonzero_command_exit
         self._last_task_dir: Path | None = None
         self._last_summary: dict[str, Any] | None = None
 
@@ -133,12 +135,20 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             command_cwd=self.command_cwd or "",
             command_cwd_shell=shlex.quote(self.command_cwd or ""),
         )
-        result = await self._exec_as_agent(
-            environment,
-            command,
-            cwd=self.command_cwd,
-            timeout_sec=self.timeout_seconds,
-        )
+        if self.capture_nonzero_command_exit:
+            result = await self._exec_as_agent_capture(
+                environment,
+                command,
+                cwd=self.command_cwd,
+                timeout_sec=self.timeout_seconds,
+            )
+        else:
+            result = await self._exec_as_agent(
+                environment,
+                command,
+                cwd=self.command_cwd,
+                timeout_sec=self.timeout_seconds,
+            )
         exit_code, stdout, stderr, timed_out = self._normalize_result(result)
 
         self._write_json(
@@ -174,6 +184,49 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         else:
             result = environment.exec_as_agent(command=command, env=env, cwd=cwd, timeout_sec=timeout_sec)
 
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    async def _exec_as_agent_capture(
+        self,
+        environment: Any,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        cwd: str | Path | None = None,
+        timeout_sec: int | None = None,
+    ) -> Any:
+        """Run task commands while preserving nonzero exits as artifacts.
+
+        Harbor's BaseInstalledAgent raises on nonzero command exits. That is
+        right for setup failures, but too lossy for mew work attempts: a failed
+        work session still needs a transcript, report, and benchmark verifier
+        result so M6.20 can distinguish auth, loop, and task-quality failures.
+        """
+        raw_exec = getattr(environment, "exec", None)
+        if raw_exec is None:
+            return await self._exec_as_agent(
+                environment,
+                command,
+                env=env,
+                cwd=cwd,
+                timeout_sec=timeout_sec,
+            )
+
+        merged_env = env
+        extra_env = getattr(self, "_extra_env", None) or getattr(self, "extra_env", None)
+        if extra_env:
+            merged_env = dict(env) if env else {}
+            merged_env.update(extra_env)
+
+        result = raw_exec(
+            command=f"set -o pipefail; {command}",
+            user=None,
+            env=merged_env,
+            cwd=str(cwd) if cwd is not None else None,
+            timeout_sec=timeout_sec,
+        )
         if inspect.isawaitable(result):
             return await result
         return result

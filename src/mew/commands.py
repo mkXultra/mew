@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import select
 import shlex
 import signal
@@ -282,6 +283,7 @@ from .work_session import (
     select_work_recovery_plan_item,
     start_work_model_turn,
     find_model_turn_for_tool_call,
+    first_unquoted_shell_operator,
     work_tool_result_error,
     start_work_tool_call,
     broad_read_after_search_miss_guard,
@@ -4153,6 +4155,14 @@ def cmd_work_oneshot(args):
         work_args.max_steps = 30
     if work_args.max_steps == 0:
         work_args.live = True
+    auto_verify_command = ""
+    if getattr(work_args, "allow_verify", False) and not getattr(work_args, "verify_command", ""):
+        auto_verify_command = detect_default_verify_command(
+            cwd=getattr(work_args, "cwd", None) or task.get("cwd"),
+            instruction=instruction,
+        )
+        if auto_verify_command:
+            work_args.verify_command = auto_verify_command
 
     stdout = StringIO()
     with redirect_stdout(stdout):
@@ -4175,9 +4185,11 @@ def cmd_work_oneshot(args):
         "work_exit_code": exit_code,
         "work_report": work_report,
         "work_stdout": work_stdout if not work_report else "",
+        "auto_verify_command": auto_verify_command,
         "resume": resume,
         "verification": {
-            "command": getattr(args, "verify_command", None) or "",
+            "command": getattr(work_args, "verify_command", None) or "",
+            "source": "auto_detected" if auto_verify_command else ("explicit" if getattr(args, "verify_command", None) else ""),
             "reason": "external harness may run the final verifier",
         },
         "usage": "unavailable",
@@ -4279,12 +4291,222 @@ def cmd_work_todo(args):
     return 0
 
 
-def detect_default_verify_command():
-    if Path("pyproject.toml").exists() and Path("tests").exists():
+VERIFY_COMMAND_EXECUTABLES = {
+    "bun",
+    "cargo",
+    "deno",
+    "go",
+    "make",
+    "node",
+    "npm",
+    "nox",
+    "pnpm",
+    "poetry",
+    "pytest",
+    "python",
+    "python3",
+    "tox",
+    "uv",
+    "yarn",
+}
+VERIFY_CONTEXT_STRONG_WORDS = ("verify", "verifier", "test", "tests", "testing", "check", "checks")
+VERIFY_CONTEXT_WEAK_WORDS = ("run", "running", "execute", "exec")
+VERIFY_CONTEXT_NEGATIONS = ("do not", "don't", "dont", "never", "avoid", "skip", "without")
+VERIFY_COMMAND_REJECT_WORDS = {
+    "add",
+    "build",
+    "deploy",
+    "fix",
+    "generate",
+    "install",
+    "lock",
+    "migrate",
+    "migration",
+    "publish",
+    "remove",
+    "release",
+    "scaffold",
+    "seed",
+    "setup",
+    "sync",
+    "update",
+    "upgrade",
+    "watch",
+    "write",
+}
+VERIFY_PACKAGE_MANAGER_EXECUTABLES = {"npm", "pnpm", "yarn", "bun"}
+VERIFY_PACKAGE_MANAGER_DIRECT_WORDS = {"test", "tests", "lint", "check", "verify", "e2e", "unit", "integration"}
+VERIFY_PACKAGE_MANAGER_VERIFY_WORDS = {"test", "tests", "lint", "check", "verify", "e2e", "unit", "integration", "ci"}
+VERIFY_CONTEXT_BOUNDARIES = ".!?\n;,"
+
+
+def _context_has_word(context, words):
+    return any(re.search(rf"\b{re.escape(word)}\b", context) for word in words)
+
+
+def _same_sentence_context(text, start, end):
+    before = text[max(0, start - 96) : start]
+    after = text[end : min(len(text), end + 96)]
+    boundary = max(before.rfind(marker) for marker in VERIFY_CONTEXT_BOUNDARIES)
+    if boundary >= 0:
+        before = before[boundary + 1 :]
+    after_boundary = min((after.find(marker) for marker in VERIFY_CONTEXT_BOUNDARIES if marker in after), default=-1)
+    if after_boundary >= 0:
+        after = after[:after_boundary]
+    return before.lower(), after.lower()
+
+
+def _verify_command_context_score(text, start, end, command):
+    before, after = _same_sentence_context(text, start, end)
+    near_before = before[-48:]
+    if any(marker in near_before for marker in VERIFY_CONTEXT_NEGATIONS):
+        return 0
+
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return 0
+    if any(_verify_command_rejected_arg(part) for part in parts):
+        return 0
+
+    if _context_has_word(before, VERIFY_CONTEXT_STRONG_WORDS):
+        return 4
+    if _context_has_word(before, VERIFY_CONTEXT_WEAK_WORDS):
+        return 2
+    if _context_has_word(after, VERIFY_CONTEXT_STRONG_WORDS):
+        return 1
+    return 0
+
+
+def _instruction_verify_command_candidates(instruction):
+    text = instruction or ""
+    candidates = []
+    seen = set()
+    for index, match in enumerate(re.finditer(r"`([^`\n]+)`", text)):
+        command = match.group(1).strip()
+        if not command or command in seen:
+            continue
+        seen.add(command)
+        score = _verify_command_context_score(text, match.start(), match.end(), command)
+        if score > 0:
+            candidates.append((score, index, command))
+    return [command for _score, _index, command in sorted(candidates, key=lambda item: (-item[0], item[1]))]
+
+
+def _python_inline_eval_arg(part):
+    if part == "-c" or part.startswith("--command"):
+        return True
+    return part.startswith("-") and not part.startswith("--") and "c" in part[1:]
+
+
+def _node_inline_eval_arg(part):
+    if part in {"-e", "-p"} or part.startswith("--eval") or part.startswith("--print"):
+        return True
+    return part.startswith("-") and not part.startswith("--") and any(flag in part[1:] for flag in ("e", "p"))
+
+
+def _verify_command_rejected_arg(part):
+    word = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", Path(part).name)
+    word = word.lower()
+    if word in VERIFY_COMMAND_REJECT_WORDS:
+        return True
+    pieces = [piece for piece in re.split(r"[^a-z0-9]+", word) if piece]
+    return any(piece in VERIFY_COMMAND_REJECT_WORDS for piece in pieces)
+
+
+def _package_manager_command_allowed(parts):
+    if not parts:
+        return True
+    executable = Path(parts[0]).name
+    if executable not in VERIFY_PACKAGE_MANAGER_EXECUTABLES:
+        return True
+    args = [part for part in parts[1:] if not part.startswith("-")]
+    if not args:
+        return False
+    if _verify_command_rejected_arg(args[0]):
+        return False
+    if args[0] in VERIFY_PACKAGE_MANAGER_DIRECT_WORDS:
+        return True
+    if args[0] == "run" and len(args) > 1:
+        script_words = {piece for piece in re.split(r"[^a-z0-9]+", Path(args[1]).name.lower()) if piece}
+        return bool(script_words & VERIFY_PACKAGE_MANAGER_VERIFY_WORDS) and not _verify_command_rejected_arg(args[1])
+    return False
+
+
+def _make_command_allowed(parts):
+    if not parts or Path(parts[0]).name != "make":
+        return True
+    targets = [part for part in parts[1:] if part and not part.startswith("-")]
+    if not targets:
+        return False
+    for target in targets:
+        if _verify_command_rejected_arg(target):
+            return False
+    target_words = {
+        piece
+        for target in targets
+        for piece in re.split(r"[^a-z0-9]+", Path(target).name.lower())
+        if piece
+    }
+    return bool(target_words & VERIFY_PACKAGE_MANAGER_VERIFY_WORDS)
+
+
+def _looks_like_verify_command(command):
+    command = (command or "").strip()
+    if not command:
+        return False
+    operator, _kind = first_unquoted_shell_operator(command)
+    if operator:
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    if _verify_command_rejected_arg(parts[0]):
+        return False
+    executable = Path(parts[0]).name
+    if executable in {"python", "python3"} and any(_python_inline_eval_arg(part) for part in parts[1:]):
+        return False
+    if executable == "node" and any(_node_inline_eval_arg(part) for part in parts[1:]):
+        return False
+    if not _package_manager_command_allowed(parts):
+        return False
+    if not _make_command_allowed(parts):
+        return False
+    if executable in VERIFY_COMMAND_EXECUTABLES:
+        return True
+    return parts[0].startswith("./") and len(parts) <= 4
+
+
+def detect_instruction_verify_command(instruction):
+    for command in _instruction_verify_command_candidates(instruction):
+        if _looks_like_verify_command(command):
+            return command
+    return ""
+
+
+def _path_for_verify_detection(cwd=None):
+    if cwd in (None, "", "."):
+        return Path.cwd()
+    path = Path(cwd).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path
+
+
+def detect_default_verify_command(cwd=None, instruction=None):
+    instruction_command = detect_instruction_verify_command(instruction)
+    if instruction_command:
+        return instruction_command
+
+    root = _path_for_verify_detection(cwd)
+    if (root / "pyproject.toml").exists() and (root / "tests").exists():
         return "uv run pytest -q"
-    if Path("pytest.ini").exists() or Path("tests").exists():
+    if (root / "pytest.ini").exists() or (root / "tests").exists():
         return "python -m pytest -q"
-    if Path("package.json").exists():
+    if (root / "package.json").exists():
         return "npm test"
     return ""
 
@@ -4914,6 +5136,42 @@ def _refresh_step_tool_call_after_approval(step, approved_tool_call):
         step["pending_approval"] = bool(pending_ids)
 
 
+def _work_task_verify_instruction_text(task):
+    if not task:
+        return ""
+    fields = [
+        task.get("title") or "",
+        task.get("description") or "",
+        task.get("notes") or "",
+        task.get("command") or "",
+    ]
+    return "\n".join(field for field in fields if field)
+
+
+def _auto_detect_work_verify_command(args, options, session, task):
+    if not options.get("allow_verify") or options.get("verify_command"):
+        return ""
+    inferred = detect_default_verify_command(
+        cwd=options.get("cwd") or work_session_default_cwd(session, task=task),
+        instruction=_work_task_verify_instruction_text(task),
+    )
+    if not inferred:
+        return ""
+    options["verify_command"] = inferred
+    setattr(args, "verify_command", inferred)
+    if session:
+        with state_lock():
+            state = load_state()
+            stored_session = find_work_session(state, session.get("id"))
+            if stored_session:
+                defaults = stored_session.setdefault("default_options", {})
+                defaults["allow_verify"] = True
+                defaults["verify_command"] = inferred
+                defaults["verify_command_source"] = "auto_detected"
+                save_state(state)
+    return inferred
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -4989,6 +5247,7 @@ def cmd_work_ai(args):
     options = _work_control_options(args, session=session)
     if not options.get("cwd"):
         options["cwd"] = work_session_default_cwd(session, task=task)
+    auto_verify_command = _auto_detect_work_verify_command(args, options, session, task)
     effective_args = _work_effective_args(args, options)
     compact_cli_controls = bool(getattr(effective_args, "compact_live", False) or getattr(args, "follow", False))
     report = {
@@ -4999,6 +5258,8 @@ def cmd_work_ai(args):
         "stop_reason": "max_steps",
         "steps": [],
     }
+    if auto_verify_command:
+        report["auto_verify_command"] = auto_verify_command
     if max_steps == 0:
         report["stop_reason"] = "snapshot_refresh"
         if getattr(args, "live", False) or getattr(args, "follow", False):
@@ -6140,6 +6401,17 @@ def cmd_work_ai(args):
                 progress(f"step #{index}: pending write approval")
             break
         if error:
+            recoverable_verification_failure = (
+                action_type in WRITE_WORK_TOOLS
+                and bool((result or {}).get("rolled_back"))
+                and bool((result or {}).get("verification"))
+                and index < max_steps
+            )
+            if recoverable_verification_failure:
+                report["steps"][-1]["recoverable_verification_failure"] = True
+                if progress:
+                    progress(f"step #{index}: verification failed; continuing with repair context")
+                continue
             report["stop_reason"] = "tool_failed"
             break
 
