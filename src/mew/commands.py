@@ -300,9 +300,11 @@ from .work_session import (
     work_session_for_task,
     work_recovery_read_root,
     work_call_path,
+    work_session_default_cwd,
     work_session_runtime_command,
     work_session_task,
     work_write_pairing_status,
+    workspace_relative_work_parameters,
 )
 from .work_loop import (
     _is_calibration_measured_patch_draft_task,
@@ -2237,11 +2239,21 @@ def _work_control_options(args, session=None):
             return value
         return getattr(args, name, fallback)
 
+    def cwd_option():
+        explicit = getattr(args, "cwd", None)
+        if explicit not in (None, "", "."):
+            return explicit
+        value = defaults.get("cwd")
+        if value not in (None, "", "."):
+            return value
+        return ""
+
     options = {
         "auth": option("auth"),
         "model_backend": option("model_backend"),
         "model": option("model"),
         "base_url": option("base_url"),
+        "cwd": cwd_option(),
         "allow_read": list(option("allow_read", []) or []),
         "allow_write": list(option("allow_write", []) or []),
         "allow_shell": bool(option("allow_shell", False)),
@@ -2336,6 +2348,7 @@ def remember_work_session_default_options(session, args):
             options.get("approval_mode"),
             options.get("model"),
             options.get("base_url"),
+            options.get("cwd"),
             options.get("act_mode") and options.get("act_mode") != "model",
             options.get("compact_live"),
             options.get("quiet"),
@@ -2382,6 +2395,7 @@ def remember_work_session_default_options(session, args):
         "model_backend": merged_scalar("model_backend"),
         "model": merged_scalar("model"),
         "base_url": merged_scalar("base_url"),
+        "cwd": merged_scalar("cwd"),
         "allow_read": merged_list("allow_read"),
         "allow_write": [] if clear_write_defaults else merged_list("allow_write"),
         "allow_shell": False if clear_write_defaults else bool(current.get("allow_shell") or options.get("allow_shell")),
@@ -2515,6 +2529,8 @@ def work_chat_continue_options(session):
         parts.extend(["--allow-read", root])
     for root in options.get("allow_write") or []:
         parts.extend(["--allow-write", root])
+    if options.get("cwd"):
+        parts.extend(["--cwd", options["cwd"]])
     if options.get("allow_shell"):
         parts.append("--allow-shell")
     if options.get("allow_verify"):
@@ -3629,26 +3645,40 @@ def _work_path_is_mew_source_path(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
-def _work_path_under_allowed_write_roots(path, allowed_write_roots=None):
-    normalized = str(path or "").replace("\\", "/").lstrip("./")
-    if not normalized:
+def _work_path_under_allowed_write_roots(path, allowed_write_roots=None, cwd=""):
+    if not str(path or "").strip():
         return False
-    roots = [
-        str(root or "").replace("\\", "/").lstrip("./").rstrip("/")
-        for root in (allowed_write_roots or [])
-        if str(root or "").strip()
-    ]
+    roots = [root for root in (allowed_write_roots or []) if str(root or "").strip()]
     if not roots:
         return False
+    base = Path(cwd or ".").expanduser()
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    candidate = candidate.resolve(strict=False)
     for root in roots:
-        if root in {".", "*"}:
+        root_text = str(root or "").strip()
+        if root_text in {".", "*"}:
             return True
-        if normalized == root or normalized.startswith(f"{root}/"):
+        root_path = Path(root_text).expanduser()
+        if not root_path.is_absolute():
+            root_path = base / root_path
+        root_path = root_path.resolve(strict=False)
+        try:
+            if candidate == root_path or candidate.relative_to(root_path):
+                return True
+        except ValueError:
+            continue
+        except OSError:
+            continue
+        if candidate == root_path:
             return True
     return False
 
 
-def _paired_write_batch_actions(actions, allowed_write_roots=None):
+def _paired_write_batch_actions(actions, allowed_write_roots=None, cwd=""):
     write_actions = [
         dict(action)
         for action in actions or []
@@ -3661,7 +3691,7 @@ def _paired_write_batch_actions(actions, allowed_write_roots=None):
     if sources and (not tests or len(tests) + len(sources) != len(write_actions)):
         return []
     if not sources and not all(
-        _work_path_under_allowed_write_roots(action.get("path"), allowed_write_roots)
+        _work_path_under_allowed_write_roots(action.get("path"), allowed_write_roots, cwd=cwd)
         for action in write_actions
     ):
         return []
@@ -3686,6 +3716,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         sub_actions = _paired_write_batch_actions(
             raw_sub_actions,
             allowed_write_roots=getattr(args, "allow_write", []) or [],
+            cwd=getattr(args, "cwd", "") or "",
         )
     else:
         sub_actions = [
@@ -3796,6 +3827,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             allow_verify=bool(args.allow_verify) if write_batch else False,
             verify_command=args.verify_command or "" if write_batch else "",
             verify_timeout=args.verify_timeout,
+            default_cwd=getattr(args, "cwd", "") or "",
         )
         if write_batch:
             parameters["apply"] = False
@@ -4815,6 +4847,8 @@ def cmd_work_ai(args):
         progress(f"{'created' if created else 'reused'} session #{session_id} task=#{task_id}")
 
     options = _work_control_options(args, session=session)
+    if not options.get("cwd"):
+        options["cwd"] = work_session_default_cwd(session, task=task)
     effective_args = _work_effective_args(args, options)
     compact_cli_controls = bool(getattr(effective_args, "compact_live", False) or getattr(args, "follow", False))
     report = {
@@ -5459,6 +5493,7 @@ def cmd_work_ai(args):
             allow_verify=effective_args.allow_verify,
             verify_command=effective_args.verify_command or "",
             verify_timeout=effective_args.verify_timeout,
+            default_cwd=getattr(effective_args, "cwd", "") or "",
         )
         coerced_test_dry_run = _force_paired_test_steer_write_to_dry_run(
             pending_steer,
@@ -6164,10 +6199,14 @@ def _deferred_approval_rollback_snapshot(source_call, parameters):
     if not parameters.get("apply") or not parameters.get("defer_verify"):
         return None
     try:
+        snapshot_parameters, _read_roots = workspace_relative_work_parameters(
+            source_call.get("tool"),
+            parameters,
+        )
         return snapshot_write_path(
-            parameters.get("path") or "",
-            parameters.get("allowed_write_roots") or [],
-            create=source_call.get("tool") == "write_file" and bool(parameters.get("create")),
+            snapshot_parameters.get("path") or "",
+            snapshot_parameters.get("allowed_write_roots") or [],
+            create=source_call.get("tool") == "write_file" and bool(snapshot_parameters.get("create")),
         )
     except (OSError, ValueError):
         return None
@@ -7209,7 +7248,14 @@ def cmd_work_show_session(args):
                 task = work_session_task(state, session)
         resume = build_work_session_resume(session, task=task, state=state)
         if resume and getattr(args, "allow_read", None):
-            attach_work_resume_world_state(resume, build_work_world_state(resume, args.allow_read))
+            attach_work_resume_world_state(
+                resume,
+                build_work_world_state(
+                    resume,
+                    args.allow_read,
+                    cwd=work_session_default_cwd(session, task=task),
+                ),
+            )
         snapshot_summary = work_session_snapshot_summary(session, state) if resume else {}
         if not resume and not getattr(args, "task_id", None):
             if args.json:
@@ -8930,7 +8976,16 @@ def interrupted_write_verify_cwd(call):
     result = (call or {}).get("result") or {}
     parameters = (call or {}).get("parameters") or {}
     intent = (call or {}).get("write_intent") or {}
-    return result.get("verify_cwd") or parameters.get("verify_cwd") or intent.get("verify_cwd") or "."
+    for value in (result.get("verify_cwd"), intent.get("verify_cwd"), parameters.get("verify_cwd")):
+        text = str(value or "").strip()
+        if text and text != ".":
+            return text
+    return "."
+
+
+def explicit_verify_cwd_arg(args):
+    text = str(getattr(args, "verify_cwd", None) or "").strip()
+    return text if text and text != "." else ""
 
 
 def work_recover_verification_blocker(args, session, source_call, *, safe_only=False):
@@ -9029,10 +9084,11 @@ def work_recover_apply_write_blocker(args, source_call, recovery_item, *, safe_o
             "write_world_state": write_state,
         }
     try:
+        recovery_parameters = _recovery_write_path_parameters(args, source_call, write_root)
         resolve_allowed_write_path(
-            write_root,
-            getattr(args, "allow_write", None) or [],
-            create=bool((source_call.get("parameters") or {}).get("create")),
+            recovery_parameters.get("path") or "",
+            recovery_parameters.get("allowed_write_roots") or [],
+            create=bool(recovery_parameters.get("create")),
         )
     except ValueError as exc:
         return {
@@ -9131,6 +9187,17 @@ def work_recover_completed_write_blocker(args, source_call, recovery_item, *, sa
     return None
 
 
+def _recovery_write_path_parameters(args, source_call, path):
+    parameters = dict((source_call or {}).get("parameters") or {})
+    parameters["path"] = path
+    parameters["allowed_write_roots"] = getattr(args, "allow_write", None) or []
+    normalized, _read_roots = workspace_relative_work_parameters(
+        (source_call or {}).get("tool"),
+        parameters,
+    )
+    return normalized
+
+
 def work_recovery_plan_item_for_call(state, session, source_call):
     if not source_call:
         return {}
@@ -9164,10 +9231,11 @@ def work_recover_dry_run_write_blocker(args, source_call):
             "path": write_root,
         }
     try:
+        recovery_parameters = _recovery_write_path_parameters(args, source_call, write_root)
         resolve_allowed_write_path(
-            write_root,
-            getattr(args, "allow_write", None) or [],
-            create=bool((source_call.get("parameters") or {}).get("create")),
+            recovery_parameters.get("path") or "",
+            recovery_parameters.get("allowed_write_roots") or [],
+            create=bool(recovery_parameters.get("create")),
         )
     except ValueError as exc:
         return {
@@ -9246,7 +9314,11 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
 
     world_state_before = {}
     if getattr(args, "allow_read", None):
-        world_state_before = build_work_world_state(resume_for_world, args.allow_read)
+        world_state_before = build_work_world_state(
+            resume_for_world,
+            args.allow_read,
+            cwd=work_session_default_cwd(session, task=work_session_task(state, session)),
+        )
 
     with state_lock():
         state = load_state()
@@ -9308,13 +9380,13 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                 parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
                 parameters["allow_verify"] = bool(getattr(args, "allow_verify", False))
                 parameters["verify_command"] = getattr(args, "verify_command", None) or interrupted_write_verify_command(source_call)
-                parameters["verify_cwd"] = getattr(args, "verify_cwd", None) or interrupted_write_verify_cwd(source_call)
+                parameters["verify_cwd"] = explicit_verify_cwd_arg(args) or interrupted_write_verify_cwd(source_call)
             elif recovery_item.get("action") == "verify_completed_write":
                 recovery_tool = "run_tests"
                 parameters = {
                     "recovered_from_tool_call_id": source_call.get("id"),
                     "command": getattr(args, "verify_command", None) or interrupted_write_verify_command(source_call),
-                    "cwd": getattr(args, "verify_cwd", None) or interrupted_write_verify_cwd(source_call),
+                    "cwd": explicit_verify_cwd_arg(args) or interrupted_write_verify_cwd(source_call),
                     "allow_verify": True,
                     "timeout": getattr(args, "verify_timeout", None),
                 }
@@ -9546,13 +9618,14 @@ def _work_tool_task_cwd(task):
     return cwd if cwd != "." else ""
 
 
-def _work_tool_effective_cwd(args, task=None):
+def _work_tool_effective_cwd(args, task=None, session=None):
     cwd = getattr(args, "cwd", None)
     if cwd not in (None, "", "."):
         return cwd
-    if getattr(args, "tool", "") in (GIT_WORK_TOOLS | {"run_command", "run_tests"}):
-        return _work_tool_task_cwd(task) or cwd
-    return cwd
+    default_cwd = work_session_default_cwd(session, task=task)
+    if default_cwd:
+        return default_cwd
+    return _work_tool_task_cwd(task) or cwd
 
 
 def _work_tool_edits(args):
@@ -9571,6 +9644,9 @@ def _work_tool_edits(args):
 def _work_tool_parameters(args, session=None, gate_options=None, task=None):
     path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file", "edit_file_hunks"}
     options = gate_options if gate_options is not None else _work_tool_gate_options(args, session)
+    effective_cwd = _work_tool_effective_cwd(args, task=task, session=session)
+    explicit_verify_cwd = getattr(args, "verify_cwd", None)
+    verify_cwd = explicit_verify_cwd if explicit_verify_cwd not in (None, "", ".") else effective_cwd
     parameters = {
         "path": args.path if getattr(args, "tool", "") in path_tools else None,
         "query": getattr(args, "query", None),
@@ -9586,13 +9662,13 @@ def _work_tool_parameters(args, session=None, gate_options=None, task=None):
         "create": getattr(args, "create", False),
         "replace_all": getattr(args, "replace_all", False),
         "apply": getattr(args, "apply", False),
-        "cwd": _work_tool_effective_cwd(args, task=task),
+        "cwd": effective_cwd,
         "timeout": getattr(args, "timeout", None),
         "allowed_write_roots": options.get("allow_write") or [],
         "allow_shell": options.get("allow_shell"),
         "allow_verify": options.get("allow_verify"),
         "verify_command": options.get("verify_command"),
-        "verify_cwd": getattr(args, "verify_cwd", None),
+        "verify_cwd": verify_cwd,
         "verify_timeout": getattr(args, "verify_timeout", None),
         "limit": getattr(args, "limit", None),
         "max_chars": getattr(args, "max_chars", None),
@@ -15519,7 +15595,15 @@ def chat_work_session(rest, chat_state=None):
                 session = _latest_work_session_for_task(state, task_id)
         resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
         if resume and allow_read:
-            attach_work_resume_world_state(resume, build_work_world_state(resume, allow_read))
+            task = work_session_task(state, session)
+            attach_work_resume_world_state(
+                resume,
+                build_work_world_state(
+                    resume,
+                    allow_read,
+                    cwd=work_session_default_cwd(session, task=task),
+                ),
+            )
         snapshot_summary = work_session_snapshot_summary(session, state) if resume else {}
         if not resume and not task_id:
             if auto_recovery is not None:

@@ -1320,7 +1320,7 @@ def build_parser():
     work_parser.add_argument("--verify-command", help="verification command required for applied writes; persisted on the work session")
     work_parser.add_argument("--verify-cwd", default=".", help="verification command cwd")
     work_parser.add_argument("--verify-timeout", type=float, default=300.0, help="verification timeout")
-    work_parser.add_argument("--cwd", default=".", help="cwd for run_command or run_tests")
+    work_parser.add_argument("--cwd", default=".", help="cwd for native work tools; persisted on the work session")
     work_parser.add_argument("--timeout", type=float, default=300.0, help="timeout for run_command or run_tests")
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
     work_parser.add_argument("--max-chars", type=int, default=DEFAULT_READ_MAX_CHARS, help="maximum read_file characters")

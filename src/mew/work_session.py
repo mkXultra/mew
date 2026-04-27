@@ -258,6 +258,76 @@ WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 SHELL_CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
+
+
+def _truthy_path(value):
+    text = str(value or "").strip()
+    return text if text and text != "." else ""
+
+
+def work_session_default_cwd(session=None, task=None):
+    defaults = (session or {}).get("default_options") if isinstance(session, dict) else {}
+    task = task if isinstance(task, dict) else {}
+    return _truthy_path((defaults or {}).get("cwd")) or _truthy_path(task.get("cwd"))
+
+
+def _work_tool_workspace_cwd(parameters):
+    raw = str((parameters or {}).get("cwd") or ".").strip() or "."
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.resolve(strict=False)
+
+
+def _work_path_for_cwd(path, cwd, default="."):
+    if path in (None, "") and default == "":
+        return ""
+    raw = str(path if path not in (None, "") else default)
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        return str(candidate)
+    return str((Path(cwd) / candidate).resolve(strict=False))
+
+
+def _work_roots_for_cwd(roots, cwd):
+    resolved = []
+    for root in roots or []:
+        raw = str(root or "").strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = Path(cwd) / path
+        text = str(path.resolve(strict=False))
+        if text not in resolved:
+            resolved.append(text)
+    return resolved
+
+
+def _workspace_relative_work_parameters(tool, parameters, allowed_read_roots):
+    parameters = dict(parameters or {})
+    cwd = _work_tool_workspace_cwd(parameters)
+    parameters["cwd"] = str(cwd)
+    read_roots = _work_roots_for_cwd(allowed_read_roots or [], cwd)
+    if tool in READ_ONLY_WORK_TOOLS:
+        parameters["path"] = _work_path_for_cwd(parameters.get("path"), cwd)
+    elif tool in GIT_WORK_TOOLS:
+        parameters["cwd"] = _work_path_for_cwd(parameters.get("cwd"), cwd)
+    elif tool in WRITE_WORK_TOOLS:
+        parameters["path"] = _work_path_for_cwd(parameters.get("path"), cwd, default="")
+        parameters["allowed_write_roots"] = _work_roots_for_cwd(parameters.get("allowed_write_roots") or [], cwd)
+        verify_cwd = parameters.get("verify_cwd")
+        if verify_cwd in (None, "", "."):
+            parameters["verify_cwd"] = str(cwd)
+        else:
+            parameters["verify_cwd"] = _work_path_for_cwd(verify_cwd, cwd)
+    elif tool in COMMAND_WORK_TOOLS:
+        parameters["cwd"] = _work_path_for_cwd(parameters.get("cwd"), cwd)
+    return parameters, read_roots
+
+
+def workspace_relative_work_parameters(tool, parameters, allowed_read_roots=None):
+    return _workspace_relative_work_parameters(tool, parameters, allowed_read_roots or [])
 RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 RECOVERY_PLAN_ACTION_PRIORITY = (
     "needs_user_review",
@@ -1839,7 +1909,8 @@ def start_work_tool_call(state, session, tool, parameters):
     write_intent_error = ""
     if tool in WRITE_WORK_TOOLS and (parameters or {}).get("apply"):
         try:
-            write_intent = build_write_intent(tool, parameters or {})
+            intent_parameters, _read_roots = workspace_relative_work_parameters(tool, parameters or {})
+            write_intent = build_write_intent(tool, intent_parameters)
         except (OSError, ValueError) as exc:
             write_intent_error = str(exc)
     tool_call = {
@@ -2108,6 +2179,11 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
+    parameters, allowed_read_roots = _workspace_relative_work_parameters(
+        tool,
+        parameters,
+        allowed_read_roots,
+    )
     if tool in READ_ONLY_WORK_TOOLS and not allowed_read_roots:
         raise ValueError("work tool read access is disabled; pass --allow-read PATH")
     if tool in GIT_WORK_TOOLS and not allowed_read_roots:

@@ -96,6 +96,12 @@ Current M6.20 target:
 - choose one implementation-lane or task-spec repair from benchmark evidence
 - rerun the same bounded subset after the repair and record improved,
   regressed, or unchanged outcome
+- drift guard: do not create a Terminal-Bench-specific solver in mew core.
+  The next repair must improve generic `work_session` / implementation-lane
+  behavior for arbitrary workspace roots such as a benchmark task `/app`.
+  Harbor glue may adapt input/output capture, but benchmark execution should
+  call the normal work path with explicit cwd, read/write roots, verifier, and
+  bounded permissions.
 
 Current M6.20 chain:
 
@@ -1279,9 +1285,12 @@ The next implementation task should map to this chain:
 
 Acceptable near-term work:
 
+- remove generic `work_session` repo-root assumptions so read/write/run/git and
+  verification defaults can target an arbitrary workspace root such as
+  Terminal-Bench `/app`
 - run a real implementation-lane attempt against the bounded
-  `terminal-bench/make-mips-interpreter` slice, now that instruction ingestion
-  and host report capture are proven
+  `terminal-bench/make-mips-interpreter` slice through that normal work path,
+  now that instruction ingestion and host report capture are proven
 - classify the resulting implementation failure shape through M6.18 with cited
   Harbor evidence
 - implement only the smallest repair needed to make the next rerun more
@@ -1291,6 +1300,9 @@ Acceptable near-term work:
 
 Non-goals for the next session:
 
+- adding a Terminal-Bench-specific solver path or benchmark-only core command
+- treating Terminal-Bench as a separate architecture instead of a measurement
+  harness for generic `mew work`
 - broad prompt tuning before instruction ingestion and failure classification
   are proven
 - resuming M7 inbound signal work before the Terminal-Bench milestones are

@@ -43,6 +43,7 @@ from .work_session import (
     attach_work_resume_world_state,
     build_work_session_resume,
     compact_model_turns_for_prompt,
+    work_session_default_cwd,
     work_turn_guidance_snapshot,
 )
 from .work_world import DEFAULT_WORLD_STATE_FILE_LIMIT, build_work_world_state
@@ -1827,12 +1828,14 @@ def build_work_model_context(
 ):
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
+    work_cwd = work_session_default_cwd(session, task=task) or "."
     resume = build_work_session_resume(session, task=task, limit=8, state=state, current_time=current_time)
     prompt_context_mode = _effective_prompt_context_mode(prompt_context_mode, resume, model_turns)
     world_state = build_work_world_state(
         resume,
         allowed_read_roots or [],
         file_limit=DEFAULT_WORLD_STATE_FILE_LIMIT,
+        cwd=work_cwd,
     )
     resume = attach_work_resume_world_state(resume, world_state)
     if prompt_context_mode != "full":
@@ -1860,7 +1863,7 @@ def build_work_model_context(
             "status": task.get("status") if task else "",
             "kind": task.get("kind") if task else "",
             "notes": clip_work_task_notes(task_notes, WORK_RESULT_TEXT_LIMIT),
-            "cwd": (task or {}).get("cwd") or ".",
+            "cwd": work_cwd,
         },
         "work_session": work_context,
         "capabilities": {
@@ -5108,6 +5111,12 @@ def _write_ready_patch_draft_environment(
     write_ready_fast_path,
     todo_id_override="",
 ):
+    raw_cwd = (((context or {}).get("task") or {}).get("cwd") or ".")
+    workspace_root = Path(raw_cwd).expanduser()
+    if not workspace_root.is_absolute():
+        workspace_root = Path.cwd() / workspace_root
+    workspace_root = workspace_root.resolve(strict=False)
+
     def canonical_path(path):
         normalized = normalize_work_path(path)
         if not normalized:
@@ -5116,13 +5125,13 @@ def _write_ready_patch_draft_environment(
         candidate = Path(normalized)
         if candidate.is_absolute():
             try:
-                return candidate.resolve(strict=False).relative_to(Path.cwd().resolve()).as_posix()
+                return candidate.resolve(strict=False).relative_to(workspace_root).as_posix()
             except ValueError:
                 return normalized
             except OSError:
                 return normalized
 
-        root_without_leading_slash = str(Path.cwd().resolve()).lstrip("/")
+        root_without_leading_slash = str(workspace_root).lstrip("/")
         if root_without_leading_slash and normalized.startswith(f"{root_without_leading_slash}/"):
             normalized = normalized[len(root_without_leading_slash) + 1 :]
 
@@ -5669,6 +5678,7 @@ def _attempt_write_ready_tiny_draft_turn(
     action = normalize_work_model_action(
         action_plan,
         allowed_write_roots=allowed_write_roots,
+        default_cwd=(((context or {}).get("task") or {}).get("cwd") or ""),
     )
     if action.get("type") == "wait":
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
@@ -6191,6 +6201,7 @@ def normalize_work_model_action(
     verify_command="",
     suggested_verify_command="",
     allowed_write_roots=None,
+    default_cwd="",
 ):
     if not isinstance(action_plan, dict):
         action_plan = {}
@@ -6224,6 +6235,7 @@ def normalize_work_model_action(
                 verify_command=verify_command,
                 suggested_verify_command=suggested_verify_command,
                 allowed_write_roots=allowed_write_roots,
+                default_cwd=default_cwd,
             )
             dropped_tool_count += int(sub_action.get("truncated_tools") or 0)
             if sub_action.get("type") == "batch":
@@ -6260,12 +6272,14 @@ def normalize_work_model_action(
             paired_reason = paired_write_batch_rejection_reason(
                 normalized_tools,
                 allowed_write_roots=allowed_write_roots,
+                cwd=default_cwd,
             )
             if paired_reason:
                 return {"type": "wait", "reason": paired_reason}
             paired_tools = normalize_paired_write_batch_tools(
                 normalized_tools,
                 allowed_write_roots=allowed_write_roots,
+                cwd=default_cwd,
             )
             if not paired_tools:
                 return {
@@ -6470,22 +6484,34 @@ def _work_batch_path_is_mew_source(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
-def _work_batch_path_under_allowed_write_roots(path, allowed_write_roots=None):
-    normalized = _normalized_work_path(path)
-    if not normalized:
+def _work_batch_path_under_allowed_write_roots(path, allowed_write_roots=None, cwd=""):
+    if not str(path or "").strip():
         return False
-    roots = [
-        _normalized_work_path(root)
-        for root in (allowed_write_roots or [])
-        if _normalized_work_path(root)
-    ]
+    roots = [root for root in (allowed_write_roots or []) if str(root or "").strip()]
     if not roots:
         return False
+    base = Path(cwd or ".").expanduser()
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    candidate = candidate.resolve(strict=False)
     for root in roots:
-        if root in {".", "*"}:
+        root_text = str(root or "").strip()
+        if root_text in {".", "*"}:
             return True
-        if normalized == root or normalized.startswith(f"{root.rstrip('/')}/"):
+        root_path = Path(root_text).expanduser()
+        if not root_path.is_absolute():
+            root_path = base / root_path
+        root_path = root_path.resolve(strict=False)
+        try:
+            candidate.relative_to(root_path)
             return True
+        except ValueError:
+            continue
+        except OSError:
+            continue
     return False
 
 
@@ -6543,7 +6569,7 @@ def collapse_same_path_edit_file_write_batch_tools(tools):
     return normalized
 
 
-def paired_write_batch_rejection_reason(tools, allowed_write_roots=None):
+def paired_write_batch_rejection_reason(tools, allowed_write_roots=None, cwd=""):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
         return "write batch requires at least two write/edit tools for a complete scoped slice"
@@ -6565,7 +6591,7 @@ def paired_write_batch_rejection_reason(tools, allowed_write_roots=None):
     if source_tools:
         return ""
     if all(
-        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots, cwd=cwd)
         for tool in write_tools
     ):
         return ""
@@ -6597,7 +6623,7 @@ def valid_paired_write_batch_sub_action(action):
     return False
 
 
-def normalize_paired_write_batch_tools(tools, allowed_write_roots=None):
+def normalize_paired_write_batch_tools(tools, allowed_write_roots=None, cwd=""):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
         return []
@@ -6613,7 +6639,7 @@ def normalize_paired_write_batch_tools(tools, allowed_write_roots=None):
     if source_tools and (not tests_tools or len(tests_tools) + len(source_tools) != len(write_tools)):
         return []
     if not source_tools and not all(
-        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots, cwd=cwd)
         for tool in write_tools
     ):
         return []
@@ -6638,16 +6664,22 @@ def work_tool_parameters_from_action(
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
+    default_cwd="",
 ):
     parameters = dict(action or {})
     action_type = action.get("type") or action.get("tool")
     parameters.pop("type", None)
+    if default_cwd and parameters.get("cwd") in (None, "", "."):
+        parameters["cwd"] = default_cwd
     parameters["allowed_write_roots"] = allowed_write_roots or []
     parameters["allow_shell"] = bool(allow_shell)
     parameters["allow_verify"] = bool(allow_verify)
     if verify_command and not parameters.get("verify_command"):
         parameters["verify_command"] = verify_command
-    parameters.setdefault("verify_cwd", ".")
+    if default_cwd and parameters.get("verify_cwd") in (None, "", "."):
+        parameters["verify_cwd"] = parameters.get("cwd") or default_cwd
+    else:
+        parameters.setdefault("verify_cwd", parameters.get("cwd") or ".")
     parameters.setdefault("verify_timeout", verify_timeout)
     if action_type == "read_file":
         try:
@@ -7200,12 +7232,14 @@ def plan_work_model_turn(
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
     model_metrics["think"]["elapsed_seconds"] = _round_seconds(tiny_write_ready_elapsed + think_elapsed)
+    work_default_cwd = (((context or {}).get("task") or {}).get("cwd") or "")
     if act_mode == "deterministic":
         action = normalize_work_model_action(
             decision_plan,
             verify_command=verify_command,
             suggested_verify_command=suggested_verify_command,
             allowed_write_roots=allowed_write_roots,
+            default_cwd=work_default_cwd,
         )
         action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""
         action_plan = {
@@ -7249,6 +7283,7 @@ def plan_work_model_turn(
         verify_command=verify_command,
         suggested_verify_command=suggested_verify_command,
         allowed_write_roots=allowed_write_roots,
+        default_cwd=work_default_cwd,
     )
     if write_ready_fast_path.get("active") and not skip_shadow_compile:
         model_metrics.update(

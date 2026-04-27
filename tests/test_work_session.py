@@ -5066,22 +5066,20 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(resume["recovery_plan"]["items"][0]["action"], "retry_verification")
 
                 with redirect_stdout(StringIO()) as stdout:
-                    self.assertEqual(
-                        main(
-                            [
-                                "work",
-                                "1",
-                                "--recover-session",
-                                "--allow-read",
-                                ".",
-                                "--allow-verify",
-                                "--verify-command",
-                                command,
-                                "--json",
-                            ]
-                        ),
-                        0,
+                    exit_code = main(
+                        [
+                            "work",
+                            "1",
+                            "--recover-session",
+                            "--allow-read",
+                            ".",
+                            "--allow-verify",
+                            "--verify-command",
+                            command,
+                            "--json",
+                        ]
                     )
+                self.assertEqual(exit_code, 0, stdout.getvalue())
                 recovered = json.loads(stdout.getvalue())
                 self.assertEqual(recovered["recovery"]["action"], "retry_tool")
                 self.assertEqual(recovered["tool_call"]["status"], "completed")
@@ -22729,22 +22727,20 @@ class WorkSessionTests(unittest.TestCase):
                         )
 
                 with redirect_stdout(StringIO()) as stdout:
-                    self.assertEqual(
-                        main(
-                            [
-                                "work",
-                                "1",
-                                "--recover-session",
-                                "--allow-read",
-                                ".",
-                                "--allow-verify",
-                                "--verify-command",
-                                command,
-                                "--json",
-                            ]
-                        ),
-                        0,
+                    exit_code = main(
+                        [
+                            "work",
+                            "1",
+                            "--recover-session",
+                            "--allow-read",
+                            ".",
+                            "--allow-verify",
+                            "--verify-command",
+                            command,
+                            "--json",
+                        ]
                     )
+                self.assertEqual(exit_code, 0, stdout.getvalue())
                 report = json.loads(stdout.getvalue())
                 self.assertEqual(report["recovery"]["source_tool_call_id"], 2)
                 self.assertEqual(report["tool_call"]["status"], "completed")
@@ -24665,6 +24661,94 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_recover_session_retries_apply_write_with_session_cwd(self):
+        from mew.work_session import workspace_relative_work_parameters
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            target = workspace / "target.txt"
+            target.write_text("before\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                command = (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "'from pathlib import Path; assert Path(\"target.txt\").read_text().startswith(\"after\")'"
+                )
+                parameters = {
+                    "path": "target.txt",
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "cwd": str(workspace),
+                    "allowed_write_roots": ["."],
+                    "allow_verify": True,
+                    "verify_command": command,
+                    "verify_cwd": str(workspace),
+                }
+                intent_parameters, _read_roots = workspace_relative_work_parameters("edit_file", parameters)
+                intent = build_write_intent("edit_file", intent_parameters)
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["cwd"] = str(workspace)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover apply write in workspace.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "default_options": {"cwd": str(workspace)},
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "edit_file",
+                                    "status": "interrupted",
+                                    "parameters": parameters,
+                                    "write_intent": intent,
+                                    "summary": "interrupted workspace apply write",
+                                    "error": "Interrupted before write completed.",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "retry_apply_write")
+                self.assertEqual(report["tool_call"]["status"], "completed")
+                self.assertEqual(report["tool_call"]["result"]["verification_exit_code"], 0)
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_recover_session_skips_completed_write_and_verifies(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -24744,6 +24828,94 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
                 self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_recover_session_verifies_completed_write_with_session_cwd(self):
+        from mew.work_session import workspace_relative_work_parameters
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            target = workspace / "target.txt"
+            target.write_text("before\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                command = (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "'from pathlib import Path; assert Path(\"target.txt\").read_text().startswith(\"after\")'"
+                )
+                parameters = {
+                    "path": "target.txt",
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "cwd": str(workspace),
+                    "allowed_write_roots": ["."],
+                    "allow_verify": True,
+                    "verify_command": command,
+                    "verify_cwd": ".",
+                }
+                intent_parameters, _read_roots = workspace_relative_work_parameters("edit_file", parameters)
+                intent = build_write_intent("edit_file", intent_parameters)
+                target.write_text("after\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["cwd"] = str(workspace)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover completed workspace write.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "default_options": {"cwd": str(workspace)},
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "edit_file",
+                                    "status": "interrupted",
+                                    "parameters": parameters,
+                                    "write_intent": intent,
+                                    "summary": "interrupted after workspace write",
+                                    "error": "Interrupted before verifier completed.",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    exit_code = main(
+                        [
+                            "work",
+                            "1",
+                            "--recover-session",
+                            "--allow-read",
+                            ".",
+                            "--allow-verify",
+                            "--verify-command",
+                            command,
+                            "--json",
+                        ]
+                    )
+                self.assertEqual(exit_code, 0, stdout.getvalue())
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "verify_completed_write")
+                self.assertEqual(report["tool_call"]["tool"], "run_tests")
+                self.assertEqual(report["tool_call"]["status"], "completed")
+                self.assertEqual(report["tool_call"]["result"]["exit_code"], 0)
+                self.assertEqual(Path(report["tool_call"]["result"]["cwd"]), workspace.resolve())
             finally:
                 os.chdir(old_cwd)
 
@@ -30677,6 +30849,70 @@ class WorkSessionTests(unittest.TestCase):
         explicit_diff_parameters = work_tool_parameters_from_action({"type": "git_diff", "stat": False})
         self.assertFalse(explicit_diff_parameters["stat"])
 
+        default_cwd_parameters = work_tool_parameters_from_action(
+            {"type": "read_file", "path": "README.md", "cwd": "."},
+            default_cwd="/tmp/workspace",
+        )
+        self.assertEqual(default_cwd_parameters["cwd"], "/tmp/workspace")
+        self.assertEqual(default_cwd_parameters["verify_cwd"], "/tmp/workspace")
+
+    def test_work_model_write_batch_allows_relative_paths_under_default_cwd_root(self):
+        from mew.work_loop import normalize_work_model_action
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            os.chdir(outside)
+            try:
+                action = normalize_work_model_action(
+                    {
+                        "summary": "write two workspace files",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "write_file", "path": "README.md", "content": "hello\n"},
+                                {"type": "write_file", "path": "notes/todo.md", "content": "todo\n"},
+                            ],
+                        },
+                    },
+                    allowed_write_roots=[str(workspace)],
+                    default_cwd=str(workspace),
+                )
+
+                self.assertEqual(action["type"], "batch")
+                self.assertEqual([tool["path"] for tool in action["tools"]], ["README.md", "notes/todo.md"])
+                self.assertTrue(all(tool["dry_run"] for tool in action["tools"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_command_write_batch_allows_relative_paths_under_cwd_root(self):
+        from mew.commands import _paired_write_batch_actions
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            os.chdir(outside)
+            try:
+                actions = _paired_write_batch_actions(
+                    [
+                        {"type": "write_file", "path": "README.md", "content": "hello\n"},
+                        {"type": "write_file", "path": "notes/todo.md", "content": "todo\n"},
+                    ],
+                    allowed_write_roots=[str(workspace)],
+                    cwd=str(workspace),
+                )
+
+                self.assertEqual([action["path"] for action in actions], ["README.md", "notes/todo.md"])
+                self.assertTrue(all(action["dry_run"] for action in actions))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_model_context_digests_older_tool_calls(self):
         from mew.work_loop import build_work_model_context
 
@@ -33455,6 +33691,233 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(Path(world["git_status"]["cwd"]), repo.resolve())
                 self.assertEqual(world["files"][0]["path"], str(repo / "README.md"))
                 self.assertTrue(world["files"][0]["exists"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_world_state_resolves_relative_roots_against_explicit_cwd(self):
+        from mew.work_world import build_work_world_state
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "README.md").write_text("workspace root\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                world = build_work_world_state({}, ["."], cwd=str(workspace))
+
+                self.assertEqual(Path(world["git_status"]["cwd"]), workspace.resolve())
+                self.assertEqual(world["git_status"]["exit_code"], 128)
+                self.assertTrue(any(item["path"] == "README.md" for item in world["files"]))
+                self.assertFalse(any(str(outside) in item["path"] for item in world["files"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tools_resolve_relative_paths_against_explicit_cwd(self):
+        from mew.work_session import execute_work_tool
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "README.md").write_text("workspace root\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                read_result = execute_work_tool(
+                    "read_file",
+                    {"path": "README.md", "cwd": str(workspace)},
+                    ["."],
+                )
+                self.assertEqual(Path(read_result["path"]), (workspace / "README.md").resolve())
+                self.assertEqual(read_result["text"], "workspace root\n")
+
+                write_result = execute_work_tool(
+                    "write_file",
+                    {
+                        "path": "out.txt",
+                        "content": "created from workspace\n",
+                        "create": True,
+                        "cwd": str(workspace),
+                        "allowed_write_roots": ["."],
+                    },
+                    [],
+                )
+                self.assertEqual(Path(write_result["path"]), (workspace / "out.txt").resolve())
+                self.assertTrue(write_result["changed"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_defaults_persist_cwd_for_relative_tool_paths(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            (workspace / "README.md").write_text("workspace default\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--cwd",
+                                str(workspace),
+                                "--allow-read",
+                                ".",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "read_file", "--path", "README.md", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                result = payload["tool_call"]["result"]
+                self.assertEqual(Path(result["path"]), (workspace / "README.md").resolve())
+                self.assertEqual(result["text"], "workspace default\n")
+                self.assertEqual(payload["tool_call"]["parameters"]["cwd"], str(workspace))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--session", "--resume", "--allow-read", ".", "--json"]),
+                        0,
+                    )
+                resume_payload = json.loads(stdout.getvalue())
+                world_state = resume_payload["resume"]["world_state"]
+                self.assertEqual(Path(world_state["git_status"]["cwd"]), workspace.resolve())
+                self.assertTrue(
+                    any(
+                        item["path"] == "README.md" or Path(item["path"]) == (workspace / "README.md").resolve()
+                        for item in world_state["files"]
+                    )
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_approval_write_intent_and_deferred_snapshot_use_session_cwd(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            target = workspace / "notes.md"
+            target.write_text("before\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--cwd",
+                                str(workspace),
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--defer-verify",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                approved = json.loads(stdout.getvalue())
+
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                self.assertEqual(Path(approved["tool_call"]["write_intent"]["path"]), target.resolve())
+                self.assertEqual(Path(approved["tool_call"]["write_intent"]["verify_cwd"]), workspace.resolve())
+                self.assertEqual(Path(approved["rollback_snapshot"]["path"]), target.resolve())
+                self.assertEqual(approved["rollback_snapshot"]["content"], "before\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_model_context_uses_task_cwd_for_workspace_state(self):
+        from mew.work_loop import build_work_model_context
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "README.md").write_text("model workspace\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["cwd"] = str(workspace)
+                    session, _created = create_work_session(state, task)
+                    save_state(state)
+
+                context = build_work_model_context(
+                    state,
+                    session,
+                    task,
+                    "2026-04-27T00:00:00Z",
+                    allowed_read_roots=["."],
+                )
+
+                self.assertEqual(context["task"]["cwd"], str(workspace))
+                world_state = context["work_session"]["resume"]["world_state"]
+                self.assertEqual(Path(world_state["git_status"]["cwd"]), workspace.resolve())
+                self.assertTrue(any(item["path"] == "README.md" for item in world_state["files"]))
             finally:
                 os.chdir(old_cwd)
 

@@ -1216,6 +1216,20 @@ Terminal gate:
 - Broader Terminal-Bench parity is not squeezed into M6.20; it is prepared by
   the target registry milestone below.
 
+Generic work-session constraint:
+
+- Do not add a Terminal-Bench-specific solver path to mew core.
+- Terminal-Bench is the measurement harness, not a separate implementation
+  architecture. Repairs must improve the generic work session /
+  implementation lane so it can operate against arbitrary workspace roots such
+  as a benchmark task `/app`.
+- Harbor / Terminal-Bench wrappers may adapt input/output and artifact capture,
+  but they should call the normal work path with an explicit task cwd,
+  read/write roots, verifier, and bounded permissions.
+- Any M6.20-M6.25 implementation that solves only the benchmark wrapper while
+  leaving generic `mew work` repo-root assumptions intact is drift and does not
+  satisfy the milestone.
+
 ## Milestone 6.21: Terminal-Bench Codex Target Registry
 
 Freeze the Codex leaderboard target as local structured data so mew can compare
@@ -1260,6 +1274,9 @@ Target:
 - compare per-task successes, aggregate successes, Harbor errors, timeouts,
   cost/token metadata, verifier failures, and rescue/approval outcomes
 - feed every below-target task into M6.18 classification before any repair
+- keep every repair on the generic work-session path; benchmark-specific
+  special cases are allowed only in harness glue, not in the core
+  implementation loop
 
 Done when:
 
@@ -1322,6 +1339,9 @@ Target:
 - iterate benchmark-driven repairs without losing per-task evidence
 - keep parity work bounded by artifacts, classifications, and reruns, not
   impressionistic prompt tuning
+- preserve the generic arbitrary-workspace contract throughout the campaign;
+  the same work-session path should be usable for normal repositories and
+  Terminal-Bench task directories
 
 Done when:
 
