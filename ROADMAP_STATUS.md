@@ -78,8 +78,8 @@ Why M6.20 is active:
 
 Current M6.20 target:
 
-- turn the M6.19 smoke artifacts into a baseline report with task list,
-  commands, environment notes, scores, and artifact paths
+- baseline report is now recorded in
+  `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
 - classify at least one scored failure cohort through the M6.18 taxonomy
 - write an explicit small score target before prompt/tool optimization
 - choose one implementation-lane or task-spec repair from benchmark evidence
@@ -88,7 +88,7 @@ Current M6.20 target:
 
 Current M6.20 chain:
 
-`M6.20 -> baseline report -> failure cohort -> explicit score target -> bounded repair rerun`
+`M6.20 -> baseline report done -> instruction-consuming rerun -> failure cohort -> bounded repair rerun`
 
 M7 pending evidence preserved:
 
@@ -1156,10 +1156,11 @@ begin from model opinion alone; it needs benchmark artifacts from M6.19.
 
 First M6.20 slice:
 
-- choose a fixed smoke/selected subset and write the score target before
-  optimizing
-- compute mew baseline and reference-agent baseline on the same subset
-- classify failed mew tasks through M6.18
+- baseline report completed:
+  `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
+- next: run an instruction-consuming mew entrypoint on the same bounded
+  `terminal-bench/make-mips-interpreter` smoke before optimizing
+- classify any failed mew task through M6.18
 - route only cited structural failures into M6.14 repair episodes
 - rerun the same subset and record whether the repair improved, regressed, or
   did not affect the score
@@ -1252,22 +1253,22 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.20 -> baseline report -> failure cohort -> explicit score target -> bounded repair rerun`
+`M6.20 -> baseline report done -> instruction-consuming rerun -> failure cohort -> bounded repair rerun`
 
 Acceptable near-term work:
 
-- write the M6.20 baseline report from the mew and Codex smoke artifacts
-- classify the `make-mips-interpreter` failure shape through M6.18 with cited
-  Harbor evidence
-- define a small explicit target before any optimization, such as "the mew
-  smoke run must attempt an instruction-consuming task path without wrapper
-  exceptions before score tuning"
+- implement the smallest instruction-consuming mew Terminal-Bench entrypoint or
+  command path needed for the next one-task smoke rerun
+- run that bounded rerun against `terminal-bench/make-mips-interpreter`
+- classify the resulting `make-mips-interpreter` failure shape through M6.18
+  with cited Harbor evidence
 - implement only the smallest repair needed to make the next rerun more
   informative
 
 Non-goals for the next session:
 
-- broad prompt tuning before the baseline report and score target exist
+- broad prompt tuning before instruction ingestion and failure classification
+  are proven
 - resuming M7 inbound signal work before the Terminal-Bench milestones are
   addressed or explicitly reprioritized
 - full concurrent executor
@@ -1282,6 +1283,16 @@ Non-goals for the next session:
 
 Latest roadmap/status validation:
 
+- M6.20 task `#691` created
+  `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md` from the M6.19 mew and
+  Codex Harbor smoke artifacts. Verifier passed:
+  `test -f docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`, and manual
+  `git diff --check` passed.
+- M6.20 baseline facts: mew and Codex each ran one
+  `terminal-bench/make-mips-interpreter` smoke trial with `n_errors=0`, empty
+  `exception_stats`, and mean score `0.0`. The baseline route is not M6.14
+  repair yet; next step is an instruction-consuming mew rerun, then M6.18
+  failure classification if score remains zero.
 - M6.19 task `#687` added `.harbor/mew_terminal_bench_agent.py`,
   `docs/terminal-bench-harbor-smoke.md`, and
   `tests/test_harbor_terminal_bench_agent.py`.
