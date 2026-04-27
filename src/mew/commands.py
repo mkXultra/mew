@@ -3677,15 +3677,12 @@ def work_tool_output_progress(progress, tool_call_id, session_id=None, on_state_
 
 
 def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+    kwargs = {}
     if output_progress:
-        return execute_work_tool(
-            tool,
-            parameters,
-            allowed_read_roots,
-            on_output=output_progress,
-            model_context=model_context,
-        )
-    return execute_work_tool(tool, parameters, allowed_read_roots, model_context=model_context)
+        kwargs["on_output"] = output_progress
+    if model_context is not None:
+        kwargs["model_context"] = model_context
+    return execute_work_tool(tool, parameters, allowed_read_roots, **kwargs)
 
 
 def compact_work_tool_guard_action(action):
@@ -6972,7 +6969,7 @@ def _latest_work_session_for_task(state, task_id):
 
 
 def _recoverable_missing_read_file_error(action_type, parameters, error, args, index, max_steps):
-    if action_type != "read_file" or index >= max_steps:
+    if action_type != "read_file" or (max_steps is not None and index >= max_steps):
         return False
     if "path does not exist" not in str(error or ""):
         return False
@@ -6987,7 +6984,7 @@ def _recoverable_missing_read_file_error(action_type, parameters, error, args, i
 
 
 def _recoverable_stale_edit_file_error(action_type, parameters, error, args, index, max_steps):
-    if action_type not in {"edit_file", "edit_file_hunks"} or index >= max_steps:
+    if action_type not in {"edit_file", "edit_file_hunks"} or (max_steps is not None and index >= max_steps):
         return False
     if "old text was not found" not in str(error or ""):
         return False
@@ -7002,7 +6999,7 @@ def _recoverable_stale_edit_file_error(action_type, parameters, error, args, ind
 
 
 def _recoverable_git_inspection_unavailable_error(action_type, error, result, index, max_steps):
-    if action_type not in GIT_WORK_TOOLS or index >= max_steps:
+    if action_type not in GIT_WORK_TOOLS or (max_steps is not None and index >= max_steps):
         return False
     result = result or {}
     normalized = "\n".join(

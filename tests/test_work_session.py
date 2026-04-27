@@ -4238,6 +4238,147 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Recurring failures", text)
         self.assertIn("run_tests uv run pytest -q failed 2x", text)
 
+    def test_work_session_resume_builds_verifier_failure_repair_agenda(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        stderr = "\n".join(
+            [
+                "Traceback (most recent call last):",
+                '  File "/usr/local/lib/python3.13/site-packages/pkg/invariants.py", line 137, in run',
+                "    dtype = n.complex if isinstance(variable, n.complex) else n.float",
+                "AttributeError: module 'numpy' has no attribute 'complex'.",
+                "ImportError: cannot import name 'gcd' from 'fractions'",
+                "tests/test_widget.py:42: AssertionError: legacy alias still broken",
+            ]
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Repair verifier failure",
+            "goal": "Use verifier output to drive the next edit.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "python -m pytest"},
+                    "result": {"command": "python -m pytest", "cwd": "/app", "exit_code": 1, "stderr": stderr},
+                    "error": "run_command failed with exit_code=1",
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "pkg/invariants.py"},
+                    "result": {
+                        "path": "pkg/invariants.py",
+                        "changed": True,
+                        "dry_run": True,
+                        "written": False,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        agenda = resume["verifier_failure_repair_agenda"]
+        self.assertEqual(agenda["source_tool_call_id"], 1)
+        self.assertEqual(agenda["exit_code"], 1)
+        self.assertIn("complex", agenda["symbols"])
+        self.assertIn("gcd", agenda["symbols"])
+        self.assertEqual(
+            agenda["source_locations"][0],
+            {"path": "/usr/local/lib/python3.13/site-packages/pkg/invariants.py", "line": "137"},
+        )
+        self.assertIn({"path": "tests/test_widget.py", "line": "42"}, agenda["source_locations"])
+        self.assertEqual(agenda["latest_changed_dry_run_write"]["tool_call_id"], 2)
+        self.assertIn("small applied edit batch", agenda["suggested_next"])
+
+        text = format_work_session_resume(resume)
+        self.assertIn("verifier_failure_repair_agenda: tool=#1 exit=1 run_command", text)
+        self.assertIn("verifier_failure_symbols: complex, gcd", text)
+        self.assertIn("/usr/local/lib/python3.13/site-packages/pkg/invariants.py:137", text)
+        self.assertIn("verifier_failure_latest_dry_run: #2 pkg/invariants.py", text)
+
+    def test_work_session_resume_clears_verifier_failure_agenda_after_later_green_command(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Repair verifier failure",
+            "goal": "Use verifier output to drive the next edit.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "parameters": {"command": "pytest"},
+                    "result": {
+                        "command": "pytest",
+                        "exit_code": 1,
+                        "stderr": "AttributeError: module 'numpy' has no attribute 'complex'.",
+                    },
+                    "error": "verification failed with exit_code=1",
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "pkg/invariants.py"},
+                    "result": {
+                        "path": "pkg/invariants.py",
+                        "changed": True,
+                        "dry_run": True,
+                        "written": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "parameters": {"command": "pytest"},
+                    "result": {"command": "pytest", "exit_code": 0, "stdout": "passed"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["verifier_failure_repair_agenda"], {})
+
+    def test_work_session_resume_ignores_wrapper_only_verifier_failure_for_repair_agenda(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Wrapper-only failure",
+            "goal": "Do not turn generic wrappers into edit agendas.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "failed",
+                    "parameters": {"command": "pytest"},
+                    "result": {"command": "pytest", "exit_code": 1},
+                    "error": "run_command failed with exit_code=1",
+                    "summary": "verification failed with exit_code=1",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["verifier_failure_repair_agenda"], {})
+
     def test_work_session_resume_detects_low_yield_search_traps(self):
         session = {
             "id": 1,

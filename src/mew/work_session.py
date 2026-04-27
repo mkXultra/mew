@@ -3286,6 +3286,166 @@ def build_recurring_work_failures(calls, limit=3):
     return repeated[-limit:]
 
 
+_VERIFIER_LOCATION_PATTERNS = (
+    re.compile(r'File "([^"]+)", line (\d+)'),
+    re.compile(
+        r"(?m)(?:^|[\s(])((?:[A-Za-z]:)?/?[^\s:]+(?:\.py|\.pyx|\.c|\.cpp|\.h|\.hpp|\.js|\.ts|\.go|\.rs|\.java|\.rb|\.php|\.sh)):(\d+)"
+    ),
+)
+_VERIFIER_ERROR_LINE_RE = re.compile(
+    r"(Traceback|AssertionError|AttributeError|ImportError|ModuleNotFoundError|NameError|TypeError|ValueError|"
+    r"\bFAILED\b|\bERROR\b|No module named|cannot import name|has no attribute)",
+    re.IGNORECASE,
+)
+_GENERIC_VERIFIER_WRAPPER_LINE_RE = re.compile(
+    r"^(?:run_command|run_tests|verification)\s+failed with exit_code=\d+$",
+    re.IGNORECASE,
+)
+_VERIFIER_SYMBOL_PATTERNS = (
+    re.compile(r"has no attribute ['\"]([^'\"]+)['\"]"),
+    re.compile(r"cannot import name ['\"]([^'\"]+)['\"]"),
+    re.compile(r"No module named ['\"]([^'\"]+)['\"]"),
+    re.compile(r"NameError: name ['\"]([^'\"]+)['\"]"),
+)
+
+
+def _latest_failed_command_call(calls):
+    for call in reversed(list(calls or [])):
+        if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+            continue
+        if call.get("status") in ("failed", "interrupted") or work_tool_failure_record(call):
+            return call
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("exit_code") == 0:
+            return {}
+    return {}
+
+
+def _verifier_failure_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    running = call.get("running_output") if isinstance(call.get("running_output"), dict) else {}
+    parts = [
+        call.get("error") or "",
+        call.get("summary") or "",
+        result.get("stderr") or running.get("stderr") or "",
+        result.get("stdout") or running.get("stdout") or "",
+    ]
+    return "\n".join(str(part) for part in parts if part)
+
+
+def _extract_verifier_error_lines(text, limit=6):
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or not _VERIFIER_ERROR_LINE_RE.search(line):
+            continue
+        if _GENERIC_VERIFIER_WRAPPER_LINE_RE.match(line):
+            continue
+        clipped = clip_inline_text(line, 240)
+        if clipped not in lines:
+            lines.append(clipped)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _extract_verifier_source_locations(text, limit=8):
+    locations = []
+    seen = set()
+    for pattern in _VERIFIER_LOCATION_PATTERNS:
+        for match in pattern.finditer(str(text or "")):
+            path = str(match.group(1) or "").strip()
+            line = str(match.group(2) or "").strip()
+            if not path or not line:
+                continue
+            key = (path, line)
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append({"path": path, "line": line})
+            if len(locations) >= limit:
+                return locations
+    return locations
+
+
+def _extract_verifier_symbols(text, limit=8):
+    symbols = []
+    for pattern in _VERIFIER_SYMBOL_PATTERNS:
+        for match in pattern.finditer(str(text or "")):
+            symbol = str(match.group(1) or "").strip()
+            if not symbol or symbol in symbols:
+                continue
+            symbols.append(clip_inline_text(symbol, 120))
+            if len(symbols) >= limit:
+                return symbols
+    return symbols
+
+
+def _latest_changed_dry_run_write(calls, *, after_tool_call_id=None):
+    try:
+        after_id = int(after_tool_call_id) if after_tool_call_id is not None else None
+    except (TypeError, ValueError):
+        after_id = None
+    for call in reversed(list(calls or [])):
+        if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        if after_id is not None:
+            try:
+                call_id = int(call.get("id"))
+            except (TypeError, ValueError):
+                call_id = None
+            if call_id is not None and call_id <= after_id:
+                continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("dry_run") is True and result.get("changed"):
+            return call
+    return {}
+
+
+def build_verifier_failure_repair_agenda(calls):
+    call = _latest_failed_command_call(calls)
+    if not call:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    failure_record = work_tool_failure_record(call) or result
+    text = _verifier_failure_text(call)
+    error_lines = _extract_verifier_error_lines(text)
+    source_locations = _extract_verifier_source_locations(text)
+    symbols = _extract_verifier_symbols(text)
+    if not any((error_lines, source_locations, symbols)):
+        return {}
+    dry_run_call = _latest_changed_dry_run_write(calls, after_tool_call_id=call.get("id"))
+    agenda = {
+        "kind": "verifier_failure_repair_agenda",
+        "source_tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "command": result.get("command") or (call.get("parameters") or {}).get("command") or "",
+        "cwd": result.get("cwd") or (call.get("parameters") or {}).get("cwd") or "",
+        "exit_code": (failure_record or {}).get("exit_code"),
+        "error_lines": error_lines,
+        "source_locations": source_locations,
+        "symbols": symbols,
+        "suggested_next": (
+            "turn this verifier output into one small applied edit batch before broader exploration; "
+            "if multiple same-family errors are visible, repair the visible sibling set together"
+        ),
+        "installed_artifact_policy": (
+            "if a traceback points into an installed/generated artifact but the workspace contains matching source, "
+            "edit the matching workspace source under the allowed write root and reinstall/reverify"
+        ),
+    }
+    if dry_run_call:
+        agenda["latest_changed_dry_run_write"] = {
+            "tool_call_id": dry_run_call.get("id"),
+            "tool": dry_run_call.get("tool") or "",
+            "path": work_call_path(dry_run_call),
+            "summary": clip_inline_text(dry_run_call.get("summary") or "", 240),
+        }
+    return agenda
+
+
 def build_low_yield_observation_warnings(calls, *, threshold=3, limit=3):
     groups = {}
     for call in calls or []:
@@ -7308,6 +7468,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         working_memory=working_memory,
         limit=4,
     )
+    verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -7384,6 +7545,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "plan_item_observations": plan_item_observations,
         "skipped_exact_read_plan_items": skipped_exact_read_plan_items,
         "repair_anchor_observations": repair_anchor_observations,
+        "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "failed_patch_repair": failed_patch_repair,
         "retry_context": retry_context,
         "pending_approvals": pending_approvals[-limit:],
@@ -7545,6 +7707,33 @@ def format_work_session_resume(resume):
             lines.append(f"retry_verification_exit_code: {retry_context.get('verification_exit_code')}")
         if retry_context.get("body_policy"):
             lines.append(f"retry_body_policy: {retry_context.get('body_policy')}")
+    verifier_agenda = resume.get("verifier_failure_repair_agenda") or {}
+    if verifier_agenda:
+        lines.append(
+            "verifier_failure_repair_agenda: "
+            f"tool=#{verifier_agenda.get('source_tool_call_id') or '-'} "
+            f"exit={format_exit_code(verifier_agenda.get('exit_code'))} "
+            f"{verifier_agenda.get('tool') or ''}"
+        )
+        if verifier_agenda.get("symbols"):
+            lines.append(f"verifier_failure_symbols: {', '.join(verifier_agenda.get('symbols') or [])}")
+        if verifier_agenda.get("source_locations"):
+            refs = []
+            for item in verifier_agenda.get("source_locations") or []:
+                refs.append(f"{item.get('path')}:{item.get('line')}")
+            lines.append(f"verifier_failure_locations: {', '.join(refs)}")
+        if verifier_agenda.get("error_lines"):
+            lines.append("verifier_failure_errors:")
+            for line in verifier_agenda.get("error_lines") or []:
+                lines.append(f"  {line}")
+        if verifier_agenda.get("suggested_next"):
+            lines.append(f"verifier_failure_next: {verifier_agenda.get('suggested_next')}")
+        dry_run_write = verifier_agenda.get("latest_changed_dry_run_write") or {}
+        if dry_run_write:
+            lines.append(
+                "verifier_failure_latest_dry_run: "
+                f"#{dry_run_write.get('tool_call_id')} {dry_run_write.get('path') or ''}"
+            )
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)

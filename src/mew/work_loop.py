@@ -6135,6 +6135,7 @@ def build_work_think_prompt(context):
         "If work_session.resume.suggested_verify_command.command is present and no verify_command is configured, prefer that suggested command before inventing a broader verifier. "
         "If verification_confidence.status is narrow after source edits and suggested_verify_command.command exists, prefer run_tests with that broader suggested verifier before finish unless guidance explicitly says the task is narrow-only. "
         "If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user. "
+        "If work_session.resume.verifier_failure_repair_agenda is present, treat it as the active repair queue: use its error_lines, source_locations, symbols, and latest_changed_dry_run_write to make one small applied edit batch before broader exploration. If the failure names multiple same-family symbols or source locations, repair the visible sibling set together instead of fixing only the first occurrence. If the traceback points into an installed/generated artifact but the workspace contains matching source under allowed write roots, inspect/edit the workspace source and reinstall or reverify rather than patching the installed artifact directly. "
         "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
         "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, a schema-only or finite-number check is not enough; verify numeric plausibility against the input data with residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric before finish. "
         "For answer-from-artifact tasks such as images, boards, puzzles, diagrams, screenshots, or data files, reading back the output file or checking output format is not enough; independently derive or verify the semantic answer from the source artifact, and if the task asks for all winning/valid answers, prove completeness instead of writing a single plausible answer. "
@@ -6165,32 +6166,45 @@ def build_work_think_prompt(context):
 
 
 def build_work_write_ready_think_prompt(context):
+    schema = (
+        '{"summary":"short reason",'
+        '"working_memory":{"hypothesis":"current narrow read","next_step":"next reentry step",'
+        '"plan_items":["up to 3 remaining steps"],"target_paths":["scoped paths"],'
+        '"open_questions":["unknowns"],"last_verified_state":"latest verifier state",'
+        '"acceptance_constraints":["task constraints"],'
+        '"acceptance_checks":[{"constraint":"text","status":"unknown|verified|blocked","evidence":"proof"}]},'
+        '"action":{"type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",'
+        '"tools":[{"type":"write_file|edit_file|edit_file_hunks","path":"target path",'
+        '"content":"write_file content","old":"exact old text","new":"replacement",'
+        '"edits":[{"old":"exact old text","new":"replacement"}],"create":false,'
+        '"replace_all":false,"dry_run":true}],'
+        '"path":"target path","content":"write_file content","old":"exact old text",'
+        '"new":"replacement","edits":[{"old":"exact old text","new":"replacement"}],'
+        '"create":false,"replace_all":false,"dry_run":true,'
+        '"reason":"why this scoped draft or blocker is next"}}'
+    )
     return (
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Write-ready fast path is active.\n"
         "The active_work_todo already names the paired src/test slice to draft.\n"
-        "Return the standard work JSON schema below and exactly one next action.\n"
+        "Return exactly one next action using the schema below.\n"
         "Use write_ready_fast_path.cached_window_texts as the exact old text source for edit_file/edit_file_hunks.\n"
         "Keep the action inside active_work_todo.source.target_paths and allowed_roots.write.\n"
-        "If task_goal.required_terms is non-empty, treat those terms as semantic anchors from the task goal, not product fields to copy into code or metadata.\n"
-        "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
-        "If a required term cannot naturally appear in the scoped source/test edit, return wait with blocker task_goal_term_missing instead of inventing schema or switching to a nearby helper.\n"
-        "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
-        "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
-        "Use current_run as the active invocation budget. Historical effort pressure is not a hard stop while current_run.can_continue_after_current is true.\n"
-        "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run still has remaining steps, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
-        "For API, schema, protocol, config, or CLI contract tasks, preserve exact literal contract names from the task text for messages, methods, fields, keys, flags, endpoints, ports, and filenames. Do not substitute synonyms or nearby response-field names, such as using val when the task says value. Internal smoke tests and verifier commands must instantiate and assert the exact names from the task text, not the names you accidentally implemented.\n"
-        "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, a schema-only or finite-number check is not enough; verify numeric plausibility against the input data with residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric before finish.\n"
-        "For answer-from-artifact tasks such as images, boards, puzzles, diagrams, screenshots, or data files, reading back the output file or checking output format is not enough; independently derive or verify the semantic answer from the source artifact, and if the task asks for all winning/valid answers, prove completeness instead of writing a single plausible answer. When a source artifact is visual and read_image is available, prefer read_image before lossy ASCII rendering or manual OCR commands.\n"
-        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone. If a task mentions KeyboardInterrupt, Ctrl-C, SIGINT, cancellation, canceling, or cleanup, verify process-level cancellation/interrupt behavior when practical instead of only checking in-process coroutine cancellation. For Python async task orchestration where cancellation cleanup matters, prefer structured concurrency such as asyncio.TaskGroup, or explicitly prove that gather/semaphore code cancels and awaits only the started work. When verifying concurrency limits with cancellation, cover below-limit, exactly-at-limit, and above-limit cases when practical; one happy-path concurrency check is not enough.\n"
+        "Treat required terms as semantic anchors, not fields to copy; return wait with blocker task_goal_term_missing if they cannot naturally fit this scoped edit.\n"
+        "If failed_patch_repair or retry_context is present, repair that same proposal/current target window and keep its constraints instead of switching to a nearby easier patch.\n"
+        "Use current_run as the active invocation budget; historical effort pressure is not a hard stop while current_run can continue.\n"
+        "Preserve exact public contract names from the task text: methods, fields, flags, endpoints, filenames, CLI strings, and documented output names.\n"
+        "For numeric, artifact, visual, watch, cancellation, or concurrency tasks, draft code/tests that make semantic verification possible rather than schema-only or smoke-only proof.\n"
+        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker; for contract/docs-heavy slices, compare documented headings/surfaces with actual renderer or CLI output instead of file creation as proof. For watch, continuous, polling, listen tasks require bounded-loop or repeated-observation proof plus interval/interrupt handling or output-rewrite evidence; do not accept internal mode flags alone. If task mentions KeyboardInterrupt, Ctrl-C, SIGINT, prefer process-level cancellation/interrupt behavior over in-process coroutine cancellation. For Python async cancellation, prefer structured concurrency such as asyncio.TaskGroup or prove gather/semaphore code cancels and awaits only the started work. For concurrency limits cover below-limit, exactly-at-limit, and above-limit; one happy-path concurrency check is not enough.\n"
+        "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run can continue, keep the compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
         "Prefer one scoped dry-run batch under active_work_todo.source.target_paths now. Prefer one paired dry-run batch for mew core target paths: paired tests/** plus src/mew/**. For non-core allowed roots, stay inside the declared product root and include local tests when they are in scope.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
         "Do not add read, search, glob, git, shell, or verification actions on this fast path.\n"
         "Do not broaden scope, roots, or the focused verify command.\n"
         "If you still cannot draft the dry-run batch, return wait with one exact blocker tied to the cached windows.\n"
         "Do not invent uncached old text and do not propose a partial sibling edit set.\n"
-        f"Schema:\n{_work_action_schema_text()}\n\n"
+        f"Schema:\n{schema}\n\n"
         f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
 
@@ -6200,36 +6214,18 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Write-ready tiny draft lane is active.\n"
-        "Return exactly one patch artifact for the active scoped implementation slice.\n"
-        "Do not return work action JSON; top-level kind must be patch_proposal or patch_blocker, not action/tools.\n"
-        "Allowed kinds are patch_proposal or patch_blocker.\n"
+        "Return patch_proposal or patch_blocker, not work action JSON/action/tools.\n"
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts for patch content.\n"
-        "If active_memory is present, use it only as distilled reasoning guidance for choosing the narrow patch shape; do not read memory files or copy memory metadata into code.\n"
-        "If task_goal.required_terms is non-empty, treat those terms as semantic anchors from the task goal, not product fields to copy into code or metadata.\n"
-        "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
-        "Never persist a key named required_terms unless the task explicitly asks to add a required_terms API.\n"
-        "If a required term cannot naturally appear in the scoped source/test edit, return patch_blocker with code task_goal_term_missing instead of inventing schema or proposing a nearby patch.\n"
-        "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
-        "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
-        "Use current_run as the active invocation budget. Historical effort pressure is not a hard stop while current_run.can_continue_after_current is true.\n"
+        "For task_goal.required_terms, use semantic anchors from the task goal, not product fields to copy; do not add fields or keys solely because a required term names them. Never persist a key named required_terms unless explicitly asked. Use blocker task_goal_term_missing when anchors cannot fit naturally.\n"
+        "Repair the same failed_patch_repair or retry_context target. Use current_run as the active invocation budget.\n"
+        "Verifier keys: prefer behavior, contract, output, state, or docs-visible assertions; over exact source text phrase assertions; unless the task explicitly requires a literal public string or security-sensitive marker; contract/docs-heavy slices; documented headings/surfaces; actual renderer or CLI output; file creation as proof; watch, continuous, polling, listen; bounded-loop or repeated-observation proof; interval/interrupt handling or output-rewrite evidence; do not accept internal mode flags alone; KeyboardInterrupt, Ctrl-C, SIGINT; process-level cancellation/interrupt behavior; in-process coroutine cancellation; structured concurrency such as asyncio.TaskGroup; gather/semaphore code cancels and awaits only the started work; below-limit, exactly-at-limit, and above-limit; one happy-path concurrency check is not enough.\n"
         "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run still has remaining steps, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
-        "For API, schema, protocol, config, or CLI contract tasks, preserve exact literal contract names from the task text for messages, methods, fields, keys, flags, endpoints, ports, and filenames. Do not substitute synonyms or nearby response-field names, such as using val when the task says value. Internal smoke tests and verifier commands must instantiate and assert the exact names from the task text, not the names you accidentally implemented.\n"
-        "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, a schema-only or finite-number check is not enough; verify numeric plausibility against the input data with residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric before finish.\n"
-        "For answer-from-artifact tasks such as images, boards, puzzles, diagrams, screenshots, or data files, reading back the output file or checking output format is not enough; independently derive or verify the semantic answer from the source artifact, and if the task asks for all winning/valid answers, prove completeness instead of writing a single plausible answer. When a source artifact is visual and read_image is available, prefer read_image before lossy ASCII rendering or manual OCR commands.\n"
-        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone. If a task mentions KeyboardInterrupt, Ctrl-C, SIGINT, cancellation, canceling, or cleanup, verify process-level cancellation/interrupt behavior when practical instead of only checking in-process coroutine cancellation. For Python async task orchestration where cancellation cleanup matters, prefer structured concurrency such as asyncio.TaskGroup, or explicitly prove that gather/semaphore code cancels and awaits only the started work. When verifying concurrency limits with cancellation, cover below-limit, exactly-at-limit, and above-limit cases when practical; one happy-path concurrency check is not enough.\n"
-        "Stay inside allowed_roots.write and do not invent uncached old text.\n"
+        "Stay inside allowed_roots.write; do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
-        "For mew core target paths, keep the patch paired across src/mew/** and tests/**. For non-core target paths, stay inside active_work_todo.source.target_paths and allowed_roots.write. If one file needs multiple hunks, express them in one files[i].edits array.\n"
+        "Keep mew core patches paired across src/mew/** and tests/**; otherwise stay inside active_work_todo.source.target_paths. Put multiple hunks for one file in one files[i].edits array.\n"
         "If drafting cannot proceed from the cached windows, return patch_blocker with one stable code and detail.\n"
         "Use cached_window_incomplete when the cached text exists but ends mid-block; use missing_exact_cached_window_texts when exact cached text is absent.\n"
-        "Schema:\n"
-        "{\n"
-        '  "kind": "patch_proposal|patch_blocker",\n'
-        '  "summary": "short reason",\n'
-        '  "files": [{"path": "src/mew/file.py", "edits": [{"old": "exact old text", "new": "replacement text"}]}],\n'
-        '  "code": "blocker code when kind=patch_blocker",\n'
-        '  "detail": "why drafting cannot proceed"\n'
-        "}\n\n"
+        'Schema: {"kind": "patch_proposal|patch_blocker", "summary": "short", "files": [{"path": "src/mew/file.py", "edits": [{"old": "exact old text", "new": "replacement"}]}], "code": "blocker code", "detail": "blocker detail"}\n\n'
         f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
     )
 
