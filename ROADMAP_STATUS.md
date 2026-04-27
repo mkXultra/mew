@@ -1257,11 +1257,10 @@ The next implementation task should map to this chain:
 
 Acceptable near-term work:
 
-- inspect Harbor custom-agent integration requirements and install/run shape
+- run the new Harbor custom-agent wrapper against a tiny Terminal-Bench smoke
+  subset and keep the transcript/artifact output
 - add a mew headless benchmark entrypoint only if the current CLI surface is
-  insufficient for Harbor execution
-- add a local wrapper/config/scripts needed to run mew on a Terminal-Bench
-  smoke subset without patching Harbor source
+  insufficient for the live Harbor smoke run
 - record benchmark artifacts in a stable path with per-task outcome,
   transcript/work-session summary, verifier result, timeout, and cost/token
   data when available
@@ -1286,10 +1285,24 @@ Non-goals for the next session:
 
 Latest roadmap/status validation:
 
+- M6.19 task `#687` added `.harbor/mew_terminal_bench_agent.py`,
+  `docs/terminal-bench-harbor-smoke.md`, and
+  `tests/test_harbor_terminal_bench_agent.py`.
+- Focused validation for `#687` passed:
+  `uv run pytest -q tests/test_harbor_terminal_bench_agent.py --no-testmon`,
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  and `git diff --check`.
+- Autonomy accounting: mew produced the wrapper/docs/tests and repaired the
+  await-time timeout fallback test; Codex applied a one-line supervisor lint
+  cleanup after mew marked the task done without running ruff. Count the slice
+  as product progress with a small reviewer cleanup, not a fully clean
+  mew-first close.
+- Remaining M6.19 gap: live Harbor execution against a Terminal-Bench smoke
+  subset and a comparable reference-agent run are not yet complete.
 - M7 task `#686` pending dry-run tools `#6644/#6645` were rejected without
   applying because M7 is now pending behind Terminal-Bench milestones.
-- Roadmap-only update for M6.19/M6.20; no product tests required beyond
-  `git diff --check`.
+- Earlier roadmap-only M6.19/M6.20 setup remains historical; current M6.19
+  validation includes the focused wrapper tests and ruff checks listed above.
 
 Latest M6.18 source/test validation:
 
