@@ -4113,10 +4113,11 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         except (OSError, ValueError, MewError) as exc:
             result = None
             error = str(exc)
-        recoverable_missing_read_file = (
+        recoverable_missing_observation_path = (
             not write_batch
-            and _recoverable_missing_read_file_error(action_type, parameters, error, args, index, batch_max_steps)
+            and _recoverable_missing_observation_path_error(action_type, parameters, error, args, index, batch_max_steps)
         )
+        recoverable_missing_read_file = recoverable_missing_observation_path and action_type == "read_file"
         recoverable_git_inspection_unavailable = (
             not write_batch
             and _recoverable_git_inspection_unavailable_error(action_type, error, result, index, batch_max_steps)
@@ -4127,8 +4128,11 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             if not tool_call:
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
+                recoverable_missing_observation_path = False
                 recoverable_missing_read_file = False
                 recoverable_git_inspection_unavailable = False
+            if recoverable_missing_observation_path:
+                tool_call["recoverable_missing_observation_path"] = True
             if recoverable_missing_read_file:
                 tool_call["recoverable_missing_read_file"] = True
             if recoverable_git_inspection_unavailable:
@@ -4158,7 +4162,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {tool_call.get('status')}")
         if error:
-            if recoverable_missing_read_file and index < batch_max_steps:
+            if recoverable_missing_observation_path and index < batch_max_steps:
                 recoverable_errors.append(
                     {
                         "tool_call_id": tool_call_id,
@@ -4168,7 +4172,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                     }
                 )
                 if progress:
-                    progress(f"step #{index}: batch missing read target; continuing with partial observations")
+                    progress(f"step #{index}: batch missing observation target; continuing with partial observations")
                 error = ""
                 continue
             if recoverable_git_inspection_unavailable and index < batch_max_steps:
@@ -6593,12 +6597,25 @@ def cmd_work_ai(args):
             result = None
             error = str(exc)
 
+        recoverable_missing_observation_path = _recoverable_missing_observation_path_error(
+            action_type,
+            parameters,
+            error,
+            effective_args,
+            index,
+            max_steps,
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
             if not tool_call:
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
+                recoverable_missing_observation_path = False
+            if recoverable_missing_observation_path:
+                tool_call["recoverable_missing_observation_path"] = True
+                if action_type == "read_file":
+                    tool_call["recoverable_missing_read_file"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             if pending_steer and not steer_consumed:
@@ -6773,10 +6790,19 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: run_tests failed; continuing with verifier feedback")
                 continue
-            if _recoverable_missing_read_file_error(action_type, parameters, error, effective_args, index, max_steps):
-                report["steps"][-1]["recoverable_missing_read_file"] = True
+            if _recoverable_missing_observation_path_error(
+                action_type,
+                parameters,
+                error,
+                effective_args,
+                index,
+                max_steps,
+            ):
+                report["steps"][-1]["recoverable_missing_observation_path"] = True
+                if action_type == "read_file":
+                    report["steps"][-1]["recoverable_missing_read_file"] = True
                 if progress:
-                    progress(f"step #{index}: missing read target; continuing with create-file context")
+                    progress(f"step #{index}: missing observation target; continuing with repair context")
                 continue
             if _recoverable_stale_edit_file_error(action_type, parameters, error, effective_args, index, max_steps):
                 report["steps"][-1]["recoverable_stale_edit_file"] = True
@@ -6968,19 +6994,43 @@ def _latest_work_session_for_task(state, task_id):
     return latest
 
 
-def _recoverable_missing_read_file_error(action_type, parameters, error, args, index, max_steps):
-    if action_type != "read_file" or (max_steps is not None and index >= max_steps):
+def _recoverable_missing_observation_path_error(action_type, parameters, error, args, index, max_steps):
+    if action_type not in {"read_file", "inspect_dir"} or (max_steps is not None and index >= max_steps):
         return False
     if "path does not exist" not in str(error or ""):
         return False
+    path = parameters.get("path") or ""
     allowed_write = getattr(args, "allow_write", None) or []
-    if not allowed_write:
+    if allowed_write:
+        try:
+            resolve_allowed_write_path(path, allowed_write, create=True)
+            return True
+        except ValueError:
+            pass
+
+    allowed_read = getattr(args, "allow_read", None) or []
+    if not allowed_read:
         return False
     try:
-        resolve_allowed_write_path(parameters.get("path") or "", allowed_write, create=True)
+        candidate = Path(path or ".").expanduser()
+        if not candidate.is_absolute():
+            cwd = parameters.get("cwd") or getattr(args, "cwd", "") or "."
+            candidate = Path(cwd).expanduser() / candidate
+        resolve_allowed_path(str(candidate.parent), allowed_read)
         return True
-    except ValueError:
+    except (OSError, ValueError):
         return False
+
+
+def _recoverable_missing_read_file_error(action_type, parameters, error, args, index, max_steps):
+    return action_type == "read_file" and _recoverable_missing_observation_path_error(
+        action_type,
+        parameters,
+        error,
+        args,
+        index,
+        max_steps,
+    )
 
 
 def _recoverable_stale_edit_file_error(action_type, parameters, error, args, index, max_steps):

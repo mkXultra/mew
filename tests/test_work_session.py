@@ -31497,6 +31497,144 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_json_read_batch_continues_after_missing_directory_observation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("pkg").mkdir()
+                Path("pkg/setup.py").write_text("setup context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect missing generated metadata and sibling context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "read_file", "path": "pkg/setup.py"},
+                                {"type": "inspect_dir", "path": "pkg/pkg.egg-info"},
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "continue after missing metadata observation",
+                        "action": {
+                            "type": "read_file",
+                            "path": "pkg/setup.py",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "inspect_dir")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["path"], "pkg/pkg.egg-info")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "completed")
+                self.assertEqual(session["tool_calls"][1]["status"], "failed")
+                self.assertTrue(session["tool_calls"][1]["recoverable_missing_observation_path"])
+                self.assertEqual(session["tool_calls"][2]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_missing_directory_observation_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("pkg").mkdir()
+                Path("pkg/setup.py").write_text("setup context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect missing generated metadata",
+                        "action": {
+                            "type": "inspect_dir",
+                            "path": "pkg/pkg.egg-info",
+                        },
+                    },
+                    {
+                        "summary": "fall back to setup context",
+                        "action": {
+                            "type": "read_file",
+                            "path": "pkg/setup.py",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertTrue(report["steps"][0]["recoverable_missing_observation_path"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_missing_observation_path"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_json_recovers_stale_edit_file_under_write_root(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -339,6 +339,20 @@ M6.24 Batch 1:
   `dry_run_patch_not_converted_to_applied_patch_before_deadline`. Treat the
   next repair as generic verifier-failure repair planning, not a
   Cython-specific solver.
+- completed seventeenth repair:
+  commit `d1069ba` promoted verifier traceback/error output into
+  `work_session.resume.verifier_failure_repair_agenda`. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-verifier-agenda-20260428-0710/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 9m 34s. The score stayed
+  unchanged, but the failures are now more diagnosable: four trials hit
+  `wall_timeout` with visible verifier targets, and one trial stopped because
+  read-only batch observation treated a missing generated metadata directory
+  as terminal.
+- current route:
+  repair generic missing generated-directory observations in read-only batches,
+  then rerun `build-cython-ext`. If the missing-directory stop disappears and
+  score is still below target, move to same-family verifier sibling-set repair
+  rather than a benchmark-specific Cython solver.
 
 Drift guard:
 
