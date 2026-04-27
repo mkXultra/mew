@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import shlex
 
+from .acceptance import coerce_acceptance_checks
 from .cli_command import mew_command, mew_executable
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
@@ -3800,6 +3801,13 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
     observed_verified_state = ""
     if (verification_state or {}).get("status") != "not_run":
         observed_verified_state = format_work_verification_state(verification_state)
+    raw_acceptance_constraints = raw.get("acceptance_constraints") or raw.get("constraints") or []
+    if isinstance(raw_acceptance_constraints, str):
+        acceptance_constraint_items = [raw_acceptance_constraints]
+    elif isinstance(raw_acceptance_constraints, list):
+        acceptance_constraint_items = raw_acceptance_constraints
+    else:
+        acceptance_constraint_items = []
     memory = {
         "hypothesis": clip_output(str(raw.get("hypothesis") or raw.get("current_hypothesis") or "").strip(), 600),
         "next_step": clip_output(str(raw.get("next_step") or raw.get("next_intended_step") or "").strip(), 600),
@@ -3810,6 +3818,12 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
             600,
         ),
         "target_paths": _coerce_working_memory_target_paths(raw.get("target_paths") or raw.get("paths") or []),
+        "acceptance_constraints": [
+            clip_output(str(item or "").strip(), 260)
+            for item in acceptance_constraint_items
+            if str(item or "").strip()
+        ][:8],
+        "acceptance_checks": coerce_acceptance_checks(raw.get("acceptance_checks") or raw.get("checks") or []),
     }
     for path in _turn_action_target_paths(turn):
         if path not in memory["target_paths"]:
@@ -3820,7 +3834,16 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
         memory["last_verified_state"] = clip_output(format_work_verification_state(verification_state), 600)
     if not any(
         memory.get(key)
-        for key in ("hypothesis", "next_step", "plan_items", "open_questions", "last_verified_state", "target_paths")
+        for key in (
+            "hypothesis",
+            "next_step",
+            "plan_items",
+            "open_questions",
+            "last_verified_state",
+            "target_paths",
+            "acceptance_constraints",
+            "acceptance_checks",
+        )
     ):
         return {}
     if turn:
@@ -7836,6 +7859,17 @@ def format_work_session_resume(resume):
             lines.extend(f"- {item}" for item in plan_items)
         if memory.get("target_paths"):
             lines.append(f"target_paths: {', '.join(str(path) for path in memory.get('target_paths') or [])}")
+        constraints = memory.get("acceptance_constraints") or []
+        if constraints:
+            lines.append("acceptance_constraints:")
+            lines.extend(f"- {constraint}" for constraint in constraints)
+        checks = memory.get("acceptance_checks") or []
+        if checks:
+            lines.append("acceptance_checks:")
+            for check in checks:
+                status = f" [{check.get('status')}]" if check.get("status") else ""
+                evidence = f" evidence={check.get('evidence')}" if check.get("evidence") else ""
+                lines.append(f"-{status} {check.get('constraint') or ''}{evidence}")
         questions = memory.get("open_questions") or []
         if questions:
             lines.append("open_questions:")

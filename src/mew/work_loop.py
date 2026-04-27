@@ -9,6 +9,7 @@ import time
 from io import StringIO
 import tokenize
 
+from .acceptance import extract_acceptance_constraints
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .deliberation import (
@@ -1856,6 +1857,7 @@ def build_work_model_context(
         work_context["current_run"] = current_run
     task_description = task.get("description") if task else session.get("goal")
     task_notes = (task or {}).get("notes") or ""
+    acceptance_constraints = extract_acceptance_constraints(task_description or "")
     if prompt_context_mode != "full":
         task_description = clip_output(task_description or "", WORK_COMPACT_TASK_TEXT_LIMIT)
         task_notes = clip_work_task_notes(task_notes, WORK_COMPACT_TASK_TEXT_LIMIT)
@@ -1869,6 +1871,7 @@ def build_work_model_context(
             "kind": task.get("kind") if task else "",
             "notes": clip_work_task_notes(task_notes, WORK_RESULT_TEXT_LIMIT),
             "cwd": work_cwd,
+            "acceptance_constraints": acceptance_constraints,
         },
         "work_session": work_context,
         "capabilities": {
@@ -6042,7 +6045,7 @@ def _work_action_schema_text():
     return (
         "{\n"
         '  "summary": "short reason",\n'
-        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
+        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state", "acceptance_constraints": ["explicit stated constraints still relevant"], "acceptance_checks": [{"constraint": "constraint text", "status": "unknown|verified|blocked", "evidence": "tool output, diff, or file inspection used as proof"}]},\n'
         '  "action": {\n'
         '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
@@ -6077,6 +6080,7 @@ def _work_action_schema_text():
         '    "question": "ask_user question",\n'
         '    "summary": "optional concrete result, recommendation, or stopping note",\n'
         '    "message_type": "assistant|info|warning",\n'
+        '    "acceptance_checks": [{"constraint": "constraint text", "status": "verified|blocked|unknown", "evidence": "direct evidence from recent tool output or file inspection"}],\n'
         '    "task_done": false,\n'
         '    "completion_summary": "optional task completion summary for finish",\n'
         '    "create": false,\n'
@@ -6130,6 +6134,7 @@ def build_work_think_prompt(context):
         "If verification_confidence.status is narrow after source edits and suggested_verify_command.command exists, prefer run_tests with that broader suggested verifier before finish unless guidance explicitly says the task is narrow-only. "
         "If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user. "
         "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
+        "Treat task.acceptance_constraints as a first-class checklist. Keep working_memory.acceptance_constraints and working_memory.acceptance_checks current. Before finish with task_done=true, action.acceptance_checks must cover every stated constraint with status=verified and direct evidence from recent tool output, diff, or file inspection. If one constraint is an edit-scope rule such as only allowed edits, specified replacements, or do-not-edit paths, verify that constraint explicitly; a successful compile, smoke command, or output file alone does not prove it. "
         "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure. "
         "Do not invent test-only assertions for behavior you have not observed in source, command output, or current tests; inspect the producer first or make the paired source change in the same plan. For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone. If a task mentions KeyboardInterrupt, Ctrl-C, SIGINT, cancellation, canceling, or cleanup, verify process-level cancellation/interrupt behavior when practical instead of only checking in-process coroutine cancellation. For Python async task orchestration where cancellation cleanup matters, prefer structured concurrency such as asyncio.TaskGroup, or explicitly prove that gather/semaphore code cancels and awaits only the started work. When verifying concurrency limits with cancellation, cover below-limit, exactly-at-limit, and above-limit cases when practical; one happy-path concurrency check is not enough. "
         "If investigation shows the task premise is false, already covered, or intentionally handled by existing tests, do not force a source edit; prefer run_tests to validate the conclusion, then finish with a no-change summary and task_done=true only if the investigation task is complete. "
@@ -6355,6 +6360,7 @@ def normalize_work_model_action(
         "question",
         "message_type",
         "completion_summary",
+        "acceptance_checks",
     ):
         if action.get(key) is not None:
             normalized[key] = action.get(key)

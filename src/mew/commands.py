@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .acceptance import acceptance_finish_blocker
 from .agent_runs import (
     build_ai_cli_run_command,
     create_agent_run,
@@ -3439,6 +3440,12 @@ def apply_work_control_action(state, session, task, action):
             same_surface_audit = resume.get("same_surface_audit") or {}
             if same_surface_audit and same_surface_audit.get("status") != "noted":
                 finish_blockers.append("required same-surface audit")
+            acceptance_blocker = acceptance_finish_blocker(
+                (task or {}).get("description") or session.get("goal") or "",
+                action,
+            )
+            if acceptance_blocker:
+                finish_blockers.append(acceptance_blocker)
             if finish_blockers:
                 blocked_note = f"finish blocked: {', '.join(finish_blockers)}"
                 if task is not None:

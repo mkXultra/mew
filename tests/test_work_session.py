@@ -33603,6 +33603,32 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work session finish blocked", task["notes"])
                 self.assertNotIn("Work session finished:", task["notes"])
 
+    def test_work_finish_blocks_task_done_without_acceptance_checks(self):
+        from mew.commands import apply_work_control_action
+
+        state = {}
+        session = {"id": 9, "status": "active", "goal": "Ensure output exists. Do not edit config.json."}
+        task = {
+            "id": 15,
+            "description": "Ensure output exists. Do not edit config.json.",
+            "status": "ready",
+            "notes": "",
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(
+                state,
+                session,
+                task,
+                {"type": "finish", "reason": "implemented and verified", "task_done": True},
+            )
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("acceptance constraints unchecked", result["finished_note"])
+        self.assertIn("Work session finish blocked", task["notes"])
+
     def test_work_finish_allows_completed_same_surface_audit(self):
         from mew.commands import apply_work_control_action
 
