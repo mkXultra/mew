@@ -155,12 +155,17 @@ M6.24 Batch 1:
 
 - manifest: `docs/M6_24_BATCH_1_MANIFEST_2026-04-28.md`
 - local batch JSON: `docs/data/terminal_bench_m6_24_batch_1.json`
+- run ledger: `docs/M6_24_BATCH_1_RUNS_2026-04-28.md`
 - selected tasks: `configure-git-webserver`, `db-wal-recovery`,
   `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
-- next action: run Batch 1 task by task through Harbor using the generic
-  `mew work --oneshot` path and record each result before any repair.
+- measured so far: `build-cython-ext` 0/5 against Codex target 5/5, Harbor
+  errors 0, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-20260428-0054/result.json`
+- current first repair candidate:
+  `batch_missing_read_path_terminal_tool_failed`; repair generic read-only
+  batch semantics before running more Batch 1 tasks.
 
 Drift guard:
 
