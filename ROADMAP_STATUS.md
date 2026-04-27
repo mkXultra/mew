@@ -135,6 +135,15 @@ Current M7 evidence:
   src/mew/agent.py tests/test_autonomy.py`, and `git diff --check`.
   Codex-ultra review `019dcc36-658f-72b0-8371-f24eae6a863e` returned
   `STATUS: pass`.
+- Runtime proof `2026-04-27 09:00 JST`: enabled gated non-file RSS source
+  `hn` with daily budget `1`, selected it through `mew signals proof-source`,
+  fetched one HN RSS item through `mew signals fetch hn --json`, and processed
+  the queued event with `mew run --once --echo-outbox`. The runtime produced
+  outbox `#156`: `signal-observed noticed, not acted`, with source `hn`,
+  fetched summary, `reason_for_use`, and disable command
+  `./mew signals disable hn`. This proves the immediate end-to-end M7 path, but
+  the real-day useful-observation gate remains open until the observation
+  survives an intended passive proof window without spam.
 
 M6.17 close evidence:
 
