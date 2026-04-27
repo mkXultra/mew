@@ -6708,6 +6708,11 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: stale edit target; continuing with refresh context")
                 continue
+            if _recoverable_git_status_not_repo_error(action_type, error, result, index, max_steps):
+                report["steps"][-1]["recoverable_git_status_not_repo"] = True
+                if progress:
+                    progress(f"step #{index}: git status unavailable; continuing with filesystem context")
+                continue
             report["stop_reason"] = "tool_failed"
             break
 
@@ -6916,6 +6921,21 @@ def _recoverable_stale_edit_file_error(action_type, parameters, error, args, ind
         return True
     except ValueError:
         return False
+
+
+def _recoverable_git_status_not_repo_error(action_type, error, result, index, max_steps):
+    if action_type != "git_status" or index >= max_steps:
+        return False
+    result = result or {}
+    normalized = "\n".join(
+        str(value or "")
+        for value in (
+            error,
+            result.get("stderr"),
+            result.get("stdout"),
+        )
+    ).lower()
+    return "not a git repository" in normalized
 
 
 def _approval_parameters_from_call(call, args):

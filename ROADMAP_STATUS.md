@@ -161,9 +161,9 @@ M6.24 Batch 1:
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far: `build-cython-ext` remains 0/5 against Codex target 5/5
-  across the initial run and three reruns. The latest rerun is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-repeat-reset-20260428-0148/result.json`
-  with one `AgentTimeoutError`.
+  across the initial run and four reruns. The latest rerun is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-stale-edit-20260428-0208/result.json`
+  with Harbor errors 0.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
   read-only batches continue after missing paths under allowed write roots.
@@ -173,10 +173,15 @@ M6.24 Batch 1:
   `26a2647` reset repeat counts at the latest completed workspace-changing
   write. Score stayed 0/5 but the progressed trial reached 9/11 verifier tests
   before timing out.
+- completed third repair:
+  `stale_exact_text_edit_terminal_tool_failed`; commit `404f36c` made stale
+  exact-text edit misses recoverable under allowed write roots while budget
+  remains. Score stayed 0/5 but stale edit misses no longer terminated the
+  loop.
 - current repair candidate:
-  `stale_exact_text_edit_terminal_tool_failed`; exact old-text edit misses are
-  recoverable under allowed write roots while budget remains. Repair this
-  generic refresh boundary before running more Batch 1 tasks.
+  `git_status_not_repo_terminal_tool_failed`; unavailable git status in
+  non-git workspaces should be recoverable while budget remains. Repair this
+  generic workspace boundary before running more Batch 1 tasks.
 
 Drift guard:
 
