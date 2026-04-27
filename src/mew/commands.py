@@ -3345,6 +3345,74 @@ def _work_finish_text(action, fallback):
     return fallback
 
 
+def _work_budget_pressure_finish_text(action):
+    return " ".join(
+        str((action or {}).get(key) or "")
+        for key in ("summary", "reason", "completion_summary", "note", "text")
+        if str((action or {}).get(key) or "").strip()
+    ).casefold()
+
+
+def _work_finish_mentions_budget_pressure(action):
+    text = _work_budget_pressure_finish_text(action)
+    if not text:
+        return False
+    budget_marker = any(marker in text for marker in ("budget", "pressure"))
+    stop_marker = any(marker in text for marker in ("exhaust", "near", "limit", "stop", "stopp", "replan"))
+    return budget_marker and stop_marker
+
+
+def convert_budget_pressure_finish_to_remember(action, session, index, max_steps, *, continue_after_remember=False):
+    action = action or {}
+    if (action.get("type") or "") != "finish":
+        return action
+    if action.get("task_done"):
+        return action
+    if not continue_after_remember:
+        return action
+    try:
+        current_index = int(index)
+        current_max_steps = int(max_steps)
+    except (TypeError, ValueError):
+        return action
+    if current_index >= current_max_steps:
+        return action
+    if not _work_finish_mentions_budget_pressure(action):
+        return action
+    resume = build_work_session_resume(session) if session else {}
+    effort = (resume or {}).get("effort") or {}
+    warnings = set(effort.get("warnings") or [])
+    pressure_related = bool(
+        warnings
+        & {
+            "step_budget_near",
+            "step_budget_exhausted",
+            "failure_budget_near",
+            "failure_budget_exhausted",
+        }
+    )
+    has_repair_context = bool(
+        (resume or {}).get("failures")
+        or (resume or {}).get("unresolved_failure")
+        or (resume or {}).get("retry_context")
+        or (resume or {}).get("suggested_safe_reobserve")
+    )
+    if not pressure_related and not has_repair_context:
+        return action
+    remaining_after_current = max(0, current_max_steps - current_index)
+    note = _work_finish_text(action, "Budget-pressure finish deferred.")
+    return {
+        "type": "remember",
+        "note": (
+            "Budget-pressure finish was deferred because this invocation still has "
+            f"{remaining_after_current} step(s) after the current step. "
+            f"Original finish note: {clip_output(note, 500)}"
+        ),
+        "reason": "converted budget-pressure finish to continuity note",
+        "converted_from_finish": "budget_pressure",
+    }
+
+
 def apply_work_control_action(state, session, task, action):
     action = action or {}
     action_type = action.get("type") or ""
@@ -5530,6 +5598,8 @@ def cmd_work_ai(args):
                 progress_model_deltas=not bool(getattr(effective_args, "compact_live", False)),
                 pre_model_metrics_sink=record_pre_model_metrics,
                 compact_live=bool(getattr(effective_args, "compact_live", False)),
+                run_step_index=index,
+                run_max_steps=max_steps,
             )
             flush_live_model_delta()
         except KeyboardInterrupt:
@@ -5593,6 +5663,13 @@ def cmd_work_ai(args):
             break
 
         action = planned.get("action") or {"type": "wait", "reason": "missing action"}
+        action = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            index,
+            max_steps,
+            continue_after_remember=bool(getattr(effective_args, "continue_after_remember", False)),
+        )
         action_type = action.get("type")
         session_trace_patch = (
             planned.get("session_trace_patch") if isinstance(planned.get("session_trace_patch"), dict) else {}

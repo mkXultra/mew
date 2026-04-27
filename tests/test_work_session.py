@@ -18,6 +18,7 @@ from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
     broad_read_guard_replacement_parameters,
+    convert_budget_pressure_finish_to_remember,
     detect_default_verify_command,
     detect_instruction_verify_command,
     format_work_cli_controls,
@@ -464,6 +465,159 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("warnings: step_budget_near, failure_budget_near, wall_time_near", resume_text)
         self.assertEqual(context["work_session"]["effort"]["pressure"], "medium")
         self.assertEqual(context["work_session"]["resume"]["effort"]["steps"]["used"], 24)
+
+    def test_work_model_context_includes_current_run_budget(self):
+        task = {"id": 1, "title": "Budgeted run", "status": "ready", "kind": "coding"}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Budgeted run",
+            "goal": "Keep invocation budget visible.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        from mew.work_loop import build_work_model_context
+
+        context = build_work_model_context(
+            {"tasks": [task]},
+            session,
+            task,
+            "2026-04-17T00:01:00Z",
+            run_step_index=11,
+            run_max_steps=30,
+        )
+
+        current_run = context["work_session"]["current_run"]
+        self.assertEqual(current_run["step_index"], 11)
+        self.assertEqual(current_run["max_steps"], 30)
+        self.assertEqual(current_run["remaining_steps_including_current"], 20)
+        self.assertEqual(current_run["remaining_steps_after_current"], 19)
+        self.assertTrue(current_run["can_continue_after_current"])
+        self.assertEqual(current_run["budget_source"], "current_cli_invocation")
+
+    def test_convert_budget_pressure_finish_to_remember_when_oneshot_can_continue(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Repair task",
+            "goal": "Repair after verification failure.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": index + 1,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "summary": "verification failed and rolled back",
+                    "started_at": "2026-04-17T00:00:00Z",
+                    "finished_at": "2026-04-17T00:00:01Z",
+                    "parameters": {"path": "vm.js"},
+                    "result": {
+                        "path": "vm.js",
+                        "changed": True,
+                        "verification": {"command": "node vm.js", "exit_code": 1},
+                    },
+                    "approval_status": "auto_rolled_back",
+                    "approval_error": "verification failed after apply; rolled back",
+                }
+                for index in range(4)
+            ],
+            "model_turns": [],
+        }
+        action = {
+            "type": "finish",
+            "summary": "Stopped due exhausted step/failure budget. Repair vm.js next.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            11,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_finish"], "budget_pressure")
+        self.assertIn("19 step(s)", converted["note"])
+        self.assertIn("Original finish note", converted["note"])
+
+    def test_convert_budget_pressure_finish_keeps_final_step_finish(self):
+        action = {
+            "type": "finish",
+            "summary": "Stopped due exhausted step/failure budget.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            {"tool_calls": [], "model_turns": []},
+            30,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertIs(converted, action)
+
+    def test_convert_budget_pressure_finish_keeps_non_budget_safety_finish(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {"command": "pytest", "exit_code": 1},
+                }
+            ],
+            "model_turns": [],
+        }
+        action = {
+            "type": "finish",
+            "summary": "Stopping: verification failure appears environmental; ask the user to replan.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            11,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertIs(converted, action)
+
+    def test_convert_budget_pressure_finish_requires_repair_or_pressure_context(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        action = {
+            "type": "finish",
+            "summary": "Stopped due exhausted failure budget.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            11,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertIs(converted, action)
 
     def test_resume_surfaces_same_surface_audit_for_mew_source_edit(self):
         task = {"id": 1, "title": "Audit surface", "status": "ready", "kind": "coding", "notes": ""}
@@ -4752,6 +4906,82 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_converts_budget_pressure_finish_and_continues(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_outputs = [
+                    {
+                        "summary": "write then verify",
+                        "action": {
+                            "type": "write_file",
+                            "path": "out.txt",
+                            "content": "bad\n",
+                            "create": True,
+                            "apply": True,
+                        },
+                    },
+                    {
+                        "summary": "budget pressure closeout",
+                        "action": {
+                            "type": "finish",
+                            "summary": "Stopped due exhausted step/failure budget. Repair out.txt next.",
+                            "task_done": False,
+                        },
+                    },
+                    {
+                        "summary": "finish after converted checkpoint",
+                        "action": {"type": "finish", "reason": "done after converted budget note"},
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Create out.txt and verify with false.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "false",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "3",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                self.assertEqual(call_model.call_count, 3)
+                self.assertEqual(report["stop_reason"], "finish")
+                self.assertTrue(report["steps"][0]["recoverable_verification_failure"])
+                self.assertEqual(report["steps"][1]["action"]["type"], "remember")
+                self.assertEqual(report["steps"][1]["action"]["converted_from_finish"], "budget_pressure")
+                self.assertTrue(report["steps"][1]["continued_after_remember"])
+                self.assertFalse((workspace / "out.txt").exists())
+            finally:
+                os.chdir(old_cwd)
+
     def test_detect_default_verify_command_prefers_instruction_backtick_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -7415,6 +7645,8 @@ class WorkSessionTests(unittest.TestCase):
             session,
             {"id": 1, "title": "Memory", "description": "Reenter with a compact hypothesis.", "status": "todo"},
             "now",
+            run_step_index=2,
+            run_max_steps=5,
         )
         self.assertEqual(
             context["work_session"]["resume"]["working_memory"]["next_step"],
@@ -7483,6 +7715,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer one paired dry-run edit over another same-path reread", prompt)
         fast_context = build_write_ready_work_model_context(context)
         self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+        self.assertEqual(fast_context["current_run"]["remaining_steps_after_current"], 3)
         self.assertEqual(
             [item["path"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
@@ -7494,6 +7727,7 @@ class WorkSessionTests(unittest.TestCase):
         fast_prompt = build_work_write_ready_think_prompt(fast_context)
         self.assertIn("Write-ready fast path is active.", fast_prompt)
         self.assertIn("Use write_ready_fast_path.cached_window_texts as the exact old text source", fast_prompt)
+        self.assertIn("Use current_run as the active invocation budget", fast_prompt)
         self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
         self.assertIn(
@@ -7524,9 +7758,10 @@ class WorkSessionTests(unittest.TestCase):
 
         def assert_rollback_repair_guidance(repair_prompt):
             self.assertIn(
-                "When a rollback verifier failure has one small clear localized cause and the worktree is clean",
+                "When a rollback verifier failure has one small clear localized cause",
                 repair_prompt,
             )
+            self.assertIn("the worktree is clean", repair_prompt)
             self.assertIn(
                 "center it on the failed assertion/output and target path",
                 repair_prompt,
@@ -7542,12 +7777,14 @@ class WorkSessionTests(unittest.TestCase):
         assert_rollback_repair_guidance(fast_prompt)
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
+        self.assertEqual(tiny_context["current_run"]["remaining_steps_after_current"], 3)
         self.assertEqual(
             [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
         )
         self.assertEqual(tiny_context["task_goal"]["required_terms"], [])
         self.assertIn("Write-ready tiny draft lane is active.", tiny_prompt)
+        self.assertIn("Use current_run as the active invocation budget", tiny_prompt)
         self.assertIn("task_goal.required_terms", tiny_prompt)
         self.assertIn('"kind": "patch_proposal|patch_blocker"', tiny_prompt)
         self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
@@ -30523,8 +30760,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("work_session.resume.active_memory", prompt)
         self.assertIn("durable typed recall", prompt)
         self.assertIn("Do not use read_file on .mew/memory/private paths", prompt)
-        self.assertIn("Use work_session.effort as operational pressure", prompt)
-        self.assertIn("If effort.pressure is high, avoid broad exploration", prompt)
+        self.assertIn("Use work_session.current_run as the active invocation budget", prompt)
+        self.assertIn("work_session.effort as historical session pressure", prompt)
+        self.assertIn("Do not claim the step or failure budget is exhausted", prompt)
+        self.assertIn("current_run still has remaining steps", prompt)
         self.assertIn("If effort.pressure is medium, choose a narrow next action", prompt)
         self.assertIn("working_memory.target_paths", prompt)
         self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
@@ -30600,6 +30839,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("explicitly unverified modes", prompt)
         self.assertIn("same_surface_audit.status indicates a sibling-surface audit is still needed", prompt)
         self.assertIn("do one narrow audit step or record why the sibling surface is already covered or out of scope before finish", prompt)
+        self.assertIn("Do not use finish merely because historical effort warnings mention step_budget or failure_budget", prompt)
         self.assertIn("do not finish merely because the next edit is clear", prompt)
         self.assertIn("propose the dry-run edit_file/write_file action instead", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)

@@ -1825,6 +1825,8 @@ def build_work_model_context(
     verify_command="",
     guidance="",
     prompt_context_mode="full",
+    run_step_index=None,
+    run_max_steps=None,
 ):
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
@@ -1849,6 +1851,9 @@ def build_work_model_context(
         world_state,
         prompt_context_mode=prompt_context_mode,
     )
+    current_run = build_current_work_run_budget(run_step_index, run_max_steps)
+    if current_run:
+        work_context["current_run"] = current_run
     task_description = task.get("description") if task else session.get("goal")
     task_notes = (task or {}).get("notes") or ""
     if prompt_context_mode != "full":
@@ -1876,6 +1881,28 @@ def build_work_model_context(
             "verify_command_configured": bool(verify_command),
         },
         "guidance": guidance or "",
+    }
+
+
+def build_current_work_run_budget(run_step_index=None, run_max_steps=None):
+    try:
+        step_index = int(run_step_index)
+        max_steps = int(run_max_steps)
+    except (TypeError, ValueError):
+        return {}
+    if step_index <= 0 or max_steps <= 0:
+        return {}
+    return {
+        "step_index": step_index,
+        "max_steps": max_steps,
+        "remaining_steps_including_current": max(0, max_steps - step_index + 1),
+        "remaining_steps_after_current": max(0, max_steps - step_index),
+        "can_continue_after_current": step_index < max_steps,
+        "budget_source": "current_cli_invocation",
+        "note": (
+            "This is the current command's step budget. work_session.effort is "
+            "historical session pressure, not a hard stop by itself."
+        ),
     }
 
 
@@ -5858,6 +5885,7 @@ def build_write_ready_work_model_context(context):
     failed_patch_repair = _write_ready_failed_patch_repair_for_targets(resume, target_paths)
     required_terms = _write_ready_task_goal_required_terms(context, resume)
     result = {
+        "current_run": work_session.get("current_run") or {},
         "active_work_todo": active_work_todo,
         "write_ready_fast_path": {
             "active": True,
@@ -5892,7 +5920,8 @@ def build_write_ready_tiny_draft_model_context(context):
     write_ready_context = build_write_ready_work_model_context(context)
     if not write_ready_context:
         return {}
-    resume = ((context or {}).get("work_session") or {}).get("resume") or {}
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") or {}
     actionable_target_paths = _write_ready_tiny_draft_observation_target_paths(resume)
     if not actionable_target_paths:
         actionable_target_paths = [str(path or "") for path in (fast_path.get("cached_paths") or []) if str(path).strip()]
@@ -5976,6 +6005,7 @@ def build_write_ready_tiny_draft_model_context(context):
             f"Original proposal summary: {failed_patch_repair.get('proposal_summary') or ''}"
         ).strip()
     result = {
+        "current_run": work_session.get("current_run") or {},
         "active_work_todo": {
             "source": {
                 "plan_item": active_todo_plan_item,
@@ -6072,7 +6102,7 @@ def build_work_think_prompt(context):
         "Treat the capabilities object as current and authoritative; if a read/write/verify root or command is allowed there, do not ask the user to pass the same flag again. "
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
         "Use work_session.resume.active_memory as durable typed recall about the user, project, feedback, or references; treat it as relevant context, but verify project facts with tools before relying on them for code changes. If active_memory.compacted_for_prompt is true, memory bodies were intentionally omitted; use id/path/name/description as pointers and read only the narrow source you need. Do not use read_file on .mew/memory/private paths surfaced in active_memory; their excerpt is already present in the prompt and those files are sensitive. "
-        "Use work_session.effort as operational pressure. If effort.pressure is high, avoid broad exploration and prefer finish, remember, or ask_user with a concise state summary and a concrete replan. If effort.pressure is medium, choose a narrow next action and refresh working_memory so the next reentry is not stale. "
+        "Use work_session.current_run as the active invocation budget and work_session.effort as historical session pressure. Do not claim the step or failure budget is exhausted while work_session.current_run.can_continue_after_current is true; if effort.pressure is high but current_run still has remaining steps and a safe repair/read/write action is clear, prefer that bounded action over finish. If effort.pressure is high and no safe action remains, prefer remember or ask_user with a concise state summary and concrete replan. If effort.pressure is medium, choose a narrow next action and refresh working_memory so the next reentry is not stale. "
         "If working_memory.target_paths lists likely files or directories for the next step, and one already names the likely file or directory, prefer a direct read_file on one of those target_paths before repeating same-surface search_text; otherwise prefer those paths before a broader project search, and keep that list short and current. "
         "If work_session.world_state.files marks a target_path as exists=false, do not read_file that missing path; inspect its parent or sibling surface first, then use write_file with create=true when creating the new scoped file is the intended implementation step. "
         "If work_session.resume.target_path_cached_window_observations already names a recent read_file window for that target_path, prefer refreshing that direct cached window before repeating same-surface search_text to rediscover the file. "
@@ -6106,7 +6136,7 @@ def build_work_think_prompt(context):
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
         "Use run_command only when shell is explicitly allowed. run_command is parsed with shlex and executed without a shell, so do not use pipes, redirection, &&, ||, or ; unless you wrap the behavior in an interpreter such as python -c. "
         "Do not use run_command to invoke resident mew loops or the printed Next CLI controls such as mew work, mew do, mew chat, or mew run; those controls are for a human operator outside the active session. "
-        "Use finish when the task is done or when an investigation/recommendation task has a concrete conclusion. "
+        "Use finish when the task is done or when an investigation/recommendation task has a concrete conclusion. Do not use finish merely because historical effort warnings mention step_budget or failure_budget while current_run says another step is available. "
         "Before finishing an implementation task that touched user-facing surfaces, account for the task acceptance criteria, README or usage docs, CLI stdout or output-file behavior, tests run, and any explicitly unverified modes in action.summary or action.completion_summary. "
         "If work_session.resume.same_surface_audit.status indicates a sibling-surface audit is still needed after src/mew edits, do one narrow audit step or record why the sibling surface is already covered or out of scope before finish. "
         "For implementation tasks with allowed write roots, do not finish merely because the next edit is clear; if exact old/new text or file content is available, propose the dry-run edit_file/write_file action instead. "
@@ -6136,7 +6166,8 @@ def build_work_write_ready_think_prompt(context):
         "If a required term cannot naturally appear in the scoped source/test edit, return wait with blocker task_goal_term_missing instead of inventing schema or switching to a nearby helper.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
-        "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
+        "Use current_run as the active invocation budget. Historical effort pressure is not a hard stop while current_run.can_continue_after_current is true.\n"
+        "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run still has remaining steps, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
         "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone.\n"
         "Prefer one scoped dry-run batch under active_work_todo.source.target_paths now. Prefer one paired dry-run batch for mew core target paths: paired tests/** plus src/mew/**. For non-core allowed roots, stay inside the declared product root and include local tests when they are in scope.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
@@ -6165,7 +6196,8 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "If a required term cannot naturally appear in the scoped source/test edit, return patch_blocker with code task_goal_term_missing instead of inventing schema or proposing a nearby patch.\n"
         "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
         "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
-        "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
+        "Use current_run as the active invocation budget. Historical effort pressure is not a hard stop while current_run.can_continue_after_current is true.\n"
+        "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run still has remaining steps, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
         "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone.\n"
         "Stay inside allowed_roots.write and do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
@@ -6769,6 +6801,8 @@ def plan_work_model_turn(
     compact_live=False,
     deliberation_requested=False,
     auto_deliberation=True,
+    run_step_index=None,
+    run_max_steps=None,
 ):
     current_time = now_iso()
     capabilities = {
@@ -6801,6 +6835,8 @@ def plan_work_model_turn(
         verify_command=verify_command,
         guidance=guidance,
         prompt_context_mode=prompt_context_mode,
+        run_step_index=run_step_index,
+        run_max_steps=run_max_steps,
     )
     write_ready_fast_path = _work_write_ready_fast_path_details(context)
     write_ready_context = (
