@@ -149,7 +149,18 @@ Closed M6.23 result:
 
 Current M6.24 chain:
 
-`M6.24 broad parity -> choose first registry batch -> run mew with generic work path -> compare against frozen Codex target -> feed failures through M6.18/M6.23 repair economy`
+`M6.24 broad parity -> run Batch 1 with generic work path -> compare against frozen Codex target -> feed failures through M6.18/M6.23 repair economy`
+
+M6.24 Batch 1:
+
+- manifest: `docs/M6_24_BATCH_1_MANIFEST_2026-04-28.md`
+- local batch JSON: `docs/data/terminal_bench_m6_24_batch_1.json`
+- selected tasks: `configure-git-webserver`, `db-wal-recovery`,
+  `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
+  `build-cython-ext`, `code-from-image`, and `fix-git`
+- frozen Codex target: 25/40 successes, 62.5%
+- next action: run Batch 1 task by task through Harbor using the generic
+  `mew work --oneshot` path and record each result before any repair.
 
 Drift guard:
 
