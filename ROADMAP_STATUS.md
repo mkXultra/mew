@@ -188,7 +188,8 @@ M6.24 Batch 1:
   become recoverable verifier observations while budget remains. The latest
   rerun has near-solution trials that reached the README snippet with compiled
   extensions and NumPy `2.3.0`, then stopped on `No module named pytest`.
-  A generic repair is implemented locally and awaiting commit/rerun.
+  Commit `f91209e` implements the generic repair; rerun current head before
+  selecting more Batch 1 tasks.
 
 Drift guard:
 
