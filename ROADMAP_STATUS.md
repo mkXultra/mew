@@ -52,8 +52,8 @@ is tracked below.
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
 | 6.18 Implementation Failure Diagnosis Gate | `done` | Close gate passed via `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`; M7+ dogfood now routes failures through diagnosis before M6.14 repair. |
-| 6.19 Terminal-Bench Compatibility | `in_progress` | Active milestone: make mew runnable under Harbor / Terminal-Bench and produce comparable smoke-subset artifacts; latest live smoke proves wrapper construction, logs_dir artifacts, and exit-code capture, not score optimization. |
-| 6.20 Terminal-Bench Driven Implement-Lane Debugging | `not_started` | Use Terminal-Bench scores and failure cohorts to drive implementation-lane repair after M6.19 creates the harness. |
+| 6.19 Terminal-Bench Compatibility | `done` | Close gate passed via `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`; mew and Codex both run the bounded Harbor smoke with comparable artifacts. |
+| 6.20 Terminal-Bench Driven Implement-Lane Debugging | `in_progress` | Active milestone: use Terminal-Bench scores and failure cohorts to drive implementation-lane repair from the M6.19 harness. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
@@ -62,42 +62,33 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.19 Terminal-Bench Compatibility**.
+Active work: **M6.20 Terminal-Bench Driven Implement-Lane Debugging**.
 
-Why M6.19 is active:
+Why M6.20 is active:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
-- The implementation lane needs an external, comparable benchmark. Internal
-  mew-first dogfood is valuable but can overfit to mew's own repository and
-  task style.
-- Harbor is the official Terminal-Bench 2.0 harness and already supports
-  existing reference agents such as Codex CLI and Claude Code, making it a
-  suitable comparison surface for mew.
-- M6.18 can now classify mew-first failures, so benchmark failures can become
-  diagnosis data rather than free-form anecdotes.
+- M6.19 closed the Harbor compatibility harness and produced comparable mew and
+  Codex artifacts on `terminal-bench/make-mips-interpreter`.
+- Both smoke runs scored `0.0`, so the next value is not more compatibility
+  plumbing. It is a measured failure report, score target, and first
+  implementation-lane repair selected from benchmark evidence.
+- M6.18 can now classify mew-first failures, so benchmark failures should feed
+  diagnosis data instead of becoming free-form anecdotes.
 
-Current M6.19 target:
+Current M6.20 target:
 
-- make mew runnable as a Harbor / Terminal-Bench custom agent
-- make Harbor factory construction work with `logs_dir`, `model_name`, and
-  wrapper kwargs, and install mounted local mew before the smoke command
-- preserve wrapper artifacts under Harbor `logs_dir/terminal-bench-harbor-smoke`
-  when `logs_dir` is supplied, with local fallback artifacts only outside Harbor
-- run a small Terminal-Bench smoke subset through mew
-- retain the latest live smoke proof: `command_template="mew --help"`,
-  `Exceptions=0`, transcript `exit_code=0`, result artifact at
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-help-fixed-return-code/result.json`,
-  and score still `0.0`
-- run the same subset with at least one reference agent such as Codex CLI or
-  Claude Code
-- store per-task artifacts with instruction, transcript/work-session summary,
-  verifier result, timeout status, and available cost/token data
-- keep score optimization out of M6.19; M6.20 owns debug/score improvement
+- turn the M6.19 smoke artifacts into a baseline report with task list,
+  commands, environment notes, scores, and artifact paths
+- classify at least one scored failure cohort through the M6.18 taxonomy
+- write an explicit small score target before prompt/tool optimization
+- choose one implementation-lane or task-spec repair from benchmark evidence
+- rerun the same bounded subset after the repair and record improved,
+  regressed, or unchanged outcome
 
-Current M6.19 chain:
+Current M6.20 chain:
 
-`M6.19 -> Harbor custom agent wrapper -> Terminal-Bench smoke artifacts -> comparable baseline`
+`M6.20 -> baseline report -> failure cohort -> explicit score target -> bounded repair rerun`
 
 M7 pending evidence preserved:
 
@@ -1261,24 +1252,22 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.19 -> Harbor custom agent wrapper -> Terminal-Bench smoke artifacts -> comparable baseline`
+`M6.20 -> baseline report -> failure cohort -> explicit score target -> bounded repair rerun`
 
 Acceptable near-term work:
 
-- run the new Harbor custom-agent wrapper against a tiny Terminal-Bench smoke
-  subset and keep the transcript/artifact output
-- add a mew headless benchmark entrypoint only if the current CLI surface is
-  insufficient for the live Harbor smoke run
-- record benchmark artifacts in a stable path with per-task outcome,
-  transcript/work-session summary, verifier result, timeout, and cost/token
-  data when available
-- run or document the same smoke subset against at least one reference agent
-  such as Codex CLI or Claude Code
+- write the M6.20 baseline report from the mew and Codex smoke artifacts
+- classify the `make-mips-interpreter` failure shape through M6.18 with cited
+  Harbor evidence
+- define a small explicit target before any optimization, such as "the mew
+  smoke run must attempt an instruction-consuming task path without wrapper
+  exceptions before score tuning"
+- implement only the smallest repair needed to make the next rerun more
+  informative
 
 Non-goals for the next session:
 
-- M6.20 score optimization before the M6.19 harness is trustworthy
-- broad prompt tuning for Terminal-Bench before baseline artifacts exist
+- broad prompt tuning before the baseline report and score target exist
 - resuming M7 inbound signal work before the Terminal-Bench milestones are
   addressed or explicitly reprioritized
 - full concurrent executor
@@ -1305,21 +1294,23 @@ Latest roadmap/status validation:
   cleanup after mew marked the task done without running ruff. Count the slice
   as product progress with a small reviewer cleanup, not a fully clean
   mew-first close.
-- Remaining M6.19 gap: live Harbor execution against a Terminal-Bench smoke
-  subset and a comparable reference-agent run are not yet complete.
+- Historical M6.19 gap after `#687`: live Harbor execution and reference-agent
+  comparison were still missing at that point.
 - M6.19 task `#688` repaired Harbor factory/install compatibility. Focused
   validation passed:
   `uv run pytest -q tests/test_harbor_terminal_bench_agent.py --no-testmon`,
   `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
   `git diff --check`, and a real Harbor tool-env
   `AgentFactory.create_agent_from_import_path(...)` smoke.
-- Remaining M6.19 gap after `#690`: run the same bounded Harbor smoke subset
-  with at least one reference agent such as Codex CLI or Claude Code and compare
-  artifacts. The current mew live smoke uses `command_template="mew --help"`
-  and now proves Harbor execution with `Exceptions=0`, transcript `exit_code=0`,
-  and artifacts under Harbor `logs_dir/terminal-bench-harbor-smoke`; true
-  instruction-consuming task solving remains M6.20/debugging work, not M6.19
-  score optimization.
+- M6.19 close audit:
+  `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`.
+  The mew smoke result is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-help-fixed-return-code/result.json`
+  with `Exceptions=0`, transcript `exit_code=0`, and score `0.0`.
+  The Codex reference result is
+  `proof-artifacts/terminal-bench/harbor-smoke/codex-smoke-make-mips/result.json`
+  with `Exceptions=0`, score `0.0`, and Codex token metadata in Harbor
+  `agent_result`.
 - M7 task `#686` pending dry-run tools `#6644/#6645` were rejected without
   applying because M7 is now pending behind Terminal-Bench milestones.
 - Earlier roadmap-only M6.19/M6.20 setup remains historical; current M6.19
