@@ -1125,6 +1125,81 @@ Why it matters:
   M7+ dogfood produce either product progress or actionable implementation-lane
   repair data.
 
+## Milestone 6.19: Terminal-Bench Compatibility
+
+Make mew runnable as a Harbor / Terminal-Bench agent so implementation-lane
+quality can be measured against established terminal-agent baselines.
+
+Target:
+
+- provide a headless mew entrypoint suitable for Harbor custom-agent execution
+- add or document a Harbor agent wrapper that can run mew against
+  Terminal-Bench tasks
+- preserve mew's reviewer-gated work-session audit trail while running inside
+  benchmark containers
+- export enough benchmark artifacts to compare mew, Codex CLI, Claude Code,
+  and other agent CLIs on the same task subset
+- keep the first slice small: smoke subset first, full benchmark later
+- avoid optimizing prompts or implementation-lane behavior before the
+  measurement harness is trustworthy
+
+Done when:
+
+- Harbor can invoke mew as a custom agent without patching Harbor source
+- a Terminal-Bench smoke subset runs through mew and produces per-task results
+- the same subset can be run for at least one reference agent such as Codex CLI
+  or Claude Code for side-by-side comparison
+- mew stores per-task artifacts with instruction, command transcript,
+  work-session/tool-call summary, verifier result, timeout status, and cost or
+  token data when available
+- the artifacts are stable enough that failures can be replayed or routed into
+  M6.18/M6.14 diagnosis instead of becoming free-form anecdotes
+
+Why it matters:
+
+- Internal dogfood proves mew can improve itself, but it can overfit to mew's
+  own repository and task style. Terminal-Bench gives the implementation lane a
+  shared external yardstick against Codex CLI, Claude Code, and other terminal
+  agents.
+
+## Milestone 6.20: Terminal-Bench Driven Implement-Lane Debugging
+
+Use Terminal-Bench results to improve mew's implementation lane with measured
+failure classes and score targets instead of local anecdotes.
+
+Target:
+
+- establish a mew Terminal-Bench baseline on a fixed smoke or selected subset
+- compare mew against Codex CLI and Claude Code on the same subset
+- route failed tasks through the M6.18 diagnosis taxonomy:
+  `polish`, `structural`, `invalid_task_spec`, `transient_model`, or
+  `ambiguous`
+- connect structural failures to bounded M6.14 repair episodes with before /
+  after benchmark evidence
+- track success rate, timeout rate, verification failure rate, first-edit
+  latency, tool count, cost, and rescue/approval outcomes
+- set an explicit score target before broad optimization
+
+Done when:
+
+- a baseline report exists with mew score, reference-agent score, task list,
+  command lines, environment notes, and artifact paths
+- at least one scored failure cohort is classified through M6.18 with cited
+  benchmark evidence
+- at least one implementation-lane repair or task-spec repair is chosen from
+  benchmark evidence and rerun against the same task subset
+- the score target is written in ROADMAP_STATUS before optimization, starting
+  with a small target such as smoke-subset pass rate or a percentage of the
+  reference Codex CLI score
+- reruns show whether the repair improved, regressed, or did not affect the
+  benchmark score
+
+Why it matters:
+
+- mew should become a coding body that frontier models would actually choose
+  over standard agent CLIs. Terminal-Bench-driven debugging turns that goal into
+  a scoreboard and a failure-science loop.
+
 ## Milestone 7: Senses - Inbound Signals
 
 Let mew notice the user's working world through explicit, audited, read-only

@@ -52,7 +52,9 @@ is tracked below.
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
 | 6.18 Implementation Failure Diagnosis Gate | `done` | Close gate passed via `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`; M7+ dogfood now routes failures through diagnosis before M6.14 repair. |
-| 7. Senses: Inbound Signals | `in_progress` | Active milestone: convert existing signal gates/journaling/RSS foundation into useful audited inbound observations. |
+| 6.19 Terminal-Bench Compatibility | `in_progress` | Active milestone: make mew runnable under Harbor / Terminal-Bench and produce comparable smoke-subset artifacts. |
+| 6.20 Terminal-Bench Driven Implement-Lane Debugging | `not_started` | Use Terminal-Bench scores and failure cohorts to drive implementation-lane repair after M6.19 creates the harness. |
+| 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
 | 10. Multi-Agent Residence | `not_started` | Multi-model shared residence remains future work. |
@@ -60,36 +62,36 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M7 Senses: Inbound Signals**.
+Active work: **M6.19 Terminal-Bench Compatibility**.
 
-Why M7 is active:
+Why M6.19 is active:
 
-- M6.17 closed the reviewer-gated resident meta-loop v0: mew can propose the
-  next task/lane or a safe next action without losing the active gate.
-- M6.18 closed the failure-diagnosis gate, so future M7+ dogfood can route
-  polish, structural, invalid task spec, transient, and ambiguous failures
-  without hiding implementation-lane weakness behind supervisor rescue.
-- A resident that only rereads its own state is not meaningfully passive. The
-  next product gap is controlled inbound sensing: audited signals that let mew
-  notice the user's working world without becoming spam.
-- M7 already has foundation pieces, but the gate is not met until at least one
-  useful, provenance-backed unsolicited observation is produced from enabled
-  signal evidence.
+- User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
+  before continuing the senses roadmap.
+- The implementation lane needs an external, comparable benchmark. Internal
+  mew-first dogfood is valuable but can overfit to mew's own repository and
+  task style.
+- Harbor is the official Terminal-Bench 2.0 harness and already supports
+  existing reference agents such as Codex CLI and Claude Code, making it a
+  suitable comparison surface for mew.
+- M6.18 can now classify mew-first failures, so benchmark failures can become
+  diagnosis data rather than free-form anecdotes.
 
-Current M7 target:
+Current M6.19 target:
 
-- keep inbound sources explicitly gated and budgeted
-- journal signal provenance, source, timestamp, and reason-for-use
-- start with local file/git signals, then one non-file-system source behind an
-  explicit gate
-- distinguish "noticed" from "acted" in passive turns
-- make every unsolicited observation explainable and disableable
+- make mew runnable as a Harbor / Terminal-Bench custom agent
+- run a small Terminal-Bench smoke subset through mew
+- run the same subset with at least one reference agent such as Codex CLI or
+  Claude Code
+- store per-task artifacts with instruction, transcript/work-session summary,
+  verifier result, timeout status, and available cost/token data
+- keep score optimization out of M6.19; M6.20 owns debug/score improvement
 
-Current M7 chain:
+Current M6.19 chain:
 
-`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
+`M6.19 -> Harbor custom agent wrapper -> Terminal-Bench smoke artifacts -> comparable baseline`
 
-Current M7 evidence:
+M7 pending evidence preserved:
 
 - M6.18 close audit `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md` adds the
   required diagnosis route for future M7 dogfood failures:
@@ -1147,31 +1149,28 @@ M6.8.5 close result: **done**. The recorded audit is
 
 ## Next Milestone
 
-Current scheduled milestone: **M6.13 High-Effort Deliberation Lane**.
+Current scheduled milestone: **M6.20 Terminal-Bench Driven Implement-Lane Debugging**.
 
-M6.13 starts now because the M6.8.5 deferral trigger has fired. The first slice
-should be additive and low-risk:
+M6.20 starts after M6.19 proves that Harbor / Terminal-Bench can execute mew
+and at least one reference agent on the same smoke subset. M6.20 should not
+begin from model opinion alone; it needs benchmark artifacts from M6.19.
 
-- introduce lane state/registry with `tiny` as the legacy default
-- prove old sessions and replay bundles normalize to tiny without migration
-- prove a mirror lane can record non-authoritative lane identity/bundles
-  without changing tiny-lane behavior
-- add lane-attempt telemetry fields that future M6.16/M6.17 work can use for
-  calibration economics, without claiming EV routing in M6.13 v0
-- add M6.13.2 side-project implementation dogfood telemetry before launching
-  the side-project dogfood lane, so the first external implementation attempts
-  produce structured M6.16 evidence instead of only reply/chat history
-  (**landed in M6.13.2 v0**)
+First M6.20 slice:
+
+- choose a fixed smoke/selected subset and write the score target before
+  optimizing
+- compute mew baseline and reference-agent baseline on the same subset
+- classify failed mew tasks through M6.18
+- route only cited structural failures into M6.14 repair episodes
+- rerun the same subset and record whether the repair improved, regressed, or
+  did not affect the score
 
 Planned future milestones:
 
-- **M6.16 Codex-Grade Implementation Lane**: use M6.13 lane-attempt telemetry
-  and the M6.13.2 side-project dogfood ledger to harden the authoritative
-  implementation lane. Broad refactoring belongs here only when a measured
-  bottleneck or recurring failure class is named with before/after proof.
-- **M6.17 Resident Meta Loop / Lane Chooser**: add a reviewer-gated resident
-  supervisor after implementation-lane reliability and lane boundaries are
-  proven.
+- **M7 Senses: Inbound Signals**: resume after M6.19/M6.20 give the
+  implementation lane an external benchmark and failure-debug loop.
+- **M8 Identity: Cross-Project Self**: user-scope identity and cross-project
+  memory remain future work after M7.
 
 ## Post-Close Deferred Ledger
 
@@ -1254,30 +1253,43 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
+`M6.19 -> Harbor custom agent wrapper -> Terminal-Bench smoke artifacts -> comparable baseline`
 
 Acceptable near-term work:
 
-- run or set up the intended passive proof window for the enabled signal source
-- preserve signal provenance, source, timestamp, budget, and reason-for-use
-- verify the passive observation stays "noticed, not acted" and remains
-  disableable
-- if M7 implementation fails, route the mew-first failure through M6.18
-  diagnosis before retrying or opening M6.14 repair
+- inspect Harbor custom-agent integration requirements and install/run shape
+- add a mew headless benchmark entrypoint only if the current CLI surface is
+  insufficient for Harbor execution
+- add a local wrapper/config/scripts needed to run mew on a Terminal-Bench
+  smoke subset without patching Harbor source
+- record benchmark artifacts in a stable path with per-task outcome,
+  transcript/work-session summary, verifier result, timeout, and cost/token
+  data when available
+- run or document the same smoke subset against at least one reference agent
+  such as Codex CLI or Claude Code
 
 Non-goals for the next session:
 
+- M6.20 score optimization before the M6.19 harness is trustworthy
+- broad prompt tuning for Terminal-Bench before baseline artifacts exist
+- resuming M7 inbound signal work before the Terminal-Bench milestones are
+  addressed or explicitly reprioritized
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
 - broad work-loop or work-session refactors without a recorded structural
   signal
-- broad multi-source integrations before the first M7 proof window is closed
-- direct task/roadmap/memory mutation from inbound signals without reviewer approval
 - treating diagnosis output as automatic permission to perform structural
   repair without reviewer-visible evidence
 
 ## Latest Validation
+
+Latest roadmap/status validation:
+
+- M7 task `#686` pending dry-run tools `#6644/#6645` were rejected without
+  applying because M7 is now pending behind Terminal-Bench milestones.
+- Roadmap-only update for M6.19/M6.20; no product tests required beyond
+  `git diff --check`.
 
 Latest M6.18 source/test validation:
 
