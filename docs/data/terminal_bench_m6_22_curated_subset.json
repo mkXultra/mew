@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "source": {
+    "registry": "docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json",
+    "reference": "Terminal-Bench 2.0 Codex 0.121.0 / gpt-5.5@openai",
+    "created_at": "2026-04-27"
+  },
+  "selection_policy": {
+    "purpose": "M6.22 curated subset parity",
+    "trial_count_per_task": 5,
+    "bands_required": [0, 20, 40, 60, 80, 100],
+    "notes": [
+      "Select one representative task from each non-100 band.",
+      "Keep both M6.20 fixed gate tasks as 100% positive controls.",
+      "Do not add Terminal-Bench-specific solver behavior to mew core."
+    ]
+  },
+  "tasks": [
+    {
+      "taskName": "filter-js-from-html",
+      "taskChecksum": "885bb73e2797a54d5de860c25f481b5a60e2b91c0de30acaca9560603e9e1ff8",
+      "nTrials": 5,
+      "successCount": 0,
+      "resolutionRatePct": 0.0,
+      "band": 0,
+      "selectionReason": "0% Codex band; HTML/JavaScript extraction task exercises parsing and file transformation failure classification."
+    },
+    {
+      "taskName": "sanitize-git-repo",
+      "taskChecksum": "2193195d0a2d45451b0ff7b8bfe47677e11744f9528f54d6281d01bda76267cc",
+      "nTrials": 5,
+      "successCount": 1,
+      "resolutionRatePct": 20.0,
+      "band": 20,
+      "selectionReason": "20% Codex band; git/repository mutation task exercises arbitrary workspace-root handling and command policy."
+    },
+    {
+      "taskName": "gcode-to-text",
+      "taskChecksum": "5531de29b9b445e4cd67b66231d34cb9e7bddcf15f4c2574b7376a19f0e4c339",
+      "nTrials": 5,
+      "successCount": 2,
+      "resolutionRatePct": 40.0,
+      "band": 40,
+      "selectionReason": "40% Codex band; parser/output task exercises acceptance-output verification beyond file existence."
+    },
+    {
+      "taskName": "overfull-hbox",
+      "taskChecksum": "96c3365a4d527007766a44afa802cd19d8601eb13b458cf4e7a2c1dce8058cb7",
+      "nTrials": 5,
+      "successCount": 3,
+      "resolutionRatePct": 60.0,
+      "band": 60,
+      "selectionReason": "60% Codex band; document/build task provides a medium target without reusing the noisy make-mips-interpreter stretch task."
+    },
+    {
+      "taskName": "extract-elf",
+      "taskChecksum": "cd3887ff7e15541da700a00b6464b8dc3a54a140b9cddee7cd462ae18f3e8056",
+      "nTrials": 5,
+      "successCount": 4,
+      "resolutionRatePct": 80.0,
+      "band": 80,
+      "selectionReason": "80% Codex band; binary/file inspection task exercises command use and artifact verification."
+    },
+    {
+      "taskName": "cancel-async-tasks",
+      "taskChecksum": "283c70ca90688dc09a969d24e3ed137ba0f00d23018df68771bdf86526b82047",
+      "nTrials": 5,
+      "successCount": 5,
+      "resolutionRatePct": 100.0,
+      "band": 100,
+      "selectionReason": "100% Codex band and M6.20 positive control; current-head mew reached 5/5 after generic cancellation and verifier-planning repairs."
+    },
+    {
+      "taskName": "fix-code-vulnerability",
+      "taskChecksum": "13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119",
+      "nTrials": 5,
+      "successCount": 5,
+      "resolutionRatePct": 100.0,
+      "band": 100,
+      "selectionReason": "100% Codex band and M6.20 positive control; current-head mew reached 5/5 with the generic accept-edits/defer command shape."
+    }
+  ],
+  "target": {
+    "totalTasks": 7,
+    "totalTrials": 35,
+    "codexSuccessTarget": 20,
+    "codexResolutionRatePct": 57.1428571429
+  }
+}

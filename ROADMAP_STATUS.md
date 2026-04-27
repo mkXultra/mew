@@ -1212,9 +1212,12 @@ Planned future milestones:
 
 - **M6.21 Terminal-Bench Codex Target Registry**: done. The frozen target data
   is `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
-- **M6.22 Terminal-Bench Curated Subset Parity**: active next. Run a fixed
-  multi-band subset from the registry and match or explain the Codex success
-  target.
+- **M6.22 Terminal-Bench Curated Subset Parity**: active. The curated subset
+  manifest is now selected in `docs/M6_22_CURATED_SUBSET_MANIFEST_2026-04-27.md`
+  and `docs/data/terminal_bench_m6_22_curated_subset.json`: 7 tasks, 35 trials,
+  Codex target 20 successes. Next: run the five not-yet-run selected tasks
+  through the same generic `mew work --oneshot` Harbor command shape, then
+  combine them with the M6.20 positive-control artifacts.
 - **M6.23 Terminal-Bench Failure-Class Coverage**: classify below-target
   benchmark failures into repair classes and rerun at least one ranked repair.
 - **M6.24 Broad Terminal-Bench Parity Campaign**: run all 89 registry tasks and
@@ -1314,10 +1317,14 @@ Acceptable near-term work:
 
 - define the M6.22 curated subset directly from
   `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`
+  (done in `docs/data/terminal_bench_m6_22_curated_subset.json`)
 - keep `mew work --oneshot` as the implementation path and preserve the
   no-Terminal-Bench-specific-solver constraint
-- run the subset, classify below-target tasks through M6.18, then choose the
-  next generic implementation-lane repair from cited benchmark evidence
+- run `filter-js-from-html`, `sanitize-git-repo`, `gcode-to-text`,
+  `overfull-hbox`, and `extract-elf`; reuse the M6.20 current-head artifacts
+  for `cancel-async-tasks` and `fix-code-vulnerability` as positive controls
+- classify below-target tasks through M6.18, then choose the next generic
+  implementation-lane repair from cited benchmark evidence
 
 Non-goals for the next session:
 
@@ -1348,6 +1355,12 @@ Latest roadmap/status validation:
   (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-fix-code-vulnerability-5attempts-current-head-20260427-2207/result.json`).
   Evidence and failure classification:
   `docs/M6_20_MEW_TERMINAL_GATE_RUNS_2026-04-27.md`.
+- M6.22 curated subset manifest exists:
+  `docs/M6_22_CURATED_SUBSET_MANIFEST_2026-04-27.md` and
+  `docs/data/terminal_bench_m6_22_curated_subset.json`. Selected tasks:
+  `filter-js-from-html`, `sanitize-git-repo`, `gcode-to-text`,
+  `overfull-hbox`, `extract-elf`, `cancel-async-tasks`, and
+  `fix-code-vulnerability`. Aggregate Codex target: 20/35 successes.
 - M6.21 target registry is complete. The source leaderboard is
   `https://www.tbench.ai/leaderboard/terminal-bench/2.0/codex/0.121.0/gpt-5.5%40openai`.
   Local JSON:
