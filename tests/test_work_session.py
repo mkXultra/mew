@@ -31517,6 +31517,70 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_json_recovers_run_tests_failure_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "run failing verifier",
+                        "action": {
+                            "type": "run_tests",
+                            "command": "python -c \"import sys; sys.exit(1)\"",
+                            "cwd": ".",
+                        },
+                    },
+                    {
+                        "summary": "inspect after failure",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_run_tests_failure"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_json_accept_edits_batch_can_defer_verification_without_command(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

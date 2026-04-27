@@ -6718,6 +6718,11 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: verification failed; continuing with repair context")
                 continue
+            if _recoverable_run_tests_failure(action_type, error, result, index, max_steps):
+                report["steps"][-1]["recoverable_run_tests_failure"] = True
+                if progress:
+                    progress(f"step #{index}: run_tests failed; continuing with verifier feedback")
+                continue
             if _recoverable_missing_read_file_error(action_type, parameters, error, effective_args, index, max_steps):
                 report["steps"][-1]["recoverable_missing_read_file"] = True
                 if progress:
@@ -6956,6 +6961,15 @@ def _recoverable_git_status_not_repo_error(action_type, error, result, index, ma
         )
     ).lower()
     return "not a git repository" in normalized
+
+
+def _recoverable_run_tests_failure(action_type, error, result, index, max_steps):
+    if action_type != "run_tests" or index >= max_steps:
+        return False
+    if "verification failed" not in str(error or "").lower():
+        return False
+    result = result or {}
+    return "exit_code" in result
 
 
 def _approval_parameters_from_call(call, args):
