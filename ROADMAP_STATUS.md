@@ -168,7 +168,8 @@ M6.24 Batch 1:
   - `fix-git`: 5/5, matched Codex target 5/5, no Harbor errors.
   - `kv-store-grpc`: latest 5/5 after generic exact-schema repair, above Codex
     target 4/5; previous baseline was 2/5.
-  - `raman-fitting`: 0/5, below Codex target 2/5, no Harbor errors.
+  - `raman-fitting`: latest 0/5 after generic numeric plausibility guidance,
+    below Codex target 2/5; previous baseline was 0/5.
   - measured latest task total: 12/30 against frozen Codex target 17/30.
   - best observed measured total: 13/30 if `build-cython-ext` uses its best
     observed 1/5 rerun.
@@ -240,14 +241,20 @@ M6.24 Batch 1:
   errors in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-db-wal-recovery-5attempts-20260428-0421/result.json`.
   This is measurement coverage only, not a repair candidate.
-- current repair candidate:
+- completed ninth repair:
   `raman-fitting` scored 0/5 against Codex target 2/5 in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-raman-fitting-5attempts-20260428-0426/result.json`.
   The dominant failure is `numeric_artifact_schema_only_false_green`: all
   trials produced `/app/results.json`, but internal checks only proved JSON
   shape or finite values while hidden tests rejected the fitted peak
   parameters. The generic repair is numeric plausibility verification for
-  fitting/optimization/scientific scripting tasks before finish.
+  fitting/optimization/scientific scripting tasks before finish. Commit
+  `defd1c3` implemented that prompt repair and reran the task at 0/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-raman-fitting-5attempts-numeric-plausibility-20260428-0438/result.json`.
+  The repair changed behavior but did not improve score, so do not spend a
+  third consecutive `raman-fitting` prompt-polish cycle. Continue broad Batch 1
+  measurement; if another numeric/data task shows the same shape, prefer a
+  reusable artifact-quality verifier scaffold over another prompt sentence.
 
 Drift guard:
 
