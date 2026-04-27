@@ -161,9 +161,9 @@ M6.24 Batch 1:
   `build-cython-ext`, `code-from-image`, and `fix-git`
 - frozen Codex target: 25/40 successes, 62.5%
 - measured so far: `build-cython-ext` best observed result is 1/5 against
-  Codex target 5/5 after the initial run and seven reruns. The latest rerun is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-git-inspection-20260428-0312/result.json`
-  with 0/5 and three `AgentTimeoutError` exceptions.
+  Codex target 5/5 after the initial run and eight reruns. The latest rerun is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-run-tests-cd-prefix-20260428-0335/result.json`
+  with 0/5 and five `AgentTimeoutError` exceptions.
 - completed first repair:
   `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
   read-only batches continue after missing paths under allowed write roots.
@@ -194,11 +194,16 @@ M6.24 Batch 1:
   `git_status`. Commit `dae6000` generalized the recovery for read-only
   git-inspection tools. The targeted boundary did not recur in the next
   non-timeout trials, but score regressed to 0/5.
-- completed seventh repair, awaiting rerun:
+- completed seventh repair:
   `run_tests_cd_prefix_shell_operator_terminal_tool_failed`; commit `3930af5`
   normalizes only the safe `cd DIR && <verifier>` shape into `cwd=DIR` plus a
   single verifier command, while preserving `run_tests` shell-chain rejection.
-  Rerun `build-cython-ext` before selecting another Batch 1 task.
+  The next rerun produced 5/5 `AgentTimeoutError`, so this repair could not be
+  validated against `build-cython-ext`.
+- current route:
+  stop spending more `build-cython-ext`-only repair cycles until either
+  timeout partial-report observability is improved or another Batch 1 task
+  confirms the same shape. Run the next Batch 1 task to keep M6.24 broad.
 
 Drift guard:
 
