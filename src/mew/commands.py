@@ -3422,6 +3422,55 @@ def convert_budget_pressure_finish_to_remember(action, session, index, max_steps
     }
 
 
+def _work_wait_mentions_repairable_blocker(action):
+    text = " ".join(
+        str((action or {}).get(key) or "")
+        for key in ("reason", "summary", "note", "text")
+        if str((action or {}).get(key) or "").strip()
+    ).casefold()
+    if not text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "constraint",
+            "invalid",
+            "repair",
+            "revised",
+            "unsupported",
+            "unsafe",
+            "violat",
+        )
+    )
+
+
+def convert_repairable_wait_to_remember(action, index, max_steps, *, continue_after_remember=False):
+    action = action or {}
+    if (action.get("type") or "") != "wait":
+        return action
+    if not continue_after_remember:
+        return action
+    try:
+        current_index = int(index)
+        current_max_steps = int(max_steps)
+    except (TypeError, ValueError):
+        return action
+    if current_index >= current_max_steps:
+        return action
+    if not _work_wait_mentions_repairable_blocker(action):
+        return action
+    note = _work_control_text(action, "Repairable blocker recorded.")
+    return {
+        "type": "remember",
+        "note": (
+            "Repairable wait was deferred so the work loop can continue in this "
+            f"invocation. Original wait: {clip_output(note, 500)}"
+        ),
+        "reason": "converted repairable wait to continuity note",
+        "converted_from_wait": "repairable_blocker",
+    }
+
+
 def apply_work_control_action(state, session, task, action):
     action = action or {}
     action_type = action.get("type") or ""
@@ -5760,6 +5809,12 @@ def cmd_work_ai(args):
             max_steps,
             continue_after_remember=bool(getattr(effective_args, "continue_after_remember", False)),
         )
+        action = convert_repairable_wait_to_remember(
+            action,
+            index,
+            max_steps,
+            continue_after_remember=bool(getattr(effective_args, "continue_after_remember", False)),
+        )
         action_type = action.get("type")
         session_trace_patch = (
             planned.get("session_trace_patch") if isinstance(planned.get("session_trace_patch"), dict) else {}
@@ -6066,6 +6121,17 @@ def cmd_work_ai(args):
                 report["steps"][-1]["continued_after_remember"] = True
                 if progress:
                     progress(f"step #{index}: remembered context; continuing")
+                continue
+            finished_note = str(control_effect.get("finished_note") or "")
+            if (
+                action_type == "finish"
+                and "acceptance constraints unchecked" in finished_note
+                and getattr(effective_args, "continue_after_remember", False)
+                and index < max_steps
+            ):
+                report["steps"][-1]["continued_after_finish_block"] = True
+                if progress:
+                    progress(f"step #{index}: acceptance finish blocked; continuing")
                 continue
             report["stop_reason"] = action_type or "control"
             if progress:

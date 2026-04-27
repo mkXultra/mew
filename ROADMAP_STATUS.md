@@ -120,6 +120,12 @@ Current M6.22 target:
   generic acceptance-constraint ledger / final self-check before finish, using
   `overfull-hbox` as the M6.22 rerun proof. Defer visual/OCR-specific gcode
   repair to M6.23 failure-class ranking unless the same shape appears again.
+- latest repair attempt:
+  commit `29335c9` added acceptance checks but regressed the `overfull-hbox`
+  rerun to 0/5 because repairable constraint blockers terminated as `wait`.
+  Follow-up repair converts unsafe/unsupported/constraint `wait` blockers into
+  continuity `remember` steps while current-run budget remains, then reruns
+  `overfull-hbox` again.
 - M6.20 positive-control artifacts remain available for the two 100% tasks.
 
 Drift guard:

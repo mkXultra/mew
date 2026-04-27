@@ -2,7 +2,7 @@
 
 Date: 2026-04-27 JST
 
-Status: all selected task runs recorded; below-target repair selection pending.
+Status: all selected task runs recorded; acceptance-check repair in progress.
 
 ## Scope
 
@@ -213,6 +213,56 @@ Classification:
 M6.22 should not close yet: its Done-when requires at least one below-target
 task to be repaired and rerun against the same subset evidence.
 
+## Repair Attempt 1: Acceptance Checks
+
+Commit: `29335c9` (`Add work acceptance checks`)
+
+Change:
+
+- Surface `task.acceptance_constraints` in the work prompt context.
+- Ask the model to preserve `working_memory.acceptance_constraints` and
+  `working_memory.acceptance_checks`.
+- Require `action.acceptance_checks` before a `finish` with `task_done=true`.
+- Block task-done finish when extracted stated constraints are unchecked.
+
+Rerun artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-acceptance-checks-20260427-2349/result.json`
+
+Observed result:
+
+- `n_total_trials`: 5
+- `n_trials`: 5
+- `n_errors`: 1
+- exception: `AgentTimeoutError` for `overfull-hbox__S2pETMP`
+- `mean`: 0.0
+- `pass@5`: 0.0
+- reward `0.0`: all 5 trials
+- started: `2026-04-27T23:48:52.588140`
+- finished: `2026-04-28T00:04:10.564154`
+
+Delta:
+
+- Baseline `overfull-hbox`: 1/5
+- After first acceptance-check repair: 0/5
+- Result: regressed.
+
+M6.18 classification of the repair regression:
+
+- `failure_scope`: structural
+- `confidence`: high
+- `structural_reason`: `repairable_constraint_blocker_terminal_wait`
+- evidence:
+  - four reported trials stopped with `stop_reason = wait`
+  - repeated last-action reasons show unsafe or unsupported synonym-edit
+    candidates were detected, but the work loop stopped instead of continuing
+    to repair the candidate
+  - the remaining trial hit `AgentTimeoutError`
+- follow-up repair: convert repairable constraint/unsafe/unsupported `wait`
+  actions into `remember` when `continue_after_remember` is enabled and the
+  current run still has remaining steps; continue after acceptance-finish blocks
+  caused by unchecked constraints.
+
 ## `overfull-hbox`
 
 Artifact:
@@ -285,5 +335,6 @@ generic work-session behavior.
 
 ## Next Tasks
 
-Implement the selected generic acceptance-constraint repair and rerun
-`overfull-hbox` before closing M6.22.
+Commit and rerun the follow-up repair for
+`repairable_constraint_blocker_terminal_wait`; M6.22 can close only after a
+below-target task is repaired and rerun with recorded outcome.

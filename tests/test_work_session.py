@@ -19,6 +19,7 @@ from mew.commands import (
     build_work_reply_schema,
     broad_read_guard_replacement_parameters,
     convert_budget_pressure_finish_to_remember,
+    convert_repairable_wait_to_remember,
     detect_default_verify_command,
     detect_instruction_verify_command,
     format_work_cli_controls,
@@ -33628,6 +33629,35 @@ class WorkSessionTests(unittest.TestCase):
         self.assertFalse(result["task_done"])
         self.assertIn("acceptance constraints unchecked", result["finished_note"])
         self.assertIn("Work session finish blocked", task["notes"])
+
+    def test_repairable_wait_converts_to_remember_when_continuation_allowed(self):
+        action = {
+            "type": "wait",
+            "reason": "The proposed edit is unsafe under the stated constraint; revised edit needed.",
+        }
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            3,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_wait"], "repairable_blocker")
+        self.assertIn("unsafe under the stated constraint", converted["note"])
+
+    def test_repairable_wait_does_not_convert_on_final_step(self):
+        action = {"type": "wait", "reason": "unsupported replacement"}
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            10,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted, action)
 
     def test_work_finish_allows_completed_same_surface_audit(self):
         from mew.commands import apply_work_control_action
