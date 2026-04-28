@@ -479,6 +479,18 @@ M6.24 Batch 1:
   exposing the deeper generic blocker
   `document_pdf_observation_missing`; a future repair should add a generic
   PDF/document observation substrate, not a task-specific solver.
+  Later generic repeat-guard, apt-root, and patch-shape repairs showed mixed
+  evidence: a single-trial probe passed 1/1 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-financial-document-processor-1attempt-repeat-guard-apt-20260428-1245/result.json`,
+  but a post-issue #3/#14/#15 parallel 5-trial rerun had 0 completed reward
+  trials and 5 `RuntimeError` command timeouts in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-financial-document-processor-5attempts-post-issue3-20260428-1328/result.json`.
+  The sequential probe was stopped after one 900s timeout and one cancelled
+  trial. The current blocker is timeout/partial-observability dominated, not a
+  simple PDF absolute blocker. Do not spend more wall-clock on repeated
+  `financial-document-processor` 5-trial reruns until a generic timeout /
+  partial-report repair is selected or another document/artifact task confirms
+  the same shape.
   Batch 2 measured latest total is 15/20 against frozen Codex target 19/20 for
   measured tasks.
 - latest source/test validation:
