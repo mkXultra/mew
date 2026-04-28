@@ -31627,6 +31627,222 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_json_read_batch_continues_after_unsupported_image_type(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("doc.pdf").write_text("%PDF\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect pdf and sibling context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "read_image", "path": "doc.pdf"},
+                                {"type": "read_file", "path": "README.md"},
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "fall back after unsupported pdf image observation",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    if tool == "read_image":
+                        raise ValueError(
+                            "unsupported image type for /tmp/doc.pdf; "
+                            "supported=image/gif, image/jpeg, image/png, image/webp"
+                        )
+                    return {"path": str(Path(parameters["path"]).resolve()), "content": "context\n"}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--ai",
+                                            "--json",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--max-steps",
+                                            "2",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "read_image")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["path"], "doc.pdf")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_unsupported_observation_type"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_read_batch_does_not_recover_stale_unsupported_image_finish(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("doc.pdf").write_text("%PDF\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "inspect pdf and sibling context",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "read_image", "path": "doc.pdf"},
+                            {"type": "read_file", "path": "README.md"},
+                        ],
+                    },
+                }
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    if tool == "read_image":
+                        raise ValueError(
+                            "unsupported image type for /tmp/doc.pdf; "
+                            "supported=image/gif, image/jpeg, image/png, image/webp"
+                        )
+                    return {"path": str(Path(parameters["path"]).resolve()), "content": "context\n"}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with patch("mew.commands.finish_work_tool_call", return_value=None):
+                                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                    self.assertEqual(
+                                        main(
+                                            [
+                                                "work",
+                                                "1",
+                                                "--ai",
+                                                "--json",
+                                                "--auth",
+                                                "auth.json",
+                                                "--allow-read",
+                                                ".",
+                                                "--max-steps",
+                                                "2",
+                                                "--act-mode",
+                                                "deterministic",
+                                            ]
+                                        ),
+                                        1,
+                                    )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "tool_failed")
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertEqual(
+                    report["steps"][0]["error"],
+                    "work tool result could not be recorded; work session changed during tool execution",
+                )
+                self.assertEqual(report["steps"][0].get("recoverable_errors"), [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_unsupported_image_type_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("doc.pdf").write_text("%PDF\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "try visual document read",
+                        "action": {
+                            "type": "read_image",
+                            "path": "doc.pdf",
+                        },
+                    },
+                    {
+                        "summary": "fall back to text context",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    if tool == "read_image":
+                        raise ValueError(
+                            "unsupported image type for /tmp/doc.pdf; "
+                            "supported=image/gif, image/jpeg, image/png, image/webp"
+                        )
+                    return {"path": str(Path(parameters["path"]).resolve()), "content": "context\n"}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--ai",
+                                            "--json",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--max-steps",
+                                            "2",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertTrue(report["steps"][0]["recoverable_unsupported_observation_type"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_unsupported_observation_type"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_json_read_batch_continues_after_missing_directory_observation(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
