@@ -28,11 +28,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
 | SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
-| SP18 mew-ghost Live Desk Opt-In | `blocked` | First mew-first attempt stopped before product edits: mew generated a substantial live-desk patch but could not apply it after a same-file hunk ambiguity and repeated write-batch collapse waits. Issue `#3` is reopened. |
+| SP18 mew-ghost Live Desk Opt-In | `blocked` | Retry after issue `#3` was fixed still stopped before product edits: mew hit remaining multi-hunk ambiguity/overlap and then could not safely emit the large full-file `write_file` batch. Issues `#14` and `#15` are open. |
 
 ## Active Focus
 
-Active side-project focus: **SP18 mew-ghost Live Desk Opt-In is blocked on issue `#3`**.
+Active side-project focus: **SP18 mew-ghost Live Desk Opt-In is blocked on issues `#14` and `#15`**.
 
 Current target:
 
@@ -56,9 +56,9 @@ Current target:
   the same desk status/count/action surface, rerun during watch only when
   opted in, and convert failures into structured desk states
 - live macOS probing remains explicit through `--live-active-window`
-- live `mew desk --json` subprocess execution remains deferred to a later
-  explicit opt-in slice; SP17 should not read live `.mew` state or import
-  `src/mew/**`
+- live `mew desk --json` subprocess execution remains unimplemented until SP18
+  is unblocked; existing SP17 behavior should not read live `.mew` state or
+  import `src/mew/**`
 - preserve the bounded deterministic presence loop without background
   monitoring or hidden capture
 - preserve structured fallback for missing `osascript`, non-macOS platforms,
@@ -69,9 +69,12 @@ Current target:
   set for future product planning and contract checks
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
-- route the repeated same-file write-batch ergonomics blocker as reopened issue
-  `#3` evidence; SP18 stopped before product edits on this blocker, recorded in
-  ledger row `19`
+- route the originally repeated same-file write-batch ergonomics blocker as
+  closed issue `#3` evidence; SP18 first stopped before product edits on this
+  blocker, recorded in ledger row `19`
+- route the remaining large patch-shaping blockers as open issues `#14` and
+  `#15` evidence; SP18 retry after the `#3` fix still stopped before product
+  edits, recorded in ledger row `20`
 - route the repeated stale failed-approval cleanup pattern as closed issue
   `#10` evidence for M6.16 implementation-lane hardening
 - route the report-schema closeout gap as closed issue `#11` evidence for
@@ -94,9 +97,9 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
-  the first SP18 attempt on 2026-04-28: `rows_total=19`, two `failed`,
-  fourteen `practical`, three `clean`, `success_rate=0.895`,
-  `structural_repairs_required=2`,
+  the SP18 retry on 2026-04-28: `rows_total=20`, three `failed`,
+  fourteen `practical`, three `clean`, `success_rate=0.85`,
+  `structural_repairs_required=3`,
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
   twelve `mew-companion-log` rows on 2026-04-26: `rows_total=12`, one `failed`,
@@ -494,6 +497,28 @@ Current target:
   `rescue_edits=0`, `repair_required=true`.
 - Problem issue reopened:
   `https://github.com/mkXultra/mew/issues/3`.
+- Task `#18` / session `#40` retried SP18 after issue `#3` was closed by
+  `14b670a` and merged into `side/r2`. Mew reached edit planning, but the
+  source-only dry-run failed the focused verifier because paired tests/docs were
+  not updated yet. A complete source/tests/README/report batch then failed
+  because one `ghost.py` hunk matched two locations. After steering, the next
+  complete batch failed because `ghost.py` hunks overlapped. The operator opened
+  issue `#14` for the remaining hunk-shaping failure.
+- Mew was then steered to avoid `edit_file_hunks` for `ghost.py` and use
+  full-file `write_file`; it stopped with an exact blocker that the complete
+  three-file `write_file` JSON batch was too large/risky to emit safely. The
+  operator opened issue `#15` for the large write-file patch-shaping limit.
+- No product files were changed and no operator product-code rescue edits were
+  made in session `#40`.
+- mew-ghost SP18 retry blocked local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/18-live-desk-opt-in-blocked-after-write-shape-limit.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `20`;
+  outcome `failed`, failure class
+  `large_patch_write_shape_limit_after_hunk_repair`, `rescue_edits=0`,
+  `repair_required=true`.
+- Problem issues opened:
+  `https://github.com/mkXultra/mew/issues/14` and
+  `https://github.com/mkXultra/mew/issues/15`.
 
 ## Missing Proof
 
@@ -512,18 +537,20 @@ Current target:
 - Real macOS Accessibility behavior for `--live-active-window` remains
   intentionally unverified by automation; structured fallback and injected
   provider paths are covered.
-- Open `[side-pj]` issue `#3` blocks SP18 mew-first implementation because the
-  write batch loop still cannot reliably collapse or retry same-file hunks.
+- Open `[side-pj]` issue `#14` captures the remaining multi-hunk ambiguity and
+  overlap failure after issue `#3` was fixed.
+- Open `[side-pj]` issue `#15` captures the large `write_file` batch-shaping
+  limit after the natural hunk-failure workaround.
 - Open `[side-pj]` issue `#13` captures the reusable SP17 stale schema/version
   closeout gap. Any additional recurrence should be recorded as a new or
   reopened one-problem issue before the next major side-project milestone.
 
 ## Next Action
 
-Resolve or bypass SP18's implementation-lane blocker before retrying:
+Resolve or bypass SP18's implementation-lane blockers before retrying:
 
-1. repair or close reopened issue `#3`, then retry task `#18` with mew as first
-   implementer
+1. repair or close issues `#14` and `#15`, then retry task `#18` with mew as
+   first implementer
 2. alternatively, ask the user for explicit Codex fallback permission and
    record the attempt as non-mew-first implementation if product progress is
    more important than autonomy credit

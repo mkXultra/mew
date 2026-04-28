@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": 18,
+  "session_id": 40,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Retry explicit --live-desk support after issue #3 was fixed, preserving fixture defaults and adding injected-runner live desk coverage.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 32,
+  "files_changed": [
+    "experiments/mew-ghost/.mew-dogfood/reports/18-live-desk-opt-in-blocked-after-write-shape-limit.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "git status --short",
+    "git pull origin main"
+  ],
+  "reviewer_rejections": 1,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "large_patch_write_shape_limit_after_hunk_repair",
+  "repair_required": true,
+  "proof_artifacts": [
+    ".mew/sessions/40/snapshot.json",
+    "experiments/mew-ghost/.mew-dogfood/reports/18-live-desk-opt-in-blocked-after-write-shape-limit.json",
+    "https://github.com/mkXultra/mew/issues/14",
+    "https://github.com/mkXultra/mew/issues/15"
+  ],
+  "commit": "",
+  "notes": "SP18 was retried after issue #3 was closed by 14b670a and merged into side/r2. Mew reached edit planning but still could not apply the product patch. A first source-only dry-run failed the focused verifier because paired tests/docs were not yet updated. A complete source/tests/README/report batch then failed because one ghost.py edit hunk matched two locations. After steering, a second complete batch failed because ghost.py hunks overlapped. The operator opened issue #14 for the remaining hunk-shaping problem. Mew was then steered to use full-file write_file for ghost.py/tests, but stopped with an exact blocker: it could not safely emit the required complete three-file write_file JSON batch without risking truncation or malformed content. The operator opened issue #15 for this large write_file patch-shaping limit. No product files were changed and no Codex product-code rescue edits were made."
+}
