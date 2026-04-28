@@ -160,10 +160,11 @@ M6.24 resume condition:
 
 Next concrete action:
 
-- Select the next M6.24 broad registry slice (Batch 3) from unmeasured frozen
-  registry tasks. If a new failure is accepted as structural rather than
-  ordinary task miss, append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`
-  before repairing.
+- Run M6.24 Batch 3 task by task from
+  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md` and
+  `docs/data/terminal_bench_m6_24_batch_3.json`. If a new failure is accepted
+  as structural rather than ordinary task miss, append it to
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
 
 Closed M6.22 result:
 
