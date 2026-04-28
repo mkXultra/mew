@@ -103,6 +103,7 @@ Status vocabulary:
 | SR-007 | repaired | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen write-batch normalization/execution so blockers are top-level waits, not pseudo-tools inside a write batch; preserve the exact blocker instead of surfacing `batch write tool is not ... wait` | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for mixed `edit_file_hunks` + `wait` batch | Repaired by normalizer and executor guards: mixed write/wait batches now become an actionable top-level blocker, and command execution blocks before any pseudo-tool execution. Focused regression passed. |
 | SR-008 | repaired | M6.24 Batch 3 | direct Python pytest-file false green | `break-filter-js-from-html` scored 0/5 while several trials claimed `python /app/test_outputs.py` passed; direct Python execution only defined pytest tests and exited 0, while Harbor pytest verifier failed | Normalize `run_tests` commands that directly execute pytest-style `test_*.py` files through Python into `python -m pytest -q <file>` so no-op verifiers fail loudly | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `break-filter-js-from-html` same failed shape | Repaired by executor normalization plus focused regression; same-shape rerun no longer false-greened and preserved `python -m pytest -q /app/test_outputs.py` failure evidence. |
 | SR-009 | repaired | side-project issue #18 reopen | broad rollback loop keeps retrying whole coordinated patch | Reopened issue #18 after SR-007: SP19 still could not land broad HTML removal; coordinated source/test/report attempts rolled back with 9 failed / 19 passed, then 1 failed / 27 passed, then regressed to 8 failed / 20 passed before timeout | Surface `broad_rollback_slice_repair` in work-session resume/prompt/deliberation so repeated verifier rollbacks or broad failed-test output steer the next turn to one smaller complete source/test/docs slice instead of retrying the whole patch | issue #18 reopen, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for two rolled-back verifier failures spanning source/test/docs | Repaired by resume diagnostic and prompt guidance; focused regression verifies the diagnostic, formatter, and deliberation context. |
+| SR-010 | repaired | M6.24 Batch 3 | exact command example finish gap | `polyglot-rust-c` scored 0/5 against Codex target 4/5; trials self-finished after nearby verifier commands that changed cwd or used Python wrappers instead of proving the exact backticked command examples from the task text | Add exact-command-example finish grounding: when a task says a backticked command can be run, `task_done=true` requires completed `run_command`/`run_tests` evidence for that advertised command shape without a preceding cwd-changing `cd` wrapper | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `polyglot-rust-c` same failed shape | Repaired by acceptance finish gate and prompt update; same-shape proof stopped with `ask_user` after detecting the exact Rust command writes `/app/main`, not `/app/polyglot/main`, so it did not false-finish. |
 
 ## SR-001 Progress
 
@@ -324,6 +325,53 @@ Status vocabulary:
   before the model continued with explicit verifier feedback. This satisfies
   SR-008: the executor no longer treats direct Python execution of pytest-style
   test files as a passing verifier.
+
+## SR-010 Progress
+
+- 2026-04-28: M6.24 Batch 3 `polyglot-rust-c` baseline scored 0/5 against
+  Codex target 4/5. Multiple trials finished after nearby verifier commands
+  such as `cd /app/polyglot; rustc ...` or Python subprocess wrappers instead
+  of proving the exact backticked command examples in the task text from the
+  task cwd.
+- Generic repair:
+  `acceptance_finish_blocker` now extracts backticked command examples when
+  the surrounding task text says the user can run or execute them. For
+  `task_done=true`, each advertised command shape must be grounded by a
+  completed `run_command` or `run_tests` tool whose command text contains the
+  advertised shell command shape with a concrete placeholder value. Verifier
+  loops are useful smoke tests but do not satisfy the finish gate. The matcher
+  rejects cwd-changing wrappers, output-location overrides, failed command
+  results, semicolon substitutions for `&&`, and setup mutations inserted
+  between advertised command terms. Evidence now accepts both `tool #N` and
+  `Tool call N` references.
+- Prompt repair:
+  the work THINK prompt now tells the model to verify exact backticked command
+  examples from task cwd and not to insert a `cd` wrapper or verify only a
+  nearby invocation whose compiler/output defaults differ.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py -k 'acceptance or work_think_prompt_includes_work_guidance' -q`.
+  The selected run covered 34 tests after the review-driven hardening for
+  `-o` / `--out-dir` output overrides, cwd-changing wrappers, failed command
+  results, semicolon substitutions, setup mutations, surrogate verifier loops,
+  both advertised command examples, and legitimate Python/cat command examples.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/acceptance.py src/mew/work_loop.py tests/test_acceptance.py`
+  and `git diff --check`.
+- Broader validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py -q`
+  passed with 794 tests, 30 subtests, and one multiprocessing deprecation
+  warning.
+- Review:
+  `codex-ultra` session `019dd414-73fe-7840-9b6c-a72a52d4ef40` returned
+  `no blocking findings` after the final strict command-shape revision.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__21-23-44/result.json`
+  reran `polyglot-rust-c` for one trial and scored 0/1 with errors 0. The
+  preserved report stopped with `stop_reason=ask_user`: it ran the exact Rust
+  command shape from `/app`, observed that `rustc /app/polyglot/main.rs`
+  creates `/app/main` rather than `/app/polyglot/main`, and did not mark the
+  task done. This satisfies SR-010: the prior exact-command-example false
+  finish is removed. The remaining score gap is task-solving strategy debt.
 
 ## Repaired / Superseded Rows
 

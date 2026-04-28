@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Selected M6.24 structural blockers SR-001, SR-002, SR-003, and later append-only repairs such as SR-007/SR-008 are repaired; the previous close gate remains historical and future repairs reopen/append here. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Reopened follow-on SR-010 exact command example finish grounding is repaired; M6.24 can resume broad measurement. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Resumed after selected M6.14 repairs; continue broad measurement and route any new accepted structural blockers back through M6.14. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Resumed after SR-010 repair; continue Batch 3 and route any new accepted structural blockers back through M6.14. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -76,6 +76,11 @@ Why M6.24 is active now:
 - User decision on 2026-04-28: if M6.24 exposes an accepted structural
   problem, stop broad measurement, set M6.24 to `pending`, and repair the
   substrate through M6.14 before returning to the same failing shape.
+- M6.24 Batch 3 `polyglot-rust-c` exposed SR-010:
+  exact backticked command examples in the task text were not treated as
+  finish-gating acceptance evidence. Trials self-finished after nearby checks
+  that changed cwd or used Python wrappers instead of proving the advertised
+  command shapes from task cwd.
 - M6.20 closed the first fixed terminal gate on current head:
   `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
   errors 0.
@@ -176,6 +181,17 @@ M6.24 resume condition:
   steered away from retrying the whole coordinated patch and toward one smaller
   complete source/test/docs slice while carrying remaining scope in
   `working_memory`.
+- Closed M6.14 follow-on episode:
+  SR-010 exact command example finish gap is `repaired`. The finish gate now
+  extracts exact backticked command examples from task text and blocks
+  `task_done=true` unless acceptance evidence cites a completed
+  `run_command`/`run_tests` whose command text runs the advertised shell shape
+  with a concrete placeholder value and without cwd/output-location mutation.
+  Same-shape
+  `polyglot-rust-c` proof
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__21-23-44/result.json`
+  stopped with `ask_user` after observing that the exact Rust command creates
+  `/app/main`, not `/app/polyglot/main`, instead of false-finishing.
 - M6.24 Batch 2 `dna-insert` was measured after SR-003 and before the #18
   repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.
@@ -199,11 +215,11 @@ M6.24 resume condition:
 
 Next concrete action:
 
-- Run M6.24 Batch 3 task by task from
-  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md` and
-  `docs/data/terminal_bench_m6_24_batch_3.json`. If a new failure is accepted
-  as structural rather than ordinary task miss, append it to
-  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
+- Continue M6.24 Batch 3 task-by-task measurement from
+  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md`, starting with the remaining
+  pending task list. If a new failure is accepted as structural rather than an
+  ordinary task miss, append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`
+  before repairing.
 
 Closed M6.22 result:
 

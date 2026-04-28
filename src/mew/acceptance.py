@@ -37,7 +37,7 @@ ACCEPTANCE_CONSTRAINT_KEYWORDS = (
 
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
-_TOOL_ID_RE = re.compile(r"\btool\s*#?\s*(\d+)\b", re.IGNORECASE)
+_TOOL_ID_RE = re.compile(r"\btool(?:\s+call)?\s*#?\s*(\d+)\b", re.IGNORECASE)
 
 _WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 _GROUNDING_TOOLS = {
@@ -175,6 +175,15 @@ _OUTPUT_OF_TOOL_RE = re.compile(
 _WORDISH_COMMAND_RE = re.compile(r"^[A-Za-z][\w.+-]*$")
 _FLAG_RE = re.compile(r"(?<!\S)-[A-Za-z][\w-]*")
 _GROUND_TRUTH_RE = re.compile(r"\bground[-\s]+truth\b", re.IGNORECASE)
+_COMMAND_EXAMPLE_CONTEXT_RE = re.compile(
+    r"\b(?:can\s+run|could\s+run|run|runs|execute|executed|invoke|invoked)\b",
+    re.IGNORECASE,
+)
+_COMMAND_EXAMPLE_PLACEHOLDERS = {"arg", "args", "input", "n", "path", "value"}
+_COMMAND_EXAMPLE_OUTPUT_FLAG_TOOLS = {"cc", "clang", "clang++", "gcc", "g++", "rustc"}
+_COMMAND_EXAMPLE_SETUP_MUTATION_RE = re.compile(
+    r"(?:^|[;&|('\"]\s*)(?:cat|chmod|cp|install|ln|mkdir|mv|rm|touch)\b"
+)
 
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:
@@ -348,6 +357,108 @@ def _external_command_text_contains_term(command_text: str, term: object) -> boo
         return bool(re.search(pattern, command_text) or re.search(python_list_pattern, command_text))
     pattern = rf"(?<![\w.+-])(?:[\w./+-]*/)?{re.escape(normalized)}(?![\w.+-])"
     return bool(re.search(pattern, command_text))
+
+
+def _looks_like_command_example(value: str, context: str) -> bool:
+    if not _COMMAND_EXAMPLE_CONTEXT_RE.search(context):
+        return False
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        tokens = value.split()
+    if not tokens:
+        return False
+    first = tokens[0]
+    if first.startswith(("-", "{", "$")):
+        return False
+    if not re.match(r"^(?:[\w.+/-]+|/[\w.+/-]+)$", first):
+        return False
+    return any(token in {"&&", "||"} or token.startswith(("-", "/", ".")) for token in tokens[1:])
+
+
+def exact_command_example_requirements(text: object, *, limit: int = 4) -> list[dict[str, str]]:
+    source = str(text or "")
+    requirements: list[dict[str, str]] = []
+    for match in _BACKTICK_TEXT_RE.finditer(source):
+        value = _clean_constraint_text(match.group(1), limit=240)
+        if not value:
+            continue
+        context = source[max(0, match.start() - 80) : min(len(source), match.end() + 80)]
+        if not _looks_like_command_example(value, context):
+            continue
+        if any(item["command"] == value for item in requirements):
+            continue
+        requirements.append({"command": value, "sentence": _clean_constraint_text(context, limit=260)})
+        if len(requirements) >= limit:
+            break
+    return requirements
+
+
+def _command_example_regex(command: str) -> re.Pattern[str] | None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    if not tokens:
+        return None
+    pieces: list[str] = []
+    for token in tokens:
+        normalized = token.casefold()
+        if normalized in _COMMAND_EXAMPLE_PLACEHOLDERS:
+            pieces.append(r"\S+")
+            continue
+        pieces.append(re.escape(normalized))
+    if not pieces:
+        return None
+    # Match the advertised shell command shape with concrete placeholder values.
+    # Verifier loops are useful smoke tests, but they are not evidence that the
+    # exact user-facing invocation works.
+    return re.compile(r"(?<![\w./+-])" + r"\s+".join(pieces) + r"(?![\w./+-])")
+
+
+def _command_example_call_matches(call: object, command: str) -> bool:
+    result = call.get("result") if isinstance(call, dict) else None
+    if not isinstance(result, dict) or result.get("exit_code") != 0:
+        return False
+    command_text = _tool_call_external_command_text(call)
+    pattern = _command_example_regex(command)
+    if not command_text or pattern is None:
+        return False
+    if re.search(r"\bcwd\s*=", command_text) or re.search(r"\bos\.chdir\s*\(", command_text):
+        return False
+    match = pattern.search(command_text)
+    if not match:
+        return False
+    prefix = command_text[: match.start()]
+    if re.search(r"[;&|]", prefix):
+        return False
+    # Command examples are user-facing invocation contracts. A preceding cd
+    # wrapper can change where compiler defaults or relative outputs land, so
+    # it is not evidence that the exact advertised invocation works.
+    if re.search(r"(?:^|[;&|('\"]\s*)(?:cd|pushd)\s+\S+", prefix):
+        return False
+    if _COMMAND_EXAMPLE_SETUP_MUTATION_RE.search(prefix):
+        return False
+    try:
+        command_tokens = shlex.split(command)
+    except ValueError:
+        command_tokens = command.split()
+    first = command_tokens[0].casefold() if command_tokens else ""
+    matched_text = command_text[match.start() : match.end()]
+    if first in _COMMAND_EXAMPLE_OUTPUT_FLAG_TOOLS and "-o" not in command_tokens:
+        if re.search(r"(?<![\w-])(?:-o|--out-dir)(?![\w-])", matched_text):
+            return False
+    return True
+
+
+def _has_exact_command_example_evidence(evidence: object, session: object, command: str) -> bool:
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if _command_example_call_matches(call, command):
+            return True
+    return False
 
 
 def _evidence_tool_ids(text: object) -> list[int]:
@@ -624,6 +735,35 @@ def _external_tool_ground_truth_blocker(
     return ""
 
 
+def _exact_command_example_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    requirements = exact_command_example_requirements(task_description)
+    if not requirements:
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    for requirement in requirements:
+        command = str(requirement.get("command") or "")
+        if not verified_checks:
+            return (
+                "exact command example evidence missing: tasks that state a command can be run "
+                "must cite that exact command shape before task_done=true"
+            )
+        if not any(_has_exact_command_example_evidence(check.get("evidence"), session, command) for check in verified_checks):
+            return (
+                "exact command example evidence ungrounded: command-example constraints must "
+                "cite a completed run_command or run_tests tool that runs the advertised command "
+                "shape without a preceding cwd-changing cd wrapper"
+            )
+    return ""
+
+
 def _numeric_artifact_quality_blocker(
     task_description: object,
     checks: list[dict[str, str]],
@@ -665,6 +805,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     external_tool_blocker = _external_tool_ground_truth_blocker(task_description, checks, session)
     if external_tool_blocker:
         return external_tool_blocker
+    exact_command_blocker = _exact_command_example_blocker(task_description, checks, session)
+    if exact_command_blocker:
+        return exact_command_blocker
     numeric_artifact_blocker = _numeric_artifact_quality_blocker(task_description, checks, session)
     if numeric_artifact_blocker:
         return numeric_artifact_blocker

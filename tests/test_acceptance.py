@@ -1,6 +1,7 @@
 from mew.acceptance import (
     acceptance_finish_blocker,
     coerce_acceptance_checks,
+    exact_command_example_requirements,
     extract_acceptance_constraints,
     is_numeric_artifact_task,
 )
@@ -282,6 +283,774 @@ def test_acceptance_finish_blocker_does_not_escalate_non_edit_scope_checks():
     text = "Ensure the output file exists."
     checks = [{"constraint": text, "status": "verified", "evidence": "tool #2 wrote the file"}]
     session = {"tool_calls": [{"id": 2, "tool": "write_file", "status": "completed"}]}
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_exact_command_example_requirements_extract_backticked_run_shapes():
+    text = (
+        "Write /app/polyglot/main.rs. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N` or "
+        "`g++ -x c++ /app/polyglot/main.rs -o /app/polyglot/cmain && /app/polyglot/cmain N`."
+    )
+
+    commands = [item["command"] for item in exact_command_example_requirements(text)]
+
+    assert commands == [
+        "rustc /app/polyglot/main.rs && /app/polyglot/main N",
+        "g++ -x c++ /app/polyglot/main.rs -o /app/polyglot/cmain && /app/polyglot/cmain N",
+    ]
+
+
+def test_acceptance_finish_blocker_rejects_cd_wrapped_exact_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "rustc /app/polyglot/main.rs && /app/polyglot/main N",
+            "status": "verified",
+            "evidence": "tool #4 ran the exact command shape.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "bash -lc 'cd /app/polyglot; "
+                        "rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                    )
+                },
+                "result": {
+                    "command": "bash -lc 'cd /app/polyglot; rustc /app/polyglot/main.rs && /app/polyglot/main 20'",
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_exact_command_example_from_task_cwd():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "rustc /app/polyglot/main.rs && /app/polyglot/main N",
+            "status": "verified",
+            "evidence": "tool #4 ran rustc /app/polyglot/main.rs && /app/polyglot/main 20.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                },
+                "result": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'",
+                    "exit_code": 0,
+                    "stdout": "10946\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_accepts_command_example_from_tool_not_check_text():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Both advertised command shapes should print Fibonacci values.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                },
+                "result": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'",
+                    "exit_code": 0,
+                    "stdout": "10946\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_rejects_command_example_verifier_loop_as_surrogate():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Both advertised command shapes should print Fibonacci values.",
+            "status": "verified",
+            "evidence": "Tool call 4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs && "
+                        "for n in 0 1 2 7; do /app/polyglot/main \"$n\"; done'"
+                    )
+                },
+                "result": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs && "
+                        "for n in 0 1 2 7; do /app/polyglot/main \"$n\"; done'"
+                    ),
+                    "exit_code": 0,
+                    "stdout": "1\n1\n2\n21\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_output_override_for_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs -o /app/polyglot/main "
+                        "&& /app/polyglot/main 20'"
+                    )
+                },
+                "result": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs -o /app/polyglot/main "
+                        "&& /app/polyglot/main 20'"
+                    ),
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_python_output_override_for_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "python3 -c \"import subprocess; "
+                        "subprocess.run(['rustc','/app/polyglot/main.rs','-o','/app/polyglot/main']); "
+                        "subprocess.run(['/app/polyglot/main','20'])\""
+                    )
+                },
+                "result": {
+                    "command": (
+                        "python3 -c \"import subprocess; "
+                        "subprocess.run(['rustc','/app/polyglot/main.rs','-o','/app/polyglot/main']); "
+                        "subprocess.run(['/app/polyglot/main','20'])\""
+                    ),
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_semicolon_for_and_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs; /app/polyglot/main 20'"
+                },
+                "result": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs; /app/polyglot/main 20'",
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_subshell_cd_for_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": "bash -lc '(cd /app/polyglot && rustc /app/polyglot/main.rs && /app/polyglot/main 20)'"
+                },
+                "result": {
+                    "command": "bash -lc '(cd /app/polyglot && rustc /app/polyglot/main.rs && /app/polyglot/main 20)'",
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_setup_copy_between_command_example_terms():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs && "
+                        "cp /app/main /app/polyglot/main && /app/polyglot/main 20'"
+                    )
+                },
+                "result": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs && "
+                        "cp /app/main /app/polyglot/main && /app/polyglot/main 20'"
+                    ),
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_setup_copy_before_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "bash -lc 'cp /app/main /app/polyglot/main && "
+                        "rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                    )
+                },
+                "result": {
+                    "command": (
+                        "bash -lc 'cp /app/main /app/polyglot/main && "
+                        "rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                    ),
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_out_dir_override_for_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs --out-dir /app/polyglot "
+                        "&& /app/polyglot/main 20'"
+                    )
+                },
+                "result": {
+                    "command": (
+                        "bash -lc 'rustc /app/polyglot/main.rs --out-dir /app/polyglot "
+                        "&& /app/polyglot/main 20'"
+                    ),
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_python_cwd_wrapper_for_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "python3 -c \"import subprocess; "
+                        "subprocess.run(['rustc','/app/polyglot/main.rs'], cwd='/app/polyglot'); "
+                        "subprocess.run(['/app/polyglot/main','20'])\""
+                    )
+                },
+                "result": {
+                    "command": (
+                        "python3 -c \"import subprocess; "
+                        "subprocess.run(['rustc','/app/polyglot/main.rs'], cwd='/app/polyglot'); "
+                        "subprocess.run(['/app/polyglot/main','20'])\""
+                    ),
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_python_chdir_wrapper_for_command_example():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "python3 -c \"import os, subprocess; os.chdir('/app/polyglot'); "
+                        "subprocess.run(['rustc','/app/polyglot/main.rs']); "
+                        "subprocess.run(['/app/polyglot/main','20'])\""
+                    )
+                },
+                "result": {
+                    "command": (
+                        "python3 -c \"import os, subprocess; os.chdir('/app/polyglot'); "
+                        "subprocess.run(['rustc','/app/polyglot/main.rs']); "
+                        "subprocess.run(['/app/polyglot/main','20'])\""
+                    ),
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_failed_command_example_result():
+    text = (
+        "Write me a single file in /app/polyglot/main.rs which is a polyglot. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=1 attempted advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                },
+                "result": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'",
+                    "exit_code": 1,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_requires_each_advertised_command_example():
+    text = (
+        "Write /app/polyglot/main.rs. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N` or "
+        "`g++ -x c++ /app/polyglot/main.rs -o /app/polyglot/cmain && /app/polyglot/cmain N`."
+    )
+    checks = [
+        {
+            "constraint": "Advertised Rust command shape works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified the Rust advertised command shape.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                },
+                "result": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'",
+                    "exit_code": 0,
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "exact command example evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_both_advertised_command_examples():
+    text = (
+        "Write /app/polyglot/main.rs. I can run "
+        "`rustc /app/polyglot/main.rs && /app/polyglot/main N` or "
+        "`g++ -x c++ /app/polyglot/main.rs -o /app/polyglot/cmain && /app/polyglot/cmain N`."
+    )
+    checks = [
+        {
+            "constraint": "Both advertised command shapes work.",
+            "status": "verified",
+            "evidence": "Tool #4 and Tool call 5 verified both advertised command shapes.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'"
+                },
+                "result": {
+                    "command": "bash -lc 'rustc /app/polyglot/main.rs && /app/polyglot/main 20'",
+                    "exit_code": 0,
+                },
+            },
+            {
+                "id": 5,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "bash -lc 'g++ -x c++ /app/polyglot/main.rs -o /app/polyglot/cmain "
+                        "&& /app/polyglot/cmain 20'"
+                    )
+                },
+                "result": {
+                    "command": (
+                        "bash -lc 'g++ -x c++ /app/polyglot/main.rs -o /app/polyglot/cmain "
+                        "&& /app/polyglot/cmain 20'"
+                    ),
+                    "exit_code": 0,
+                },
+            },
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_accepts_python_command_example_itself():
+    text = "You can run `python3 /app/check.py N` to validate the answer."
+    checks = [
+        {
+            "constraint": "Advertised Python command works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified the advertised Python command.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": "python3 /app/check.py 1"},
+                "result": {"command": "python3 /app/check.py 1", "exit_code": 0},
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_accepts_cat_command_example_itself():
+    text = "You can run `cat /app/out.txt` to inspect the answer."
+    checks = [
+        {
+            "constraint": "Advertised cat command works.",
+            "status": "verified",
+            "evidence": "Tool #4 run_tests exit_code=0 verified the advertised cat command.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": "cat /app/out.txt"},
+                "result": {"command": "cat /app/out.txt", "exit_code": 0},
+            }
+        ]
+    }
 
     assert (
         acceptance_finish_blocker(
