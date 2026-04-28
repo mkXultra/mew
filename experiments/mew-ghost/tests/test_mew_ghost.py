@@ -9,8 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 README_PATH = ROOT / 'README.md'
 GHOST_PATH = ROOT / 'ghost.py'
 FIXTURE_PATH = ROOT / 'fixtures' / 'sample_ghost_state.json'
+DESK_FIXTURE_PATH = ROOT / 'fixtures' / 'sample_desk_view.json'
 
-spec = importlib.util.spec_from_file_location('mew_ghost_sp16', GHOST_PATH)
+spec = importlib.util.spec_from_file_location('mew_ghost_sp17', GHOST_PATH)
 ghost = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(ghost)
@@ -26,14 +27,14 @@ def test_fixture_builds_deterministic_state_and_html() -> None:
 
     assert state_one == state_two
     assert html_one == html_two
-    assert state_one['schema_version'] == 'mew-ghost.sp16.v1'
+    assert state_one['schema_version'] == 'mew-ghost.sp17.v1'
     assert state_one['active_window']['status'] == 'available'
     assert state_one['active_window']['active_app'] == 'Visual Studio Code'
     assert state_one['presence']['classification']['state'] == 'coding'
     assert [snapshot['presence_state'] for snapshot in state_one['presence']['snapshots']] == ['coding', 'coding', 'coding']
     assert 'Ghost is watching VS Code without screen capture.' in html_one
     assert 'Writing the SP12 scaffold' in html_one
-    assert 'mew-ghost.sp16.v1' in html_one
+    assert 'mew-ghost.sp17.v1' in html_one
     assert 'Freshness' in html_one
 
 
@@ -77,7 +78,7 @@ def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
 
     assert calls == []
     assert unavailable == {
-        'schema_version': 'mew-ghost.sp16.v1',
+        'schema_version': 'mew-ghost.sp17.v1',
         'status': 'unavailable',
         'reason': 'requires_macos',
         'platform': 'Linux',
@@ -218,6 +219,95 @@ def test_launcher_intents_are_dry_run_by_default_and_execute_only_when_allowed()
     assert [result['execution']['status'] for result in executed] == ['executed', 'executed']
 
 
+def test_desk_fixture_loads_status_counts_mapping_and_primary_action() -> None:
+    fixture = ghost.load_fixture(FIXTURE_PATH)
+    desk_fixture = ghost.load_desk_fixture(DESK_FIXTURE_PATH)
+
+    state = ghost.build_ghost_state(fixture, desk_fixture=desk_fixture)
+
+    assert state['presence']['classification']['state'] == 'coding'
+    assert state['desk']['enabled'] is True
+    assert state['desk']['status'] == 'typing'
+    assert state['desk']['counts']['pets_total'] == 4
+    assert state['desk']['counts']['pet_states'] == {'sleeping': 1, 'thinking': 1, 'typing': 1, 'alerting': 1}
+    assert [detail['presence_state'] for detail in state['desk']['details']] == ['idle', 'attentive', 'coding', 'waiting']
+    assert state['presence']['desk']['state'] == 'idle'
+    assert state['presence']['desk']['preserves_active_window_classification'] is True
+    assert state['presence']['snapshots'][0]['desk_presence_state'] == 'idle'
+    assert state['desk']['primary_action']['command'] == ['mew', 'code', '--task', '17']
+    assert state['desk']['primary_action']['dry_run'] is True
+
+    desk_intent = state['launch_intents'][-1]
+    assert desk_intent['id'] == 'desk-primary-action'
+    assert desk_intent['execution']['status'] == 'dry_run'
+    assert desk_intent['execution']['executed'] is False
+
+
+def test_cli_renders_desk_json_state_and_html(tmp_path: Path) -> None:
+    html_output = tmp_path / 'desk.html'
+    state_output = tmp_path / 'desk-state.json'
+
+    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--desk-json', str(DESK_FIXTURE_PATH), '--format', 'state', '--output', str(state_output)]) == 0
+    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--desk-json', str(DESK_FIXTURE_PATH), '--format', 'html', '--output', str(html_output)]) == 0
+
+    state = json.loads(state_output.read_text(encoding='utf-8'))
+    html = html_output.read_text(encoding='utf-8')
+
+    assert state['desk']['source'] == 'desk-json-fixture'
+    assert state['desk']['primary_action']['label'] == 'Resume SP17 desk bridge'
+    assert state['presence']['classification']['state'] == 'coding'
+    assert 'Desk bridge' in html
+    assert 'Resume SP17 desk bridge' in html
+    assert 'mew code --task 17' in html
+    assert 'typing' in html
+
+
+def test_watch_reloads_desk_fixture_each_iteration(tmp_path: Path, capsys) -> None:
+    desk_path = tmp_path / 'desk.json'
+    desk_path.write_text(json.dumps({'fixture_name': 'first', 'desk': {'status': 'thinking', 'pets': [{'name': 'mew', 'pet_state': 'thinking'}]}}), encoding='utf-8')
+    clocks = iter(['desk-0', 'desk-1'])
+    sleeps: list[float] = []
+
+    def sleeper(interval: float) -> None:
+        sleeps.append(interval)
+        desk_path.write_text(json.dumps({'fixture_name': 'second', 'desk': {'status': 'alerting', 'pets': [{'name': 'mew', 'pet_state': 'alerting'}]}}), encoding='utf-8')
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--desk-json', str(desk_path), '--format', 'state', '--watch-count', '2', '--interval', '0'],
+        clock=lambda: next(clocks),
+        sleeper=sleeper,
+    ) == 0
+
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    assert sleeps == [0]
+    assert [record['desk_status'] for record in records] == ['thinking', 'alerting']
+    assert records[0]['state']['presence']['desk']['state'] == 'attentive'
+    assert records[1]['state']['presence']['desk']['state'] == 'waiting'
+    assert records[1]['state']['desk']['fixture_name'] == 'second'
+
+
+def test_execute_launchers_never_executes_desk_primary_action(capsys) -> None:
+    calls: list[list[str]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return _completed_process()
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--desk-json', str(DESK_FIXTURE_PATH), '--format', 'state', '--execute-launchers'],
+        launcher_runner=runner,
+    ) == 0
+
+    state = json.loads(capsys.readouterr().out)
+
+    assert calls == [['mew', 'chat'], ['mew', 'code']]
+    desk_intent = state['launch_intents'][-1]
+    assert desk_intent['id'] == 'desk-primary-action'
+    assert desk_intent['dry_run'] is True
+    assert desk_intent['execution']['executed'] is False
+
+
 def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
     html_output = tmp_path / 'ghost.html'
     state_output = tmp_path / 'ghost-state.json'
@@ -229,7 +319,7 @@ def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
     state = json.loads(state_output.read_text(encoding='utf-8'))
 
     assert html.startswith('<!doctype html>')
-    assert '<title>mew-ghost SP16 watch mode</title>' in html
+    assert '<title>mew-ghost SP17 watch mode</title>' in html
     assert 'single render' in html
     assert 'refresh 0' in html
     assert 'refresh 1' in html
@@ -369,6 +459,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --watch-count 2',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --execute-launchers',
     ]
@@ -390,6 +481,9 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert '--execute-launchers' in source
     assert '--watch-count' in source
     assert '--interval' in source
+    assert '--desk-json' in source
+    assert 'sample_desk_view.json' in source
+    assert 'mew desk --json' not in source
     assert 'background_monitoring' in source
     assert 'network' in source
     assert 'live_mew_reads' in source

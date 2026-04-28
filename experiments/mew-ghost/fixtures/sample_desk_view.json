@@ -1,0 +1,40 @@
+{
+  "fixture_name": "sample_desk_view",
+  "generated_at": "2026-04-28T02:00:00Z",
+  "desk": {
+    "status": "typing",
+    "counts": {
+      "ready": 2,
+      "running": 1,
+      "blocked": 1
+    },
+    "pets": [
+      {
+        "name": "nap-mew",
+        "pet_state": "sleeping",
+        "detail": "No urgent work is active."
+      },
+      {
+        "name": "think-mew",
+        "pet_state": "thinking",
+        "detail": "Reviewing the fixture-only desk bridge plan."
+      },
+      {
+        "name": "type-mew",
+        "pet_state": "typing",
+        "detail": "Editing experiments/mew-ghost without core imports."
+      },
+      {
+        "name": "alert-mew",
+        "pet_state": "alerting",
+        "detail": "Desk has one item needing operator attention."
+      }
+    ],
+    "primary_action": {
+      "id": "resume-sp17",
+      "label": "Resume SP17 desk bridge",
+      "command": ["mew", "code", "--task", "17"],
+      "description": "Dry-run fixture intent surfaced from static desk JSON."
+    }
+  }
+}

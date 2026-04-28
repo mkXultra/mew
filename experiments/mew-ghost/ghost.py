@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-'''Standalone SP16 mew-ghost foreground watch-mode shell.
+'''Standalone SP17 mew-ghost foreground watch-mode shell.
 
 The module is deliberately local and fixture-driven by default. It can perform
 an explicit opt-in macOS active app/window probe through osascript, renders a
@@ -24,8 +24,16 @@ from html import escape
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TextIO
 
-SCHEMA_VERSION = 'mew-ghost.sp16.v1'
+SCHEMA_VERSION = 'mew-ghost.sp17.v1'
 DEFAULT_FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'sample_ghost_state.json'
+DEFAULT_DESK_FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'sample_desk_view.json'
+DESK_PET_STATE_TO_PRESENCE = {
+    'sleeping': 'idle',
+    'thinking': 'attentive',
+    'typing': 'coding',
+    'alerting': 'waiting',
+}
+EXECUTABLE_LAUNCHER_IDS = {'mew-chat', 'mew-code'}
 ProbeProvider = Callable[[], Mapping[str, Any]]
 OsascriptRunner = Callable[..., subprocess.CompletedProcess[str]]
 LauncherRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -63,6 +71,101 @@ def load_fixture(path: str | Path = DEFAULT_FIXTURE) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError('ghost fixture must be a JSON object')
     return data
+
+
+def load_desk_fixture(path: str | Path = DEFAULT_DESK_FIXTURE) -> dict[str, Any]:
+    fixture_path = Path(path)
+    with fixture_path.open('r', encoding='utf-8') as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError('desk fixture must be a JSON object')
+    return data
+
+
+def _coerce_command(raw_command: object) -> list[str]:
+    if isinstance(raw_command, str):
+        return [part for part in raw_command.split() if part]
+    if isinstance(raw_command, Sequence):
+        return [str(part) for part in raw_command]
+    return []
+
+
+def _normalize_primary_action(raw_action: object) -> dict[str, Any] | None:
+    if not isinstance(raw_action, Mapping):
+        return None
+    command = _coerce_command(raw_action.get('command'))
+    label = str(raw_action.get('label') or raw_action.get('title') or raw_action.get('id') or 'Desk primary action')
+    return {
+        'id': str(raw_action.get('id') or 'desk-primary-action'),
+        'label': label,
+        'command': command,
+        'dry_run': True,
+        'side_effects': 'none',
+        'description': str(raw_action.get('description') or 'Fixture-only desk primary_action; mew-ghost never executes it.'),
+        'source': 'desk-json-fixture',
+        'executable': False,
+    }
+
+
+def build_desk_status(desk_fixture: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    if desk_fixture is None:
+        return {
+            'enabled': False,
+            'source': None,
+            'fixture_name': None,
+            'generated_at': None,
+            'status': 'disabled',
+            'counts': {},
+            'details': [],
+            'primary_action': None,
+            'pet_state_presence_map': dict(DESK_PET_STATE_TO_PRESENCE),
+            'live_mew_reads': False,
+        }
+
+    desk_root = desk_fixture.get('desk') if isinstance(desk_fixture.get('desk'), Mapping) else desk_fixture
+    raw_pets = desk_root.get('pets') if isinstance(desk_root.get('pets'), list) else []
+    details: list[dict[str, Any]] = []
+    pet_state_counts: dict[str, int] = {}
+    for index, raw_pet in enumerate(raw_pets):
+        if not isinstance(raw_pet, Mapping):
+            continue
+        pet_state = str(raw_pet.get('pet_state') or raw_pet.get('state') or 'unknown')
+        presence_state = DESK_PET_STATE_TO_PRESENCE.get(pet_state, 'attentive')
+        pet_state_counts[pet_state] = pet_state_counts.get(pet_state, 0) + 1
+        details.append(
+            {
+                'index': index,
+                'name': str(raw_pet.get('name') or raw_pet.get('id') or 'desk-pet-%s' % index),
+                'pet_state': pet_state,
+                'presence_state': presence_state,
+                'detail': str(raw_pet.get('detail') or raw_pet.get('message') or raw_pet.get('status') or ''),
+            }
+        )
+
+    raw_counts = desk_root.get('counts') if isinstance(desk_root.get('counts'), Mapping) else {}
+    counts: dict[str, Any] = {}
+    for key, value in raw_counts.items():
+        try:
+            counts[str(key)] = int(value)
+        except (TypeError, ValueError):
+            counts[str(key)] = value
+    counts['pets_total'] = len(details)
+    counts['pet_states'] = pet_state_counts
+
+    primary_action = _normalize_primary_action(desk_root.get('primary_action') or desk_fixture.get('primary_action'))
+    primary_pet_state = details[0]['pet_state'] if details else 'unknown'
+    return {
+        'enabled': True,
+        'source': 'desk-json-fixture',
+        'fixture_name': str(desk_fixture.get('fixture_name') or 'desk-json-fixture'),
+        'generated_at': str(desk_fixture.get('generated_at') or 'fixture-time'),
+        'status': str(desk_root.get('status') or primary_pet_state),
+        'counts': counts,
+        'details': details,
+        'primary_action': primary_action,
+        'pet_state_presence_map': dict(DESK_PET_STATE_TO_PRESENCE),
+        'live_mew_reads': False,
+    }
 
 
 def _probe_result(
@@ -232,9 +335,13 @@ def probe_active_window(
     )
 
 
-def build_launcher_intents(*, dry_run: bool = True) -> list[dict[str, Any]]:
+def build_launcher_intents(
+    *,
+    dry_run: bool = True,
+    desk_status: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     side_effects = 'none' if dry_run else 'executes_local_mew_command'
-    return [
+    intents = [
         {
             'id': 'mew-chat',
             'label': 'Open mew chat',
@@ -242,6 +349,8 @@ def build_launcher_intents(*, dry_run: bool = True) -> list[dict[str, Any]]:
             'dry_run': dry_run,
             'side_effects': side_effects,
             'description': 'Would open the chat surface for the operator.' if dry_run else 'Opens the chat surface for the operator.',
+            'source': 'local-launcher',
+            'executable': True,
         },
         {
             'id': 'mew-code',
@@ -250,8 +359,19 @@ def build_launcher_intents(*, dry_run: bool = True) -> list[dict[str, Any]]:
             'dry_run': dry_run,
             'side_effects': side_effects,
             'description': 'Would open the coding surface for the operator.' if dry_run else 'Opens the coding surface for the operator.',
+            'source': 'local-launcher',
+            'executable': True,
         },
     ]
+    if desk_status and isinstance(desk_status.get('primary_action'), Mapping):
+        primary_action = dict(desk_status['primary_action'])
+        primary_action['id'] = 'desk-primary-action'
+        primary_action['dry_run'] = True
+        primary_action['side_effects'] = 'none'
+        primary_action['executable'] = False
+        primary_action['execution_policy'] = 'fixture_intent_never_executed_by_mew_ghost'
+        intents.append(primary_action)
+    return intents
 
 
 def execute_launcher_intents(
@@ -264,7 +384,8 @@ def execute_launcher_intents(
     for intent in intents:
         command = [str(part) for part in intent.get('command', [])]
         result = dict(intent)
-        if not allow_execute or bool(intent.get('dry_run', True)):
+        executable_intent = str(intent.get('id')) in EXECUTABLE_LAUNCHER_IDS and bool(intent.get('executable', True))
+        if not allow_execute or bool(intent.get('dry_run', True)) or not executable_intent:
             result['dry_run'] = True
             result['side_effects'] = 'none'
             result['execution'] = {'status': 'dry_run', 'executed': False, 'returncode': None}
@@ -349,10 +470,22 @@ def build_presence_loop(
     active_window: Mapping[str, Any],
     ghost: Mapping[str, Any],
     refresh_count: int | str | None = DEFAULT_REFRESH_COUNT,
+    desk_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     count = normalize_refresh_count(refresh_count)
     task = _task_mapping(fixture)
     classified = classify_presence(active_window=active_window, task=task, ghost=ghost)
+    desk_presence: dict[str, Any] | None = None
+    if desk_status and desk_status.get('enabled'):
+        details = desk_status.get('details') if isinstance(desk_status.get('details'), list) else []
+        primary_detail = details[0] if details else {}
+        desk_presence = {
+            'state': str(primary_detail.get('presence_state') or 'attentive'),
+            'pet_state': str(primary_detail.get('pet_state') or desk_status.get('status') or 'unknown'),
+            'status': desk_status.get('status'),
+            'detail': primary_detail.get('detail'),
+            'preserves_active_window_classification': True,
+        }
     base_time = str(fixture.get('generated_at') or 'fixture-time')
     snapshots = [
         {
@@ -361,6 +494,8 @@ def build_presence_loop(
             'presence_state': classified['state'],
             'visual_state': classified['state'],
             'detail': classified['detail'],
+            'desk_presence_state': None if desk_presence is None else desk_presence['state'],
+            'desk_pet_state': None if desk_presence is None else desk_presence['pet_state'],
             'active_app': active_window.get('active_app'),
             'window_title': active_window.get('window_title'),
             'task_title': task.get('title'),
@@ -376,6 +511,7 @@ def build_presence_loop(
         'network': False,
         'live_mew_reads': False,
         'classification': classified,
+        'desk': desk_presence,
         'snapshots': snapshots,
     }
 
@@ -387,6 +523,7 @@ def build_ghost_state(
     platform_name: str | None = None,
     refresh_count: int | str | None = DEFAULT_REFRESH_COUNT,
     freshness: Mapping[str, Any] | None = None,
+    desk_fixture: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     ghost_raw = fixture.get('ghost')
     if not isinstance(ghost_raw, Mapping):
@@ -403,7 +540,14 @@ def build_ghost_state(
         'message': str(ghost_raw.get('message') or 'ready'),
         'focus': str(ghost_raw.get('focus') or 'local shell'),
     }
-    presence = build_presence_loop(fixture=fixture, active_window=probe, ghost=ghost, refresh_count=refresh_count)
+    desk_status = build_desk_status(desk_fixture)
+    presence = build_presence_loop(
+        fixture=fixture,
+        active_window=probe,
+        ghost=ghost,
+        refresh_count=refresh_count,
+        desk_status=desk_status,
+    )
     return {
         'schema_version': SCHEMA_VERSION,
         'fixture_name': str(fixture.get('fixture_name') or 'unknown'),
@@ -411,8 +555,9 @@ def build_ghost_state(
         'ghost': ghost,
         'active_window': probe,
         'presence': presence,
+        'desk': desk_status,
         'freshness': dict(freshness or {'mode': 'single-render', 'rendered_at': str(fixture.get('generated_at') or 'fixture-time')}),
-        'launch_intents': execute_launcher_intents(build_launcher_intents(dry_run=True)),
+        'launch_intents': execute_launcher_intents(build_launcher_intents(dry_run=True, desk_status=desk_status)),
     }
 
 
@@ -423,6 +568,10 @@ def render_local_html(state: Mapping[str, Any]) -> str:
     classification = presence['classification']
     intents = state['launch_intents']
     freshness = state.get('freshness', {})
+    desk = state.get('desk', {})
+    desk_counts = desk.get('counts') if isinstance(desk, Mapping) and isinstance(desk.get('counts'), Mapping) else {}
+    desk_details = desk.get('details') if isinstance(desk, Mapping) and isinstance(desk.get('details'), list) else []
+    desk_primary = desk.get('primary_action') if isinstance(desk, Mapping) and isinstance(desk.get('primary_action'), Mapping) else None
     watch_iteration = freshness.get('watch_iteration')
     watch_total = freshness.get('watch_total')
     iteration_label = 'single render' if watch_iteration is None else 'watch iteration %s%s' % (
@@ -450,6 +599,19 @@ def render_local_html(state: Mapping[str, Any]) -> str:
         + '</li>'
         for snapshot in presence['snapshots']
     )
+    desk_detail_items = chr(10).join(
+        '        <li>'
+        + escape(str(detail.get('name')))
+        + ': <strong>'
+        + escape(str(detail.get('pet_state')))
+        + '</strong> → '
+        + escape(str(detail.get('presence_state')))
+        + ' — '
+        + escape(str(detail.get('detail') or ''))
+        + '</li>'
+        for detail in desk_details
+    ) or '        <li>No desk pet details loaded.</li>'
+    desk_primary_command = '' if desk_primary is None else ' '.join(str(part) for part in desk_primary.get('command', []))
     state_json = escape(json.dumps(state, indent=2, sort_keys=True))
 
     return chr(10).join(
@@ -458,7 +620,7 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             '<html lang=' + chr(39) + 'en' + chr(39) + '>',
             '  <head>',
             '    <meta charset=' + chr(39) + 'utf-8' + chr(39) + '>',
-            '    <title>mew-ghost SP16 watch mode</title>',
+            '    <title>mew-ghost SP17 watch mode</title>',
             '    <style>',
             '      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; background: #111827; color: #f9fafb; }',
             '      main { max-width: 780px; }',
@@ -494,6 +656,16 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             '        </ul>',
             '      </section>',
             '      <section>',
+            '        <h2>Desk bridge</h2>',
+            '        <p><strong>Status:</strong> ' + escape(str(desk.get('status', 'disabled') if isinstance(desk, Mapping) else 'disabled')) + '</p>',
+            '        <p><strong>Counts:</strong> ' + escape(json.dumps(desk_counts, sort_keys=True)) + '</p>',
+            '        <p><strong>Primary action:</strong> ' + escape('none' if desk_primary is None else str(desk_primary.get('label'))) + '</p>',
+            '        <p><strong>Primary command:</strong> <code>' + escape(desk_primary_command or 'none') + '</code></p>',
+            '        <ul>',
+            desk_detail_items,
+            '        </ul>',
+            '      </section>',
+            '      <section>',
             '        <h2>Active app/window probe</h2>',
             '        <p class=' + chr(39) + 'status' + chr(39) + '><strong>Status:</strong> ' + escape(probe['status']) + '</p>',
             '        <p><strong>App:</strong> ' + escape(probe.get('active_app') or 'unavailable') + '</p>',
@@ -524,14 +696,17 @@ def render_fixture(
     platform_name: str | None = None,
     refresh_count: int | str | None = DEFAULT_REFRESH_COUNT,
     freshness: Mapping[str, Any] | None = None,
+    desk_path: str | Path | None = None,
 ) -> tuple[dict[str, Any], str]:
     fixture = load_fixture(path)
+    desk_fixture = load_desk_fixture(desk_path) if desk_path is not None else None
     state = build_ghost_state(
         fixture,
         probe_provider=probe_provider,
         platform_name=platform_name,
         refresh_count=refresh_count,
         freshness=freshness,
+        desk_fixture=desk_fixture,
     )
     return state, render_local_html(state)
 
@@ -551,6 +726,7 @@ def _watch_record(
     launchers_executed: bool,
 ) -> dict[str, Any]:
     freshness = state['freshness']
+    desk = state.get('desk', {})
     record: dict[str, Any] = {
         'schema_version': SCHEMA_VERSION,
         'record_type': 'mew_ghost_watch_iteration',
@@ -561,6 +737,8 @@ def _watch_record(
         'format': format_name,
         'output': str(output_path) if output_path is not None else None,
         'presence_state': state['presence']['classification']['state'],
+        'desk_status': desk.get('status') if isinstance(desk, Mapping) else None,
+        'desk_primary_action': desk.get('primary_action') if isinstance(desk, Mapping) else None,
         'active_window_status': state['active_window']['status'],
         'active_app': state['active_window'].get('active_app'),
         'launcher_execution_requested': launchers_executed,
@@ -575,6 +753,7 @@ def _watch_record(
 def run_watch(
     fixture_path: str | Path = DEFAULT_FIXTURE,
     *,
+    desk_path: str | Path | None = None,
     format_name: str = 'html',
     output: str | Path | None = None,
     probe_provider: ProbeProvider | None = None,
@@ -609,10 +788,11 @@ def run_watch(
                 platform_name=platform_name,
                 refresh_count=1,
                 freshness=freshness,
+                desk_path=desk_path,
             )
             if execute_launchers:
                 state['launch_intents'] = execute_launcher_intents(
-                    build_launcher_intents(dry_run=False),
+                    build_launcher_intents(dry_run=False, desk_status=state.get('desk')),
                     allow_execute=True,
                     runner=launcher_runner or subprocess.run,
                 )
@@ -651,8 +831,9 @@ def main(
     clock: Clock = utc_now_iso,
     platform_name: str | None = None,
 ) -> int:
-    parser = argparse.ArgumentParser(description='Render the SP16 mew-ghost watch-mode shell')
+    parser = argparse.ArgumentParser(description='Render the SP17 mew-ghost watch-mode shell')
     parser.add_argument('--fixture', default=str(DEFAULT_FIXTURE), help='local JSON fixture to render')
+    parser.add_argument('--desk-json', help='static mew desk JSON-style fixture to bridge into ghost state')
     parser.add_argument('--output', help='write rendered output to this path')
     parser.add_argument('--format', choices=('html', 'state'), default='html')
     parser.add_argument('--refresh-count', type=int, default=DEFAULT_REFRESH_COUNT, help='single-render snapshot count, clamped locally')
@@ -675,6 +856,7 @@ def main(
     if args.watch or args.watch_count is not None:
         return run_watch(
             args.fixture,
+            desk_path=args.desk_json,
             format_name=args.format,
             output=args.output,
             probe_provider=provider,
@@ -692,10 +874,11 @@ def main(
         probe_provider=provider,
         platform_name=platform_name,
         refresh_count=args.refresh_count,
+        desk_path=args.desk_json,
     )
     if args.execute_launchers:
         state['launch_intents'] = execute_launcher_intents(
-            build_launcher_intents(dry_run=False),
+            build_launcher_intents(dry_run=False, desk_status=state.get('desk')),
             allow_execute=True,
             runner=launcher_runner or subprocess.run,
         )

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "task_id": 17,
+  "session_id": 36,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Add a fixture-only desk-view-model bridge to isolated mew-ghost with static --desk-json loading, desk pet-state presence mapping, dry-run primary_action intent rendering, bounded watch rebuilds, focused tests, and README usage.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 8,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/fixtures/sample_desk_view.json",
+    "experiments/mew-ghost/.mew-dogfood/reports/17-desk-bridge-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "git diff --check",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format html --output /tmp/mew-ghost-desk-review.html --watch-count 2 --interval 0",
+    "rg -n \"SP16|sp16\" experiments/mew-ghost",
+    "./mew side-dogfood append --input experiments/mew-ghost/.mew-dogfood/reports/17-desk-bridge-practical.json --ledger /tmp/mew-side-dogfood-sp17-final-verify.jsonl --json"
+  ],
+  "reviewer_rejections": 1,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "schema_version_closeout_followup_after_report_schema_repair",
+  "repair_required": false,
+  "proof_artifacts": [
+    ".mew/sessions/36/snapshot.json",
+    ".mew/sessions/37/snapshot.json",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/fixtures/sample_desk_view.json",
+    "experiments/mew-ghost/.mew-dogfood/reports/17-desk-bridge-practical.json",
+    "/tmp/mew-ghost-desk-review.html",
+    "/tmp/mew-side-dogfood-sp17-final-verify.jsonl"
+  ],
+  "commit": "",
+  "notes": "SP17 keeps mew-ghost isolated under experiments/mew-ghost. The desk bridge loads only static --desk-json fixtures, maps sleeping/thinking/typing/alerting into separate desk presence metadata without replacing active-window classification, renders desk status/counts/details/primary_action in JSON and HTML, and exposes desk primary_action as a non-executable dry-run intent beside mew chat and mew code. Watch mode reloads the desk fixture every iteration. Real live .mew state, core src/mew imports, real desk command execution, and real mew subprocess execution remain intentionally outside automation. The one verifier failure was canonical report schema closeout for an empty failure_class, repaired in the report only. reviewer_followup: session 37 updated prior-slice closeout schema/docstring/HTML/test wording to SP17/sp17 after the desk bridge state shape landed; rescue_edits remains 0 because no operator product-code rescue edits were required."
+}

@@ -27,11 +27,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP14 mew-ghost Presence Loop | `done` | Presence loop landed practical: deterministic idle/attentive/coding/waiting/blocked classification, bounded refresh snapshots, README refresh contract, output proof, and focused tests are in place. |
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
-| SP17 mew-ghost Desk Bridge | `planned` | Next slice: let `mew-ghost` consume a static `mew desk --json` fixture so desk pet state and primary action can be rendered as ghost presence without reading live `.mew` state or running core commands. |
+| SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
 
 ## Active Focus
 
-Active side-project focus: **SP17 mew-ghost Desk Bridge**.
+Active side-project focus: **SP17 mew-ghost Desk Bridge is closed; next focus is selecting the next side-project milestone**.
 
 Current target:
 
@@ -46,9 +46,10 @@ Current target:
   controls injected/testable sleeping, CLI watch emits one JSONL record per
   iteration, and HTML watch rewrites the same output file with freshness
   metadata each iteration
-- next planned bridge: load a static `mew desk --json`-like fixture, map
-  `sleeping`/`thinking`/`typing`/`alerting` into ghost presence, and render the
-  desk `primary_action` as an explicit dry-run command intent
+- SP17 desk bridge is now present: static `--desk-json` fixture loading maps
+  `sleeping`/`thinking`/`typing`/`alerting` into separate desk-derived presence,
+  renders desk status/counts/details/primary_action in CLI state and HTML, and
+  exposes desk `primary_action` as a non-executable dry-run command intent
 - live macOS probing remains explicit through `--live-active-window`
 - live `mew desk --json` subprocess execution remains deferred to a later
   explicit opt-in slice; SP17 should not read live `.mew` state or import
@@ -67,7 +68,10 @@ Current target:
   `#10` evidence for M6.16 implementation-lane hardening
 - route the report-schema closeout gap as closed issue `#11` evidence for
   M6.16 implementation-lane hardening; SP16 still needed operator report JSON
-  normalization, recorded in ledger row `17`
+  normalization, recorded in ledger row `17`, and SP17 needed report-schema plus
+  stale schema-version closeout follow-up, recorded in ledger row `18`
+- route the stale schema/version closeout gap as open issue `#13` evidence for
+  M6.16 implementation-lane hardening
 - route watch-mode verifier semantics as closed issue `#12` evidence; SP16
   operator review confirmed multiple CLI records and HTML rewrite behavior
 - preserve the current operating model for any future side-project cohort:
@@ -82,8 +86,8 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
-  SP16 on 2026-04-27: `rows_total=17`, one `failed`, thirteen `practical`,
-  three `clean`, `success_rate=0.941`, `structural_repairs_required=1`,
+  SP17 on 2026-04-28: `rows_total=18`, one `failed`, fourteen `practical`,
+  three `clean`, `success_rate=0.944`, `structural_repairs_required=1`,
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
   twelve `mew-companion-log` rows on 2026-04-26: `rows_total=12`, one `failed`,
@@ -441,6 +445,28 @@ Current target:
   also passed. Real macOS Accessibility behavior and real launcher subprocess
   execution remain intentionally outside automated verification and require
   explicit local operator opt-in.
+- Task `#17` / session `#36` added the SP17 desk bridge with Codex CLI as
+  `operator` and mew as first implementer. Mew authored static `--desk-json`
+  fixture loading, desk pet-state mapping, CLI/HTML status/counts/details and
+  primary_action rendering, non-executable desk primary_action intent, watch
+  reload behavior, README usage, focused tests, and local report evidence under
+  `experiments/mew-ghost`.
+- Reviewer follow-up session `#37` corrected stale prior-slice SP16/sp16
+  schema/docstring/HTML/test wording after the desk bridge changed the state
+  shape. No operator product-code rescue edits were made.
+- mew-ghost SP17 local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/17-desk-bridge-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `18`;
+  outcome `practical`, failure class
+  `schema_version_closeout_followup_after_report_schema_repair`,
+  `rescue_edits=0`.
+- Problem issue opened:
+  `https://github.com/mkXultra/mew/issues/13`.
+- mew-ghost SP17 verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+  returned `23 passed`. `git diff --check`, static desk state output, bounded
+  HTML watch output, stale `SP16|sp16` audit, and temporary side-dogfood ledger
+  append validation also passed.
 
 ## Missing Proof
 
@@ -450,29 +476,30 @@ Current target:
 - SP14 is closed for the second `mew-ghost` cohort.
 - SP15 is closed for the second `mew-ghost` cohort.
 - SP16 is closed for the second `mew-ghost` cohort.
-- SP17 has not started; desk-view-model fixture bridging is not implemented.
+- SP17 is closed for the second `mew-ghost` cohort.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
 - Real macOS Accessibility behavior for `--live-active-window` remains
   intentionally unverified by automation; structured fallback and injected
   provider paths are covered.
-- All known `[side-pj]` implementation-lane polish issues are closed as of
-  2026-04-27; any recurrence should be recorded as a new or reopened
+- Open `[side-pj]` issue `#13` captures the reusable SP17 stale schema/version
+  closeout gap. Earlier known implementation-lane polish issues remain closed;
+  any additional recurrence should be recorded as a new or reopened
   one-problem issue before the next major side-project milestone.
 
 ## Next Action
 
-Start SP17 with mew as first implementer:
+Select the next side-project milestone before more coding:
 
-1. create a coding task for `mew-ghost` SP17
-2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
-   with `--model gpt-5.5`
-3. allow writes only under `experiments/mew-ghost`
-4. add a desk-view-model fixture bridge without live `.mew` reads, core imports,
-   or `mew desk --json` subprocess execution
-5. verify with
-   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+1. decide whether to extend `mew-ghost`, start another isolated side project,
+   or pause side-project work and feed the six-row mew-ghost cohort into core
+   M6.16/M9/M11 planning
+2. write the next roadmap/status entry before implementation
+3. create a bounded coding task and run repo-root `./mew work` from
+   `/Users/mk/dev/personal-pj/mew_side_pj` with `--model gpt-5.5`
+4. allow writes only under the selected side-project directory
+5. verify with the focused side-project verifier
 6. write a canonical local side-dogfood report and append it to the ledger
 7. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`

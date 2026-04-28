@@ -1,14 +1,28 @@
-# mew-ghost SP16 watch mode
+# mew-ghost SP17 desk bridge
 
-`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP16 keeps the fixture-driven and dry-run defaults, preserves `--live-active-window` as the only live active-window opt-in, and adds a foreground watch mode that can refresh CLI records and local HTML output continuously. Direct launcher execution remains available only behind the explicit `--execute-launchers` CLI opt-in.
+`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP17 keeps the fixture-driven and dry-run defaults, preserves `--live-active-window` as the only live active-window opt-in, and adds a fixture-only `--desk-json` bridge for static mew desk JSON-style view models. Direct launcher execution remains available only behind the explicit `--execute-launchers` CLI opt-in, and desk `primary_action` is always surfaced as a dry-run intent.
 
-The shell does not import core mew code, read live `.mew` state, capture the screen, monitor hidden activity, use the network, or package a native app.
+The shell does not import core mew code, read live `.mew` state, run a desk command, capture the screen, monitor hidden activity, use the network, or package a native app.
 
 ## What this slice provides
 
 - `ghost.py`: a standalone Python entrypoint/module.
-- `fixtures/sample_ghost_state.json`: deterministic input for ghost state, presence classification, and local HTML rendering.
-- `tests/test_mew_ghost.py`: focused tests for fixture rendering, foreground watch output, repeated HTML rewrites, explicit live-probe fallbacks, launcher dry-run/execution gating, isolation, and README usage.
+- `fixtures/sample_ghost_state.json`: deterministic input for ghost state, active-window classification, presence classification, and local HTML rendering.
+- `fixtures/sample_desk_view.json`: deterministic desk view-model input for `--desk-json` status/counts/details/primary_action rendering.
+- `tests/test_mew_ghost.py`: focused tests for fixture rendering, foreground watch output, repeated HTML rewrites, explicit live-probe fallbacks, launcher dry-run/execution gating, desk fixture mapping, isolation, and README usage.
+
+## Fixture-only desk bridge
+
+`--desk-json PATH` loads a static desk view-model fixture. It never invokes a live desk command and never reads live `.mew` state. Watch mode reloads the desk fixture on every iteration so local dogfood can rewrite the JSON file and observe refreshed desk status without a background daemon.
+
+Desk pet states are mapped into ghost presence metadata without replacing the active-window classification path:
+
+- `sleeping` → `idle`
+- `thinking` → `attentive`
+- `typing` → `coding`
+- `alerting` → `waiting`
+
+The rendered state includes `desk.status`, `desk.counts`, `desk.details`, `desk.primary_action`, and `presence.desk`. The HTML output adds a Desk bridge section with the same status/count/action details.
 
 ## Foreground watch contract
 
@@ -18,7 +32,7 @@ Single renders still build one local state/HTML document and then stop. Watch mo
 - `--watch` without `--watch-count` runs in the foreground until `KeyboardInterrupt`.
 - `--interval SECONDS` controls the sleep between iterations.
 - Tests can inject the sleeper, clock, probe provider, and launcher runner.
-- Every iteration reloads the fixture, rebuilds state, reruns the selected probe path, and emits one newline-delimited CLI JSON record.
+- Every iteration reloads the ghost fixture and optional desk fixture, rebuilds state, reruns the selected probe path, and emits one newline-delimited CLI JSON record.
 - With `--format html --output PATH`, each iteration rewrites the same local HTML file with freshness metadata for that iteration.
 
 Watch mode does not create a daemon, background monitor, hidden capture loop, network connection, or live `.mew` reader.
@@ -33,15 +47,19 @@ Watch mode does not create a daemon, background monitor, hidden capture loop, ne
 - `waiting`: the task/window text indicates waiting, pending review, or pause.
 - `blocked`: the live probe is permission-denied or task state is blocked/error.
 
+Desk-derived presence is exposed separately under `presence.desk` so the active-window classification remains visible and unchanged.
+
 ## Permission-safe probe contract
 
-Default rendering uses the fixture and does not perform live probing. `--live-active-window` explicitly opts into the macOS `osascript` provider. On non-macOS platforms the probe returns `unavailable` without calling the provider. On macOS, callers may inject a provider or runner; missing `osascript`, permission denial, empty output, malformed output, timeout, and other runner failures are converted into structured `status`/`reason` values instead of prompting, retrying, or reading hidden state.
+Default rendering uses fixtures and does not perform live probing. `--live-active-window` explicitly opts into the macOS `osascript` provider. On non-macOS platforms the probe returns `unavailable` without calling the provider. On macOS, callers may inject a provider or runner; missing `osascript`, permission denial, empty output, malformed output, timeout, and other runner failures are converted into structured `status`/`reason` values instead of prompting, retrying, or reading hidden state.
 
 ## Launcher contract
 
 `build_launcher_intents()` returns command intents for `mew chat` and `mew code`. Dry-run is the default: launcher commands include `dry_run: true`, `side_effects: none`, and execution status `dry_run`; no subprocess is spawned.
 
-Direct execution requires `--execute-launchers`. That flag switches the intents to `dry_run: false` and runs only the two explicit command arrays. Tests use an injected runner so the test suite never spawns real `mew` subprocesses.
+When `--desk-json` contains a `primary_action`, it is exposed beside those intents as `desk-primary-action`. That desk action is fixture evidence only: it remains `dry_run: true`, `side_effects: none`, `executable: false`, and is not executed even when `--execute-launchers` is set.
+
+Direct execution requires `--execute-launchers`. That flag switches only the two explicit local launcher command arrays, `mew chat` and `mew code`, to executable mode. Tests use an injected runner so the test suite never spawns real `mew` subprocesses.
 
 ## Usage
 
@@ -69,13 +87,19 @@ Run foreground watch until interrupted by the operator:
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2
 ```
 
+Load the static desk fixture and render desk status/counts/details/primary_action into CLI state:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state
+```
+
 Explicitly opt into the live macOS active-window probe while keeping the watch bounded:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --watch-count 2
 ```
 
-Explicitly opt into direct launcher execution for local macOS dogfood. This runs `mew chat` and `mew code`; omit the flag to stay in dry-run mode:
+Explicitly opt into direct launcher execution for local macOS dogfood. This runs only `mew chat` and `mew code`; omit the flag to stay in dry-run mode, and desk primary_action remains non-executable either way:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --execute-launchers
