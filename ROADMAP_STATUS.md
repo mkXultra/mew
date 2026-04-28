@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Reopened follow-on SR-010 exact command example finish grounding is repaired; M6.24 can resume broad measurement. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Reopened follow-on SR-011 query-only hidden-model finish grounding is repaired; M6.24 can resume broad measurement. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -80,7 +80,11 @@ Why M6.24 is active now:
   exact backticked command examples in the task text were not treated as
   finish-gating acceptance evidence. Trials self-finished after nearby checks
   that changed cwd or used Python wrappers instead of proving the advertised
-  command shapes from task cwd.
+  command shapes from task cwd. It is now repaired.
+- M6.24 Batch 3 `model-extraction-relu-logits` exposed SR-011:
+  query-only hidden-model tasks could finish after visible fixture checks such
+  as `forward.A1` or local visible-weight cosine checks without synthetic or
+  holdout validation. It is now repaired.
 - M6.20 closed the first fixed terminal gate on current head:
   `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
   errors 0.
@@ -192,6 +196,16 @@ M6.24 resume condition:
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__21-23-44/result.json`
   stopped with `ask_user` after observing that the exact Rust command creates
   `/app/main`, not `/app/polyglot/main`, instead of false-finishing.
+- Closed M6.14 follow-on episode:
+  SR-011 query-only hidden-model visible fixture false green is `repaired`.
+  The finish gate now blocks generated source that reads visible hidden-weight
+  internals or fixture source for black-box/query-only `forward` oracle tasks,
+  and requires synthetic/randomized/holdout/generalization evidence before
+  `task_done=true`. Same-shape
+  `model-extraction-relu-logits` proof
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__23-29-21/result.json`
+  reached 1/1 after first blocking visible-fixture-only finish and then
+  requiring randomized synthetic validation.
 - M6.24 Batch 2 `dna-insert` was measured after SR-003 and before the #18
   repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.
@@ -212,6 +226,16 @@ M6.24 resume condition:
   a hidden source/archive completeness miss (`file_id.diz` and related files
   absent), which remains implementation-lane evidence rather than a selected
   core repair.
+- M6.24 Batch 3 `polyglot-rust-c` scored 0/5 against Codex target 4/5, errors
+  0, runtime 11m 23s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-45-24/result.json`.
+  It selected and repaired SR-010. Same-shape proof stopped without
+  false-finishing when the exact advertised Rust command wrote `/app/main`.
+- M6.24 Batch 3 `model-extraction-relu-logits` scored 0/5 against Codex target
+  4/5, errors 0, runtime 15m 7s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__22-02-51/result.json`.
+  It selected and repaired SR-011. Same-shape proof reached 1/1 with hidden
+  verifier pass after requiring randomized synthetic validation.
 
 Next concrete action:
 

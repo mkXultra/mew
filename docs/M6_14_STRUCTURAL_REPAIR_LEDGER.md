@@ -104,6 +104,7 @@ Status vocabulary:
 | SR-008 | repaired | M6.24 Batch 3 | direct Python pytest-file false green | `break-filter-js-from-html` scored 0/5 while several trials claimed `python /app/test_outputs.py` passed; direct Python execution only defined pytest tests and exited 0, while Harbor pytest verifier failed | Normalize `run_tests` commands that directly execute pytest-style `test_*.py` files through Python into `python -m pytest -q <file>` so no-op verifiers fail loudly | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `break-filter-js-from-html` same failed shape | Repaired by executor normalization plus focused regression; same-shape rerun no longer false-greened and preserved `python -m pytest -q /app/test_outputs.py` failure evidence. |
 | SR-009 | repaired | side-project issue #18 reopen | broad rollback loop keeps retrying whole coordinated patch | Reopened issue #18 after SR-007: SP19 still could not land broad HTML removal; coordinated source/test/report attempts rolled back with 9 failed / 19 passed, then 1 failed / 27 passed, then regressed to 8 failed / 20 passed before timeout | Surface `broad_rollback_slice_repair` in work-session resume/prompt/deliberation so repeated verifier rollbacks or broad failed-test output steer the next turn to one smaller complete source/test/docs slice instead of retrying the whole patch | issue #18 reopen, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for two rolled-back verifier failures spanning source/test/docs | Repaired by resume diagnostic and prompt guidance; focused regression verifies the diagnostic, formatter, and deliberation context. |
 | SR-010 | repaired | M6.24 Batch 3 | exact command example finish gap | `polyglot-rust-c` scored 0/5 against Codex target 4/5; trials self-finished after nearby verifier commands that changed cwd or used Python wrappers instead of proving the exact backticked command examples from the task text | Add exact-command-example finish grounding: when a task says a backticked command can be run, `task_done=true` requires completed `run_command`/`run_tests` evidence for that advertised command shape without a preceding cwd-changing `cd` wrapper | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `polyglot-rust-c` same failed shape | Repaired by acceptance finish gate and prompt update; same-shape proof stopped with `ask_user` after detecting the exact Rust command writes `/app/main`, not `/app/polyglot/main`, so it did not false-finish. |
+| SR-011 | repaired | M6.24 Batch 3 | query-only hidden-model visible fixture false green | `model-extraction-relu-logits` scored 0/5 against Codex target 4/5; trials self-finished after reading/checking visible `forward.A1` fixture internals or validating only the visible fixture, while Harbor's hidden generated model failed | Add query-only hidden-model finish grounding: block generated source that reads visible hidden weights/source and require synthetic/randomized/holdout generalization evidence before `task_done=true` | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `model-extraction-relu-logits` same failed shape | Repaired by acceptance finish gate, prompt update, focused regressions, and same-shape proof reaching 1/1 after first blocking visible-fixture-only finish and then requiring synthetic validation. |
 
 ## SR-001 Progress
 
@@ -372,6 +373,56 @@ Status vocabulary:
   creates `/app/main` rather than `/app/polyglot/main`, and did not mark the
   task done. This satisfies SR-010: the prior exact-command-example false
   finish is removed. The remaining score gap is task-solving strategy debt.
+
+## SR-011 Progress
+
+- 2026-04-28: M6.24 Batch 3 `model-extraction-relu-logits` baseline scored
+  0/5 against a frozen Codex target of 4/5. Several trials self-finished after
+  direct or indirect visible fixture checks such as `forward.A1`, `target.A1`,
+  or local cosine checks against `/app/forward.py`, while Harbor's hidden
+  verifier generated a different model and failed all five trials.
+- Generic repair:
+  `acceptance_finish_blocker` now detects query-only hidden-model extraction
+  tasks when the prompt exposes a `forward` oracle and says hidden weights or
+  shape are unknown. For `task_done=true`, generated Python source must not
+  read visible hidden-weight internals or the fixture source, and acceptance
+  evidence must cite completed synthetic, randomized, holdout, or
+  generalization validation that passed. Visible fixture checks against exposed
+  local weights are no longer enough.
+- Source-violation hardening covers:
+  named hidden-weight imports from `forward`, `forward` module aliases and
+  dynamic import aliases followed by `.A1` / `.__dict__['A1']` /
+  `vars(alias)['A1']` / `getattr(alias, 'A1')`, star import plus bare hidden
+  names, `open('forward.py')`, `Path('forward.py').read_*`, and
+  `inspect.getsource`.
+- Evidence hardening covers:
+  edit-file and edit-hunk generated source, failed/skipped/not-run holdout
+  clauses, and `all_matched=0` false positives. `all_matched=True` /
+  `all_matched=1` and natural `all matched` success remain valid when paired
+  with a synthetic/randomized/holdout/generalization clause.
+- Prompt repair:
+  the work THINK prompt now tells the model not to read/copy visible fixture
+  internals for black-box/query-only model extraction, and to cite
+  synthetic/randomized/holdout validation before finishing.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py -q` passed with 46
+  tests.
+- Broader nearby validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py -q`
+  passed with 809 tests, 30 subtests.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/acceptance.py src/mew/commands.py src/mew/work_loop.py tests/test_acceptance.py`
+  and `git diff --check`.
+- Review:
+  `codex-ultra` session `019dd447-218b-78c0-826b-87dc82650133` returned
+  `No blocking findings` after multiple review rounds.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__23-29-21/result.json`
+  reran `model-extraction-relu-logits` for one trial and scored 1/1 with
+  errors 0. The preserved report first blocked finish with
+  `query-only hidden-model generalization evidence ungrounded`, then ran
+  randomized synthetic validation before final finish. Harbor's hidden
+  verifier passed. This satisfies SR-011.
 
 ## Repaired / Superseded Rows
 
