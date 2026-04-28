@@ -95,7 +95,7 @@ Status vocabulary:
 | ID | Status | First seen | Blocker | Evidence | Generic repair route | Reference inputs | Retry target | Notes |
 |---|---|---|---|---|---|---|---|---|
 | SR-001 | repaired | M6.22 / M6.24 | `agent_wall_timeout_without_report` / timeout partial observability | `gcode-to-text` had timeout without useful report; `financial-document-processor` and `dna-assembly` later hit long domain/document repair timeouts | Add generic partial progress / timeout observability so long work loops emit actionable reports before command or wall timeout | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` streaming executor notes | rerun `financial-document-processor` or `dna-assembly` same failed shape | Repaired by atomic partial `mew work --oneshot --report` writes plus Harbor `container_repo_root` mapping; same-shape timeout left a host-visible actionable report. |
-| SR-002 | in_repair | M6.22 / M6.24 | finish/verifier grounding false green | `overfull-hbox` self-reported acceptance despite verifier rejection; `dna-assembly` used surrogate primer Tm checks instead of exact named ground-truth tool | Strengthen finish gate/task contract so named external ground-truth tools or acceptance constraints must be executed exactly, or finish must be blocked | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/review/verify and todo patterns | rerun `dna-assembly`; optionally rerun an acceptance-grounding task | Generic finish-gate slice started: task text that names an exact external ground-truth command/tool and flags now requires completed `run_command` / `run_tests` evidence containing the exact command shape. |
+| SR-002 | repaired | M6.22 / M6.24 | finish/verifier grounding false green | `overfull-hbox` self-reported acceptance despite verifier rejection; `dna-assembly` used surrogate primer Tm checks instead of exact named ground-truth tool | Strengthen finish gate/task contract so named external ground-truth tools or acceptance constraints must be executed exactly, or finish must be blocked | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/review/verify and todo patterns | rerun `dna-assembly`; optionally rerun an acceptance-grounding task | Repaired by exact external-tool finish gate plus exact-tool-unavailable blocker guidance; smaller proof stopped with `task_done=false` after the required command was missing. |
 | SR-003 | candidate | M6.22 / M6.24 | artifact observation substrate gap | `gcode-to-text` visual/geometric grounding gap; `code-from-image` fixed by `read_image`; `financial-document-processor` exposed PDF/document observation gap | Add generic document/PDF or broader artifact observation only if selected as bounded repair slice | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md` | rerun `financial-document-processor` or a visual/document task | Partly repaired for images; PDF/document remains open. |
 | SR-004 | candidate | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure | Add safer multiline command guidance or command-shape helper, likely heredoc/script-first policy | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | rerun a task that exercises multiline verification | Lower priority than timeout/grounding unless it blocks a selected repair. |
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
@@ -169,10 +169,16 @@ Status vocabulary:
   use a surrogate package/library/API; it must run/install the exact command
   within current capabilities or return `wait`/`remember` with that exact
   blocker.
-- Missing proof before marking `repaired`: rerun a same-shape or smaller
-  exact-ground-truth task and confirm either exact `oligotm` evidence is used,
-  or exact-tool unavailability stops as an explicit blocker without surrogate
-  false green or timeout.
+- Smaller exact-ground-truth proof result:
+  `proof-artifacts/m6-14-sr002-exact-tool-unavailable-smoke-20260428-1651/agent/mew-report.json`
+  created `output.txt`, ran the required exact command
+  `missing-validator --threshold 50 --format json output.txt`, observed
+  `executable not found: missing-validator`, and then finished with
+  `task_done=false`. Its final acceptance checks marked the file creation as
+  verified and the exact ground-truth command as blocked, citing the completed
+  `run_command` evidence. It did not install or use a surrogate validator and
+  did not claim task completion. This satisfies the SR-002 repair proof for the
+  false-green/unavailable-tool shape.
 
 ## Repaired / Superseded Rows
 
