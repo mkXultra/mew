@@ -253,15 +253,19 @@ M6.24 resume condition:
   trials were wrapper `RuntimeError: Command timed out after 900 seconds`
   errors. It selected and repaired SR-012. This remains a 0/5 task result but
   should no longer produce wrapper errors on future long-task runs.
+- M6.24 Batch 3 `make-doom-for-mips` scored 0/5 against Codex target 1/5,
+  errors 0, runtime 12m 52s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__00-29-51/result.json`.
+  This is recorded as task-solving / surrogate-build evidence, not an accepted
+  structural blocker yet.
 
 Next concrete action:
 
 - Continue M6.24 Batch 3 task-by-task measurement from
   `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md`, starting with the remaining
-  pending task list: `make-doom-for-mips`, `mcmc-sampling-stan`, and
-  `video-processing`. If a new failure is accepted as structural rather than
-  an ordinary task miss, append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`
-  before repairing.
+  pending task list: `mcmc-sampling-stan` and `video-processing`. If a new
+  failure is accepted as structural rather than an ordinary task miss, append
+  it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
 
 Closed M6.22 result:
 
