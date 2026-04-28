@@ -4,6 +4,7 @@ import inspect
 import json
 import shlex
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 try:  # Harbor is not installed in local unit tests.
@@ -64,7 +65,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         command_template: str = "mew-smoke --instruction {instruction_shell} --report {report_path} --artifacts {artifact_dir}",
         command_cwd: str | Path | None = None,
         artifact_root: str | Path | None = None,
-        timeout_seconds: int | None = 900,
+        timeout_seconds: int | str | None = None,
         install_command: str | None = None,
         install_env: dict[str, str] | None = None,
         capture_nonzero_command_exit: bool = True,
@@ -96,7 +97,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             else:
                 artifact_root = Path("artifacts/terminal-bench-harbor-smoke")
         self.artifact_root = Path(artifact_root)
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = self._parse_timeout_seconds(timeout_seconds)
         self.install_command = install_command
         self.install_env = install_env
         self.capture_nonzero_command_exit = capture_nonzero_command_exit
@@ -240,16 +241,26 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             merged_env = dict(env) if env else {}
             merged_env.update(extra_env)
 
-        result = raw_exec(
-            command=f"set -o pipefail; {command}",
-            user=None,
-            env=merged_env,
-            cwd=str(cwd) if cwd is not None else None,
-            timeout_sec=timeout_sec,
-        )
-        if inspect.isawaitable(result):
-            return await result
-        return result
+        try:
+            result = raw_exec(
+                command=f"set -o pipefail; {command}",
+                user=None,
+                env=merged_env,
+                cwd=str(cwd) if cwd is not None else None,
+                timeout_sec=timeout_sec,
+            )
+            if inspect.isawaitable(result):
+                return await result
+            return result
+        except RuntimeError as exc:
+            if self._is_command_timeout_exception(exc):
+                return SimpleNamespace(
+                    return_code=124,
+                    stdout="",
+                    stderr=str(exc),
+                    timed_out=True,
+                )
+            raise
 
     def populate_context_post_run(self, context: Any) -> None:
         task_dir = self._last_task_dir
@@ -304,6 +315,22 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             str(getattr(result, "stderr", "")),
             bool(getattr(result, "timed_out", False)),
         )
+
+    @staticmethod
+    def _parse_timeout_seconds(value: int | str | None) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped or stripped.lower() in {"none", "null", "off", "false"}:
+                return None
+            return int(float(stripped))
+        return int(value)
+
+    @staticmethod
+    def _is_command_timeout_exception(exc: RuntimeError) -> bool:
+        text = str(exc).lower()
+        return text.startswith("command timed out after")
 
     @staticmethod
     def _write_json(path: Path, payload: dict[str, Any]) -> None:

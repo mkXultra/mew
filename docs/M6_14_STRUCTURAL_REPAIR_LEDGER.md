@@ -105,6 +105,7 @@ Status vocabulary:
 | SR-009 | repaired | side-project issue #18 reopen | broad rollback loop keeps retrying whole coordinated patch | Reopened issue #18 after SR-007: SP19 still could not land broad HTML removal; coordinated source/test/report attempts rolled back with 9 failed / 19 passed, then 1 failed / 27 passed, then regressed to 8 failed / 20 passed before timeout | Surface `broad_rollback_slice_repair` in work-session resume/prompt/deliberation so repeated verifier rollbacks or broad failed-test output steer the next turn to one smaller complete source/test/docs slice instead of retrying the whole patch | issue #18 reopen, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for two rolled-back verifier failures spanning source/test/docs | Repaired by resume diagnostic and prompt guidance; focused regression verifies the diagnostic, formatter, and deliberation context. |
 | SR-010 | repaired | M6.24 Batch 3 | exact command example finish gap | `polyglot-rust-c` scored 0/5 against Codex target 4/5; trials self-finished after nearby verifier commands that changed cwd or used Python wrappers instead of proving the exact backticked command examples from the task text | Add exact-command-example finish grounding: when a task says a backticked command can be run, `task_done=true` requires completed `run_command`/`run_tests` evidence for that advertised command shape without a preceding cwd-changing `cd` wrapper | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `polyglot-rust-c` same failed shape | Repaired by acceptance finish gate and prompt update; same-shape proof stopped with `ask_user` after detecting the exact Rust command writes `/app/main`, not `/app/polyglot/main`, so it did not false-finish. |
 | SR-011 | repaired | M6.24 Batch 3 | query-only hidden-model visible fixture false green | `model-extraction-relu-logits` scored 0/5 against Codex target 4/5; trials self-finished after reading/checking visible `forward.A1` fixture internals or validating only the visible fixture, while Harbor's hidden generated model failed | Add query-only hidden-model finish grounding: block generated source that reads visible hidden weights/source and require synthetic/randomized/holdout generalization evidence before `task_done=true` | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `model-extraction-relu-logits` same failed shape | Repaired by acceptance finish gate, prompt update, focused regressions, and same-shape proof reaching 1/1 after first blocking visible-fixture-only finish and then requiring synthetic validation. |
+| SR-012 | repaired | M6.24 Batch 3 | Harbor wrapper inner timeout cap and unmapped partial report | `install-windows-3.11` / Harbor `install-windows-3-11` scored 0/5 with 5 wrapper `RuntimeError: Command timed out after 900 seconds` exceptions despite task `agent.timeout_sec=3600`; the run also used container-local report paths so partial reports were not preserved on the host | Remove the wrapper's default inner timeout cap, let Harbor task timeout govern by default, capture explicit wrapper timeout exceptions as normal command transcripts, and require `container_repo_root=/mew` in benchmark run manifests | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | wrapper timeout no-error proof plus future long-task reruns | Repaired by `.harbor/mew_terminal_bench_agent.py` default `timeout_seconds=None`, timeout exception capture with `exit_code=124`, manifest `container_repo_root=/mew`, focused tests, and a light Harbor proof with `n_errors=0`. |
 
 ## SR-001 Progress
 
@@ -423,6 +424,48 @@ Status vocabulary:
   `query-only hidden-model generalization evidence ungrounded`, then ran
   randomized synthetic validation before final finish. Harbor's hidden
   verifier passed. This satisfies SR-011.
+
+## SR-012 Progress
+
+- 2026-04-29: M6.24 Batch 3 `install-windows-3.11` was runnable only under
+  the current Harbor canonical name `install-windows-3-11`. The full 5-trial
+  run scored 0/5 with 5 Harbor errors. Each error was the wrapper-level
+  `RuntimeError: Command timed out after 900 seconds`, even though the task's
+  declared agent timeout is 3600 seconds.
+- Generic repair:
+  `.harbor/mew_terminal_bench_agent.py` now defaults `timeout_seconds` to
+  `None`, so Harbor's task-level `agent.timeout_sec` remains authoritative.
+  The explicit `timeout_seconds=...` kwarg is still supported, including string
+  values from Harbor `--ak`. The default delegation path is covered by focused
+  tests; the live proof below covers explicit wrapper-timeout conversion.
+- Timeout observability repair:
+  explicit wrapper timeout exceptions are captured as normal command results
+  with `exit_code=124`, `timed_out=true`, and a command transcript / summary
+  instead of escaping as Harbor exceptions.
+- Artifact mapping repair:
+  Terminal-Bench run manifests now include `--ak container_repo_root=/mew`, so
+  `{report_path}` and `{artifact_dir}` resolve to host-visible paths inside the
+  benchmark container.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_harbor_terminal_bench_agent.py -q`
+  passed with 13 tests.
+- Lint passed:
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`.
+- Review:
+  `codex-ultra` session `019dd4ae-e10c-72e0-8463-10224441cbb3` returned
+  `No blocking findings` after the timeout-predicate hardening.
+- Same-shape timeout-capture proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr012-install-windows-wrapper-timeout-20260429-0010/.../command-transcript.json`
+  shows the Windows task with explicit `timeout_seconds=5`, host-visible
+  partial `mew-report.json`, `exit_code=124`, and `timed_out=true`. The Windows
+  verifier was intentionally stopped because the proof target was wrapper
+  timeout capture, not QEMU task scoring.
+- No-error wrapper proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr012-wrapper-timeout-no-error-20260429-0017/result.json`
+  ran a light task with explicit `timeout_seconds=1` and recorded `n_errors=0`,
+  reward 0.0, and a host-visible timeout transcript. This satisfies SR-012:
+  wrapper timeout no longer becomes a Harbor exception or drops the report
+  artifact.
 
 ## Repaired / Superseded Rows
 

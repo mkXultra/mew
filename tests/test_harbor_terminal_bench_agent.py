@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / ".harbor" / "mew_terminal_bench_agent.py"
 
@@ -42,6 +44,18 @@ class FakeHarborEnvironment:
         self.commands.append(kwargs["command"])
         self.exec_kwargs.append(kwargs)
         return self.result
+
+
+class FakeHarborTimeoutEnvironment:
+    def __init__(self, message="Command timed out after 900 seconds"):
+        self.message = message
+        self.commands = []
+        self.exec_kwargs = []
+
+    def exec(self, **kwargs):
+        self.commands.append(kwargs["command"])
+        self.exec_kwargs.append(kwargs)
+        raise RuntimeError(self.message)
 
 
 class MetadataOnlyContext:
@@ -343,6 +357,48 @@ def test_run_captures_nonzero_command_exit_without_harbor_exception(tmp_path):
     assert context["mew_terminal_bench_summary"] == summary
 
 
+def test_run_captures_command_timeout_without_harbor_exception(tmp_path):
+    module = load_agent_module()
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew work --oneshot --instruction {instruction_shell}",
+        artifact_root=tmp_path,
+        timeout_seconds=5,
+    )
+    environment = FakeHarborTimeoutEnvironment()
+    context = {"task_id": "timeout-task"}
+
+    stdout = asyncio.run(agent.run("instruction", environment, context))
+
+    task_dir = tmp_path / "timeout-task"
+    transcript = json.loads((task_dir / "command-transcript.json").read_text(encoding="utf-8"))
+    summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert stdout == ""
+    assert transcript["exit_code"] == 124
+    assert transcript["stdout"] == ""
+    assert transcript["timed_out"] is True
+    assert transcript["timeout_seconds"] == 5
+    assert "Command timed out after 900 seconds" in transcript["stderr"]
+    assert summary["timeout_status"] == {"timed_out": True, "timeout_seconds": 5}
+    assert summary["work_session_or_report_summary"] == "unavailable"
+    assert context["mew_terminal_bench_artifact_dir"] == str(task_dir)
+    assert context["mew_terminal_bench_summary"] == summary
+
+
+def test_run_does_not_capture_unrelated_timeout_runtime_errors(tmp_path):
+    module = load_agent_module()
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew work --oneshot --instruction {instruction_shell}",
+        artifact_root=tmp_path,
+        timeout_seconds=5,
+    )
+    environment = FakeHarborTimeoutEnvironment("model timed out after 900 seconds")
+    context = {"task_id": "unrelated-timeout-task"}
+
+    with pytest.raises(RuntimeError, match="model timed out"):
+        asyncio.run(agent.run("instruction", environment, context))
+
+
 def test_stdout_report_fallback_writes_report_and_context_summary(tmp_path):
     module = load_agent_module()
     stdout_report = {
@@ -411,3 +467,37 @@ def test_exec_as_agent_uses_harbor_timeout_sec_keyword(tmp_path, monkeypatch):
     assert summary["timeout_status"] == {"timed_out": False, "timeout_seconds": 5}
     assert context.mew_terminal_bench_artifact_dir == str(task_dir)
     assert context.mew_terminal_bench_summary == summary
+
+
+def test_default_timeout_delegates_to_harbor_trial_timeout(tmp_path):
+    module = load_agent_module()
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew-smoke {instruction_shell}",
+        artifact_root=tmp_path,
+    )
+    environment = FakeHarborEnvironment(SimpleNamespace(return_code=0, stdout="out", stderr=""))
+    context = {"task_id": "outer-timeout-task"}
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    transcript = json.loads((tmp_path / "outer-timeout-task" / "command-transcript.json").read_text(encoding="utf-8"))
+
+    assert agent.timeout_seconds is None
+    assert environment.exec_kwargs[0]["timeout_sec"] is None
+    assert transcript["timeout_seconds"] is None
+
+
+def test_string_timeout_seconds_agent_kwarg_is_normalized(tmp_path):
+    module = load_agent_module()
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew-smoke {instruction_shell}",
+        artifact_root=tmp_path,
+        timeout_seconds="120",
+    )
+    environment = FakeHarborEnvironment(SimpleNamespace(return_code=0, stdout="out", stderr=""))
+    context = {"task_id": "string-timeout-task"}
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    assert agent.timeout_seconds == 120
+    assert environment.exec_kwargs[0]["timeout_sec"] == 120
