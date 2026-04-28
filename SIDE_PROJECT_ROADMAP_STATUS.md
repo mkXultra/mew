@@ -28,11 +28,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
 | SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
-| SP18 mew-ghost Live Desk Opt-In | `planned` | Next slice: add explicit `--live-desk` support so `mew-ghost` can show real `./mew desk --json` state during terminal/HTML watch, with fixture defaults, timeout/failure fallbacks, and injected-runner tests. |
+| SP18 mew-ghost Live Desk Opt-In | `blocked` | First mew-first attempt stopped before product edits: mew generated a substantial live-desk patch but could not apply it after a same-file hunk ambiguity and repeated write-batch collapse waits. Issue `#3` is reopened. |
 
 ## Active Focus
 
-Active side-project focus: **SP18 mew-ghost Live Desk Opt-In**.
+Active side-project focus: **SP18 mew-ghost Live Desk Opt-In is blocked on issue `#3`**.
 
 Current target:
 
@@ -69,6 +69,9 @@ Current target:
   set for future product planning and contract checks
 - route the already-fixed structural write-scope blocker as closed issue `#1`
   evidence, not an active side-project blocker
+- route the repeated same-file write-batch ergonomics blocker as reopened issue
+  `#3` evidence; SP18 stopped before product edits on this blocker, recorded in
+  ledger row `19`
 - route the repeated stale failed-approval cleanup pattern as closed issue
   `#10` evidence for M6.16 implementation-lane hardening
 - route the report-schema closeout gap as closed issue `#11` evidence for
@@ -91,8 +94,9 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
-  SP17 on 2026-04-28: `rows_total=18`, one `failed`, fourteen `practical`,
-  three `clean`, `success_rate=0.944`, `structural_repairs_required=1`,
+  the first SP18 attempt on 2026-04-28: `rows_total=19`, two `failed`,
+  fourteen `practical`, three `clean`, `success_rate=0.895`,
+  `structural_repairs_required=2`,
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
   twelve `mew-companion-log` rows on 2026-04-26: `rows_total=12`, one `failed`,
@@ -472,6 +476,24 @@ Current target:
   returned `23 passed`. `git diff --check`, static desk state output, bounded
   HTML watch output, stale `SP16|sp16` audit, and temporary side-dogfood ledger
   append validation also passed.
+- Task `#18` / sessions `#38` and `#39` attempted SP18 live desk opt-in with
+  Codex CLI as `operator` and mew as first implementer. Session `#38` stopped
+  before product edits after repeated Codex Web API disconnects. Session `#39`
+  generated a substantial source/tests/README/report patch, but the first
+  `ghost.py` edit failed because one hunk matched two locations; after focused
+  steering, the loop repeatedly returned write-batch collapse guidance instead
+  of applying a corrected single-file edit/write.
+- No product files were changed and no operator product-code rescue edits were
+  made. The existing write-batch ergonomics issue `#3` was reopened instead of
+  creating a duplicate.
+- mew-ghost SP18 blocked local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/18-live-desk-opt-in-blocked.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `19`;
+  outcome `failed`, failure class
+  `same_file_write_batch_guard_recurrence_before_sp18_edit`,
+  `rescue_edits=0`, `repair_required=true`.
+- Problem issue reopened:
+  `https://github.com/mkXultra/mew/issues/3`.
 
 ## Missing Proof
 
@@ -482,36 +504,34 @@ Current target:
 - SP15 is closed for the second `mew-ghost` cohort.
 - SP16 is closed for the second `mew-ghost` cohort.
 - SP17 is closed for the second `mew-ghost` cohort.
-- SP18 has not started; real `./mew desk --json` state is not yet available in
-  `mew-ghost`.
+- SP18 is blocked before product edits; real `./mew desk --json` state is not
+  yet available in `mew-ghost`.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
 - Real macOS Accessibility behavior for `--live-active-window` remains
   intentionally unverified by automation; structured fallback and injected
   provider paths are covered.
+- Open `[side-pj]` issue `#3` blocks SP18 mew-first implementation because the
+  write batch loop still cannot reliably collapse or retry same-file hunks.
 - Open `[side-pj]` issue `#13` captures the reusable SP17 stale schema/version
-  closeout gap. Earlier known implementation-lane polish issues remain closed;
-  any additional recurrence should be recorded as a new or reopened
-  one-problem issue before the next major side-project milestone.
+  closeout gap. Any additional recurrence should be recorded as a new or
+  reopened one-problem issue before the next major side-project milestone.
 
 ## Next Action
 
-Start SP18 with mew as first implementer:
+Resolve or bypass SP18's implementation-lane blocker before retrying:
 
-1. create a coding task for `mew-ghost` SP18
-2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
-   with `--model gpt-5.5`
-3. allow writes only under `experiments/mew-ghost`
-4. add explicit `--live-desk` support that runs repo-local
-   `./mew desk --json` without shell execution and with timeout/failure
-   fallbacks
-5. keep default and `--desk-json` paths fixture-only and deterministic
-6. verify with
-   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
-7. write a canonical local side-dogfood report and append it to the ledger
-8. before any new mew coding operation, run the repo-root sync rule from
+1. repair or close reopened issue `#3`, then retry task `#18` with mew as first
+   implementer
+2. alternatively, ask the user for explicit Codex fallback permission and
+   record the attempt as non-mew-first implementation if product progress is
+   more important than autonomy credit
+3. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
+4. if SP18 is retried, preserve the same acceptance target: explicit
+   `--live-desk`, no shell execution, timeout/failure fallbacks, fixture
+   defaults, injected-runner tests, README examples, and canonical report
 
 ## Non-Goals
 
