@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 3 is fully measured: 2/40 vs frozen Codex 24/40; no new accepted structural blocker from `video-processing`. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 selected after Batch 3 completed at 2/40 vs frozen Codex 24/40; run `sam-cell-seg` next. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -287,14 +287,20 @@ M6.24 resume condition:
   blocker.
 - M6.24 Batch 3 is now fully measured: latest full task-run total **2/40**
   against frozen Codex target **24/40**.
+- M6.24 Batch 4 is selected in
+  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md` and
+  `docs/data/terminal_bench_m6_24_batch_4.json`. It covers remaining
+  available unmeasured Codex success bands 0/5, 3/5, 4/5, and 5/5; the 1/5
+  and 2/5 unmeasured bands are exhausted. Frozen Codex Batch 4 target:
+  **25/40**.
 
 Next concrete action:
 
-- Continue M6.24 by selecting the next broad registry batch from the frozen
-  Codex registry, excluding tasks already measured in M6.20, M6.22, M6.24
-  Batch 1, Batch 2, and Batch 3. If the next batch exposes a new accepted
-  structural blocker, append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`
-  and repair through M6.14 before continuing broad measurement.
+- Run M6.24 Batch 4 task-by-task from
+  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, starting with
+  `sam-cell-seg`. If a new accepted structural blocker appears, append it to
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` and repair through M6.14 before
+  continuing broad measurement.
 
 Closed M6.22 result:
 
