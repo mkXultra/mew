@@ -464,7 +464,22 @@ M6.24 Batch 1:
   `--allow-read . --allow-read /etc/apt --allow-write . --allow-write /usr/local/bin`.
   `large-scale-text-editing` matched Codex target 5/5 with no Harbor errors in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-large-scale-text-editing-5attempts-20260428-1026/result.json`.
-  Batch 2 measured latest total is 15/15 against frozen Codex target 15/15 for
+  `financial-document-processor` scored 0/5 against Codex target 4/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-financial-document-processor-5attempts-20260428-1044/result.json`.
+  The first blocker was structural:
+  `unsupported_document_observation_type_terminal_stop`, where read-only
+  batches treated `read_image` on PDFs as terminal instead of recoverable.
+  The generic repair records
+  `recoverable_unsupported_observation_type` and continues while budget
+  remains; focused and full `tests/test_work_session.py` validation passed, and
+  Codex-ultra review session `019dd1d0-02ea-7ec3-acad-08c57ad59976` reported
+  `STATUS: pass` after the stale-state regression test was added. The repair
+  rerun remained 0/5 with 2 Harbor `RuntimeError` timeouts in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-financial-document-processor-5attempts-unsupported-image-recover-20260428-1058/result.json`,
+  exposing the deeper generic blocker
+  `document_pdf_observation_missing`; a future repair should add a generic
+  PDF/document observation substrate, not a task-specific solver.
+  Batch 2 measured latest total is 15/20 against frozen Codex target 19/20 for
   measured tasks.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`

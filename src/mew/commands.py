@@ -4087,6 +4087,19 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             if progress:
                 label = "broad-read-guard" if broad_read_guard else "repeat-guard"
                 progress(f"step #{index}: batch tool #{tool_call_id} {action_type} {label}")
+            if repeat_guard and _recoverable_repeat_guard_error(action_type, error, index, batch_max_steps):
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "path": parameters.get("path") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch repeat guard; continuing with prior observation context")
+                error = ""
+                continue
             break
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
@@ -4122,6 +4135,10 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             and _recoverable_missing_observation_path_error(action_type, parameters, error, args, index, batch_max_steps)
         )
         recoverable_missing_read_file = recoverable_missing_observation_path and action_type == "read_file"
+        recoverable_unsupported_observation_type = (
+            not write_batch
+            and _recoverable_unsupported_observation_type_error(action_type, error, index, batch_max_steps)
+        )
         recoverable_git_inspection_unavailable = (
             not write_batch
             and _recoverable_git_inspection_unavailable_error(action_type, error, result, index, batch_max_steps)
@@ -4134,11 +4151,14 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
                 recoverable_missing_observation_path = False
                 recoverable_missing_read_file = False
+                recoverable_unsupported_observation_type = False
                 recoverable_git_inspection_unavailable = False
             if recoverable_missing_observation_path:
                 tool_call["recoverable_missing_observation_path"] = True
             if recoverable_missing_read_file:
                 tool_call["recoverable_missing_read_file"] = True
+            if recoverable_unsupported_observation_type:
+                tool_call["recoverable_unsupported_observation_type"] = True
             if recoverable_git_inspection_unavailable:
                 tool_call["recoverable_git_inspection_unavailable"] = True
             session = find_work_session(state, session_id)
@@ -4190,6 +4210,19 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 )
                 if progress:
                     progress(f"step #{index}: batch git inspection unavailable; continuing with partial observations")
+                error = ""
+                continue
+            if recoverable_unsupported_observation_type and index < batch_max_steps:
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "path": parameters.get("path") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch unsupported observation type; continuing with partial observations")
                 error = ""
                 continue
             break
@@ -5527,6 +5560,7 @@ def cmd_work_ai(args):
         options["cwd"] = work_session_default_cwd(session, task=task)
     auto_verify_command = _auto_detect_work_verify_command(args, options, session, task)
     effective_args = _work_effective_args(args, options)
+    effective_args.max_steps = max_steps
     compact_cli_controls = bool(getattr(effective_args, "compact_live", False) or getattr(args, "follow", False))
     report = {
         "session_id": session_id,
@@ -6534,7 +6568,6 @@ def cmd_work_ai(args):
                 "summary": error,
             }
             report["steps"].append(step)
-            report["stop_reason"] = "tool_failed"
             refresh_work_follow_snapshot(args, report, session_id, task_id)
             if getattr(args, "live", False):
                 with state_lock():
@@ -6555,6 +6588,12 @@ def cmd_work_ai(args):
             if progress:
                 label = "broad-read-guard" if broad_read_guard else "repeat-guard"
                 progress(f"step #{index}: tool #{tool_call_id} {action_type} {label}")
+            if repeat_guard and _recoverable_repeat_guard_error(action_type, error, index, max_steps):
+                step["recoverable_repeat_guard"] = True
+                if progress:
+                    progress(f"step #{index}: repeat guard; continuing with prior observation context")
+                continue
+            report["stop_reason"] = "tool_failed"
             break
         refresh_work_follow_snapshot(args, report, session_id, task_id)
         maybe_print_work_active_cell(args, session, task, index, "tool_call", tool_call_id)
@@ -6628,6 +6667,12 @@ def cmd_work_ai(args):
             index,
             max_steps,
         )
+        recoverable_unsupported_observation_type = _recoverable_unsupported_observation_type_error(
+            action_type,
+            error,
+            index,
+            max_steps,
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
@@ -6635,10 +6680,13 @@ def cmd_work_ai(args):
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
                 recoverable_missing_observation_path = False
+                recoverable_unsupported_observation_type = False
             if recoverable_missing_observation_path:
                 tool_call["recoverable_missing_observation_path"] = True
                 if action_type == "read_file":
                     tool_call["recoverable_missing_read_file"] = True
+            if recoverable_unsupported_observation_type:
+                tool_call["recoverable_unsupported_observation_type"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             if pending_steer and not steer_consumed:
@@ -6826,6 +6874,11 @@ def cmd_work_ai(args):
                     report["steps"][-1]["recoverable_missing_read_file"] = True
                 if progress:
                     progress(f"step #{index}: missing observation target; continuing with repair context")
+                continue
+            if _recoverable_unsupported_observation_type_error(action_type, error, index, max_steps):
+                report["steps"][-1]["recoverable_unsupported_observation_type"] = True
+                if progress:
+                    progress(f"step #{index}: unsupported observation type; continuing with repair context")
                 continue
             if _recoverable_stale_edit_file_error(action_type, parameters, error, effective_args, index, max_steps):
                 report["steps"][-1]["recoverable_stale_edit_file"] = True
@@ -7054,6 +7107,20 @@ def _recoverable_missing_read_file_error(action_type, parameters, error, args, i
         index,
         max_steps,
     )
+
+
+def _recoverable_unsupported_observation_type_error(action_type, error, index, max_steps):
+    if action_type != "read_image" or (max_steps is not None and index >= max_steps):
+        return False
+    normalized = str(error or "").lower()
+    return "unsupported image type" in normalized and "supported=" in normalized
+
+
+def _recoverable_repeat_guard_error(action_type, error, index, max_steps):
+    if action_type not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) or (max_steps is not None and index >= max_steps):
+        return False
+    normalized = str(error or "").lower()
+    return "repeat-action guard blocked" in normalized
 
 
 def _recoverable_stale_edit_file_error(action_type, parameters, error, args, index, max_steps):

@@ -5899,6 +5899,146 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_read_file_extracts_pdf_text_fallback(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("invoice.pdf").write_bytes(
+                    b"%PDF-1.4\n"
+                    b"1 0 obj\n"
+                    b"<< /Length 75 >>\n"
+                    b"stream\n"
+                    b"BT\n"
+                    b"(Invoice) Tj\n"
+                    b"(Total 123.45) Tj\n"
+                    b"(VAT 10.00) Tj\n"
+                    b"ET\n"
+                    b"endstream\n"
+                    b"endobj\n"
+                    b"%%EOF\n"
+                )
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with patch("mew.read_tools.shutil.which", return_value=None):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--tool",
+                                    "read_file",
+                                    "--path",
+                                    "invoice.pdf",
+                                    "--allow-read",
+                                    ".",
+                                    "--json",
+                                ]
+                            ),
+                            0,
+                        )
+                    from mew.read_tools import read_file
+
+                    paged = read_file("invoice.pdf", ["."], max_chars=7)
+                    with patch("mew.read_tools.PDF_EXTRACT_TEXT_LIMIT", 10):
+                        fallback_capped = read_file("invoice.pdf", ["."], max_chars=50)
+
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertEqual(result["document_type"], "pdf")
+                self.assertEqual(result["extraction_method"], "pdf_literal_fallback")
+                self.assertFalse(result["empty_extraction"])
+                self.assertIn("Invoice", result["text"])
+                self.assertIn("Total 123.45", result["text"])
+                self.assertIn("VAT 10.00", result["text"])
+                self.assertEqual(paged["text"], "Invoice")
+                self.assertEqual(paged["next_offset"], 7)
+                self.assertEqual(fallback_capped["extraction_method"], "pdf_literal_fallback_truncated")
+                self.assertTrue(fallback_capped["extraction_truncated"])
+                self.assertTrue(fallback_capped["truncated"])
+                self.assertEqual(fallback_capped["next_offset"], 10)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_read_file_pdf_pdftotext_preserves_layout(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("statement.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                pdf_text = b"Item        Amount\nSubtotal    100.00\nVAT          10.00\n"
+
+                def fake_pdftotext(command, **kwargs):
+                    Path(command[-1]).write_bytes(pdf_text)
+                    return SimpleNamespace(stderr=b"", returncode=0)
+
+                with patch("mew.read_tools.shutil.which", return_value="/usr/bin/pdftotext"):
+                    with patch("mew.read_tools.subprocess.run", side_effect=fake_pdftotext):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--tool",
+                                        "read_file",
+                                        "--path",
+                                        "statement.pdf",
+                                        "--allow-read",
+                                        ".",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+                        from mew.read_tools import read_file
+
+                        paged = read_file("statement.pdf", ["."], max_chars=4)
+                        line_read = read_file("statement.pdf", ["."], max_chars=20, line_start=3, line_count=1)
+
+                result = json.loads(stdout.getvalue())["tool_call"]["result"]
+                self.assertEqual(result["document_type"], "pdf")
+                self.assertEqual(result["extraction_method"], "pdftotext")
+                self.assertIn("Item        Amount", result["text"])
+                self.assertIn("VAT          10.00", result["text"])
+                self.assertEqual(paged["extraction_method"], "pdftotext_truncated")
+                self.assertTrue(paged["extraction_truncated"])
+                self.assertTrue(paged["truncated"])
+                self.assertEqual(paged["next_offset"], 4)
+                self.assertIn("VAT          10.00", line_read["text"])
+                self.assertEqual(line_read["line_start"], 3)
+                self.assertEqual(line_read["line_end"], 3)
+
+                from mew.read_tools import _read_text_result_from_text
+
+                capped = _read_text_result_from_text(
+                    Path("statement.pdf").resolve(),
+                    "short",
+                    size=1000,
+                    max_chars=4,
+                    offset=999,
+                    source_truncated=True,
+                    extra={"document_type": "pdf", "extraction_method": "pdftotext_truncated"},
+                )
+                self.assertTrue(capped["truncated"])
+                self.assertIsNone(capped["next_offset"])
+                self.assertIn("beyond extracted document text cap", capped["message"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_read_file_can_target_lines_from_search_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -31624,6 +31764,387 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertTrue(session["tool_calls"][0]["recoverable_missing_read_file"])
                 self.assertEqual(session["tool_calls"][1]["status"], "completed")
                 self.assertEqual(session["tool_calls"][2]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_read_batch_continues_after_unsupported_image_type(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("doc.pdf").write_text("%PDF\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect pdf and sibling context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "read_image", "path": "doc.pdf"},
+                                {"type": "read_file", "path": "README.md"},
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "fall back after unsupported pdf image observation",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    if tool == "read_image":
+                        raise ValueError(
+                            "unsupported image type for /tmp/doc.pdf; "
+                            "supported=image/gif, image/jpeg, image/png, image/webp"
+                        )
+                    return {"path": str(Path(parameters["path"]).resolve()), "content": "context\n"}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--ai",
+                                            "--json",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--max-steps",
+                                            "2",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "read_image")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["path"], "doc.pdf")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_unsupported_observation_type"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_read_batch_does_not_recover_stale_unsupported_image_finish(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("doc.pdf").write_text("%PDF\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "inspect pdf and sibling context",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "read_image", "path": "doc.pdf"},
+                            {"type": "read_file", "path": "README.md"},
+                        ],
+                    },
+                }
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    if tool == "read_image":
+                        raise ValueError(
+                            "unsupported image type for /tmp/doc.pdf; "
+                            "supported=image/gif, image/jpeg, image/png, image/webp"
+                        )
+                    return {"path": str(Path(parameters["path"]).resolve()), "content": "context\n"}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with patch("mew.commands.finish_work_tool_call", return_value=None):
+                                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                    self.assertEqual(
+                                        main(
+                                            [
+                                                "work",
+                                                "1",
+                                                "--ai",
+                                                "--json",
+                                                "--auth",
+                                                "auth.json",
+                                                "--allow-read",
+                                                ".",
+                                                "--max-steps",
+                                                "2",
+                                                "--act-mode",
+                                                "deterministic",
+                                            ]
+                                        ),
+                                        1,
+                                    )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "tool_failed")
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertEqual(
+                    report["steps"][0]["error"],
+                    "work tool result could not be recorded; work session changed during tool execution",
+                )
+                self.assertEqual(report["steps"][0].get("recoverable_errors"), [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_unsupported_image_type_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("doc.pdf").write_text("%PDF\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "try visual document read",
+                        "action": {
+                            "type": "read_image",
+                            "path": "doc.pdf",
+                        },
+                    },
+                    {
+                        "summary": "fall back to text context",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    if tool == "read_image":
+                        raise ValueError(
+                            "unsupported image type for /tmp/doc.pdf; "
+                            "supported=image/gif, image/jpeg, image/png, image/webp"
+                        )
+                    return {"path": str(Path(parameters["path"]).resolve()), "content": "context\n"}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "1",
+                                            "--ai",
+                                            "--json",
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--max-steps",
+                                            "2",
+                                            "--act-mode",
+                                            "deterministic",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertTrue(report["steps"][0]["recoverable_unsupported_observation_type"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_unsupported_observation_type"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_read_only_repeat_guard_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read once", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "read twice", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "accidental repeated read", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "finish after guard context", "action": {"type": "finish", "task_done": True}},
+                ]
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--max-steps",
+                                        "4",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 4)
+                self.assertEqual(report["steps"][2]["status"], "failed")
+                self.assertTrue(report["steps"][2]["recoverable_repeat_guard"])
+                self.assertNotEqual(report.get("stop_reason"), "tool_failed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][2]["status"], "failed")
+                self.assertIn("repeat-action guard blocked", session["tool_calls"][2]["error"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_batch_recovers_read_only_repeat_guard_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("other.md").write_text("other\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "batch includes accidental repeated observation",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "read_file", "path": "README.md"},
+                                {"type": "read_file", "path": "README.md"},
+                                {"type": "read_file", "path": "README.md"},
+                                {"type": "read_file", "path": "other.md"},
+                            ],
+                        },
+                    },
+                    {"summary": "finish after batch guard context", "action": {"type": "finish", "task_done": True}},
+                ]
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "read_file")
+                self.assertIn("repeat-action guard blocked", report["steps"][0]["recoverable_errors"][0]["error"])
+                self.assertEqual(report["steps"][0]["tool_calls"][-1]["parameters"]["path"], "other.md")
+                self.assertNotEqual(report.get("stop_reason"), "tool_failed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_batch_repeat_guard_is_terminal_without_remaining_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "single-step batch repeats same observation",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "read_file", "path": "README.md"},
+                            {"type": "read_file", "path": "README.md"},
+                            {"type": "read_file", "path": "README.md"},
+                        ],
+                    },
+                }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["max_steps"], 1)
+                self.assertEqual(report["stop_reason"], "tool_failed")
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertEqual(report["steps"][0].get("recoverable_errors"), [])
             finally:
                 os.chdir(old_cwd)
 
