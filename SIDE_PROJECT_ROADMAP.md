@@ -348,3 +348,23 @@ Done when:
 - tests cover fixture loading, pet-state mapping, primary-action rendering,
   bounded watch rebuilds, and no live `.mew`/core import coupling
 - README examples show safe desk-fixture usage
+
+### SP18: mew-ghost Live Desk Opt-In
+
+Let `mew-ghost` show real current mew desk state when the operator explicitly
+opts in, while preserving fixture-only defaults and avoiding core imports.
+
+Done when:
+
+- default rendering still does not read live `.mew` state or run a desk command
+- an explicit CLI flag such as `--live-desk` runs repo-local `./mew desk --json`
+  without using a shell and with a short timeout
+- live desk output is normalized through the same desk status/count/action
+  surface used by the SP17 fixture bridge
+- watch mode reruns the live desk command on each bounded/foreground iteration
+  only when `--live-desk` is present
+- failures such as missing command, nonzero exit, timeout, malformed JSON, and
+  non-object JSON become structured desk states instead of crashing or retrying
+  hidden work
+- tests use injected runners/providers and do not spawn real `mew` subprocesses
+- README examples show terminal and HTML watch commands for real desk state

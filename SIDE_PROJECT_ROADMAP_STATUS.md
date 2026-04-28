@@ -28,10 +28,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
 | SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
+| SP18 mew-ghost Live Desk Opt-In | `planned` | Next slice: add explicit `--live-desk` support so `mew-ghost` can show real `./mew desk --json` state during terminal/HTML watch, with fixture defaults, timeout/failure fallbacks, and injected-runner tests. |
 
 ## Active Focus
 
-Active side-project focus: **SP17 mew-ghost Desk Bridge is closed; next focus is selecting the next side-project milestone**.
+Active side-project focus: **SP18 mew-ghost Live Desk Opt-In**.
 
 Current target:
 
@@ -50,6 +51,10 @@ Current target:
   `sleeping`/`thinking`/`typing`/`alerting` into separate desk-derived presence,
   renders desk status/counts/details/primary_action in CLI state and HTML, and
   exposes desk `primary_action` as a non-executable dry-run command intent
+- next planned bridge: explicit `--live-desk` should run repo-local
+  `./mew desk --json` without shell execution, map the live desk result through
+  the same desk status/count/action surface, rerun during watch only when
+  opted in, and convert failures into structured desk states
 - live macOS probing remains explicit through `--live-active-window`
 - live `mew desk --json` subprocess execution remains deferred to a later
   explicit opt-in slice; SP17 should not read live `.mew` state or import
@@ -477,6 +482,8 @@ Current target:
 - SP15 is closed for the second `mew-ghost` cohort.
 - SP16 is closed for the second `mew-ghost` cohort.
 - SP17 is closed for the second `mew-ghost` cohort.
+- SP18 has not started; real `./mew desk --json` state is not yet available in
+  `mew-ghost`.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -490,18 +497,20 @@ Current target:
 
 ## Next Action
 
-Select the next side-project milestone before more coding:
+Start SP18 with mew as first implementer:
 
-1. decide whether to extend `mew-ghost`, start another isolated side project,
-   or pause side-project work and feed the six-row mew-ghost cohort into core
-   M6.16/M9/M11 planning
-2. write the next roadmap/status entry before implementation
-3. create a bounded coding task and run repo-root `./mew work` from
-   `/Users/mk/dev/personal-pj/mew_side_pj` with `--model gpt-5.5`
-4. allow writes only under the selected side-project directory
-5. verify with the focused side-project verifier
-6. write a canonical local side-dogfood report and append it to the ledger
-7. before any new mew coding operation, run the repo-root sync rule from
+1. create a coding task for `mew-ghost` SP18
+2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
+   with `--model gpt-5.5`
+3. allow writes only under `experiments/mew-ghost`
+4. add explicit `--live-desk` support that runs repo-local
+   `./mew desk --json` without shell execution and with timeout/failure
+   fallbacks
+5. keep default and `--desk-json` paths fixture-only and deterministic
+6. verify with
+   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+7. write a canonical local side-dogfood report and append it to the ledger
+8. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
 
 ## Non-Goals
