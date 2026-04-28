@@ -309,6 +309,29 @@ def _work_roots_for_cwd(roots, cwd):
     return resolved
 
 
+def _git_scope_from_allowed_root(root):
+    try:
+        resolved = Path(root).expanduser().resolve(strict=True)
+    except OSError:
+        return None
+    if resolved.is_dir():
+        return str(resolved), "."
+    return str(resolved.parent), resolved.name
+
+
+def _resolve_work_git_cwd_and_pathspec(cwd, allowed_read_roots, *, default_cwd_requested):
+    try:
+        return str(resolve_allowed_path(cwd or ".", allowed_read_roots)), ""
+    except ValueError as exc:
+        if not default_cwd_requested or "outside allowed read roots" not in str(exc):
+            raise
+    for root in allowed_read_roots or []:
+        scope = _git_scope_from_allowed_root(root)
+        if scope:
+            return scope
+    raise ValueError(f"path is outside allowed read roots: {cwd}; allowed={', '.join(allowed_read_roots or [])}")
+
+
 def _workspace_relative_work_parameters(tool, parameters, allowed_read_roots):
     parameters = dict(parameters or {})
     cwd = _work_tool_workspace_cwd(parameters)
@@ -2217,6 +2240,8 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
+    requested_cwd = str(parameters.get("cwd") or "").strip()
+    default_cwd_requested = requested_cwd in ("", ".")
     parameters, allowed_read_roots = _workspace_relative_work_parameters(
         tool,
         parameters,
@@ -2276,9 +2301,13 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
             max_matches=parameters.get("max_matches", 100),
         )
     if tool in GIT_WORK_TOOLS:
-        cwd = resolve_allowed_path(parameters.get("cwd") or ".", allowed_read_roots)
+        cwd, pathspec = _resolve_work_git_cwd_and_pathspec(
+            parameters.get("cwd") or ".",
+            allowed_read_roots,
+            default_cwd_requested=default_cwd_requested,
+        )
         if tool == "git_status":
-            return run_git_tool("status", cwd=str(cwd))
+            return run_git_tool("status", cwd=str(cwd), pathspec=pathspec)
         if tool == "git_diff":
             return run_git_tool(
                 "diff",
@@ -2286,8 +2315,9 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
                 staged=bool(parameters.get("staged")),
                 stat=bool(parameters.get("stat")),
                 base=parameters.get("base") or "",
+                pathspec=pathspec,
             )
-        return run_git_tool("log", cwd=str(cwd), limit=parameters.get("limit", 20))
+        return run_git_tool("log", cwd=str(cwd), limit=parameters.get("limit", 20), pathspec=pathspec)
     if tool in WRITE_WORK_TOOLS:
         return execute_work_write_tool(tool, parameters, on_output=on_output)
     if tool == "run_tests":

@@ -7737,6 +7737,80 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_git_tools_scope_to_allowed_read_root_when_default_cwd_blocked(self):
+        if not shutil.which("git"):
+            self.skipTest("git not found")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            side_root = repo / "experiments" / "mew-ghost"
+            side_root.mkdir(parents=True)
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            subprocess.run(
+                ["git", "config", "user.email", "mew@example.invalid"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "mew"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            (side_root / "app.py").write_text("print('old')\n", encoding="utf-8")
+            (repo / "root.txt").write_text("old\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            subprocess.run(
+                ["git", "commit", "-m", "init"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            (side_root / "app.py").write_text("print('new')\n", encoding="utf-8")
+            (repo / "root.txt").write_text("new\n", encoding="utf-8")
+            os.chdir(repo)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", str(side_root)]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "git_status", "--allow-read", str(side_root), "--json"]),
+                        0,
+                    )
+                status_data = json.loads(stdout.getvalue())
+                status_result = status_data["tool_call"]["result"]
+                self.assertEqual(status_result["exit_code"], 0)
+                self.assertEqual(Path(status_result["cwd"]), side_root.resolve())
+                self.assertIn("app.py", status_result["stdout"])
+                self.assertNotIn("root.txt", status_result["stdout"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "git_diff", "--allow-read", str(side_root), "--json"]),
+                        0,
+                    )
+                diff_data = json.loads(stdout.getvalue())
+                diff_result = diff_data["tool_call"]["result"]
+                self.assertEqual(diff_result["exit_code"], 0)
+                self.assertEqual(Path(diff_result["cwd"]), side_root.resolve())
+                self.assertIn("-print('old')", diff_result["stdout"])
+                self.assertIn("+print('new')", diff_result["stdout"])
+                self.assertNotIn("root.txt", diff_result["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_tool_progress_streams_command_output(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
