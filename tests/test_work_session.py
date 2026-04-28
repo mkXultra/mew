@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -14,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import mew.commands as commands
 from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
@@ -5137,6 +5139,224 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertLess(timeout, 60.0)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_oneshot_writes_partial_report_before_model_turn(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            report_path = Path(tmp) / "report.json"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                observed_partial = {}
+
+                def model_response(*args, **kwargs):
+                    self.assertTrue(report_path.exists())
+                    observed_partial.update(json.loads(report_path.read_text(encoding="utf-8")))
+                    return {
+                        "summary": "finish after one turn",
+                        "action": {
+                            "type": "finish",
+                            "status": "done",
+                            "summary": "done",
+                        },
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_response):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--no-auto-deliberation",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-steps",
+                                        "1",
+                                        "--report",
+                                        str(report_path),
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertTrue(observed_partial["partial_report"])
+                self.assertEqual(observed_partial["summary"], "mew work --oneshot partial progress report")
+                self.assertEqual(observed_partial["phase"], "running")
+                self.assertEqual(observed_partial["workspace_cwd"], str(workspace))
+                self.assertEqual(observed_partial["work_report"]["stop_reason"], "max_steps")
+                self.assertEqual(observed_partial["resume"]["continuity"]["status"], "strong")
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["summary"], "mew work --oneshot completed generic work-session attempt")
+                final_report = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertNotIn("partial_report", final_report)
+                self.assertEqual(final_report["work_report"]["stop_reason"], "finish")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_writes_partial_report_during_batch_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            report_path = Path(tmp) / "report.json"
+            state_root.mkdir()
+            workspace.mkdir()
+            (workspace / "README.md").write_text("context\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                observed_partial = {}
+                model_outputs = [
+                    {
+                        "summary": "inspect workspace context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "read_file",
+                                    "path": "README.md",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "finish after batch",
+                        "action": {
+                            "type": "finish",
+                            "status": "done",
+                            "summary": "done",
+                        },
+                    },
+                ]
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    self.assertTrue(report_path.exists())
+                    if not observed_partial:
+                        observed_partial.update(json.loads(report_path.read_text(encoding="utf-8")))
+                    if output_progress:
+                        output_progress("stdout", "streamed context\n")
+                    return {
+                        "path": str((workspace / parameters["path"]).resolve()),
+                        "content": "context\n",
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            "Inspect this workspace.",
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "60",
+                                            "--max-steps",
+                                            "2",
+                                            "--report",
+                                            str(report_path),
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                self.assertTrue(observed_partial["partial_report"])
+                self.assertEqual(observed_partial["phase"], "running")
+                self.assertEqual(observed_partial["last_step"]["action"]["type"], "batch")
+                self.assertIsNotNone(observed_partial["last_step"]["model_turn"])
+                self.assertEqual(observed_partial["last_step"]["model_turn"]["action"]["type"], "batch")
+                self.assertEqual(observed_partial["last_step"]["tool_calls"][0]["tool"], "read_file")
+                self.assertEqual(observed_partial["last_step"]["tool_calls"][0]["status"], "running")
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_report"]["stop_reason"], "finish")
+                final_report = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertNotIn("partial_report", final_report)
+                self.assertEqual(final_report["work_report"]["steps"][0]["action"]["type"], "batch")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_partial_report_cannot_overwrite_final_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            args = SimpleNamespace(
+                oneshot_report_path=str(report_path),
+                oneshot_workspace_cwd=str(tmp),
+                oneshot_artifacts="",
+                verify_command="",
+                oneshot_verify_source="",
+            )
+            partial_report = {"stop_reason": "max_steps", "steps": []}
+            session = {"id": 1, "task_id": 1}
+            task = {"id": 1, "cwd": str(tmp)}
+            resume = {"continuity": {"status": "strong"}}
+            final_report = {
+                "summary": "final",
+                "work_exit_code": 0,
+                "work_report": {"stop_reason": "finish"},
+            }
+
+            real_write = commands._write_json_file_atomic
+            partial_write_entered = threading.Event()
+            release_partial_write = threading.Event()
+
+            def blocking_atomic_write(path, payload):
+                if payload.get("partial_report"):
+                    partial_write_entered.set()
+                    self.assertTrue(release_partial_write.wait(timeout=2))
+                return real_write(path, payload)
+
+            with patch("mew.commands._write_json_file_atomic", side_effect=blocking_atomic_write):
+                partial_thread = threading.Thread(
+                    target=commands._write_work_oneshot_partial_report,
+                    args=(args, partial_report, session, task, resume),
+                    kwargs={"phase": "running"},
+                )
+                partial_thread.start()
+                self.assertTrue(partial_write_entered.wait(timeout=2))
+
+                final_thread = threading.Thread(
+                    target=commands._write_work_oneshot_final_report,
+                    args=(report_path, final_report),
+                )
+                final_thread.start()
+                time.sleep(0.05)
+                self.assertTrue(final_thread.is_alive())
+
+                release_partial_write.set()
+                partial_thread.join(timeout=2)
+                final_thread.join(timeout=2)
+
+            saved = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved, final_report)
 
     def test_work_oneshot_keeps_model_timeout_when_wall_budget_has_room(self):
         old_cwd = os.getcwd()

@@ -101,6 +101,13 @@ M6.24 resume condition:
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
+- Current M6.14 episode:
+  SR-001 timeout / partial observability is `in_repair`. The first generic code
+  slice writes partial `mew work --oneshot --report` progress before model/tool
+  execution, covers batch tool state, uses atomic partial/final report writes,
+  and mirrors running tool output for non-live oneshot reports.
+  Source/test validation passed; same-shape Harbor rerun is still required
+  before marking the row `repaired`.
 
 Closed M6.22 result:
 
