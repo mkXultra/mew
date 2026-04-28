@@ -152,13 +152,18 @@ M6.24 resume condition:
   repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.
   This is broad parity evidence, not yet an accepted structural repair signal.
+- M6.24 Batch 2 `caffe-cifar-10` then completed the batch: 0/3 completed
+  reward trials, 2 RuntimeError command timeouts, runtime 16m 46s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-23-11/result.json`.
+  Because the frozen Codex target is 0/5, this is runner-error debt but not a
+  selected repair by itself.
 
 Next concrete action:
 
-- Continue M6.24 Batch 2 / broad parity measurement from the current manifest.
-  If a new failure is accepted as structural rather than ordinary task miss,
-  append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
-  Remaining unmeasured Batch 2 task is `caffe-cifar-10`.
+- Select the next M6.24 broad registry slice (Batch 3) from unmeasured frozen
+  registry tasks. If a new failure is accepted as structural rather than
+  ordinary task miss, append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`
+  before repairing.
 
 Closed M6.22 result:
 
