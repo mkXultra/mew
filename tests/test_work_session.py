@@ -5899,6 +5899,146 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_read_file_extracts_pdf_text_fallback(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("invoice.pdf").write_bytes(
+                    b"%PDF-1.4\n"
+                    b"1 0 obj\n"
+                    b"<< /Length 75 >>\n"
+                    b"stream\n"
+                    b"BT\n"
+                    b"(Invoice) Tj\n"
+                    b"(Total 123.45) Tj\n"
+                    b"(VAT 10.00) Tj\n"
+                    b"ET\n"
+                    b"endstream\n"
+                    b"endobj\n"
+                    b"%%EOF\n"
+                )
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                with patch("mew.read_tools.shutil.which", return_value=None):
+                    with redirect_stdout(StringIO()) as stdout:
+                        self.assertEqual(
+                            main(
+                                [
+                                    "work",
+                                    "1",
+                                    "--tool",
+                                    "read_file",
+                                    "--path",
+                                    "invoice.pdf",
+                                    "--allow-read",
+                                    ".",
+                                    "--json",
+                                ]
+                            ),
+                            0,
+                        )
+                    from mew.read_tools import read_file
+
+                    paged = read_file("invoice.pdf", ["."], max_chars=7)
+                    with patch("mew.read_tools.PDF_EXTRACT_TEXT_LIMIT", 10):
+                        fallback_capped = read_file("invoice.pdf", ["."], max_chars=50)
+
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertEqual(result["document_type"], "pdf")
+                self.assertEqual(result["extraction_method"], "pdf_literal_fallback")
+                self.assertFalse(result["empty_extraction"])
+                self.assertIn("Invoice", result["text"])
+                self.assertIn("Total 123.45", result["text"])
+                self.assertIn("VAT 10.00", result["text"])
+                self.assertEqual(paged["text"], "Invoice")
+                self.assertEqual(paged["next_offset"], 7)
+                self.assertEqual(fallback_capped["extraction_method"], "pdf_literal_fallback_truncated")
+                self.assertTrue(fallback_capped["extraction_truncated"])
+                self.assertTrue(fallback_capped["truncated"])
+                self.assertEqual(fallback_capped["next_offset"], 10)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_read_file_pdf_pdftotext_preserves_layout(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("statement.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                pdf_text = b"Item        Amount\nSubtotal    100.00\nVAT          10.00\n"
+
+                def fake_pdftotext(command, **kwargs):
+                    Path(command[-1]).write_bytes(pdf_text)
+                    return SimpleNamespace(stderr=b"", returncode=0)
+
+                with patch("mew.read_tools.shutil.which", return_value="/usr/bin/pdftotext"):
+                    with patch("mew.read_tools.subprocess.run", side_effect=fake_pdftotext):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--tool",
+                                        "read_file",
+                                        "--path",
+                                        "statement.pdf",
+                                        "--allow-read",
+                                        ".",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+                        from mew.read_tools import read_file
+
+                        paged = read_file("statement.pdf", ["."], max_chars=4)
+                        line_read = read_file("statement.pdf", ["."], max_chars=20, line_start=3, line_count=1)
+
+                result = json.loads(stdout.getvalue())["tool_call"]["result"]
+                self.assertEqual(result["document_type"], "pdf")
+                self.assertEqual(result["extraction_method"], "pdftotext")
+                self.assertIn("Item        Amount", result["text"])
+                self.assertIn("VAT          10.00", result["text"])
+                self.assertEqual(paged["extraction_method"], "pdftotext_truncated")
+                self.assertTrue(paged["extraction_truncated"])
+                self.assertTrue(paged["truncated"])
+                self.assertEqual(paged["next_offset"], 4)
+                self.assertIn("VAT          10.00", line_read["text"])
+                self.assertEqual(line_read["line_start"], 3)
+                self.assertEqual(line_read["line_end"], 3)
+
+                from mew.read_tools import _read_text_result_from_text
+
+                capped = _read_text_result_from_text(
+                    Path("statement.pdf").resolve(),
+                    "short",
+                    size=1000,
+                    max_chars=4,
+                    offset=999,
+                    source_truncated=True,
+                    extra={"document_type": "pdf", "extraction_method": "pdftotext_truncated"},
+                )
+                self.assertTrue(capped["truncated"])
+                self.assertIsNone(capped["next_offset"])
+                self.assertIn("beyond extracted document text cap", capped["message"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_read_file_can_target_lines_from_search_results(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

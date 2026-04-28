@@ -1,9 +1,13 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import fnmatch
 import shlex
+import shutil
+import tempfile
+import zlib
 
 
 DEFAULT_READ_MAX_CHARS = 50000
@@ -45,6 +49,8 @@ SEARCH_EXCLUDE_GLOBS = (
     "!id_rsa",
     "!id_ed25519",
 )
+PDF_EXTRACT_TEXT_LIMIT = 200_000
+PDF_FALLBACK_BYTES_LIMIT = 5_000_000
 
 
 def _is_relative_to(path, root):
@@ -144,6 +150,246 @@ def _optional_int_in_range(value, name, default, minimum, maximum):
     return number
 
 
+def _path_looks_like_pdf(path):
+    if path.suffix.lower() == ".pdf":
+        return True
+    try:
+        with path.open("rb") as handle:
+            return handle.read(5) == b"%PDF-"
+    except OSError:
+        return False
+
+
+def _normalize_extracted_document_text(text, *, preserve_layout=False):
+    text = str(text or "").replace("\x00", "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if preserve_layout:
+        text = "\n".join(line.rstrip() for line in text.splitlines())
+    else:
+        text = re.sub(r"[ \t\f\v]+", " ", text)
+        text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"\n{4,}", "\n\n\n", text)
+    return text.strip()
+
+
+def _extract_pdf_text_with_pdftotext(path, text_limit=PDF_EXTRACT_TEXT_LIMIT, timeout=20):
+    if not shutil.which("pdftotext"):
+        return "", "pdftotext_unavailable"
+    text_limit = max(1, min(int(text_limit or PDF_EXTRACT_TEXT_LIMIT), PDF_EXTRACT_TEXT_LIMIT))
+    with tempfile.TemporaryDirectory(prefix="mew-pdf-") as tmp:
+        output_path = Path(tmp) / "extracted.txt"
+        try:
+            completed = subprocess.run(
+                ["pdftotext", "-layout", "-enc", "UTF-8", str(path), str(output_path)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=False,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return "", f"pdftotext_failed:{exc.__class__.__name__}"
+        try:
+            with output_path.open("rb") as handle:
+                payload = handle.read(text_limit + 1)
+        except OSError:
+            payload = b""
+    text = _normalize_extracted_document_text(
+        payload[:text_limit].decode("utf-8", errors="replace"),
+        preserve_layout=True,
+    )
+    if text:
+        method = "pdftotext"
+        if len(payload) > text_limit:
+            method = "pdftotext_truncated"
+        return text, method
+    reason = f"pdftotext_empty:exit={completed.returncode}"
+    stderr = _normalize_extracted_document_text((completed.stderr or b"").decode("utf-8", errors="replace"))
+    if stderr:
+        reason = f"{reason}:{stderr[:120]}"
+    return "", reason
+
+
+def _pdf_stream_payloads(data):
+    for match in re.finditer(rb"stream\r?\n?(.*?)\r?\n?endstream", data, flags=re.DOTALL):
+        payload = match.group(1).strip(b"\r\n")
+        header = data[max(0, match.start() - 500) : match.start()]
+        if b"FlateDecode" in header:
+            try:
+                payload = zlib.decompress(payload)
+            except zlib.error:
+                pass
+        yield payload
+
+
+def _decode_pdf_literal_string(raw):
+    text = bytearray()
+    escaped = False
+    for byte in raw:
+        if escaped:
+            mapping = {
+                ord("n"): ord("\n"),
+                ord("r"): ord("\r"),
+                ord("t"): ord("\t"),
+                ord("b"): ord("\b"),
+                ord("f"): ord("\f"),
+                ord("("): ord("("),
+                ord(")"): ord(")"),
+                ord("\\"): ord("\\"),
+            }
+            text.append(mapping.get(byte, byte))
+            escaped = False
+        elif byte == ord("\\"):
+            escaped = True
+        else:
+            text.append(byte)
+    return text.decode("utf-8", errors="replace")
+
+
+def _extract_pdf_literal_strings(data):
+    strings = []
+    index = 0
+    while index < len(data):
+        start = data.find(b"(", index)
+        if start < 0:
+            break
+        depth = 1
+        cursor = start + 1
+        escaped = False
+        while cursor < len(data):
+            byte = data[cursor]
+            if escaped:
+                escaped = False
+            elif byte == ord("\\"):
+                escaped = True
+            elif byte == ord("("):
+                depth += 1
+            elif byte == ord(")"):
+                depth -= 1
+                if depth == 0:
+                    raw = data[start + 1 : cursor]
+                    text = _normalize_extracted_document_text(_decode_pdf_literal_string(raw))
+                    if text and any(ch.isalnum() for ch in text):
+                        strings.append(text)
+                    cursor += 1
+                    break
+            cursor += 1
+        index = max(cursor, start + 1)
+    return strings
+
+
+def _extract_pdf_hex_strings(data):
+    strings = []
+    for match in re.finditer(rb"(?<!<)<([0-9A-Fa-f\s]{4,})>(?!>)", data):
+        raw_hex = re.sub(rb"\s+", b"", match.group(1))
+        if len(raw_hex) % 2:
+            raw_hex += b"0"
+        try:
+            payload = bytes.fromhex(raw_hex.decode("ascii"))
+        except ValueError:
+            continue
+        text = _normalize_extracted_document_text(payload.decode("utf-8", errors="replace"))
+        if text and any(ch.isalnum() for ch in text):
+            strings.append(text)
+    return strings
+
+
+def _extract_pdf_text_fallback(path, byte_limit=PDF_FALLBACK_BYTES_LIMIT):
+    byte_limit = max(1, min(int(byte_limit or PDF_FALLBACK_BYTES_LIMIT), PDF_FALLBACK_BYTES_LIMIT))
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(byte_limit + 1)
+    except OSError as exc:
+        raise ValueError(f"could not read PDF: {path}") from exc
+    source_truncated = len(data) > byte_limit
+    data = data[:byte_limit]
+    chunks = []
+    for payload in _pdf_stream_payloads(data):
+        chunks.extend(_extract_pdf_literal_strings(payload))
+        chunks.extend(_extract_pdf_hex_strings(payload))
+    if not chunks:
+        chunks.extend(_extract_pdf_literal_strings(data))
+        chunks.extend(_extract_pdf_hex_strings(data))
+    text = _normalize_extracted_document_text("\n".join(chunks))
+    text_truncated = len(text) > PDF_EXTRACT_TEXT_LIMIT
+    method = "pdf_literal_fallback_truncated" if source_truncated or text_truncated else "pdf_literal_fallback"
+    return text[:PDF_EXTRACT_TEXT_LIMIT], method
+
+
+def _extract_pdf_text(path, *, text_limit=PDF_EXTRACT_TEXT_LIMIT):
+    text, method = _extract_pdf_text_with_pdftotext(path, text_limit=text_limit)
+    if text:
+        return text, method, "", method.endswith("_truncated")
+    fallback_text, fallback_method = _extract_pdf_text_fallback(path)
+    warning = method if not fallback_text else ""
+    return fallback_text, fallback_method, warning, fallback_method.endswith("_truncated")
+
+
+def _read_text_result_from_text(
+    resolved,
+    text,
+    *,
+    size,
+    max_chars,
+    offset=0,
+    line_start=None,
+    line_count=None,
+    extra=None,
+    source_truncated=False,
+):
+    extra = dict(extra or {})
+    if line_start not in (None, ""):
+        start = _optional_int_in_range(line_start, "line_start", default=1, minimum=1, maximum=1_000_000)
+        count = _optional_int_in_range(line_count, "line_count", default=120, minimum=1, maximum=1000)
+        lines = text.splitlines(keepends=True)
+        selected = lines[start - 1 : start - 1 + count]
+        raw_text = "".join(selected)
+        selected_text = raw_text[:max_chars]
+        char_truncated = len(raw_text) > max_chars
+        end_line = start + len(selected) - 1 if selected else None
+        more_lines = len(lines) > start - 1 + len(selected) or bool(source_truncated)
+        total_lines = len(lines)
+        eof = not selected and start > total_lines and not source_truncated
+        if eof:
+            message = f"line_start {start} is beyond EOF at line {total_lines}"
+        elif not selected and source_truncated:
+            message = f"line_start {start} is beyond extracted document text cap at line {total_lines}"
+        else:
+            message = ""
+        return {
+            "path": str(resolved),
+            "type": "file",
+            "size": size,
+            "line_start": start,
+            "line_count": count,
+            "line_end": end_line,
+            "next_line": (end_line + 1) if end_line is not None and more_lines else None,
+            "has_more_lines": more_lines,
+            "eof": eof,
+            "message": message,
+            "text": selected_text,
+            "truncated": char_truncated or bool(source_truncated),
+            **extra,
+        }
+
+    offset = max(0, min(int(offset or 0), 1_000_000))
+    selected_text = text[offset : offset + max_chars]
+    truncated = len(text) > offset + max_chars or bool(source_truncated)
+    next_offset = offset + len(selected_text) if truncated and selected_text else None
+    message = "offset is beyond extracted document text cap" if truncated and not selected_text and source_truncated else ""
+    return {
+        "path": str(resolved),
+        "type": "file",
+        "size": size,
+        "offset": offset,
+        "next_offset": next_offset,
+        "message": message,
+        "text": selected_text,
+        "truncated": truncated,
+        **extra,
+    }
+
+
 def read_file(
     path,
     allowed_roots,
@@ -157,6 +403,34 @@ def read_file(
     ensure_not_sensitive(resolved)
     if not resolved.is_file():
         raise ValueError(f"path is not a file: {resolved}")
+
+    if _path_looks_like_pdf(resolved):
+        try:
+            size = resolved.stat().st_size
+        except OSError:
+            size = 0
+        if line_start not in (None, ""):
+            text_limit = PDF_EXTRACT_TEXT_LIMIT
+        else:
+            text_limit = max(max_chars + int(offset or 0) + 1, max_chars)
+        extracted_text, method, warning, extraction_truncated = _extract_pdf_text(resolved, text_limit=text_limit)
+        return _read_text_result_from_text(
+            resolved,
+            extracted_text,
+            size=size,
+            max_chars=max_chars,
+            offset=offset,
+            line_start=line_start,
+            line_count=line_count,
+            extra={
+                "document_type": "pdf",
+                "extraction_method": method,
+                "extraction_warning": warning,
+                "extraction_truncated": extraction_truncated,
+                "empty_extraction": not bool(extracted_text),
+            },
+            source_truncated=extraction_truncated,
+        )
 
     if line_start not in (None, ""):
         start = _optional_int_in_range(line_start, "line_start", default=1, minimum=1, maximum=1_000_000)
@@ -678,20 +952,25 @@ def summarize_read_result(action_type, result):
         return f"Inspected directory {result.get('path')}: {names}{suffix}"
     if action_type == "read_file":
         suffix = " (truncated)" if result.get("truncated") else ""
+        document = ""
+        if result.get("document_type"):
+            document = f" document={result.get('document_type')} extraction={result.get('extraction_method')}"
+            if result.get("empty_extraction"):
+                document += " empty_extraction=true"
         if result.get("line_start") is not None:
             next_text = f" next_line={result.get('next_line')}" if result.get("next_line") is not None else ""
             line_end = result.get("line_end")
             line_span = f"{result.get('line_start')}-{line_end}" if line_end is not None else f"{result.get('line_start')}-EOF"
             message = f" {result.get('message')}" if result.get("message") else ""
             return (
-                f"Read file {result.get('path')} size={result.get('size')} chars "
+                f"Read file {result.get('path')} size={result.get('size')} chars{document} "
                 f"lines={line_span}{next_text}{suffix}{message}\n"
                 f"{result.get('text') or ''}"
             )
         offset = result.get("offset") or 0
         next_text = f" next_offset={result.get('next_offset')}" if result.get("next_offset") is not None else ""
         return (
-            f"Read file {result.get('path')} size={result.get('size')} chars "
+            f"Read file {result.get('path')} size={result.get('size')} chars{document} "
             f"offset={offset}{next_text}{suffix}\n{result.get('text') or ''}"
         )
     if action_type == "read_image":
