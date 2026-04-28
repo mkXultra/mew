@@ -64,13 +64,14 @@ env PYTHONPATH=.harbor harbor run \
   --ak command_cwd=/app \
   --ak container_repo_root=/mew \
   --ak timeout_seconds=1800 \
-  --ak command_template='mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-write . --allow-write /usr/local/bin --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 {max_wall_seconds_option} --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json' \
+  --ak command_template='mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-read /tmp --allow-write . --allow-write /usr/local/bin --allow-write /tmp --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 {max_wall_seconds_option} --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json' \
   --mounts-json '[{"type":"bind","source":"/Users/mk/dev/personal-pj/mew","target":"/mew"},{"type":"bind","source":"/Users/mk/.codex/auth.json","target":"/codex-auth/auth.json"}]'
 ```
 
-The `/etc/apt` read root and `/usr/local/bin` write root are generic
-container-system task permissions for package-source inspection and requested
-binary installation. They are not task solvers.
+The `/etc/apt` read root, `/usr/local/bin` write root, and `/tmp` scratch
+read/write root are generic container-system task permissions for package-source
+inspection, requested binary installation, and task-declared scratch/build
+locations. They are not task solvers.
 
 `--agent-timeout-multiplier 2` plus `timeout_seconds=1800` plus
 `{max_wall_seconds_option}` is the current generic self-budgeting guard from

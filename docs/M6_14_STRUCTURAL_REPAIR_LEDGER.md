@@ -109,6 +109,7 @@ Status vocabulary:
 | SR-013 | repaired | M6.24 Batch 3 | run_command shell-operator execution mismatch | `mcmc-sampling-stan` pre-repair reports showed `mkdir -p ... && HOME=... Rscript -e ...` executed as a single argv command, producing `mkdir: invalid option -- 'e'` instead of a shell chain | Execute `run_command` through a bash-compatible shell only when top-level shell operators are present, keep `run_tests` non-shell, and add resident-loop guards for accidental nested `mew run` / `mew work` shell invocations | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` executor safety notes | direct shell-chain proof plus rerun `mcmc-sampling-stan` after repair | Repaired by `use_shell` execution mode for `run_command`, prompt update, focused tests, runtime `MEW_WORK_COMMAND_GUARD`, and codex-ultra review with no blocking findings. |
 | SR-014 | repaired | M6.24 Batch 4 | terminal-bench agent timeout self-budget not propagated | `protein-assembly` scored 0/5 with 3 `AgentTimeoutError`s. Timed-out trials left host-visible partial mew reports with running model turns around the outer 1800s timeout because the Harbor wrapper delegated timeout to the outer runner without passing an inner `--max-wall-seconds` budget to `mew work --oneshot` | Add Harbor wrapper wall-budget placeholders derived from explicit `timeout_seconds`, then run terminal-bench mew commands with both wrapper timeout and inner `--max-wall-seconds` so long tasks self-stop with final `wall_timeout` reports before the outer timeout | `docs/M6_24_BATCH_4_RUNS_2026-04-29.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | focused wrapper tests plus a bounded `protein-assembly` same-shape proof with no `AgentTimeoutError` | Repaired by `.harbor/mew_terminal_bench_agent.py` `{max_wall_seconds_option}` / `{mew_max_wall_seconds}` placeholders, focused tests, and a bounded `protein-assembly` proof with `n_errors=0` and final `wall_timeout` report. |
 | SR-015 | repaired | M6.24 Batch 4 | Harbor agent timeout not aligned with wrapper timeout | `adaptive-rejection-sampler` used wrapper `timeout_seconds=1800` and mew `--max-wall-seconds 1740`, but Harbor's agent execution timeout remained 900s; 3/5 trials died as `AgentTimeoutError` before mew could self-stop | Add `--agent-timeout-multiplier 2` to the Batch 4 Harbor run shape whenever using wrapper `timeout_seconds=1800` and `{max_wall_seconds_option}` | `docs/M6_24_BATCH_4_RUNS_2026-04-29.md`, `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, Harbor run help for `--agent-timeout-multiplier` | one-trial `adaptive-rejection-sampler` same-shape proof with agent timeout multiplier and no Harbor errors | Repaired by updating the Batch 4 manifest run shape; proof reached `n_errors=0` with normal verifier result instead of outer `AgentTimeoutError`. |
+| SR-016 | repaired | M6.24 Batch 5 | terminal-bench scratch path permission too narrow | `compile-compcert` scored 0/5 with Harbor errors 0 because all trials stopped as `wait` before doing material work: `/tmp/CompCert` was required by the task/verifier but outside allowed read/write roots | Treat `/tmp` as generic container scratch/build space for Terminal-Bench broad runs by adding `--allow-read /tmp --allow-write /tmp` to the manifest command shape | `docs/M6_24_BATCH_5_RUNS_2026-04-29.md`, `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md` | one-trial `compile-compcert` same-shape proof with `/tmp` access and no immediate permission wait | Repaired by updating the Batch 5 manifest run shape. Proof advanced through `/tmp/CompCert` bootstrap/build steps and ended as `wall_timeout`, not permission wait; remaining failure is task-solving/long-build strategy. |
 
 ## SR-001 Progress
 
@@ -594,6 +595,29 @@ Status vocabulary:
   the trial reached a normal verifier reward of 0.0 instead of outer
   `AgentTimeoutError`. This keeps the remaining gap classified as task-solving
   unless a later task exposes a new structural timeout pattern.
+
+## SR-016 Progress
+
+- 2026-04-29: M6.24 Batch 5 `compile-compcert` scored 0/5 against Codex target
+  5/5 with Harbor errors 0:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-58-06/result.json`.
+  All trials stopped before useful work because the task/verifier requires
+  `/tmp/CompCert`, but the Batch 5 command shape allowed only `.`, `/etc/apt`,
+  and `/usr/local/bin`.
+- Diagnosis:
+  `/tmp` is normal container scratch/build space for Terminal-Bench tasks and
+  is not a task-specific solver path. Disallowing it turns legitimate build
+  tasks into immediate permission waits, hiding the real implementation gap.
+- Generic repair:
+  `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md` now adds
+  `--allow-read /tmp --allow-write /tmp` to the generic mew command template.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr016-compile-compcert-tmp-permission/2026-04-29__07-03-03/result.json`
+  reran one `compile-compcert` trial with `/tmp` allowed. Harbor recorded
+  `n_errors=0`; the work report executed 10 steps touching `/tmp/CompCert` and
+  `/tmp/compcert-tools-bookworm`, then ended as `wall_timeout`. This proves the
+  permission wait was repaired; the remaining failure is task-solving /
+  long-build strategy, not scratch-root denial.
 
 ## Repaired / Superseded Rows
 
