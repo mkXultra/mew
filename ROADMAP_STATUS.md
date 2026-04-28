@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 full measured total is 11/35 vs Codex 25/35, excluding partial `train-fasttext`; select Batch 5 next. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 5 is selected; start with `bn-fit-modify`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -357,14 +357,21 @@ M6.24 resume condition:
   **25/35**, excluding the partial `train-fasttext` control run. The clean
   later passes show the SR-015 timeout alignment is good enough to continue
   measurement.
+- M6.24 Batch 5 is selected in
+  `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md` and
+  `docs/data/terminal_bench_m6_24_batch_5.json`. It covers the next unseen
+  frozen Codex 5/5 registry slice: `bn-fit-modify`, `circuit-fibsqrt`,
+  `compile-compcert`, `count-dataset-tokens`, `crack-7z-hash`,
+  `custom-memory-heap-crash`, `distribution-search`, and
+  `feal-differential-cryptanalysis`.
 
 Next concrete action:
 
-- Select M6.24 Batch 5 from the frozen Codex target registry, avoiding already
-  measured tasks unless a rerun is needed for a named disambiguation. Use the
-  aligned `--agent-timeout-multiplier 2`, `timeout_seconds=1800`, and
-  `{max_wall_seconds_option}` run shape as the default for broad measurement.
-  If a new accepted structural blocker appears, append it to
+- Run M6.24 Batch 5 task-by-task from
+  `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md`, using the aligned
+  `--agent-timeout-multiplier 2`, `timeout_seconds=1800`, and
+  `{max_wall_seconds_option}` run shape. Next task: `bn-fit-modify`. If a new
+  accepted structural blocker appears, append it to
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair through M6.14, rerun the
   same failed shape, then resume broad measurement.
 

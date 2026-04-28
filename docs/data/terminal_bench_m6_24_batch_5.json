@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "source_registry": "docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json",
+  "purpose": "M6.24 broad Terminal-Bench parity campaign batch 5",
+  "selection_rule": "Next unseen registry slice after M6.20/M6.22/M6.24 batches 1-4. Remaining unmeasured tasks are all frozen Codex 5/5 tasks, so this batch uses the next alphabetical unmeasured high-target slice with varied task shapes.",
+  "codex_target_successes": 40,
+  "codex_target_trials": 40,
+  "tasks": [
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "2758dba68c97cbf8fff87af7e955ac424bfe84ff053e20f160f713d3eee2358f",
+      "taskName": "bn-fit-modify"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "c0e478819545e6c9db2d42b3996441ca0ee55fde09d4cea5b7f9fbdf83bfd337",
+      "taskName": "circuit-fibsqrt"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "3c434d30e5ba4180232b09188d6f1e8e15a8e8e8f748fe479175757384a8d39e",
+      "taskName": "compile-compcert"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "1fa5f3961f0ad1c1748ebdaa39f27fd2bfd0f654cb728089365af6162b6d0ec7",
+      "taskName": "count-dataset-tokens"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "6557afcd0ab96deef7a8292019ea507be18f91433df61618b622866a293525a8",
+      "taskName": "crack-7z-hash"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "fba0e3be977223b1f8c182da8411663258f83b3563dd5dcd12beae87762ccabf",
+      "taskName": "custom-memory-heap-crash"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "9566c59435661995a4a64e71afc6b80baaa6339307dea1ae28608c9f2c1ce033",
+      "taskName": "distribution-search"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "798945c624cad262a52c46271a557698875990a600a6a5cb35c2dfd9b00bf80d",
+      "taskName": "feal-differential-cryptanalysis"
+    }
+  ]
+}
