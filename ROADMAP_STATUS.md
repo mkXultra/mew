@@ -417,6 +417,26 @@ M6.24 Batch 1:
 - latest proof validation:
   the post-`11f521f` Harbor rerun completed with errors 0 but scored 0/5, so
   the repair removed its targeted blocker without closing the Batch 1 deficit.
+- completed twenty-first repair:
+  generic numeric/data artifact support was added for the remaining Batch 1
+  deficit shape. The normal work path now has a read-only `analyze_table` tool
+  for deterministic full-file numeric profiling of CSV/TSV/whitespace tables,
+  including delimiter/header clues, column ranges, monotonicity, and local
+  extrema for x/y pairs. Finish gating for fitting, optimization, ranking,
+  scientific, and metric tasks now blocks schema-only, finite-number, and
+  single-fit residual evidence unless the acceptance check cites an independent
+  cross-check or alternative validation from a completed grounding tool.
+- current route:
+  rerun `raman-fitting` with the normal M6.24 Harbor command to test whether
+  `analyze_table` plus the numeric artifact-quality finish gate improves the
+  0/5 result toward the frozen Codex target of 2/5. Classify the result before
+  spending another repair cycle.
+- latest source/test validation:
+  `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
+  passed with 743 tests and 30 subtests; `uv run ruff check` on changed files
+  passed; `git diff --check` passed. Codex-ultra review session
+  `019dd16d-eae2-7253-b1fe-6dffab2cdf63` reported `STATUS: pass` after three
+  blocker rounds.
 
 Drift guard:
 

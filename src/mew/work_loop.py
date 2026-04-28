@@ -6053,10 +6053,10 @@ def _work_action_schema_text():
         '  "summary": "short reason",\n'
         '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state", "acceptance_constraints": ["explicit stated constraints still relevant"], "acceptance_checks": [{"constraint": "constraint text", "status": "unknown|verified|blocked", "evidence": "tool output, diff, or file inspection used as proof"}]},\n'
         '  "action": {\n'
-        '    "type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
+        '    "type": "batch|inspect_dir|analyze_table|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
-        '{"type": "inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
-        '"path": "required for read_file/read_image/glob/search_text", '
+        '{"type": "inspect_dir|analyze_table|read_file|read_image|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
+        '"path": "required for analyze_table/read_file/read_image/glob/search_text", '
         '"query": "required for search_text; literal fixed-string, so use batch for OR searches", '
         '"pattern": "required for glob; optional rg glob filter for search_text", '
         '"max_chars": "optional read_file cap", '
@@ -6075,6 +6075,8 @@ def _work_action_schema_text():
         '    "max_chars": "optional read_file cap",\n'
         '    "line_start": "optional 1-based read_file starting line from search_text results",\n'
         '    "line_count": "optional read_file line count",\n'
+        '    "max_rows": "optional analyze_table row cap",\n'
+        '    "max_extrema": "optional analyze_table local-extrema cap",\n'
         '    "detail": "optional read_image detail low|high|auto",\n'
         '    "prompt": "optional read_image inspection prompt",\n'
         '    "stat": "optional git_diff diffstat; set false only when full diff is needed",\n'
@@ -6143,7 +6145,7 @@ def build_work_think_prompt(context):
         "If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user. "
         "If work_session.resume.verifier_failure_repair_agenda is present, treat it as the active repair queue: use its error_lines, source_locations, symbols, and latest_changed_dry_run_write to make one small applied edit batch before broader exploration. If the failure names multiple same-family symbols or source locations, repair the visible sibling set together instead of fixing only the first occurrence. If the traceback points into an installed/generated artifact but the workspace contains matching source under allowed write roots, inspect/edit the workspace source and reinstall or reverify rather than patching the installed artifact directly. "
         "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
-        "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, a schema-only or finite-number check is not enough; verify numeric plausibility against the input data with residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric before finish. "
+        "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, prefer analyze_table on CSV/TSV/whitespace numeric source files before choosing fit windows, scales, extrema, or output values. A schema-only, finite-number, or single-fit residual check is not enough; before finish, cite a completed grounding tool whose output contains an independent cross-check such as an alternative method, recomputation, holdout, bootstrap, or sensitivity/stability validation against the input data, plus residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric. "
         "For answer-from-artifact tasks such as images, boards, puzzles, diagrams, screenshots, or data files, reading back the output file or checking output format is not enough; independently derive or verify the semantic answer from the source artifact, and if the task asks for all winning/valid answers, prove completeness instead of writing a single plausible answer. "
         "When a source artifact is an image, screenshot, diagram, board, plot, or code screenshot and read_image is available, prefer read_image before lossy ASCII rendering or manual OCR commands. "
         "Treat task.acceptance_constraints as a first-class checklist. Keep working_memory.acceptance_constraints and working_memory.acceptance_checks current. Before finish with task_done=true, action.acceptance_checks must cover every stated constraint with status=verified and direct evidence from recent tool output, diff, or file inspection. If one constraint is an edit-scope rule such as only allowed edits, specified replacements, or do-not-edit paths, verify that constraint explicitly with a post-edit validator, diff, or final inspection tool call after the latest write, and cite that tool id in the evidence; a successful compile, smoke command, output file, or write history alone does not prove it. "
@@ -6502,7 +6504,7 @@ def split_pipe_search_query(query, limit=5):
 
 def valid_batch_sub_action(action):
     action_type = (action or {}).get("type")
-    if action_type in {"read_file", "read_image"}:
+    if action_type in {"analyze_table", "read_file", "read_image"}:
         return bool(action.get("path"))
     if action_type == "search_text":
         return bool(action.get("query"))

@@ -7,6 +7,7 @@ import shlex
 
 from .acceptance import coerce_acceptance_checks
 from .cli_command import mew_command, mew_executable
+from .data_tools import analyze_table
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
     glob_paths,
@@ -235,6 +236,7 @@ def _apply_tiny_write_ready_draft_outcome_to_active_work_todo(
     return todo
 
 WORK_TOOLS = {
+    "analyze_table",
     "inspect_dir",
     "read_file",
     "read_image",
@@ -254,7 +256,7 @@ APPROVAL_WAIT_RE = re.compile(
     r"|\b(?:approval|approve|rejection|reject)\b.*\b(?:wait|waiting|await|awaiting)\b",
     re.IGNORECASE,
 )
-READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "read_image", "search_text", "glob"}
+READ_ONLY_WORK_TOOLS = {"analyze_table", "inspect_dir", "read_file", "read_image", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
@@ -2227,6 +2229,14 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
 
     if tool == "inspect_dir":
         return inspect_dir(parameters.get("path") or ".", allowed_read_roots, limit=parameters.get("limit", 50))
+    if tool == "analyze_table":
+        return analyze_table(
+            parameters.get("path") or "",
+            allowed_read_roots,
+            max_bytes=parameters.get("max_bytes"),
+            max_rows=parameters.get("max_rows"),
+            max_extrema=parameters.get("max_extrema"),
+        )
     if tool == "read_file":
         return read_file(
             parameters.get("path") or "",

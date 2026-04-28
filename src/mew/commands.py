@@ -3484,6 +3484,7 @@ def work_finish_blocker_allows_continue(finished_note):
             "acceptance constraints unchecked",
             "edit-scope acceptance evidence",
             "all-valid answer completeness evidence",
+            "numeric artifact quality evidence",
         )
     )
 
@@ -10558,6 +10559,7 @@ def _work_tool_edits(args):
 
 def _work_tool_parameters(args, session=None, gate_options=None, task=None):
     path_tools = {
+        "analyze_table",
         "inspect_dir",
         "read_file",
         "read_image",
@@ -10596,6 +10598,8 @@ def _work_tool_parameters(args, session=None, gate_options=None, task=None):
         "verify_timeout": getattr(args, "verify_timeout", None),
         "limit": getattr(args, "limit", None),
         "max_chars": getattr(args, "max_chars", None),
+        "max_rows": getattr(args, "max_rows", None),
+        "max_extrema": getattr(args, "max_extrema", None),
         "offset": getattr(args, "offset", None),
         "line_start": getattr(args, "line_start", None),
         "line_count": getattr(args, "line_count", None),

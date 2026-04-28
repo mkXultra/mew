@@ -1299,6 +1299,7 @@ def build_parser():
     work_parser.add_argument(
         "--tool",
         choices=(
+            "analyze_table",
             "inspect_dir",
             "read_file",
             "read_image",
@@ -1340,6 +1341,8 @@ def build_parser():
     work_parser.add_argument("--timeout", type=float, default=300.0, help="timeout for run_command or run_tests")
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
     work_parser.add_argument("--max-chars", type=int, default=DEFAULT_READ_MAX_CHARS, help="maximum read_file characters")
+    work_parser.add_argument("--max-rows", type=int, help="maximum rows for analyze_table")
+    work_parser.add_argument("--max-extrema", type=int, help="maximum local extrema per pair for analyze_table")
     work_parser.add_argument("--offset", type=int, default=0, help="character offset for read_file")
     work_parser.add_argument("--line-start", type=int, help="1-based starting line for read_file")
     work_parser.add_argument("--line-count", type=int, help="number of lines to read with --line-start")

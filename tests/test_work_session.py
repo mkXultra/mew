@@ -32261,8 +32261,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("inspect those artifact/output properties or run a small command that asserts them", prompt)
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks", prompt)
-        self.assertIn("a schema-only or finite-number check is not enough", prompt)
-        self.assertIn("verify numeric plausibility against the input data", prompt)
+        self.assertIn("prefer analyze_table on CSV/TSV/whitespace numeric source files", prompt)
+        self.assertIn("schema-only, finite-number, or single-fit residual check is not enough", prompt)
+        self.assertIn("completed grounding tool whose output contains an independent cross-check", prompt)
+        self.assertIn("alternative method, recomputation, holdout, bootstrap", prompt)
         self.assertIn("residual/error checks, expected peak/location windows", prompt)
         self.assertIn("For answer-from-artifact tasks such as images, boards, puzzles", prompt)
         self.assertIn("reading back the output file or checking output format is not enough", prompt)
@@ -34792,7 +34794,61 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(
             work_finish_blocker_allows_continue("finish blocked: acceptance constraints unchecked")
         )
+        self.assertTrue(
+            work_finish_blocker_allows_continue("finish blocked: numeric artifact quality evidence ungrounded")
+        )
         self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))
+
+    def test_work_finish_blocks_numeric_artifact_without_independent_cross_check(self):
+        from mew.commands import apply_work_control_action
+
+        description = (
+            "Fit the G and 2D Peak of the spectrum and return the x0, gamma, "
+            "amplitude and offset of the peaks."
+        )
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {"stdout": "rmse=0.05 rel_rmse=0.02 finite parameters"},
+                },
+                {"id": 2, "tool": "read_file", "status": "completed"},
+            ],
+        }
+        task = {
+            "id": 15,
+            "title": "Fit Raman peaks",
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        state["tasks"].append(task)
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Verify numeric plausibility against the input data.",
+                    "status": "verified",
+                    "evidence": "Tool #1 residual checks and finite parameter assertions passed.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("numeric artifact quality evidence ungrounded", result["finished_note"])
 
     def test_repairable_wait_does_not_convert_on_final_step(self):
         action = {"type": "wait", "reason": "unsupported replacement"}

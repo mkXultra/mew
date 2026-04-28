@@ -108,6 +108,55 @@ _COMPLETENESS_EVIDENCE_MARKERS = (
     "winning moves",
 )
 
+_NUMERIC_STRONG_TASK_RE = re.compile(
+    r"\b("
+    r"optimization|optimisation|optimize|optimise|scientific|spectrum|spectra|"
+    r"peak|peaks|gamma|amplitude|residual|rmse"
+    r")\b",
+    re.IGNORECASE,
+)
+_NUMERIC_FIT_RE = re.compile(r"\b(fit|fitting|fitted)\b", re.IGNORECASE)
+
+_NUMERIC_CHECK_MARKERS = (
+    "amplitude",
+    "bounds",
+    "error",
+    "fit",
+    "gamma",
+    "loss",
+    "metric",
+    "mse",
+    "offset",
+    "peak",
+    "plausibility",
+    "range",
+    "residual",
+    "rmse",
+    "window",
+    "x0",
+)
+
+_NUMERIC_INDEPENDENCE_MARKERS = (
+    "alternative",
+    "bootstrap",
+    "brute force",
+    "compare",
+    "comparison",
+    "cross check",
+    "cross-check",
+    "different method",
+    "holdout",
+    "independent",
+    "recalculate",
+    "recalculated",
+    "recompute",
+    "recomputed",
+    "second method",
+    "sensitivity",
+    "stability",
+    "validator",
+)
+
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:
     cleaned = _WHITESPACE_RE.sub(" ", str(text or "").strip())
@@ -261,6 +310,31 @@ def is_all_valid_answer_task(text: object) -> bool:
     return any(marker in lowered for marker in ("all", "multiple", "one per line"))
 
 
+def is_numeric_artifact_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if _NUMERIC_STRONG_TASK_RE.search(lowered):
+        return True
+    if _NUMERIC_FIT_RE.search(lowered):
+        return any(
+            marker in lowered
+            for marker in (
+                "curve",
+                "data",
+                "dataset",
+                "model",
+                "numeric",
+                "parameter",
+                "spectrum",
+                "x0",
+            )
+        )
+    if "regression" in lowered or "rank" in lowered or "ranking" in lowered:
+        return any(marker in lowered for marker in ("metric", "score", "numeric", "dataset"))
+    if "metric" in lowered or "metrics" in lowered:
+        return any(marker in lowered for marker in ("compute", "numeric", "score", "dataset", "data file"))
+    return False
+
+
 def _has_completeness_marker(text: object) -> bool:
     lowered = str(text or "").casefold()
     return any(marker in lowered for marker in _COMPLETENESS_EVIDENCE_MARKERS)
@@ -337,6 +411,59 @@ def _edit_scope_grounding_blocker(
     return ""
 
 
+def _has_numeric_check_marker(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _NUMERIC_CHECK_MARKERS)
+
+
+def _has_numeric_independence_marker(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _NUMERIC_INDEPENDENCE_MARKERS)
+
+
+def _has_numeric_artifact_quality_evidence(evidence: object, session: object) -> bool:
+    if not (_has_numeric_check_marker(evidence) and _has_numeric_independence_marker(evidence)):
+        return False
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in _GROUNDING_TOOLS:
+            continue
+        tool_text = _tool_call_text(call)
+        if _has_numeric_check_marker(tool_text) and _has_numeric_independence_marker(tool_text):
+            return True
+    return False
+
+
+def _numeric_artifact_quality_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if not is_numeric_artifact_task(task_description):
+        return ""
+    numeric_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+        and (_has_numeric_check_marker(check.get("constraint")) or _has_numeric_check_marker(check.get("evidence")))
+    ]
+    if not numeric_checks:
+        return (
+            "numeric artifact quality evidence missing: fitting, optimization, ranking, "
+            "scientific, or metric tasks must cite an independent numeric validation "
+            "before task_done=true"
+        )
+    for check in numeric_checks:
+        if _has_numeric_artifact_quality_evidence(check.get("evidence"), session):
+            return ""
+    return (
+        "numeric artifact quality evidence ungrounded: numeric checks must cite a completed "
+        "grounding tool whose output contains an independent cross-check, alternative method, "
+        "recomputation, holdout, bootstrap, or sensitivity/stability validation; schema, "
+        "finite-number, single-fit residual, or readback-only evidence is not enough"
+    )
+
+
 def acceptance_finish_blocker(task_description: object, action: object, *, session: object = None) -> str:
     action = action if isinstance(action, dict) else {}
     if not action.get("task_done"):
@@ -345,6 +472,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     all_valid_answer_blocker = _all_valid_answer_grounding_blocker(task_description, checks, session)
     if all_valid_answer_blocker:
         return all_valid_answer_blocker
+    numeric_artifact_blocker = _numeric_artifact_quality_blocker(task_description, checks, session)
+    if numeric_artifact_blocker:
+        return numeric_artifact_blocker
     constraints = extract_acceptance_constraints(task_description)
     if not constraints:
         return ""

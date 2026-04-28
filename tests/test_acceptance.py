@@ -2,6 +2,7 @@ from mew.acceptance import (
     acceptance_finish_blocker,
     coerce_acceptance_checks,
     extract_acceptance_constraints,
+    is_numeric_artifact_task,
 )
 
 
@@ -125,6 +126,145 @@ def test_acceptance_finish_blocker_accepts_post_write_edit_scope_validator():
             {"id": 2, "tool": "edit_file", "status": "completed"},
             {"id": 3, "tool": "run_command", "status": "completed"},
             {"id": 4, "tool": "run_command", "status": "completed"},
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_rejects_numeric_single_fit_residual_only():
+    text = (
+        "Fit the G and 2D Peak of the spectrum and return the x0, gamma, "
+        "amplitude and offset of the peaks."
+    )
+    checks = [
+        {
+            "constraint": "Verify numeric plausibility against the input data.",
+            "status": "verified",
+            "evidence": "Tool #4 residual checks and finite parameter assertions passed.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {"stdout": "rmse=0.05 rel_rmse=0.02 finite parameters"},
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "numeric artifact quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_numeric_independent_cross_check():
+    text = (
+        "Fit the G and 2D Peak of the spectrum and return the x0, gamma, "
+        "amplitude and offset of the peaks."
+    )
+    checks = [
+        {
+            "constraint": "Verify numeric plausibility against the input data.",
+            "status": "verified",
+            "evidence": "Tool #4 independent cross-check recomputed fit stability with an alternative method.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {
+                    "stdout": (
+                        "independent cross-check: alternative grid fit compared against "
+                        "nonlinear fit; residual rmse and parameter stability within bounds"
+                    )
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_ignores_blocked_numeric_checks():
+    text = "Compute metrics from the dataset and write output.json."
+    checks = [
+        {
+            "constraint": "Verify numeric metric quality against the input data.",
+            "status": "blocked",
+            "evidence": "Tool #4 independent cross-check recomputed metrics with an alternative method.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {
+                    "stdout": (
+                        "independent cross-check: alternative computation compared metrics; "
+                        "residual error within bounds"
+                    )
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "numeric artifact quality evidence missing" in blocker
+
+
+def test_numeric_artifact_task_classifier_covers_rank_and_metrics_without_ui_false_positive():
+    assert is_numeric_artifact_task("Rank rows by numeric score.")
+    assert is_numeric_artifact_task("Compute metrics from the dataset.")
+    assert not is_numeric_artifact_task("Fix offset pagination regression where the text does not fit.")
+    assert not is_numeric_artifact_task("Update metrics reporting docs.")
+    assert not is_numeric_artifact_task("Keep the prompt cache boundary empty without draft metrics.")
+
+
+def test_acceptance_finish_blocker_does_not_treat_ui_fit_or_offset_as_numeric():
+    text = "Fix offset pagination regression where the text does not fit in the card. Ensure output file exists."
+    checks = [
+        {"constraint": constraint, "status": "verified", "evidence": "tool #2 output confirmed it"}
+        for constraint in extract_acceptance_constraints(text)
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 2,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {"stdout": "ui pagination regression verified"},
+            }
         ]
     }
 
