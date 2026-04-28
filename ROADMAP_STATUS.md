@@ -156,6 +156,9 @@ M6.24 Batch 1:
 - manifest: `docs/M6_24_BATCH_1_MANIFEST_2026-04-28.md`
 - local batch JSON: `docs/data/terminal_bench_m6_24_batch_1.json`
 - run ledger: `docs/M6_24_BATCH_1_RUNS_2026-04-28.md`
+- Batch 2 manifest: `docs/M6_24_BATCH_2_MANIFEST_2026-04-28.md`
+- Batch 2 local JSON: `docs/data/terminal_bench_m6_24_batch_2.json`
+- Batch 2 run ledger: `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`
 - selected tasks: `configure-git-webserver`, `db-wal-recovery`,
   `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
   `build-cython-ext`, `code-from-image`, and `fix-git`
@@ -439,6 +442,13 @@ M6.24 Batch 1:
   repair cycles unless a small generic objective-grounding check is obvious;
   continue broad M6.24 measurement or build a reusable numeric objective
   substrate from multiple numeric/data tasks.
+- completed Batch 2 selection:
+  Batch 2 covers unseen tasks `caffe-cifar-10`,
+  `extract-moves-from-video`, `dna-assembly`, `dna-insert`,
+  `financial-document-processor`, `build-pmars`, `git-leak-recovery`, and
+  `large-scale-text-editing`, with frozen Codex target 27/40. The next chain
+  is `M6.24 broad parity -> all 89 frozen registry tasks measured -> run Batch
+  2 task-by-task through normal mew work --oneshot`.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
   passed with 743 tests and 30 subtests; `uv run ruff check` on changed files
