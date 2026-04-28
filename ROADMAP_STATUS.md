@@ -462,7 +462,9 @@ M6.24 Batch 1:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-build-pmars-5attempts-system-perms-20260428-1015/result.json`.
   Future Batch 2 runs should use the explicit normal work path roots
   `--allow-read . --allow-read /etc/apt --allow-write . --allow-write /usr/local/bin`.
-  Batch 2 measured latest total is 10/10 against frozen Codex target 10/10 for
+  `large-scale-text-editing` matched Codex target 5/5 with no Harbor errors in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-large-scale-text-editing-5attempts-20260428-1026/result.json`.
+  Batch 2 measured latest total is 15/15 against frozen Codex target 15/15 for
   measured tasks.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
