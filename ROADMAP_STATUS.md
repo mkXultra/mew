@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Selected M6.24 structural blockers SR-001, SR-002, and SR-003 are repaired; the previous close gate remains historical and future repairs reopen/append here. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Selected M6.24 structural blockers SR-001, SR-002, SR-003, and later append-only repairs such as SR-007/SR-008 are repaired; the previous close gate remains historical and future repairs reopen/append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -148,17 +148,37 @@ M6.24 resume condition:
   pseudo-tool when write-batch normalization fails. Focused regression covered
   `edit_file_hunks` plus `wait` and verified zero tool calls plus
   `batch_blocked=true`.
+- Closed M6.14 follow-on episode:
+  SR-008 direct Python pytest-file false green is `repaired`. M6.24 Batch 3
+  `break-filter-js-from-html` exposed trials that ran
+  `python /app/test_outputs.py`, got exit 0 because pytest tests were only
+  defined, then failed Harbor's external pytest verifier. `run_tests` now
+  normalizes pytest-style direct Python file invocations to
+  `python -m pytest -q <file>` and preserves the original command. Same-shape
+  proof `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-55-56/result.json`
+  scored 0/1 but no longer false-greened; the report shows the normalized
+  pytest command failed before the model continued with verifier feedback.
 - M6.24 Batch 2 `dna-insert` was measured after SR-003 and before the #18
   repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.
   This is broad parity evidence, not yet an accepted structural repair signal.
+- M6.24 Batch 2 `caffe-cifar-10` then completed the batch: 0/3 completed
+  reward trials, 2 RuntimeError command timeouts, runtime 16m 46s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-23-11/result.json`.
+  Because the frozen Codex target is 0/5, this is runner-error debt but not a
+  selected repair by itself.
+- M6.24 Batch 3 has started. `break-filter-js-from-html` baseline scored 0/5
+  against Codex target 5/5 and selected SR-008 for immediate repair. After the
+  repair proof, the remaining 0/5 is a task-solving gap rather than the direct
+  Python pytest-file false-green substrate bug.
 
 Next concrete action:
 
-- Continue M6.24 Batch 2 / broad parity measurement from the current manifest.
-  If a new failure is accepted as structural rather than ordinary task miss,
-  append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
-  Remaining unmeasured Batch 2 task is `caffe-cifar-10`.
+- Run M6.24 Batch 3 task by task from
+  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md` and
+  `docs/data/terminal_bench_m6_24_batch_3.json`. If a new failure is accepted
+  as structural rather than ordinary task miss, append it to
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
 
 Closed M6.22 result:
 

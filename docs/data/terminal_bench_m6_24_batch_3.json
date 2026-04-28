@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "source_registry": "docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json",
+  "purpose": "M6.24 broad Terminal-Bench parity campaign batch 3",
+  "selection_rule": "Next unseen registry slice after M6.20/M6.22/M6.24 Batch 1 and Batch 2, spanning low/medium/high Codex success bands and varied task shapes without Terminal-Bench-specific solvers.",
+  "codex_target_successes": 24,
+  "codex_target_trials": 40,
+  "tasks": [
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "b33421492e86b07de2a01bc2205f7e7d2fdc36446a84787265d99e5e138fdaaa",
+      "taskName": "break-filter-js-from-html"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "faca0987c8afa99023a8952f31da77a9017ed01ca04de9fee03b7d3fb1d92e26",
+      "taskName": "build-pov-ray"
+    },
+    {
+      "avgResolutionRate": 0,
+      "nTrials": 5,
+      "resolutionRatePct": 0.0,
+      "successCount": 0,
+      "taskChecksum": "917afbb6fd42db76b132a41359c8511be11faed2a8b74f17b802b4928f52313e",
+      "taskName": "install-windows-3.11"
+    },
+    {
+      "avgResolutionRate": 0.2,
+      "nTrials": 5,
+      "resolutionRatePct": 20.0,
+      "successCount": 1,
+      "taskChecksum": "48c24358a58435a97de86cc88255b6faf1cd3cb28bd27ff6a918e01655095981",
+      "taskName": "make-doom-for-mips"
+    },
+    {
+      "avgResolutionRate": 0.4,
+      "nTrials": 5,
+      "resolutionRatePct": 40.0,
+      "successCount": 2,
+      "taskChecksum": "a2c8524885b5ab2e9a3b8c6cd374001556f013e9009487963d3a04271130deed",
+      "taskName": "mcmc-sampling-stan"
+    },
+    {
+      "avgResolutionRate": 0.8,
+      "nTrials": 5,
+      "resolutionRatePct": 80.0,
+      "successCount": 4,
+      "taskChecksum": "d0dd8f420350bee97f2d47a2b0c74996be0146aa7bd6f8a1871d9629200dc359",
+      "taskName": "model-extraction-relu-logits"
+    },
+    {
+      "avgResolutionRate": 0.8,
+      "nTrials": 5,
+      "resolutionRatePct": 80.0,
+      "successCount": 4,
+      "taskChecksum": "0ddf1db011f2f37709b0fc536f67a3f4261ce5cae69613969f017f365c25ac94",
+      "taskName": "polyglot-rust-c"
+    },
+    {
+      "avgResolutionRate": 0.6,
+      "nTrials": 5,
+      "resolutionRatePct": 60.0,
+      "successCount": 3,
+      "taskChecksum": "b62eef3fb5c016796ec8b1eda72f2be68fcb44844d2dbe12776412e1580a33b3",
+      "taskName": "video-processing"
+    }
+  ]
+}

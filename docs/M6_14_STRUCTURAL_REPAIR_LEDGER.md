@@ -44,6 +44,7 @@ Failure evidence:
 - `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`
 - `docs/M6_24_BATCH_1_RUNS_2026-04-28.md`
 - `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`
+- `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`
 
 Architecture references:
 
@@ -100,6 +101,7 @@ Status vocabulary:
 | SR-004 | candidate | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure | Add safer multiline command guidance or command-shape helper, likely heredoc/script-first policy | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | rerun a task that exercises multiline verification | Lower priority than timeout/grounding unless it blocks a selected repair. |
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
 | SR-007 | repaired | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen write-batch normalization/execution so blockers are top-level waits, not pseudo-tools inside a write batch; preserve the exact blocker instead of surfacing `batch write tool is not ... wait` | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for mixed `edit_file_hunks` + `wait` batch | Repaired by normalizer and executor guards: mixed write/wait batches now become an actionable top-level blocker, and command execution blocks before any pseudo-tool execution. Focused regression passed. |
+| SR-008 | repaired | M6.24 Batch 3 | direct Python pytest-file false green | `break-filter-js-from-html` scored 0/5 while several trials claimed `python /app/test_outputs.py` passed; direct Python execution only defined pytest tests and exited 0, while Harbor pytest verifier failed | Normalize `run_tests` commands that directly execute pytest-style `test_*.py` files through Python into `python -m pytest -q <file>` so no-op verifiers fail loudly | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `break-filter-js-from-html` same failed shape | Repaired by executor normalization plus focused regression; same-shape rerun no longer false-greened and preserved `python -m pytest -q /app/test_outputs.py` failure evidence. |
 
 ## SR-001 Progress
 
@@ -245,6 +247,35 @@ Status vocabulary:
 - Lint/diff validation passed:
   `uv run ruff check src/mew/commands.py src/mew/work_loop.py tests/test_work_session.py`
   and `git diff --check`.
+
+## SR-008 Progress
+
+- 2026-04-28: M6.24 Batch 3 `break-filter-js-from-html` baseline scored 0/5
+  with Harbor errors 0. Several trials finished `task_done=true` after running
+  `python /app/test_outputs.py` and seeing exit 0, but the command only defined
+  pytest tests and did not execute them. Harbor's external verifier executed
+  pytest and failed all five trials.
+- Generic repair:
+  `run_tests` now detects direct Python invocation of pytest-style files such
+  as `python test_outputs.py` or `python /app/test_outputs.py` when the file
+  contains pytest test functions/classes and no direct `__main__` runner. It
+  normalizes the command to `python -m pytest -q <file>` before execution and
+  records the original command plus normalization reason in the result.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'direct_pytest_file_invocation or normalizes_leading_cd_and_then_operator or allows_quoted_shell_operator_literals or zero_test_pytest' -q`.
+- Broader nearby validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'run_tests' -q`.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`
+  and `git diff --check`.
+- Same-shape proof result:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-55-56/result.json`
+  scored 0/1 with Harbor errors 0, but the prior false green was removed. The
+  preserved `mew-report.json` has `work_exit_code=1`, `stop_reason=model_error`,
+  and command history showing `python -m pytest -q /app/test_outputs.py` failed
+  before the model continued with explicit verifier feedback. This satisfies
+  SR-008: the executor no longer treats direct Python execution of pytest-style
+  test files as a passing verifier.
 
 ## Repaired / Superseded Rows
 

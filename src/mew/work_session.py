@@ -2241,6 +2241,58 @@ def normalize_run_tests_cd_prefix(command, cwd):
     return suffix, target_cwd, True
 
 
+def _is_python_executable_token(token):
+    name = Path(str(token or "")).name.casefold()
+    return bool(re.fullmatch(r"python(?:\d+(?:\.\d+)?)?|pypy(?:\d+)?", name))
+
+
+def _looks_like_pytest_file(path):
+    try:
+        resolved = Path(path)
+    except TypeError:
+        return False
+    if resolved.suffix != ".py":
+        return False
+    normalized_path = resolved.as_posix()
+    if not (resolved.name.startswith("test_") or resolved.name.endswith("_test.py") or "/tests/" in normalized_path):
+        return False
+    try:
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    if "__main__" in text and "pytest.main" not in text:
+        return False
+    return bool(
+        re.search(r"(?m)^\s*def\s+test_[A-Za-z0-9_]*\s*\(", text)
+        or re.search(r"(?m)^\s*class\s+Test[A-Za-z0-9_]*\s*[:(]", text)
+    )
+
+
+def normalize_run_tests_pytest_file_invocation(command, cwd):
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return command, False, ""
+    if len(tokens) < 2 or not _is_python_executable_token(tokens[0]):
+        return command, False, ""
+    index = 1
+    while index < len(tokens) and tokens[index] in {"-B", "-E", "-I", "-S", "-s", "-u"}:
+        index += 1
+    if index >= len(tokens) or tokens[index] == "-m" or index != len(tokens) - 1:
+        return command, False, ""
+    script = tokens[index]
+    script_path = Path(script)
+    resolved = script_path if script_path.is_absolute() else Path(cwd or ".") / script_path
+    if not _looks_like_pytest_file(resolved):
+        return command, False, ""
+    normalized = f"{shlex.quote(tokens[0])} -m pytest -q {shlex.quote(script)}"
+    return (
+        normalized,
+        True,
+        "normalized direct Python test-file invocation to pytest to avoid a no-op verifier",
+    )
+
+
 def reject_shell_control_tokens(command, *, tool_name="run_tests"):
     operator, kind = first_unquoted_shell_operator(command)
     if not operator:
@@ -2374,13 +2426,25 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
             parameters["normalized_cd_prefix"] = True
             parameters["command"] = command
             parameters["cwd"] = cwd
+        original_command = command
+        command, normalized_pytest_invocation, normalize_reason = normalize_run_tests_pytest_file_invocation(command, cwd)
+        if normalized_pytest_invocation:
+            parameters["command"] = command
+            parameters["original_command"] = original_command
+            parameters["normalized_pytest_file_invocation"] = True
+            parameters["normalized_pytest_file_invocation_reason"] = normalize_reason
         reject_shell_control_tokens(command, tool_name="run_tests")
-        return run_command_for_work(
+        result = run_command_for_work(
             command,
             cwd=cwd,
             timeout=parameters.get("timeout", 300),
             on_output=on_output,
         )
+        if normalized_pytest_invocation:
+            result["original_command"] = original_command
+            result["normalized_pytest_file_invocation"] = True
+            result["normalization_reason"] = normalize_reason
+        return result
     if not parameters.get("allow_shell"):
         raise ValueError("shell command execution is disabled; pass --allow-shell")
     command = parameters.get("command") or ""
