@@ -29,14 +29,14 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
 | SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
 | SP18 mew-ghost Live Desk Opt-In | `done` | Live desk opt-in landed practical: explicit `--live-desk`, no-shell repo-local desk command, timeout/fallback handling, fixture-only defaults, top-level real desk JSON normalization, README examples, local report, real live-desk proof, and focused tests are in place. |
-| SP19 mew-wisp CLI-First Reset and HTML Removal | `blocked` | First mew-first attempt stopped before product edits: sessions #42/#43 could reason about HTML removal but failed on source-only verifier failure, stale edit hunks, and batch tool-shape handling. Issue #18 tracks the implementation-lane blocker. |
+| SP19 mew-wisp CLI-First Reset and HTML Removal | `blocked/partial` | Broad HTML removal remains blocked by issue #18, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `planned` | Build the foreground terminal resident view before adding more live mew coupling. |
 | SP21 mew-wisp Form Layer | `planned` | Separate the wisp surface from the displayed character so forms/skins can change later. |
 | SP22 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
 
-Active side-project focus: **SP19 mew-wisp CLI-First Reset and HTML Removal is blocked**.
+Active side-project focus: **mew-wisp terminal path toward SP21 cat form**.
 
 Current target:
 
@@ -47,12 +47,20 @@ Current target:
   the visible character should be replaceable by future forms/skins
 - build the CLI experience from fixtures first, then reconnect to explicit mew
   state once the terminal resident view is worth keeping on screen
-- retire HTML/browser output from the forward product direction; keep
-  deterministic state/JSON output for tests, proofs, and future adapters
+- retire HTML/browser output from the forward product direction when the broad
+  removal blocker is fixed; meanwhile use the additive `--format human` path as
+  the forward terminal surface and keep deterministic state/JSON output for
+  tests, proofs, and future adapters
 - keep the current implementation isolated under `experiments/mew-ghost` until
   SP19 either renames the path or records why the path should remain historical
 - SP19 task `#19` is blocked with no product edits landed; issue `#18` records
-  the stale-hunk and batch tool-shape failure after sessions `#42` and `#43`
+  the stale-hunk and batch tool-shape failure after sessions `#42` and `#43`,
+  and was reopened after session `#44` still could not land broad HTML removal
+  even after the issue was initially closed and latest `origin/main` was pulled
+- SP19a task `#20` landed practical: `--format human` renders terminal-first
+  text for operator consoles, desk fixture status/action details are visible,
+  focused tests cover the new surface, and existing `html`/`state` outputs stay
+  intact while the broad SP19 removal remains deferred behind issue `#18`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -119,6 +127,12 @@ Current target:
   `mew side-dogfood report`.
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP19a on 2026-04-28: `rows_total=24`, five `failed`, sixteen `practical`,
+  three `clean`, `success_rate=0.792`, `structural_repairs_required=5`,
+  `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`. Ledger row
+  `23` records the post-issue-18-close SP19 retry failure, and row `24`
+  records the additive SP19a terminal human renderer.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,

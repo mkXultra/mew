@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": 19,
+  "session_id": 44,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Retry SP19 broad CLI-first HTML removal after issue #18 was closed and latest origin/main was pulled.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "failed during rolled-back writes: first 9 failed/19 passed, then 1 failed/27 passed, then 8 failed/20 passed"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 3,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "sp19_html_removal_still_unstable_after_issue18_close",
+  "repair_required": true,
+  "proof_artifacts": [
+    "mew task #19",
+    "mew work session #44",
+    "reopened GitHub issue #18: https://github.com/mkXultra/mew/issues/18"
+  ],
+  "commit": "",
+  "notes": "After issue #18 was closed, operator committed the prior blocker record, pulled origin/main at bf4c3fe into side/r2, and retried task #19 with model gpt-5.5 in fresh session #44. Mew produced write_file attempts under experiments/mew-ghost, but all product writes were rolled back by focused verifier failures. The final worktree remained clean, so no product edits landed. The operator reopened issue #18 and will work around by splitting SP19 into smaller mew-first slices instead of continuing the broad coordinated HTML-removal patch."
+}

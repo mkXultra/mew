@@ -381,6 +381,27 @@ def test_cli_renders_desk_json_state_and_html(tmp_path: Path) -> None:
     assert 'typing' in html
 
 
+def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> None:
+    human_output = tmp_path / 'desk-human.txt'
+
+    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--desk-json', str(DESK_FIXTURE_PATH), '--format', 'human', '--output', str(human_output)]) == 0
+
+    human = human_output.read_text(encoding='utf-8')
+
+    assert human.startswith('mew-wisp SP19a terminal human view\n')
+    assert 'presence: coding' in human
+    assert 'desk primary: Resume SP17 desk bridge -> mew code --task 17' in human
+    assert 'typing -> coding' in human
+    assert '<!doctype html>' not in human
+    assert '"schema_version"' not in human
+
+    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--format', 'human']) == 0
+    stdout = capsys.readouterr().out
+
+    assert stdout.startswith('mew-wisp SP19a terminal human view\n')
+    assert 'launcher intents:' in stdout
+
+
 def test_cli_live_desk_opt_in_uses_injected_runner_without_spawning(capsys, tmp_path: Path) -> None:
     repo_root = tmp_path / 'repo'
     repo_root.mkdir()
@@ -672,6 +693,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 1',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --watch-count 2',
@@ -679,6 +701,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     ]
     assert all(not line.startswith('python experiments/mew-ghost/ghost.py') for line in usage_lines)
     assert '--watch-count N' in readme
+    assert '--format human' in readme
     assert 'KeyboardInterrupt' in readme
     assert 'rewrites the same local HTML file' in readme
 
@@ -697,6 +720,8 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert '--interval' in source
     assert '--desk-json' in source
     assert '--live-desk' in source
+    assert "choices=('html', 'state', 'human')" in source
+    assert 'render_terminal_human' in source
     assert "SCHEMA_VERSION = 'mew-ghost.sp18.v1'" in source
     assert 'Standalone SP18 mew-ghost foreground watch-mode shell' in source
     assert "description='Render the SP18 mew-ghost watch-mode shell'" in source

@@ -829,6 +829,89 @@ def render_local_html(state: Mapping[str, Any]) -> str:
     ) + chr(10)
 
 
+def render_terminal_human(state: Mapping[str, Any]) -> str:
+    ghost = state['ghost']
+    probe = state['active_window']
+    presence = state['presence']
+    classification = presence['classification']
+    freshness = state.get('freshness', {})
+    desk = state.get('desk', {})
+    if not isinstance(desk, Mapping):
+        desk = {}
+    desk_counts = desk.get('counts') if isinstance(desk.get('counts'), Mapping) else {}
+    desk_details = desk.get('details') if isinstance(desk.get('details'), list) else []
+    desk_primary = desk.get('primary_action') if isinstance(desk.get('primary_action'), Mapping) else None
+    intents = state.get('launch_intents', [])
+    watch_iteration = freshness.get('watch_iteration')
+    watch_total = freshness.get('watch_total')
+    iteration_label = 'single render' if watch_iteration is None else 'watch iteration %s%s' % (
+        watch_iteration,
+        '' if watch_total is None else ' of %s' % watch_total,
+    )
+    primary_label = 'none' if desk_primary is None else str(desk_primary.get('label', 'none'))
+    primary_command = 'none' if desk_primary is None else ' '.join(str(part) for part in desk_primary.get('command', [])) or 'none'
+
+    lines = [
+        'mew-wisp SP19a terminal human view',
+        'ghost: %s | mood: %s | focus: %s' % (ghost['name'], ghost['mood'], ghost['focus']),
+        'message: %s' % ghost['message'],
+        'presence: %s | %s | snapshots: %s' % (
+            classification['state'],
+            presence['contract'],
+            presence['refresh_count'],
+        ),
+        'freshness: %s | %s | refreshed: %s | interval: %s' % (
+            freshness.get('mode', 'single-render'),
+            iteration_label,
+            freshness.get('rendered_at', state.get('generated_at')),
+            freshness.get('interval_seconds', 'n/a'),
+        ),
+        'desk: %s | counts: %s' % (desk.get('status', 'disabled'), json.dumps(desk_counts, sort_keys=True)),
+        'desk primary: %s -> %s' % (primary_label, primary_command),
+    ]
+
+    if desk_details:
+        lines.append('desk details:')
+        for detail in desk_details:
+            if not isinstance(detail, Mapping):
+                continue
+            detail_text = str(detail.get('detail') or '')
+            suffix = '' if not detail_text else ' - ' + detail_text
+            lines.append(
+                '  - %s: %s -> %s%s'
+                % (
+                    detail.get('name', 'desk pet'),
+                    detail.get('pet_state', 'unknown'),
+                    detail.get('presence_state', 'unknown'),
+                    suffix,
+                )
+            )
+    else:
+        lines.append('desk details: none')
+
+    lines.extend(
+        [
+            'active window: %s | app: %s | window: %s | reason: %s'
+            % (
+                probe['status'],
+                probe.get('active_app') or 'unavailable',
+                probe.get('window_title') or 'unavailable',
+                probe.get('reason') or 'none',
+            ),
+            'launcher intents:',
+        ]
+    )
+    for intent in intents:
+        if not isinstance(intent, Mapping):
+            continue
+        command = ' '.join(str(part) for part in intent.get('command', [])) or 'none'
+        execution = 'dry-run' if intent.get('dry_run', True) else 'execute'
+        lines.append('  - %s: %s (%s)' % (intent.get('id', 'launcher'), command, execution))
+    if lines[-1] == 'launcher intents:':
+        lines.append('  - none')
+    return chr(10).join(lines) + chr(10)
+
+
 def render_fixture(
     path: str | Path = DEFAULT_FIXTURE,
     *,
@@ -856,7 +939,11 @@ def render_fixture(
 def _render_payload(state: Mapping[str, Any], html: str, format_name: str) -> str:
     if format_name == 'state':
         return json.dumps(state, indent=2, sort_keys=True) + chr(10)
-    return html
+    if format_name == 'human':
+        return render_terminal_human(state)
+    if format_name == 'html':
+        return html
+    raise ValueError('unsupported format: %s' % format_name)
 
 
 def _watch_record(
@@ -888,7 +975,10 @@ def _watch_record(
     if format_name == 'state':
         record['state'] = state
     elif output_path is None:
-        record['html'] = rendered
+        if format_name == 'human':
+            record['human'] = rendered
+        else:
+            record['html'] = rendered
     return record
 
 
@@ -983,7 +1073,7 @@ def main(
     parser.add_argument('--desk-json', help='static mew desk JSON-style fixture to bridge into ghost state')
     parser.add_argument('--live-desk', action='store_true', help='explicitly opt into repo-local live desk JSON state')
     parser.add_argument('--output', help='write rendered output to this path')
-    parser.add_argument('--format', choices=('html', 'state'), default='html')
+    parser.add_argument('--format', choices=('html', 'state', 'human'), default='html')
     parser.add_argument('--refresh-count', type=int, default=DEFAULT_REFRESH_COUNT, help='single-render snapshot count, clamped locally')
     parser.add_argument('--watch', action='store_true', help='run foreground watch until KeyboardInterrupt')
     parser.add_argument('--watch-count', type=int, help='run exactly this many foreground watch iterations')

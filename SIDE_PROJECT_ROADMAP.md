@@ -426,7 +426,7 @@ Separate the terminal presence surface from the displayed character.
 
 Done when:
 
-- fixtures can select at least two forms, for example `default` and `compact`,
+- fixtures can select at least two forms, for example `default` and `cat`,
   without changing the underlying state model
 - idle, coding, waiting, and blocked states map to form-specific expressions or
   poses through a small declarative layer

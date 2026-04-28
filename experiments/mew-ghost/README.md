@@ -95,6 +95,12 @@ Load the static desk fixture and render desk status/counts/details/primary_actio
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state
 ```
 
+Render the static desk fixture as terminal-first human text for an operator console:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json
+```
+
 Explicitly opt into live repo-local desk JSON for one terminal state render:
 
 ```bash

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "task_id": 20,
+  "session_id": 45,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP19a additive terminal-first human renderer and --format human workaround for issue #18 while retaining html and state outputs.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/20-sp19a-terminal-human-render-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #20",
+    "mew work session #45",
+    "mew work session #46 reviewer follow-up for canonical mew-wisp header",
+    "experiments/mew-ghost/.mew-dogfood/reports/20-sp19a-terminal-human-render-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 859,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "29 passed after applying source, test, and README edits."
+    },
+    {
+      "tool_call_id": null,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "29 passed after reviewer follow-up changed the terminal human header from historical mew-ghost naming to canonical mew-wisp naming."
+    }
+  ],
+  "implemented_contract": {
+    "human_format": "--format human renders terminal-first plaintext for operator consoles.",
+    "additive_formats": "argparse accepts html, state, and human; default remains html.",
+    "html_preserved": "render_local_html and the html _render_payload branch remain present for default and explicit HTML output.",
+    "state_preserved": "--format state continues to emit deterministic sorted JSON state.",
+    "watch_records": "Foreground watch records now carry rendered human text under a human field only when format is human and no output path is used; html records still use html and state records still embed state.",
+    "desk_fixture_surface": "Human output includes desk status, counts, details, and primary_action command text for the static desk fixture.",
+    "safety_surfaces": "--desk-json, --live-desk, --live-active-window, and --execute-launchers behavior remains covered by the focused test suite; launcher execution remains opt-in and desk primary_action remains non-executable."
+  },
+  "test_contract": {
+    "focused_human_output_test_added": true,
+    "readme_usage_test_updated": true,
+    "existing_tests_preserved": true,
+    "covered_cases": [
+      "human output file does not contain HTML doctype",
+      "human output file does not contain JSON schema_version text",
+      "human stdout render starts with the terminal human view header",
+      "desk fixture primary action appears in human text",
+      "README includes the --format human usage command",
+      "source isolation test asserts html/state/human choices and render_terminal_human remain present"
+    ]
+  },
+  "issue_18_workaround": {
+    "scope": "Small additive SP19a slice under experiments/mew-ghost only.",
+    "html_removal_avoided": true,
+    "terminal_first_surface": "Human plaintext renderer is available without changing the default HTML output."
+  },
+  "acceptance_notes": [
+    "The implementation intentionally keeps SCHEMA_VERSION at mew-ghost.sp18.v1 because this slice adds a renderer rather than changing the state schema.",
+    "An older untracked issue-19 report was already present before this task and was not modified by this SP19a report write.",
+    "Reviewer follow-up session #46 changed the human header/test to the canonical mew-wisp name; no Codex product-code rescue edits were used."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "Broad SP19 HTML removal remains deferred behind issue #18; SP19a only adds the terminal human surface.",
+  "created_at": "2026-04-28T11:00:18Z"
+}
