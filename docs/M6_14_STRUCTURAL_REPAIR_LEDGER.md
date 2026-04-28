@@ -95,7 +95,7 @@ Status vocabulary:
 | ID | Status | First seen | Blocker | Evidence | Generic repair route | Reference inputs | Retry target | Notes |
 |---|---|---|---|---|---|---|---|---|
 | SR-001 | in_repair | M6.22 / M6.24 | `agent_wall_timeout_without_report` / timeout partial observability | `gcode-to-text` had timeout without useful report; `financial-document-processor` and `dna-assembly` later hit long domain/document repair timeouts | Add generic partial progress / timeout observability so long work loops emit actionable reports before command or wall timeout | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` streaming executor notes | rerun `financial-document-processor` or `dna-assembly` same failed shape | Repair started by adding `mew work --oneshot --report` partial progress writes before model/tool execution and during mirrored tool output. |
-| SR-002 | selected | M6.22 / M6.24 | finish/verifier grounding false green | `overfull-hbox` self-reported acceptance despite verifier rejection; `dna-assembly` used surrogate primer Tm checks instead of exact named ground-truth tool | Strengthen finish gate/task contract so named external ground-truth tools or acceptance constraints must be executed exactly, or finish must be blocked | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/review/verify and todo patterns | rerun `dna-assembly`; optionally rerun an acceptance-grounding task | High trust impact; false green is more dangerous than honest failure. |
+| SR-002 | in_repair | M6.22 / M6.24 | finish/verifier grounding false green | `overfull-hbox` self-reported acceptance despite verifier rejection; `dna-assembly` used surrogate primer Tm checks instead of exact named ground-truth tool | Strengthen finish gate/task contract so named external ground-truth tools or acceptance constraints must be executed exactly, or finish must be blocked | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/review/verify and todo patterns | rerun `dna-assembly`; optionally rerun an acceptance-grounding task | Generic finish-gate slice started: task text that names an exact external ground-truth command/tool and flags now requires completed `run_command` / `run_tests` evidence containing the exact command shape. |
 | SR-003 | candidate | M6.22 / M6.24 | artifact observation substrate gap | `gcode-to-text` visual/geometric grounding gap; `code-from-image` fixed by `read_image`; `financial-document-processor` exposed PDF/document observation gap | Add generic document/PDF or broader artifact observation only if selected as bounded repair slice | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md` | rerun `financial-document-processor` or a visual/document task | Partly repaired for images; PDF/document remains open. |
 | SR-004 | candidate | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure | Add safer multiline command guidance or command-shape helper, likely heredoc/script-first policy | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | rerun a task that exercises multiline verification | Lower priority than timeout/grounding unless it blocks a selected repair. |
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
@@ -118,6 +118,34 @@ Status vocabulary:
 - Missing proof before marking `repaired`: rerun the same failed task shape
   (`financial-document-processor` or `dna-assembly`) and confirm timeout
   failures leave actionable `mew-report.json` / resume artifacts.
+- Same-shape proof note:
+  `mew-m6-14-sr001-financial-document-processor-1attempt-20260428-1600`
+  reproduced the 900s command timeout but did not preserve `mew-report.json`
+  because the Harbor wrapper passed a container-local artifact path. The wrapper
+  now supports `container_repo_root=/mew`, mapping `{report_path}` and
+  `{artifact_dir}` into the mounted repo so partial reports can survive outer
+  command timeout. A container-visible rerun is in progress.
+
+## SR-002 Progress
+
+- 2026-04-28: implemented the first generic false-green grounding slice:
+  task descriptions that name an exact external ground-truth command/tool and
+  required flags now block `finish task_done=true` unless acceptance evidence
+  cites a completed `run_command` or `run_tests` whose command/output contains
+  the named command and flags. The work prompt now tells the model not to
+  substitute surrogate libraries, approximations, or nearby tools for exact
+  ground-truth command constraints.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'external_ground_truth or work_think_prompt_guides_independent_reads_to_batch' -q`.
+- Broader validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py -q`.
+- Lint passed:
+  `uv run ruff check src/mew/acceptance.py src/mew/work_loop.py tests/test_work_session.py`.
+- Combined validation including the Harbor wrapper passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py tests/test_harbor_terminal_bench_agent.py -q`.
+- Missing proof before marking `repaired`: rerun `dna-assembly` same failed
+  shape and confirm surrogate Tm acceptance is blocked or exact `oligotm`
+  evidence is required.
 
 ## Repaired / Superseded Rows
 

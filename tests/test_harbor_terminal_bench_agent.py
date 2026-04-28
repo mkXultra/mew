@@ -223,6 +223,30 @@ def test_run_passes_configured_command_cwd_and_template_placeholder(tmp_path):
     assert transcript["cwd"] == "/app"
 
 
+def test_run_can_map_artifact_placeholders_to_container_repo_root(tmp_path, monkeypatch):
+    module = load_agent_module()
+    monkeypatch.chdir(tmp_path)
+    agent = module.MewTerminalBenchAgent(
+        command_template=(
+            "mew work --oneshot --report {report_path} "
+            "--artifacts {artifact_dir} --host-report {host_report_path}"
+        ),
+        artifact_root=Path("proof-artifacts/job"),
+        container_repo_root="/mew",
+        timeout_seconds=5,
+    )
+    environment = FakeEnvironment((0, "out", "", False))
+    context = {"task_id": "visible-task"}
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    command = environment.commands[0]
+    assert "--report /mew/proof-artifacts/job/visible-task/mew-report.json" in command
+    assert "--artifacts /mew/proof-artifacts/job/visible-task" in command
+    assert "--host-report proof-artifacts/job/visible-task/mew-report.json" in command
+    assert (tmp_path / "proof-artifacts/job/visible-task/command-transcript.json").exists()
+
+
 def test_run_writes_harbor_agent_context_metadata_when_attributes_rejected(tmp_path):
     module = load_agent_module()
     agent = module.MewTerminalBenchAgent(

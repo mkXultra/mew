@@ -102,12 +102,18 @@ M6.24 resume condition:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
 - Current M6.14 episode:
-  SR-001 timeout / partial observability is `in_repair`. The first generic code
-  slice writes partial `mew work --oneshot --report` progress before model/tool
-  execution, covers batch tool state, uses atomic partial/final report writes,
-  and mirrors running tool output for non-live oneshot reports.
-  Source/test validation passed; same-shape Harbor rerun is still required
-  before marking the row `repaired`.
+  SR-001 timeout / partial observability is `in_repair`; generic code landed in
+  `a87754e`. The first same-shape Harbor rerun reproduced the 900s timeout but
+  showed the wrapper needed container-visible report paths; `container_repo_root`
+  support is now implemented and a container-visible rerun is the required proof
+  before marking SR-001 `repaired`.
+- Current M6.14 follow-on episode:
+  SR-002 finish/verifier grounding false green is `in_repair`. The first
+  generic code slice blocks `finish task_done=true` when the task names an
+  exact external ground-truth command/tool and flags but acceptance evidence
+  does not cite a completed `run_command` or `run_tests` containing the exact
+  command shape. Source/test validation passed; same-shape `dna-assembly` rerun
+  is still required before marking the row `repaired`.
 
 Closed M6.22 result:
 

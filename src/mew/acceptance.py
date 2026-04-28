@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 
 from .tasks import clip_output
 
@@ -157,6 +158,23 @@ _NUMERIC_INDEPENDENCE_MARKERS = (
     "validator",
 )
 
+_EXTERNAL_TOOL_REQUIREMENT_MARKERS = (
+    "command",
+    "executable",
+    "flags",
+    "tool",
+    "validator",
+)
+
+_BACKTICK_TEXT_RE = re.compile(r"`([^`]+)`")
+_OUTPUT_OF_TOOL_RE = re.compile(
+    r"\boutput\s+of\s+(?:[\w.+-]+(?:'s|’s)\s+)?([\w.+-]+)\s+tool\b",
+    re.IGNORECASE,
+)
+_WORDISH_COMMAND_RE = re.compile(r"^[A-Za-z][\w.+-]*$")
+_FLAG_RE = re.compile(r"(?<!\S)-[A-Za-z][\w-]*")
+_GROUND_TRUTH_RE = re.compile(r"\bground[-\s]+truth\b", re.IGNORECASE)
+
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:
     cleaned = _WHITESPACE_RE.sub(" ", str(text or "").strip())
@@ -267,15 +285,68 @@ def _tool_call_text(call: object) -> str:
         value = call.get(key)
         if value:
             chunks.append(str(value))
+    parameters = call.get("parameters")
+    if isinstance(parameters, dict):
+        for key in ("command", "verify_command", "summary", "reason"):
+            value = parameters.get(key)
+            if value:
+                chunks.append(str(value))
     result = call.get("result")
     if isinstance(result, dict):
-        for key in ("text", "stdout", "stderr", "summary", "output"):
+        for key in ("text", "stdout", "stderr", "summary", "output", "command"):
             value = result.get(key)
             if value:
                 chunks.append(str(value))
+        argv = result.get("argv")
+        if isinstance(argv, list):
+            chunks.append(" ".join(str(item) for item in argv))
     elif result:
         chunks.append(str(result))
     return "\n".join(chunks)
+
+
+def _normalized_command_text(text: object) -> str:
+    return _WHITESPACE_RE.sub(" ", str(text or "").casefold()).strip()
+
+
+def _tool_call_external_command_text(call: object) -> str:
+    if not isinstance(call, dict):
+        return ""
+    chunks: list[str] = []
+    parameters = call.get("parameters")
+    if isinstance(parameters, dict):
+        for key in ("command", "verify_command"):
+            value = parameters.get(key)
+            if value:
+                chunks.append(str(value))
+    result = call.get("result")
+    if isinstance(result, dict):
+        value = result.get("command")
+        if value:
+            chunks.append(str(value))
+        argv = result.get("argv")
+        if isinstance(argv, list):
+            chunks.append(" ".join(str(item) for item in argv))
+    return _normalized_command_text("\n".join(chunks))
+
+
+def _external_command_text_contains_term(command_text: str, term: object) -> bool:
+    normalized = _normalized_command_text(term)
+    if not normalized:
+        return True
+    if normalized.startswith("-") and " " in normalized:
+        flag, value = normalized.split(None, 1)
+        flag_pattern = re.escape(flag)
+        value_pattern = re.escape(value)
+        shell_pattern = rf"(?<!\S){flag_pattern}\s+{value_pattern}(?![\w.+-])"
+        python_list_pattern = rf"['\"]{flag_pattern}['\"]\s*,\s*['\"]{value_pattern}['\"]"
+        return bool(re.search(shell_pattern, command_text) or re.search(python_list_pattern, command_text))
+    if normalized.startswith("-"):
+        pattern = rf"(?<!\S){re.escape(normalized)}(?![\w.+-])"
+        python_list_pattern = rf"['\"]{re.escape(normalized)}['\"]"
+        return bool(re.search(pattern, command_text) or re.search(python_list_pattern, command_text))
+    pattern = rf"(?<![\w.+-])(?:[\w./+-]*/)?{re.escape(normalized)}(?![\w.+-])"
+    return bool(re.search(pattern, command_text))
 
 
 def _evidence_tool_ids(text: object) -> list[int]:
@@ -434,6 +505,124 @@ def _has_numeric_artifact_quality_evidence(evidence: object, session: object) ->
     return False
 
 
+def _command_requirement_terms(command: str, backtick_values: list[str]) -> list[str]:
+    terms: list[str] = []
+    if command:
+        terms.append(command)
+    for value in backtick_values:
+        try:
+            tokens = shlex.split(value)
+        except ValueError:
+            tokens = value.split()
+        if not tokens:
+            continue
+        if not command and tokens[0] and not tokens[0].startswith("-"):
+            command = tokens[0]
+            if command not in terms:
+                terms.insert(0, command)
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            if not token.startswith("-"):
+                index += 1
+                continue
+            if "=" in token:
+                term = token
+            elif index + 1 < len(tokens) and not tokens[index + 1].startswith("-"):
+                term = f"{token} {tokens[index + 1]}"
+                index += 1
+            else:
+                term = token
+            if term not in terms:
+                terms.append(term)
+            index += 1
+    return terms
+
+
+def external_tool_ground_truth_requirements(text: object) -> list[dict[str, object]]:
+    requirements: list[dict[str, object]] = []
+    for sentence in _constraint_sentences(str(text or "")):
+        lowered = sentence.casefold()
+        if not _GROUND_TRUTH_RE.search(lowered):
+            continue
+        if not any(marker in lowered for marker in _EXTERNAL_TOOL_REQUIREMENT_MARKERS):
+            continue
+        command = ""
+        match = _OUTPUT_OF_TOOL_RE.search(sentence)
+        if match:
+            command = match.group(1)
+        backtick_values = [_clean_constraint_text(value, limit=120) for value in _BACKTICK_TEXT_RE.findall(sentence)]
+        if not command:
+            for value in backtick_values:
+                try:
+                    tokens = shlex.split(value)
+                except ValueError:
+                    tokens = value.split()
+                if tokens and _WORDISH_COMMAND_RE.match(tokens[0]) and not tokens[0].startswith("-"):
+                    command = tokens[0]
+                    break
+        if not command:
+            continue
+        requirements.append(
+            {
+                "command": command,
+                "required_terms": _command_requirement_terms(command, backtick_values),
+                "sentence": sentence,
+            }
+        )
+    return requirements
+
+
+def _has_external_tool_grounding_evidence(evidence: object, session: object, requirement: dict[str, object]) -> bool:
+    command = str(requirement.get("command") or "").casefold()
+    required_terms = [_normalized_command_text(term) for term in requirement.get("required_terms") or []]
+    if not command:
+        return True
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        command_text = _tool_call_external_command_text(call)
+        if all(_external_command_text_contains_term(command_text, term) for term in required_terms):
+            return True
+    return False
+
+
+def _external_tool_ground_truth_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    requirements = external_tool_ground_truth_requirements(task_description)
+    if not requirements:
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    for requirement in requirements:
+        command = requirement.get("command")
+        matching_checks = [
+            check
+            for check in verified_checks
+            if str(command or "").casefold()
+            in f"{check.get('constraint') or ''}\n{check.get('evidence') or ''}".casefold()
+        ]
+        if not matching_checks:
+            return (
+                "external ground-truth tool evidence missing: tasks that name an exact "
+                "ground-truth command/tool must cite that exact command and flags before task_done=true"
+            )
+        if not any(_has_external_tool_grounding_evidence(check.get("evidence"), session, requirement) for check in matching_checks):
+            return (
+                "external ground-truth tool evidence ungrounded: exact command/tool constraints "
+                "must cite a completed run_command or run_tests tool whose command/output contains "
+                "the named ground-truth command and required flags"
+            )
+    return ""
+
+
 def _numeric_artifact_quality_blocker(
     task_description: object,
     checks: list[dict[str, str]],
@@ -472,6 +661,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     all_valid_answer_blocker = _all_valid_answer_grounding_blocker(task_description, checks, session)
     if all_valid_answer_blocker:
         return all_valid_answer_blocker
+    external_tool_blocker = _external_tool_ground_truth_blocker(task_description, checks, session)
+    if external_tool_blocker:
+        return external_tool_blocker
     numeric_artifact_blocker = _numeric_artifact_quality_blocker(task_description, checks, session)
     if numeric_artifact_blocker:
         return numeric_artifact_blocker

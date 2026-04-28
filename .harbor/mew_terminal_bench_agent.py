@@ -68,6 +68,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         install_command: str | None = None,
         install_env: dict[str, str] | None = None,
         capture_nonzero_command_exit: bool = True,
+        container_repo_root: str | Path | None = None,
         **kwargs: Any,
     ) -> None:
         base_kwargs: dict[str, Any] = {}
@@ -99,6 +100,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         self.install_command = install_command
         self.install_env = install_env
         self.capture_nonzero_command_exit = capture_nonzero_command_exit
+        self.container_repo_root = str(container_repo_root) if container_repo_root is not None else None
         self._last_task_dir: Path | None = None
         self._last_summary: dict[str, Any] | None = None
 
@@ -117,6 +119,9 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         task_dir = self._task_dir(context)
         task_dir.mkdir(parents=True, exist_ok=True)
         report_path = task_dir / "mew-report.json"
+        command_task_dir = self._container_visible_task_dir(task_dir)
+        command_report_path = command_task_dir / "mew-report.json"
+        command_instruction_path = command_task_dir / "instruction.json"
 
         self._write_json(
             task_dir / "instruction.json",
@@ -129,9 +134,12 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         command = self.command_template.format(
             instruction=instruction,
             instruction_shell=shlex.quote(instruction),
-            artifact_dir=shlex.quote(str(task_dir)),
-            report_path=shlex.quote(str(report_path)),
-            instruction_json=shlex.quote(str(task_dir / "instruction.json")),
+            artifact_dir=shlex.quote(str(command_task_dir)),
+            report_path=shlex.quote(str(command_report_path)),
+            instruction_json=shlex.quote(str(command_instruction_path)),
+            host_artifact_dir=shlex.quote(str(task_dir)),
+            host_report_path=shlex.quote(str(report_path)),
+            host_instruction_json=shlex.quote(str(task_dir / "instruction.json")),
             command_cwd=self.command_cwd or "",
             command_cwd_shell=shlex.quote(self.command_cwd or ""),
         )
@@ -167,6 +175,18 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         self._last_task_dir = task_dir
         self.populate_context_post_run(context)
         return stdout
+
+    def _container_visible_task_dir(self, task_dir: Path) -> Path:
+        if not self.container_repo_root:
+            return task_dir
+        repo_root = Path.cwd().resolve(strict=False)
+        try:
+            relative_task_dir = task_dir.resolve(strict=False).relative_to(repo_root)
+        except ValueError:
+            if task_dir.is_absolute():
+                return task_dir
+            relative_task_dir = task_dir
+        return Path(self.container_repo_root) / relative_task_dir
 
     async def _exec_as_agent(
         self,
