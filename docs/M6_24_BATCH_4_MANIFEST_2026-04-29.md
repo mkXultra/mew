@@ -56,6 +56,7 @@ env PYTHONPATH=.harbor harbor run \
   -k 5 \
   -n 5 \
   -y \
+  --agent-timeout-multiplier 2 \
   --jobs-dir proof-artifacts/terminal-bench/harbor-smoke \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command='apt-get update && apt-get install -y python3 python3-pip python3-venv && python3 -m pip install --break-system-packages -e /mew' \
@@ -70,10 +71,11 @@ The `/etc/apt` read root and `/usr/local/bin` write root are generic
 container-system task permissions for package-source inspection and requested
 binary installation. They are not task solvers.
 
-`timeout_seconds=1800` plus `{max_wall_seconds_option}` is a generic
-self-budgeting guard: the wrapper still records command timeout transcripts,
-while `mew work --oneshot` gets an inner wall budget and can write a final
-`wall_timeout` report before Harbor raises `AgentTimeoutError`.
+`--agent-timeout-multiplier 2` plus `timeout_seconds=1800` plus
+`{max_wall_seconds_option}` is a generic self-budgeting guard: Harbor gives the
+agent wrapper enough wall time, the wrapper still records command timeout
+transcripts, and `mew work --oneshot` gets an inner wall budget so it can write
+a final `wall_timeout` report before any outer timeout kills the trial.
 
 ## Next
 

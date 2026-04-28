@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-014 terminal-bench wall-budget propagation is repaired; M6.24 can resume broad measurement. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-015 Harbor agent-timeout alignment is repaired; M6.24 can resume broad measurement. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 `protein-assembly` recorded, SR-014 repaired, and broad measurement resumes with `adaptive-rejection-sampler`. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 `adaptive-rejection-sampler` recorded, SR-015 repaired, and broad measurement resumes with `cobol-modernization`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -336,16 +336,26 @@ M6.24 resume condition:
   reran the same task shape with `timeout_seconds=120` and reached
   `n_errors=0`; mew self-stopped with a final `wall_timeout` report before the
   outer Harbor timeout.
+- M6.24 Batch 4 `adaptive-rejection-sampler` scored 1/5 against Codex target
+  5/5, errors 3 `AgentTimeoutError`, runtime 17m 45s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__05-46-31/result.json`.
+  It selected SR-015: the run shape passed wrapper `timeout_seconds=1800` and
+  mew `--max-wall-seconds 1740`, but Harbor's own agent execution timeout was
+  still 900 seconds. SR-015 is repaired by adding
+  `--agent-timeout-multiplier 2` to the Batch 4 manifest. Same-shape proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr015-adaptive-agent-timeout-align/2026-04-29__06-06-11/result.json`
+  reran one trial with Harbor agent timeout aligned and reached `n_errors=0`
+  with a normal verifier result instead of outer `AgentTimeoutError`.
 
 Next concrete action:
 
 - Continue M6.24 Batch 4 task-by-task from
-  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, using the explicit
-  `timeout_seconds=1800` plus `{max_wall_seconds_option}` command shape.
-  Next task: `adaptive-rejection-sampler`. If a new accepted structural
-  blocker appears, append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`,
-  repair through M6.14, rerun the same failed shape, then resume broad
-  measurement.
+  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, using the aligned
+  `--agent-timeout-multiplier 2`, `timeout_seconds=1800`, and
+  `{max_wall_seconds_option}` command shape. Next task:
+  `cobol-modernization`. If a new accepted structural blocker appears, append
+  it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair through M6.14, rerun
+  the same failed shape, then resume broad measurement.
 
 Closed M6.22 result:
 

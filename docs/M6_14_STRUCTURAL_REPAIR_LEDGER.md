@@ -108,6 +108,7 @@ Status vocabulary:
 | SR-012 | repaired | M6.24 Batch 3 | Harbor wrapper inner timeout cap and unmapped partial report | `install-windows-3.11` / Harbor `install-windows-3-11` scored 0/5 with 5 wrapper `RuntimeError: Command timed out after 900 seconds` exceptions despite task `agent.timeout_sec=3600`; the run also used container-local report paths so partial reports were not preserved on the host | Remove the wrapper's default inner timeout cap, let Harbor task timeout govern by default, capture explicit wrapper timeout exceptions as normal command transcripts, and require `container_repo_root=/mew` in benchmark run manifests | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | wrapper timeout no-error proof plus future long-task reruns | Repaired by `.harbor/mew_terminal_bench_agent.py` default `timeout_seconds=None`, timeout exception capture with `exit_code=124`, manifest `container_repo_root=/mew`, focused tests, and a light Harbor proof with `n_errors=0`. |
 | SR-013 | repaired | M6.24 Batch 3 | run_command shell-operator execution mismatch | `mcmc-sampling-stan` pre-repair reports showed `mkdir -p ... && HOME=... Rscript -e ...` executed as a single argv command, producing `mkdir: invalid option -- 'e'` instead of a shell chain | Execute `run_command` through a bash-compatible shell only when top-level shell operators are present, keep `run_tests` non-shell, and add resident-loop guards for accidental nested `mew run` / `mew work` shell invocations | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` executor safety notes | direct shell-chain proof plus rerun `mcmc-sampling-stan` after repair | Repaired by `use_shell` execution mode for `run_command`, prompt update, focused tests, runtime `MEW_WORK_COMMAND_GUARD`, and codex-ultra review with no blocking findings. |
 | SR-014 | repaired | M6.24 Batch 4 | terminal-bench agent timeout self-budget not propagated | `protein-assembly` scored 0/5 with 3 `AgentTimeoutError`s. Timed-out trials left host-visible partial mew reports with running model turns around the outer 1800s timeout because the Harbor wrapper delegated timeout to the outer runner without passing an inner `--max-wall-seconds` budget to `mew work --oneshot` | Add Harbor wrapper wall-budget placeholders derived from explicit `timeout_seconds`, then run terminal-bench mew commands with both wrapper timeout and inner `--max-wall-seconds` so long tasks self-stop with final `wall_timeout` reports before the outer timeout | `docs/M6_24_BATCH_4_RUNS_2026-04-29.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | focused wrapper tests plus a bounded `protein-assembly` same-shape proof with no `AgentTimeoutError` | Repaired by `.harbor/mew_terminal_bench_agent.py` `{max_wall_seconds_option}` / `{mew_max_wall_seconds}` placeholders, focused tests, and a bounded `protein-assembly` proof with `n_errors=0` and final `wall_timeout` report. |
+| SR-015 | repaired | M6.24 Batch 4 | Harbor agent timeout not aligned with wrapper timeout | `adaptive-rejection-sampler` used wrapper `timeout_seconds=1800` and mew `--max-wall-seconds 1740`, but Harbor's agent execution timeout remained 900s; 3/5 trials died as `AgentTimeoutError` before mew could self-stop | Add `--agent-timeout-multiplier 2` to the Batch 4 Harbor run shape whenever using wrapper `timeout_seconds=1800` and `{max_wall_seconds_option}` | `docs/M6_24_BATCH_4_RUNS_2026-04-29.md`, `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, Harbor run help for `--agent-timeout-multiplier` | one-trial `adaptive-rejection-sampler` same-shape proof with agent timeout multiplier and no Harbor errors | Repaired by updating the Batch 4 manifest run shape; proof reached `n_errors=0` with normal verifier result instead of outer `AgentTimeoutError`. |
 
 ## SR-001 Progress
 
@@ -561,6 +562,38 @@ Status vocabulary:
   the final `mew-report.json` had `work_report.stop_reason=wall_timeout`
   rather than `partial_report` or `AgentTimeoutError`. This satisfies SR-014:
   the outer timeout is no longer the first component to terminate long work.
+
+## SR-015 Progress
+
+- 2026-04-29: M6.24 Batch 4 `adaptive-rejection-sampler` scored 1/5 against
+  Codex target 5/5 with 3 `AgentTimeoutError`s:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__05-46-31/result.json`.
+  The failing trials used wrapper `timeout_seconds=1800` and mew
+  `--max-wall-seconds 1740`, but Harbor's agent execution timeout remained
+  900s. This means SR-014's inner wall budget was present but still larger than
+  Harbor's unchanged outer agent timeout.
+- Diagnosis:
+  Terminal-Bench run shape has three timeout layers: Harbor agent execution,
+  wrapper command timeout, and mew inner wall timeout. SR-014 aligned the
+  wrapper and mew layers, but Batch 4 also needs the Harbor agent layer to be
+  at least as large as the wrapper timeout. Otherwise Harbor cancels the agent
+  coroutine before the wrapper can collect a command transcript or mew can
+  self-stop.
+- Generic repair:
+  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md` now includes
+  `--agent-timeout-multiplier 2` alongside wrapper `timeout_seconds=1800` and
+  `{max_wall_seconds_option}`. This gives Harbor an 1800s agent execution
+  budget for default-900s tasks, while mew receives a 1740s inner wall budget
+  and keeps a cleanup reserve.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr015-adaptive-agent-timeout-align/2026-04-29__06-06-11/result.json`
+  reran `adaptive-rejection-sampler` for one trial with
+  `--agent-timeout-multiplier 2`, wrapper `timeout_seconds=1800`, and mew
+  `--max-wall-seconds 1740`. Harbor recorded `n_errors=0`; the command
+  transcript recorded `timeout_seconds=1800`, `mew_max_wall_seconds=1740`, and
+  the trial reached a normal verifier reward of 0.0 instead of outer
+  `AgentTimeoutError`. This keeps the remaining gap classified as task-solving
+  unless a later task exposes a new structural timeout pattern.
 
 ## Repaired / Superseded Rows
 
