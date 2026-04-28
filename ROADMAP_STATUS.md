@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Resumed after SR-013 repair; rerun `mcmc-sampling-stan` on repaired head, then continue Batch 3. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | `mcmc-sampling-stan` recorded after SR-013 repair; continue Batch 3 with `video-processing`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -271,14 +271,21 @@ M6.24 resume condition:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr013-run-command-shell-chain-20260428T161435Z/result.json`
   passed with `execution_mode=shell`, `exit_code=0`, environment propagation,
   shell redirection, and nested resident-loop rejection.
+- M6.24 Batch 3 repaired-head `mcmc-sampling-stan` rerun scored 0/5 against
+  Codex target 2/5, with 5 `AgentTimeoutError`s and runtime 32m 32s:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__01-19-36/result.json`.
+  The SR-013 shell-chain failure did not recur; verifier failures centered on
+  missing `rstan`, missing output files after timeout, or fallback analysis
+  instead of `rstan::sampling`. Treat this as task-solving / long dependency
+  strategy evidence, not a new accepted structural blocker.
 
 Next concrete action:
 
 - Continue M6.24 Batch 3 task-by-task measurement from
-  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md`, starting by rerunning
-  `mcmc-sampling-stan` on the repaired head, then `video-processing`. If a
-  new failure is accepted as structural rather than an ordinary task miss,
-  append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
+  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md`, starting with
+  `video-processing`. If a new failure is accepted as structural rather than
+  an ordinary task miss, append it to
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
 
 Closed M6.22 result:
 

@@ -511,9 +511,13 @@ Status vocabulary:
   executed the same practical shape `mkdir -p ... && HOME=... TMPDIR=... R_LIBS_USER=... python3 -c ... && cat ... > ...`
   with `execution_mode=shell`, `exit_code=0`, preserved the shell child guard
   in the environment, and rejected `true && bash -lc "m'ew' run"`.
-- The interrupted pre-repair `mcmc-sampling-stan` Harbor run is not counted as
-  a Batch 3 score because it was stopped after SR-013 was selected; rerun the
-  full task after this repair before recording the task result.
+- Repaired-head task rerun:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__01-19-36/result.json`
+  scored 0/5 with 5 `AgentTimeoutError`s. The original shell-chain executor
+  failure did not recur; reports reached RStan dependency install / fallback
+  analysis, and verifier output failed on missing `rstan` or non-`rstan`
+  sampling. This keeps SR-013 repaired and records the remaining gap as
+  task-solving / long dependency strategy evidence.
 
 ## Repaired / Superseded Rows
 
