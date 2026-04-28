@@ -452,7 +452,17 @@ M6.24 Batch 1:
 - completed Batch 2 control:
   `git-leak-recovery` matched Codex target 5/5 with no Harbor errors in
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-git-leak-recovery-5attempts-20260428-0953/result.json`.
-  Batch 2 measured latest total is 5/5 against frozen Codex target 5/5 for
+  The first `build-pmars` run scored 3/5 against Codex target 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-build-pmars-5attempts-20260428-0959/result.json`.
+  The blocker was harness permission, not core loop logic:
+  `container_system_install_path_not_explicitly_allowed`. Adding the generic
+  container-system write root `/usr/local/bin` improved `build-pmars` to 4/5,
+  and adding package-source read root `/etc/apt` plus `/usr/local/bin` produced
+  5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-build-pmars-5attempts-system-perms-20260428-1015/result.json`.
+  Future Batch 2 runs should use the explicit normal work path roots
+  `--allow-read . --allow-read /etc/apt --allow-write . --allow-write /usr/local/bin`.
+  Batch 2 measured latest total is 10/10 against frozen Codex target 10/10 for
   measured tasks.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
