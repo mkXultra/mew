@@ -409,10 +409,13 @@ def validate_git_ref(ref):
     return ref
 
 
-def run_git_tool(action, cwd=None, limit=20, staged=False, stat=False, base=""):
+def run_git_tool(action, cwd=None, limit=20, staged=False, stat=False, base="", pathspec=""):
     resolved_cwd = resolve_tool_cwd(cwd)
+    pathspec = str(pathspec or "").strip()
     if action == "status":
         command = "git status --short"
+        if pathspec:
+            command += f" -- {shlex.quote(pathspec)}"
     elif action == "diff":
         base = validate_git_ref(base)
         if staged and base:
@@ -425,10 +428,14 @@ def run_git_tool(action, cwd=None, limit=20, staged=False, stat=False, base=""):
         if stat:
             parts.append("--stat")
         parts.append("--")
+        if pathspec:
+            parts.append(shlex.quote(pathspec))
         command = " ".join(parts)
     elif action == "log":
         safe_limit = max(1, min(int(limit), 100))
         command = f"git log --oneline -n {safe_limit}"
+        if pathspec:
+            command += f" -- {shlex.quote(pathspec)}"
     else:
         raise ValueError(f"unsupported git tool action: {action}")
     return run_command_record(command, cwd=str(resolved_cwd), timeout=30)

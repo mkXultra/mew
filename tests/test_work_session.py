@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -14,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import mew.commands as commands
 from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
@@ -5138,6 +5140,224 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_writes_partial_report_before_model_turn(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            report_path = Path(tmp) / "report.json"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                observed_partial = {}
+
+                def model_response(*args, **kwargs):
+                    self.assertTrue(report_path.exists())
+                    observed_partial.update(json.loads(report_path.read_text(encoding="utf-8")))
+                    return {
+                        "summary": "finish after one turn",
+                        "action": {
+                            "type": "finish",
+                            "status": "done",
+                            "summary": "done",
+                        },
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_response):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--no-auto-deliberation",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-steps",
+                                        "1",
+                                        "--report",
+                                        str(report_path),
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                self.assertTrue(observed_partial["partial_report"])
+                self.assertEqual(observed_partial["summary"], "mew work --oneshot partial progress report")
+                self.assertEqual(observed_partial["phase"], "running")
+                self.assertEqual(observed_partial["workspace_cwd"], str(workspace))
+                self.assertEqual(observed_partial["work_report"]["stop_reason"], "max_steps")
+                self.assertEqual(observed_partial["resume"]["continuity"]["status"], "strong")
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["summary"], "mew work --oneshot completed generic work-session attempt")
+                final_report = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertNotIn("partial_report", final_report)
+                self.assertEqual(final_report["work_report"]["stop_reason"], "finish")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_writes_partial_report_during_batch_tool(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            report_path = Path(tmp) / "report.json"
+            state_root.mkdir()
+            workspace.mkdir()
+            (workspace / "README.md").write_text("context\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                observed_partial = {}
+                model_outputs = [
+                    {
+                        "summary": "inspect workspace context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "read_file",
+                                    "path": "README.md",
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "finish after batch",
+                        "action": {
+                            "type": "finish",
+                            "status": "done",
+                            "summary": "done",
+                        },
+                    },
+                ]
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    self.assertTrue(report_path.exists())
+                    if not observed_partial:
+                        observed_partial.update(json.loads(report_path.read_text(encoding="utf-8")))
+                    if output_progress:
+                        output_progress("stdout", "streamed context\n")
+                    return {
+                        "path": str((workspace / parameters["path"]).resolve()),
+                        "content": "context\n",
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            "Inspect this workspace.",
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "60",
+                                            "--max-steps",
+                                            "2",
+                                            "--report",
+                                            str(report_path),
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                self.assertTrue(observed_partial["partial_report"])
+                self.assertEqual(observed_partial["phase"], "running")
+                self.assertEqual(observed_partial["last_step"]["action"]["type"], "batch")
+                self.assertIsNotNone(observed_partial["last_step"]["model_turn"])
+                self.assertEqual(observed_partial["last_step"]["model_turn"]["action"]["type"], "batch")
+                self.assertEqual(observed_partial["last_step"]["tool_calls"][0]["tool"], "read_file")
+                self.assertEqual(observed_partial["last_step"]["tool_calls"][0]["status"], "running")
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_report"]["stop_reason"], "finish")
+                final_report = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertNotIn("partial_report", final_report)
+                self.assertEqual(final_report["work_report"]["steps"][0]["action"]["type"], "batch")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_partial_report_cannot_overwrite_final_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            args = SimpleNamespace(
+                oneshot_report_path=str(report_path),
+                oneshot_workspace_cwd=str(tmp),
+                oneshot_artifacts="",
+                verify_command="",
+                oneshot_verify_source="",
+            )
+            partial_report = {"stop_reason": "max_steps", "steps": []}
+            session = {"id": 1, "task_id": 1}
+            task = {"id": 1, "cwd": str(tmp)}
+            resume = {"continuity": {"status": "strong"}}
+            final_report = {
+                "summary": "final",
+                "work_exit_code": 0,
+                "work_report": {"stop_reason": "finish"},
+            }
+
+            real_write = commands._write_json_file_atomic
+            partial_write_entered = threading.Event()
+            release_partial_write = threading.Event()
+
+            def blocking_atomic_write(path, payload):
+                if payload.get("partial_report"):
+                    partial_write_entered.set()
+                    self.assertTrue(release_partial_write.wait(timeout=2))
+                return real_write(path, payload)
+
+            with patch("mew.commands._write_json_file_atomic", side_effect=blocking_atomic_write):
+                partial_thread = threading.Thread(
+                    target=commands._write_work_oneshot_partial_report,
+                    args=(args, partial_report, session, task, resume),
+                    kwargs={"phase": "running"},
+                )
+                partial_thread.start()
+                self.assertTrue(partial_write_entered.wait(timeout=2))
+
+                final_thread = threading.Thread(
+                    target=commands._write_work_oneshot_final_report,
+                    args=(report_path, final_report),
+                )
+                final_thread.start()
+                time.sleep(0.05)
+                self.assertTrue(final_thread.is_alive())
+
+                release_partial_write.set()
+                partial_thread.join(timeout=2)
+                final_thread.join(timeout=2)
+
+            saved = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved, final_report)
+
     def test_work_oneshot_keeps_model_timeout_when_wall_budget_has_room(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -7514,6 +7734,80 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(result["exit_code"], 0)
                 self.assertEqual(Path(result["cwd"]), repo.resolve())
                 self.assertIn("app.py", result["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_git_tools_scope_to_allowed_read_root_when_default_cwd_blocked(self):
+        if not shutil.which("git"):
+            self.skipTest("git not found")
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            side_root = repo / "experiments" / "mew-ghost"
+            side_root.mkdir(parents=True)
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            subprocess.run(
+                ["git", "config", "user.email", "mew@example.invalid"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "mew"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            (side_root / "app.py").write_text("print('old')\n", encoding="utf-8")
+            (repo / "root.txt").write_text("old\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            subprocess.run(
+                ["git", "commit", "-m", "init"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            (side_root / "app.py").write_text("print('new')\n", encoding="utf-8")
+            (repo / "root.txt").write_text("new\n", encoding="utf-8")
+            os.chdir(repo)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", str(side_root)]), 0)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "git_status", "--allow-read", str(side_root), "--json"]),
+                        0,
+                    )
+                status_data = json.loads(stdout.getvalue())
+                status_result = status_data["tool_call"]["result"]
+                self.assertEqual(status_result["exit_code"], 0)
+                self.assertEqual(Path(status_result["cwd"]), side_root.resolve())
+                self.assertIn("app.py", status_result["stdout"])
+                self.assertNotIn("root.txt", status_result["stdout"])
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "git_diff", "--allow-read", str(side_root), "--json"]),
+                        0,
+                    )
+                diff_data = json.loads(stdout.getvalue())
+                diff_result = diff_data["tool_call"]["result"]
+                self.assertEqual(diff_result["exit_code"], 0)
+                self.assertEqual(Path(diff_result["cwd"]), side_root.resolve())
+                self.assertIn("-print('old')", diff_result["stdout"])
+                self.assertIn("+print('new')", diff_result["stdout"])
+                self.assertNotIn("root.txt", diff_result["stdout"])
             finally:
                 os.chdir(old_cwd)
 
@@ -33063,6 +33357,11 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prove completeness instead of writing a single plausible answer", prompt)
         self.assertIn("When a source artifact is an image, screenshot, diagram", prompt)
         self.assertIn("prefer read_image before lossy ASCII rendering or manual OCR commands", prompt)
+        self.assertIn("exact external ground-truth command", prompt)
+        self.assertIn("surrogate libraries, approximations, or nearby tools are not enough", prompt)
+        self.assertIn("If prior command output says the exact command is NOT_FOUND", prompt)
+        self.assertIn("do not install or use a surrogate package/library/API as a substitute", prompt)
+        self.assertIn("return wait/remember with that exact blocker", prompt)
         self.assertIn("preserve exact literal contract names from the task text", prompt)
         self.assertIn("Do not substitute synonyms or nearby response-field names", prompt)
         self.assertIn("using val when the task says value", prompt)
@@ -35784,6 +36083,397 @@ class WorkSessionTests(unittest.TestCase):
         close_session.assert_not_called()
         self.assertFalse(result["task_done"])
         self.assertIn("numeric artifact quality evidence ungrounded", result["finished_note"])
+
+    def test_work_finish_blocks_external_ground_truth_tool_without_exact_command_evidence(self):
+        from mew.commands import apply_work_control_action
+
+        description = (
+            "Design primers. The output of primer3's oligotm tool should be considered "
+            "the ground truth for melting temperatures with the following flags: "
+            "`-tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500`."
+        )
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "python3 local_tm_surrogate.py"},
+                    "result": {"stdout": "Tms input 61.02/61.03"},
+                },
+                {"id": 2, "tool": "write_file", "status": "completed"},
+            ],
+        }
+        task = {"id": 15, "title": "Design primers", "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Tm computed with oligotm flags",
+                    "status": "verified",
+                    "evidence": "Tool #1 stdout listed Tms between 58 and 72 C.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("external ground-truth tool evidence ungrounded", result["finished_note"])
+
+    def test_work_finish_blocks_external_ground_truth_tool_when_evidence_claims_exact_command_only(self):
+        from mew.commands import apply_work_control_action
+
+        description = "Use the ground truth command `validator --strict --format json` to verify output.txt."
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "python3 surrogate_validator.py output.txt"},
+                    "result": {"stdout": "ok"},
+                }
+            ],
+        }
+        task = {"id": 15, "title": "Verify output", "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Run validator ground truth command",
+                    "status": "verified",
+                    "evidence": "Tool #1 ran validator --strict --format json and passed.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("external ground-truth tool evidence ungrounded", result["finished_note"])
+
+    def test_work_finish_blocks_external_ground_truth_tool_with_wrong_flag_value(self):
+        from mew.commands import apply_work_control_action
+
+        description = "Use the ground truth command `validator --threshold 50 --format json` to verify output.txt."
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "validator --threshold 500 --format json output.txt"},
+                    "result": {"stdout": "validator ok"},
+                }
+            ],
+        }
+        task = {"id": 15, "title": "Verify output", "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Run validator ground truth command",
+                    "status": "verified",
+                    "evidence": "Tool #1 ran validator with the required flags.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("external ground-truth tool evidence ungrounded", result["finished_note"])
+
+    def test_work_finish_blocks_external_ground_truth_tool_when_reason_claims_exact_command_only(self):
+        from mew.commands import apply_work_control_action
+
+        description = "Use the ground truth command `validator --threshold 50 --format json` to verify output.txt."
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "command": "python3 surrogate_validator.py output.txt",
+                        "reason": "checking validator --threshold 50 --format json semantics",
+                    },
+                    "result": {"stdout": "ok"},
+                }
+            ],
+        }
+        task = {"id": 15, "title": "Verify output", "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Run validator ground truth command",
+                    "status": "verified",
+                    "evidence": "Tool #1 ran validator --threshold 50 --format json and passed.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("external ground-truth tool evidence ungrounded", result["finished_note"])
+
+    def test_work_finish_blocks_hyphenated_external_ground_truth_command(self):
+        from mew.commands import apply_work_control_action
+
+        description = "Use the ground-truth command `validator --threshold 50 --format json` to verify output.txt."
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "python3 surrogate_validator.py output.txt"},
+                    "result": {"stdout": "ok"},
+                }
+            ],
+        }
+        task = {"id": 15, "title": "Verify output", "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Run validator ground-truth command",
+                    "status": "verified",
+                    "evidence": "Tool #1 ran validator --threshold 50 --format json and passed.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("external ground-truth tool evidence ungrounded", result["finished_note"])
+
+    def test_work_finish_does_not_treat_ground_truth_file_as_external_command(self):
+        from mew.commands import apply_work_control_action
+
+        description = "Compare output.txt against the ground truth file `expected.json`."
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {"id": 1, "tool": "read_file", "status": "completed", "result": {"text": "expected"}},
+                {"id": 2, "tool": "run_command", "status": "completed", "parameters": {"command": "cmp output.txt expected.json"}},
+            ],
+        }
+        task = {"id": 15, "title": "Compare output", "description": description, "status": "ready", "notes": ""}
+        state["tasks"].append(task)
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "completion_summary": "output matches expected file",
+            "acceptance_checks": [
+                {
+                    "constraint": "Compare output.txt against expected.json",
+                    "status": "verified",
+                    "evidence": "Tool #2 compared output.txt against expected.json.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_called_once_with(session)
+        self.assertTrue(result["task_done"])
+        self.assertIn("output matches expected file", task["notes"])
+
+    def test_work_finish_blocks_external_ground_truth_tool_with_wrong_short_flag_value(self):
+        from mew.commands import apply_work_control_action
+
+        description = (
+            "Design primers. The output of primer3's oligotm tool should be considered "
+            "the ground truth for melting temperatures with the following flags: "
+            "`-tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500`."
+        )
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "command": "oligotm -tp 1 -sc 1 -mv 500 -dv 2 -n 0.8 -d 500 ACTGACTGACTGACTG"
+                    },
+                    "result": {"stdout": "oligotm 61.02"},
+                }
+            ],
+        }
+        task = {"id": 15, "title": "Design primers", "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Tm computed with oligotm flags",
+                    "status": "verified",
+                    "evidence": "Tool #1 ran oligotm with the required flags.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("external ground-truth tool evidence ungrounded", result["finished_note"])
+
+    def test_work_finish_allows_backticked_external_ground_truth_command_with_exact_flags(self):
+        from mew.commands import apply_work_control_action
+
+        description = "Use the ground truth command `validator --threshold 50 --format json` to verify output.txt."
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "validator --threshold 50 --format json output.txt"},
+                    "result": {"stdout": "validator ok"},
+                }
+            ],
+        }
+        task = {"id": 15, "title": "Verify output", "description": description, "status": "ready", "notes": ""}
+        state["tasks"].append(task)
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "completion_summary": "validated with exact validator command",
+            "acceptance_checks": [
+                {
+                    "constraint": "Run validator ground truth command",
+                    "status": "verified",
+                    "evidence": "Tool #1 ran validator --threshold 50 --format json and passed.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_called_once_with(session)
+        self.assertTrue(result["task_done"])
+        self.assertIn("validated with exact validator command", task["notes"])
+
+    def test_work_finish_allows_external_ground_truth_tool_with_exact_command_evidence(self):
+        from mew.commands import apply_work_control_action
+
+        description = (
+            "Design primers. The output of primer3's oligotm tool should be considered "
+            "the ground truth for melting temperatures with the following flags: "
+            "`-tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500`."
+        )
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "command": "oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 ACTGACTGACTGACTG"
+                    },
+                    "result": {"stdout": "oligotm 61.02"},
+                },
+                {"id": 2, "tool": "write_file", "status": "completed"},
+            ],
+        }
+        task = {"id": 15, "title": "Design primers", "description": description, "status": "ready", "notes": ""}
+        state["tasks"].append(task)
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "completion_summary": "primers validated with exact oligotm flags",
+            "acceptance_checks": [
+                {
+                    "constraint": "Tm computed with oligotm flags",
+                    "status": "verified",
+                    "evidence": "Tool #1 ran oligotm with -tp -sc -mv -dv -n -d flags and stdout listed Tms.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_called_once_with(session)
+        self.assertTrue(result["task_done"])
+        self.assertIn("primers validated with exact oligotm flags", task["notes"])
 
     def test_repairable_wait_does_not_convert_on_final_step(self):
         action = {"type": "wait", "reason": "unsupported replacement"}

@@ -3204,15 +3204,20 @@ def write_work_follow_snapshot(args, report, session, task, resume, step=None, f
     return latest_path
 
 
-def refresh_work_follow_snapshot(args, report, session_id, task_id=None):
-    if not getattr(args, "live", False):
+def refresh_work_follow_snapshot(args, report, session_id, task_id=None, step=None):
+    if not getattr(args, "live", False) and not getattr(args, "oneshot_report_path", None):
         return None
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
         task = work_session_task(state, session) or find_task(state, task_id)
         resume = build_work_session_resume(session, task=task, state=state)
-    return write_work_follow_snapshot(args, report, session, task, resume, force=True)
+    latest_path = None
+    if getattr(args, "live", False):
+        latest_path = write_work_follow_snapshot(args, report, session, task, resume, force=True)
+    if getattr(args, "oneshot_report_path", None):
+        _write_work_oneshot_partial_report(args, report, session, task, resume, phase="running", step=step)
+    return latest_path
 
 
 def work_ai_has_tool_gates(options):
@@ -3926,7 +3931,17 @@ def _paired_write_batch_actions(actions, allowed_write_roots=None, cwd=""):
     )
 
 
-def run_work_batch_action(session_id, task_id, index, planned, action, args, progress, turn_id=None):
+def run_work_batch_action(
+    session_id,
+    task_id,
+    index,
+    planned,
+    action,
+    args,
+    progress,
+    turn_id=None,
+    on_state_update=None,
+):
     raw_sub_actions = [sub_action for sub_action in (action.get("tools") or [])[:5] if isinstance(sub_action, dict)]
     write_batch = any((sub_action.get("type") or sub_action.get("tool")) in BATCH_WRITE_WORK_TOOLS for sub_action in raw_sub_actions)
     if write_batch:
@@ -3956,6 +3971,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 "reason": write_block_reason,
             }
         ]
+    turn = None
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
@@ -3987,6 +4003,30 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
     recoverable_errors = []
     error = ""
     batch_max_steps = getattr(args, "max_steps", 999999)
+
+    def batch_progress_step(status="running", summary="running batch work action", extra_tool_call=None):
+        calls = list(tool_calls)
+        if extra_tool_call is not None:
+            calls.append(extra_tool_call)
+        return {
+            "index": index,
+            "status": status,
+            "action": action,
+            "model_turn": turn,
+            "tool_calls": calls,
+            "summary": summary,
+        }
+
+    def emit_state_update(step=None):
+        if not on_state_update:
+            return
+        try:
+            on_state_update(step or batch_progress_step())
+        except Exception as exc:  # pragma: no cover - progress reports must not break tools
+            if progress:
+                progress(f"step #{index}: batch state update failed: {clip_output(str(exc), 200)}")
+
+    emit_state_update(batch_progress_step(summary="started batch work action"))
     for sub_action in sub_actions:
         with state_lock():
             state = load_state()
@@ -3994,41 +4034,41 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             stop_request = consume_work_session_stop(session)
             if stop_request:
                 tool_call_ids = [call.get("id") for call in tool_calls if call]
-                turn = finish_work_model_turn(
+                stop_turn = finish_work_model_turn(
                     state,
                     session_id,
                     turn_id,
                     tool_call_id=tool_call_ids[0] if tool_call_ids else None,
                 )
-                if turn is not None:
-                    turn["tool_call_ids"] = tool_call_ids
-                    turn["stop_request"] = stop_request
-                    turn["summary"] = clip_output(
+                if stop_turn is not None:
+                    stop_turn["tool_call_ids"] = tool_call_ids
+                    stop_turn["stop_request"] = stop_request
+                    stop_turn["summary"] = clip_output(
                         f"stopped before next batch tool: {stop_request.get('reason') or ''}".strip(),
                         4000,
                     )
                     if write_batch and not tool_call_ids:
-                        _mark_batch_turn_replay_non_counted_on_stop(turn, stop_request)
+                        _mark_batch_turn_replay_non_counted_on_stop(stop_turn, stop_request)
                     record_active_work_todo_executor_lifecycle(
                         state,
                         session_id,
                         "cancelled",
-                        model_turn=turn,
+                        model_turn=stop_turn,
                         tool_call=tool_calls[-1] if tool_calls else {},
-                        reason=turn["summary"],
+                        reason=stop_turn["summary"],
                     )
                 save_state(state)
             else:
-                turn = None
+                stop_turn = None
         if stop_request:
             return {
                 "index": index,
                 "status": "stopped",
                 "action": action,
-                "model_turn": turn,
+                "model_turn": stop_turn,
                 "tool_calls": tool_calls,
                 "stop_request": stop_request,
-                "summary": turn.get("summary") if turn else "stopped before next batch tool",
+                "summary": stop_turn.get("summary") if stop_turn else "stopped before next batch tool",
             }
         action_type = sub_action.get("type") or sub_action.get("tool")
         expected_tools = BATCH_WRITE_WORK_TOOLS if write_batch else BATCH_READ_WORK_TOOLS
@@ -4106,6 +4146,12 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                     )
             tool_call_id = tool_call.get("id") if tool_call else None
             save_state(state)
+        emit_state_update(
+            batch_progress_step(
+                summary=f"started batch work tool {action_type}",
+                extra_tool_call=tool_call,
+            )
+        )
         guard_error = ""
         if broad_read_guard:
             guard_error = broad_read_guard.get("message") or "broad-read-after-search-miss guard blocked tool call"
@@ -4134,7 +4180,24 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
         try:
-            output_progress = work_tool_output_progress(progress, tool_call_id)
+            mirror_work_output = bool(getattr(args, "live", False) or getattr(args, "oneshot_report_path", None))
+            output_progress = work_tool_output_progress(
+                progress,
+                tool_call_id,
+                session_id=session_id if mirror_work_output else None,
+                on_state_update=(
+                    (
+                        lambda tool_call=tool_call, action_type=action_type: emit_state_update(
+                            batch_progress_step(
+                                summary=f"running batch work tool {action_type}",
+                                extra_tool_call=tool_call,
+                            )
+                        )
+                    )
+                    if mirror_work_output
+                    else None
+                ),
+            )
             if action_type == "read_image":
                 result = execute_work_tool_with_output(
                     action_type,
@@ -4209,6 +4272,13 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 reason=error or tool_call.get("summary") or f"batch work tool {tool_call.get('status')}",
             )
             save_state(state)
+        emit_state_update(
+            batch_progress_step(
+                status="failed" if error else "running",
+                summary=error or f"completed batch work tool {action_type}",
+                extra_tool_call=tool_call,
+            )
+        )
         tool_calls.append(tool_call)
         result = tool_call.get("result") or {}
         if (
@@ -4427,6 +4497,76 @@ def _work_oneshot_artifacts(args):
     return str(Path(args.artifacts).expanduser().resolve(strict=False))
 
 
+def _work_oneshot_partial_report_path(args):
+    raw = getattr(args, "oneshot_report_path", None)
+    if not raw:
+        return None
+    return Path(str(raw)).expanduser().resolve(strict=False)
+
+
+_WORK_ONESHOT_REPORT_LOCK = threading.Lock()
+
+
+def _write_json_file_atomic(path, payload):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.{time.monotonic_ns()}.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _write_work_oneshot_partial_report(args, report, session, task, resume, *, phase="", step=None):
+    report_path = _work_oneshot_partial_report_path(args)
+    if report_path is None:
+        return None
+    try:
+        with _WORK_ONESHOT_REPORT_LOCK:
+            if report_path.exists():
+                try:
+                    current = json.loads(report_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    current = {}
+                if (
+                    isinstance(current, dict)
+                    and current.get("partial_report") is not True
+                    and current.get("work_exit_code") is not None
+                ):
+                    return report_path
+            generated_at = now_iso()
+            payload = {
+                "summary": "mew work --oneshot partial progress report",
+                "partial_report": True,
+                "generated_at": generated_at,
+                "heartbeat_at": generated_at,
+                "phase": phase or "",
+                "task_id": (task or {}).get("id") or (report or {}).get("task_id"),
+                "session_id": (session or {}).get("id") or (report or {}).get("session_id"),
+                "workspace_cwd": (task or {}).get("cwd") or getattr(args, "oneshot_workspace_cwd", "") or "",
+                "artifacts": getattr(args, "oneshot_artifacts", "") or "",
+                "work_exit_code": None,
+                "work_report": report or {},
+                "resume": resume or {},
+                "verification": {
+                    "command": getattr(args, "verify_command", None) or "",
+                    "source": getattr(args, "oneshot_verify_source", "")
+                    or ("explicit" if getattr(args, "verify_command", None) else ""),
+                    "reason": "partial progress report before oneshot completion",
+                },
+                "usage": "unavailable",
+            }
+            if step is not None:
+                payload["last_step"] = step
+            _write_json_file_atomic(report_path, payload)
+    except OSError:
+        return None
+    return report_path
+
+
+def _write_work_oneshot_final_report(report_path, report):
+    with _WORK_ONESHOT_REPORT_LOCK:
+        _write_json_file_atomic(report_path, report)
+
+
 def _parse_json_object(text):
     try:
         value = json.loads(text or "{}")
@@ -4479,6 +4619,16 @@ def cmd_work_oneshot(args):
         )
         if auto_verify_command:
             work_args.verify_command = auto_verify_command
+    work_args.oneshot_verify_source = (
+        "auto_detected"
+        if auto_verify_command
+        else ("explicit" if getattr(args, "verify_command", None) else "")
+    )
+    report_path = _work_oneshot_report_path(args)
+    if report_path:
+        work_args.oneshot_report_path = str(report_path)
+        work_args.oneshot_artifacts = _work_oneshot_artifacts(args)
+        work_args.oneshot_workspace_cwd = task.get("cwd") or ""
 
     stdout = StringIO()
     with redirect_stdout(stdout):
@@ -4510,10 +4660,8 @@ def cmd_work_oneshot(args):
         },
         "usage": "unavailable",
     }
-    report_path = _work_oneshot_report_path(args)
     if report_path:
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _write_work_oneshot_final_report(report_path, report)
     if getattr(args, "json", False):
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
@@ -6137,6 +6285,13 @@ def cmd_work_ai(args):
                     effective_args,
                     progress,
                     turn_id=planning_turn_id,
+                    on_state_update=lambda step=None: refresh_work_follow_snapshot(
+                        args,
+                        report,
+                        session_id,
+                        task_id,
+                        step=step,
+                    ),
                 )
             except KeyboardInterrupt:
                 interrupt = pause_work_session_after_user_interrupt(session_id, index)
@@ -6148,6 +6303,7 @@ def cmd_work_ai(args):
                     progress(f"step #{index}: interrupted by user")
                 break
             report["steps"].append(batch_step)
+            refresh_work_follow_snapshot(args, report, session_id, task_id, step=batch_step)
             if batch_step.get("error"):
                 report["stop_reason"] = "tool_failed"
                 if getattr(args, "live", False):
@@ -6678,13 +6834,14 @@ def cmd_work_ai(args):
             progress(f"step #{index}: tool #{tool_call_id} {action_type} start")
 
         try:
+            mirror_work_output = bool(getattr(args, "live", False) or getattr(args, "oneshot_report_path", None))
             output_progress = work_tool_output_progress(
                 progress,
                 tool_call_id,
-                session_id=session_id if getattr(args, "live", False) else None,
+                session_id=session_id if mirror_work_output else None,
                 on_state_update=(
                     (lambda: refresh_work_follow_snapshot(args, report, session_id, task_id))
-                    if getattr(args, "live", False)
+                    if mirror_work_output
                     else None
                 ),
             )

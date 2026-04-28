@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Selected M6.24 structural blockers SR-001 and SR-002 are repaired; the previous close gate remains historical and future repairs reopen/append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Active milestone: broaden from curated subset to the frozen Codex target registry without Terminal-Bench-specific solvers. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Resumed after selected M6.14 repairs; continue broad measurement and route any new accepted structural blockers back through M6.14. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,10 +69,13 @@ is tracked below.
 
 Active work: **M6.24 Broad Terminal-Bench Parity Campaign**.
 
-Why M6.24 is active:
+Why M6.24 is active now:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
+- User decision on 2026-04-28: if M6.24 exposes an accepted structural
+  problem, stop broad measurement, set M6.24 to `pending`, and repair the
+  substrate through M6.14 before returning to the same failing shape.
 - M6.20 closed the first fixed terminal gate on current head:
   `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
   errors 0.
@@ -83,6 +86,54 @@ Why M6.24 is active:
 - M6.23 closed failure-class coverage and proved one ranked generic repair:
   grounded edit-scope evidence improved `overfull-hbox` from 2/5 to 3/5,
   matching its frozen Codex target.
+- M6.24 Batch 2 produced selected structural blockers that made continued
+  broad measurement low-value until repaired:
+  `domain_ground_truth_verifier_surrogate_false_green` / exact external-tool
+  verifier grounding from `dna-assembly`, and timeout / partial observability
+  for long domain/document repair loops from `financial-document-processor`
+  and `dna-assembly`.
+- M6.14 repair episode for those selected blockers is now closed:
+  SR-001 timeout / partial observability is repaired by atomic partial reports
+  plus Harbor `container_repo_root` report mapping; SR-002 exact external-tool
+  false green is repaired by the exact-command finish gate plus exact-tool
+  unavailable blocker proof.
+
+M6.24 resume condition:
+
+- If a new accepted structural blocker appears, pause M6.24, append it to
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair it through M6.14, record
+  focused validation, and rerun the same failed task shape before resuming
+  broad measurement.
+- Canonical structural blocker queue:
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
+  context compression and milestone transitions do not lose repair obligations.
+- Closed M6.14 episode:
+  SR-001 timeout / partial observability is `repaired`; generic code landed in
+  `a87754e` and wrapper path mapping in `a3cf090`. Same-shape Harbor rerun
+  `mew-m6-14-sr001-financial-document-processor-1attempt-container-report-20260428-1640`
+  still timed out after 900s, but preserved host-visible `mew-report.json` with
+  the active work-session resume bundle, unresolved failures, recent decisions,
+  current working memory, and next action.
+- Closed M6.14 follow-on episode:
+  SR-002 finish/verifier grounding false green is `repaired`. The first
+  generic code slice blocks `finish task_done=true` when the task names an
+  exact external ground-truth command/tool and flags but acceptance evidence
+  does not cite a completed `run_command` or `run_tests` containing the exact
+  command shape. Same-shape `dna-assembly` rerun
+  `mew-m6-14-sr002-dna-assembly-1attempt-exact-ground-truth-20260428-1645`
+  did not false-green, but timed out after detecting `oligotm NOT_FOUND` and
+  drifting into local `primer3-py` surrogate exploration. A smaller exact-tool
+  unavailable proof
+  `proof-artifacts/m6-14-sr002-exact-tool-unavailable-smoke-20260428-1651/agent/mew-report.json`
+  then ran the required exact command, observed executable-not-found, and
+  stopped with `task_done=false` plus a blocked acceptance check instead of
+  substituting a surrogate.
+
+Next concrete action:
+
+- Continue M6.24 Batch 2 / broad parity measurement from the current manifest.
+  If a new failure is accepted as structural rather than ordinary task miss,
+  append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
 
 Closed M6.22 result:
 
@@ -147,9 +198,9 @@ Closed M6.23 result:
 - Already repaired class:
   `repairable_constraint_blocker_terminal_wait` by commit `2d0b5c4`.
 
-Current M6.24 chain:
+Current M6.24/M6.14 chain:
 
-`M6.24 broad parity -> run Batch 1 with generic work path -> compare against frozen Codex target -> feed failures through M6.18/M6.23 repair economy`
+`M6.24 broad parity evidence -> M6.18 classification -> accepted structural blocker -> M6.24 pending -> M6.14 bounded generic repair -> rerun same failed task shape -> resume M6.24`
 
 M6.24 Batch 1:
 
@@ -398,11 +449,10 @@ M6.24 Batch 1:
   a few seconds available for the last model call and hidden verifier tails
   still concentrated around repository tests and NumPy alias compatibility.
 - current route:
-  stop spending `build-cython-ext`-only repair cycles unless a small generic
-  repair is obvious or another task confirms the same shape. Continue M6.24 by
-  selecting the next reusable Batch 1 target-deficit repair, likely a
-  data/numeric artifact-quality verifier scaffold for `raman-fitting` or the
-  next broad-parity candidate, not a benchmark-specific Cython closeout.
+  do not continue broad M6.24 measurement while an accepted structural blocker
+  is selected for repair. M6.24 is pending behind the active M6.14 repair
+  episode; resume only after a bounded generic repair is validated and rerun
+  against the same failed task shape.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_work_session.py -k verifier_failure_repair_agenda -q`,
   `uv run pytest --no-testmon tests/test_work_session.py -q`, and
@@ -439,9 +489,8 @@ M6.24 Batch 1:
   `numeric_independent_validation_not_objective_grounded`: the loop now
   grounds in the source table and cites independent checks, but still
   validates the wrong objective/scale/model family. Stop `raman-fitting`-only
-  repair cycles unless a small generic objective-grounding check is obvious;
-  continue broad M6.24 measurement or build a reusable numeric objective
-  substrate from multiple numeric/data tasks.
+  repair cycles unless it becomes the selected M6.14 structural blocker with a
+  generic objective-grounding repair plan.
 - completed Batch 2 selection:
   Batch 2 covers unseen tasks `caffe-cifar-10`,
   `extract-moves-from-video`, `dna-assembly`, `dna-insert`,
@@ -479,8 +528,30 @@ M6.24 Batch 1:
   exposing the deeper generic blocker
   `document_pdf_observation_missing`; a future repair should add a generic
   PDF/document observation substrate, not a task-specific solver.
-  Batch 2 measured latest total is 15/20 against frozen Codex target 19/20 for
-  measured tasks.
+  Later generic repeat-guard, apt-root, and patch-shape repairs showed mixed
+  evidence: a single-trial probe passed 1/1 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-financial-document-processor-1attempt-repeat-guard-apt-20260428-1245/result.json`,
+  but a post-issue #3/#14/#15 parallel 5-trial rerun had 0 completed reward
+  trials and 5 `RuntimeError` command timeouts in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-financial-document-processor-5attempts-post-issue3-20260428-1328/result.json`.
+  The sequential probe was stopped after one 900s timeout and one cancelled
+  trial. The current blocker is timeout/partial-observability dominated, not a
+  simple PDF absolute blocker. Do not spend more wall-clock on repeated
+  `financial-document-processor` 5-trial reruns until a generic timeout /
+  partial-report repair is selected or another document/artifact task confirms
+  the same shape.
+  `dna-assembly` then scored 0/2 completed reward trials with 3 Harbor errors
+  in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-dna-assembly-5attempts-20260428-1440/result.json`,
+  against Codex target 3/5. The completed trials false-greened local primer
+  verification but failed hidden checks on melting-temperature constraints; the
+  dominant reusable class is
+  `domain_ground_truth_verifier_surrogate_false_green`, with secondary
+  `agent_command_timeout_after_domain_repair_loop`,
+  `agent_setup_timeout_under_parallel_install`, and
+  `shell_quoting_multiline_command`. Batch 2 measured latest total is 15/25
+  against frozen Codex target 22/25 for measured tasks, with runner-error debt
+  still requiring cleanup before M6.24 can close.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
   passed with 743 tests and 30 subtests; `uv run ruff check` on changed files

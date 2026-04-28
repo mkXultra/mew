@@ -929,6 +929,9 @@ Target:
   under repair, then resume at the same failed task after repair
 - repair incidents are normally recorded as repair episodes under M6.14, not
   minted as M6.15/M6.16 just because another incident happened
+- structural blocker obligations are appended to
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` so they survive context compression
+  and milestone transitions
 - known M6.14 episode families include implementation-drift, wrong-target,
   scope, task-goal, patch-selection, verified-closeout, and stale-redraft
   failures
@@ -1083,6 +1086,11 @@ Target:
 - route `polish` to same-task retry, `structural` to a bounded M6.14 repair
   episode, `invalid_task_spec` to task/spec correction, `transient_model` to
   retry, and `ambiguous` to replay/proof collection before structural claims
+- distinguish a structural signal from a selected structural repair: broad
+  measurement may collect the minimum evidence needed to disambiguate an
+  ambiguous signal, but once a blocker is accepted as structural, the active
+  product/parity milestone pauses as `pending` and a bounded M6.14 repair
+  episode becomes the active work
 - use `docs/ADOPT_FROM_REFERENCES.md`,
   `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, and related reference
   reviews as evidence for structural repair candidates, not as automatic
@@ -1356,6 +1364,9 @@ Done when:
   of 445 trials, 82.2% resolution rate
 - every task where mew is below Codex has a recorded classification and either
   a selected repair route or a written decision to defer it
+- no accepted structural blocker remains unaddressed while broad measurement
+  continues; M6.24 may continue measurement only for a named disambiguation
+  probe, then must pause behind M6.14 if the blocker is confirmed
 - the final parity report includes aggregate score, per-task deltas, cost/token
   data when available, timeout/error rates, and the top remaining gaps
 
