@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Repair ledger covers known mew-first substrate failures; future repairs append here. |
+| 6.14 Mew-First Failure Repair Gate | `in_progress` | Active repair home for selected M6.24 structural blockers; the previous close gate remains historical and future repairs append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Active milestone: broaden from curated subset to the frozen Codex target registry without Terminal-Bench-specific solvers. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `pending` | Paused while the selected M6.24 structural blockers run through M6.14 repair instead of continuing low-value broad measurement. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -67,12 +67,15 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M6.24 Broad Terminal-Bench Parity Campaign**.
+Active work: **M6.14 repair episode for M6.24 structural blockers**.
 
-Why M6.24 is active:
+Why M6.14 is active now:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
+- User decision on 2026-04-28: if M6.24 exposes an accepted structural
+  problem, stop broad measurement, set M6.24 to `pending`, and repair the
+  substrate through M6.14 before returning to the same failing shape.
 - M6.20 closed the first fixed terminal gate on current head:
   `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
   errors 0.
@@ -83,6 +86,21 @@ Why M6.24 is active:
 - M6.23 closed failure-class coverage and proved one ranked generic repair:
   grounded edit-scope evidence improved `overfull-hbox` from 2/5 to 3/5,
   matching its frozen Codex target.
+- M6.24 Batch 2 produced selected structural blockers that make continued
+  broad measurement low-value until repaired:
+  `domain_ground_truth_verifier_surrogate_false_green` / exact external-tool
+  verifier grounding from `dna-assembly`, and timeout / partial observability
+  for long domain/document repair loops from `financial-document-processor`
+  and `dna-assembly`.
+
+M6.24 resume condition:
+
+- M6.14 must land a bounded generic repair for the selected blocker, record
+  focused validation, and rerun the same failed task shape. After that, M6.24
+  resumes with the repair result recorded in the relevant Batch ledger.
+- Canonical structural blocker queue:
+  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
+  context compression and milestone transitions do not lose repair obligations.
 
 Closed M6.22 result:
 
@@ -147,9 +165,9 @@ Closed M6.23 result:
 - Already repaired class:
   `repairable_constraint_blocker_terminal_wait` by commit `2d0b5c4`.
 
-Current M6.24 chain:
+Current M6.24/M6.14 chain:
 
-`M6.24 broad parity -> run Batch 1 with generic work path -> compare against frozen Codex target -> feed failures through M6.18/M6.23 repair economy`
+`M6.24 broad parity evidence -> M6.18 classification -> accepted structural blocker -> M6.24 pending -> M6.14 bounded generic repair -> rerun same failed task shape -> resume M6.24`
 
 M6.24 Batch 1:
 
@@ -398,11 +416,10 @@ M6.24 Batch 1:
   a few seconds available for the last model call and hidden verifier tails
   still concentrated around repository tests and NumPy alias compatibility.
 - current route:
-  stop spending `build-cython-ext`-only repair cycles unless a small generic
-  repair is obvious or another task confirms the same shape. Continue M6.24 by
-  selecting the next reusable Batch 1 target-deficit repair, likely a
-  data/numeric artifact-quality verifier scaffold for `raman-fitting` or the
-  next broad-parity candidate, not a benchmark-specific Cython closeout.
+  do not continue broad M6.24 measurement while an accepted structural blocker
+  is selected for repair. M6.24 is pending behind the active M6.14 repair
+  episode; resume only after a bounded generic repair is validated and rerun
+  against the same failed task shape.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_work_session.py -k verifier_failure_repair_agenda -q`,
   `uv run pytest --no-testmon tests/test_work_session.py -q`, and
@@ -439,9 +456,8 @@ M6.24 Batch 1:
   `numeric_independent_validation_not_objective_grounded`: the loop now
   grounds in the source table and cites independent checks, but still
   validates the wrong objective/scale/model family. Stop `raman-fitting`-only
-  repair cycles unless a small generic objective-grounding check is obvious;
-  continue broad M6.24 measurement or build a reusable numeric objective
-  substrate from multiple numeric/data tasks.
+  repair cycles unless it becomes the selected M6.14 structural blocker with a
+  generic objective-grounding repair plan.
 - completed Batch 2 selection:
   Batch 2 covers unseen tasks `caffe-cifar-10`,
   `extract-moves-from-video`, `dna-assembly`, `dna-insert`,
