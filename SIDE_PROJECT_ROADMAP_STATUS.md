@@ -28,11 +28,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
 | SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
-| SP18 mew-ghost Live Desk Opt-In | `blocked` | Retry after issue `#3` was fixed still stopped before product edits: mew hit remaining multi-hunk ambiguity/overlap and then could not safely emit the large full-file `write_file` batch. Issues `#14` and `#15` are open. |
+| SP18 mew-ghost Live Desk Opt-In | `done` | Live desk opt-in landed practical: explicit `--live-desk`, no-shell repo-local desk command, timeout/fallback handling, fixture-only defaults, top-level real desk JSON normalization, README examples, local report, real live-desk proof, and focused tests are in place. |
 
 ## Active Focus
 
-Active side-project focus: **SP18 mew-ghost Live Desk Opt-In is blocked on issues `#14` and `#15`**.
+Active side-project focus: **SP18 mew-ghost Live Desk Opt-In is complete**.
 
 Current target:
 
@@ -51,14 +51,15 @@ Current target:
   `sleeping`/`thinking`/`typing`/`alerting` into separate desk-derived presence,
   renders desk status/counts/details/primary_action in CLI state and HTML, and
   exposes desk `primary_action` as a non-executable dry-run command intent
-- next planned bridge: explicit `--live-desk` should run repo-local
-  `./mew desk --json` without shell execution, map the live desk result through
-  the same desk status/count/action surface, rerun during watch only when
-  opted in, and convert failures into structured desk states
+- SP18 live desk opt-in is now present: explicit `--live-desk` runs repo-local
+  `./mew desk --json` without shell execution, maps nested and current
+  top-level desk JSON through the same desk status/count/action surface, reruns
+  during watch only when opted in, and converts failures into structured desk
+  states
 - live macOS probing remains explicit through `--live-active-window`
-- live `mew desk --json` subprocess execution remains unimplemented until SP18
-  is unblocked; existing SP17 behavior should not read live `.mew` state or
-  import `src/mew/**`
+- existing default and `--desk-json` behavior still should not read live `.mew`
+  state or import `src/mew/**`; live desk reads are limited to explicit
+  `--live-desk`
 - preserve the bounded deterministic presence loop without background
   monitoring or hidden capture
 - preserve structured fallback for missing `osascript`, non-macOS platforms,
@@ -81,8 +82,14 @@ Current target:
   M6.16 implementation-lane hardening; SP16 still needed operator report JSON
   normalization, recorded in ledger row `17`, and SP17 needed report-schema plus
   stale schema-version closeout follow-up, recorded in ledger row `18`
-- route the stale schema/version closeout gap as open issue `#13` evidence for
-  M6.16 implementation-lane hardening
+- route the stale schema/version closeout gap as issue `#13` evidence for
+  M6.16 implementation-lane hardening; SP18 closed the stale schema/title
+  surfaces in `mew-ghost`
+- route the SP18 top-level real desk JSON verifier gap as issue `#16` evidence;
+  SP18 repaired it before commit with injected-runner coverage and real
+  `--live-desk` proof
+- route the final side-project `git_status`/`git_diff` closeout scope failure as
+  open issue `#17` evidence for implementation-lane hardening
 - route watch-mode verifier semantics as closed issue `#12` evidence; SP16
   operator review confirmed multiple CLI records and HTML rewrite behavior
 - preserve the current operating model for any future side-project cohort:
@@ -97,8 +104,8 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
-  the SP18 retry on 2026-04-28: `rows_total=20`, three `failed`,
-  fourteen `practical`, three `clean`, `success_rate=0.85`,
+  the SP18 completion on 2026-04-28: `rows_total=21`, three `failed`,
+  fifteen `practical`, three `clean`, `success_rate=0.857`,
   `structural_repairs_required=3`,
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
@@ -519,6 +526,37 @@ Current target:
 - Problem issues opened:
   `https://github.com/mkXultra/mew/issues/14` and
   `https://github.com/mkXultra/mew/issues/15`.
+- After issues `#14` and `#15` closed, task `#18` resumed in sessions `#40`
+  and `#41` with Codex CLI as `operator` and mew as first implementer. Mew
+  authored explicit `--live-desk` support under `experiments/mew-ghost`, kept
+  default and `--desk-json` paths deterministic and non-live, added injected
+  runner/provider tests, updated README terminal/HTML examples, and wrote the
+  practical report.
+- Reviewer follow-ups were required before commit. First, issue `#13` was still
+  visible because the SP18 state shape initially kept stale SP17 schema/title
+  strings; mew updated `SCHEMA_VERSION`, HTML title, parser description, and
+  test expectations to SP18 while preserving fixture labels. Second, real
+  `--live-desk` proof exposed issue `#16`: current top-level
+  `./mew desk --json` payloads with `pet_state`/`focus` normalized to
+  `unknown` because tests only covered nested fixture-like desk payloads. Mew
+  repaired the normalizer and added injected coverage for the current top-level
+  shape. A final live primary-action wording polish was also mew-authored.
+- No operator product-code rescue edits were made. The operator only updated
+  the report evidence after real live-desk proof and opened issue `#17` for the
+  recurring final `git_status`/`git_diff` allow-read closeout failure.
+- mew-ghost SP18 practical local report:
+  `experiments/mew-ghost/.mew-dogfood/reports/18-live-desk-opt-in-practical.json`.
+- Ledger row: `proof-artifacts/side_project_dogfood_ledger.jsonl` row `21`;
+  outcome `practical`, failure class
+  `sp18_live_desk_retry_after_prior_blocked_attempts`, `rescue_edits=0`,
+  `repair_required=false`.
+- SP18 verification passed:
+  `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+  returned `28 passed`. `git diff --check`, real state output
+  `UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk --output /tmp/mew-ghost-live-state.json`,
+  and bounded real HTML watch
+  `UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 0`
+  also passed.
 
 ## Missing Proof
 
@@ -529,36 +567,29 @@ Current target:
 - SP15 is closed for the second `mew-ghost` cohort.
 - SP16 is closed for the second `mew-ghost` cohort.
 - SP17 is closed for the second `mew-ghost` cohort.
-- SP18 is blocked before product edits; real `./mew desk --json` state is not
-  yet available in `mew-ghost`.
+- SP18 is closed for the second `mew-ghost` cohort.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
 - Real macOS Accessibility behavior for `--live-active-window` remains
   intentionally unverified by automation; structured fallback and injected
   provider paths are covered.
-- Open `[side-pj]` issue `#14` captures the remaining multi-hunk ambiguity and
-  overlap failure after issue `#3` was fixed.
-- Open `[side-pj]` issue `#15` captures the large `write_file` batch-shaping
-  limit after the natural hunk-failure workaround.
-- Open `[side-pj]` issue `#13` captures the reusable SP17 stale schema/version
-  closeout gap. Any additional recurrence should be recorded as a new or
-  reopened one-problem issue before the next major side-project milestone.
+- Issue `#13` was resolved for `mew-ghost` by the SP18 schema/title closeout.
+- Issue `#16` was resolved before commit by adding top-level real desk JSON
+  normalization coverage and proof.
+- Open `[side-pj]` issue `#17` captures the recurring final
+  `git_status`/`git_diff` closeout failure under side-project allow-read roots.
 
 ## Next Action
 
-Resolve or bypass SP18's implementation-lane blockers before retrying:
+Choose the next side-project move:
 
-1. repair or close issues `#14` and `#15`, then retry task `#18` with mew as
-   first implementer
-2. alternatively, ask the user for explicit Codex fallback permission and
-   record the attempt as non-mew-first implementation if product progress is
-   more important than autonomy credit
-3. before any new mew coding operation, run the repo-root sync rule from
+1. close issues `#13` and `#16` after the SP18 commit/push lands
+2. keep issue `#17` open as implementation-lane closeout hardening input
+3. decide whether to add a new SP19 milestone for the next `mew-ghost` slice or
+   pause the side-project arc and feed SP12-SP18 evidence into core hardening
+4. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
-4. if SP18 is retried, preserve the same acceptance target: explicit
-   `--live-desk`, no shell execution, timeout/failure fallbacks, fixture
-   defaults, injected-runner tests, README examples, and canonical report
 
 ## Non-Goals
 

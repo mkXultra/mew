@@ -1,8 +1,8 @@
-# mew-ghost SP17 desk bridge
+# mew-ghost SP18 live desk opt-in
 
-`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP17 keeps the fixture-driven and dry-run defaults, preserves `--live-active-window` as the only live active-window opt-in, and adds a fixture-only `--desk-json` bridge for static mew desk JSON-style view models. Direct launcher execution remains available only behind the explicit `--execute-launchers` CLI opt-in, and desk `primary_action` is always surfaced as a dry-run intent.
+`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP18 keeps the fixture-driven and dry-run defaults, preserves `--live-active-window` as the only live active-window opt-in, keeps `--desk-json` fixture-only, and adds explicit `--live-desk` for repo-local live desk JSON. Direct launcher execution remains available only behind the explicit `--execute-launchers` CLI opt-in, and desk `primary_action` is always surfaced as a dry-run intent.
 
-The shell does not import core mew code, read live `.mew` state, run a desk command, capture the screen, monitor hidden activity, use the network, or package a native app.
+The shell does not import core mew code, read live `.mew` state unless `--live-desk` is provided, run a desk command unless explicitly requested, capture the screen, monitor hidden activity, use the network, or package a native app.
 
 ## What this slice provides
 
@@ -14,6 +14,8 @@ The shell does not import core mew code, read live `.mew` state, run a desk comm
 ## Fixture-only desk bridge
 
 `--desk-json PATH` loads a static desk view-model fixture. It never invokes a live desk command and never reads live `.mew` state. Watch mode reloads the desk fixture on every iteration so local dogfood can rewrite the JSON file and observe refreshed desk status without a background daemon.
+
+`--live-desk` is the separate live opt-in. It runs repo-local `./mew desk --json` as an argument list with no shell, uses a short timeout, normalizes successful output through the same status/count/detail/primary_action surface, and converts missing command, nonzero exit, timeout, malformed JSON, or non-object JSON into structured fallback desk states. Default renders and `--desk-json` renders remain deterministic and non-live.
 
 Desk pet states are mapped into ghost presence metadata without replacing the active-window classification path:
 
@@ -32,10 +34,10 @@ Single renders still build one local state/HTML document and then stop. Watch mo
 - `--watch` without `--watch-count` runs in the foreground until `KeyboardInterrupt`.
 - `--interval SECONDS` controls the sleep between iterations.
 - Tests can inject the sleeper, clock, probe provider, and launcher runner.
-- Every iteration reloads the ghost fixture and optional desk fixture, rebuilds state, reruns the selected probe path, and emits one newline-delimited CLI JSON record.
+- Every iteration reloads the ghost fixture and optional desk fixture or opted-in live desk status, rebuilds state, reruns the selected probe path, and emits one newline-delimited CLI JSON record.
 - With `--format html --output PATH`, each iteration rewrites the same local HTML file with freshness metadata for that iteration.
 
-Watch mode does not create a daemon, background monitor, hidden capture loop, network connection, or live `.mew` reader.
+Watch mode does not create a daemon, background monitor, hidden capture loop, or network connection. Live desk reads occur only during foreground `--live-desk` renders.
 
 ## Presence states
 
@@ -91,6 +93,18 @@ Load the static desk fixture and render desk status/counts/details/primary_actio
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state
+```
+
+Explicitly opt into live repo-local desk JSON for one terminal state render:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk
+```
+
+Explicitly opt into live desk state while rewriting local HTML in bounded foreground watch:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 1
 ```
 
 Explicitly opt into the live macOS active-window probe while keeping the watch bounded:

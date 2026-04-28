@@ -11,7 +11,7 @@ GHOST_PATH = ROOT / 'ghost.py'
 FIXTURE_PATH = ROOT / 'fixtures' / 'sample_ghost_state.json'
 DESK_FIXTURE_PATH = ROOT / 'fixtures' / 'sample_desk_view.json'
 
-spec = importlib.util.spec_from_file_location('mew_ghost_sp17', GHOST_PATH)
+spec = importlib.util.spec_from_file_location('mew_ghost_sp18', GHOST_PATH)
 ghost = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(ghost)
@@ -27,14 +27,14 @@ def test_fixture_builds_deterministic_state_and_html() -> None:
 
     assert state_one == state_two
     assert html_one == html_two
-    assert state_one['schema_version'] == 'mew-ghost.sp17.v1'
+    assert state_one['schema_version'] == 'mew-ghost.sp18.v1'
     assert state_one['active_window']['status'] == 'available'
     assert state_one['active_window']['active_app'] == 'Visual Studio Code'
     assert state_one['presence']['classification']['state'] == 'coding'
     assert [snapshot['presence_state'] for snapshot in state_one['presence']['snapshots']] == ['coding', 'coding', 'coding']
     assert 'Ghost is watching VS Code without screen capture.' in html_one
     assert 'Writing the SP12 scaffold' in html_one
-    assert 'mew-ghost.sp17.v1' in html_one
+    assert 'mew-ghost.sp18.v1' in html_one
     assert 'Freshness' in html_one
 
 
@@ -78,7 +78,7 @@ def test_probe_contract_is_safe_without_accessibility_or_live_api() -> None:
 
     assert calls == []
     assert unavailable == {
-        'schema_version': 'mew-ghost.sp17.v1',
+        'schema_version': 'mew-ghost.sp18.v1',
         'status': 'unavailable',
         'reason': 'requires_macos',
         'platform': 'Linux',
@@ -120,6 +120,125 @@ def test_probe_contract_accepts_injected_success_provider() -> None:
 
 def _completed_process(*, stdout: str = '', stderr: str = '', returncode: int = 0) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=['osascript'], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def test_live_desk_status_uses_injected_runner_without_shell_and_normalizes_surface(tmp_path: Path) -> None:
+    mew_path = tmp_path / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        payload = {
+            'fixture_name': 'live-sample',
+            'desk': {
+                'status': 'typing',
+                'pets': [{'name': 'mew', 'pet_state': 'typing', 'detail': 'live task'}],
+                'primary_action': {'id': 'resume', 'label': 'Resume live task', 'command': ['mew', 'code']},
+            },
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    status = ghost.fetch_live_desk_status(runner=runner, mew_path=mew_path, timeout_seconds=0.25)
+
+    assert calls[0][0] == [str(mew_path), 'desk', '--json']
+    assert calls[0][1]['capture_output'] is True
+    assert calls[0][1]['text'] is True
+    assert calls[0][1]['check'] is False
+    assert calls[0][1]['timeout'] == 0.25
+    assert calls[0][1]['shell'] is False
+    assert status['source'] == 'live-desk'
+    assert status['live_mew_reads'] is True
+    assert status['command'] == ['./mew', 'desk', '--json']
+    assert status['fallback'] is None
+    assert status['status'] == 'typing'
+    assert status['counts']['pets_total'] == 1
+    assert status['details'][0]['presence_state'] == 'coding'
+    assert status['primary_action']['source'] == 'live-desk'
+    assert status['primary_action']['description'] == (
+        'Live desk primary_action is a dry-run hint from opted-in live desk JSON; '
+        'mew-ghost never executes it.'
+    )
+    assert status['primary_action']['dry_run'] is True
+    assert status['primary_action']['executable'] is False
+
+
+def test_live_desk_status_normalizes_current_top_level_live_shape_with_injected_runner(tmp_path: Path) -> None:
+    mew_path = tmp_path / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        payload = {
+            'pet_state': 'sleeping',
+            'focus': {'summary': 'review queue', 'detail': 'resting on current branch'},
+            'counts': {'queue': {'ready': 2}, 'actions': 1},
+            'details': {'current_task': {'title': 'SP18'}, 'watch': 'foreground'},
+            'actions': [
+                {
+                    'id': 'resume',
+                    'label': 'Resume live desk',
+                    'command': ['mew', 'work', '18'],
+                    'description': 'Resume provided by live desk.',
+                }
+            ],
+            'current_git': {'branch': 'sp18-live-desk', 'dirty': True},
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    status = ghost.fetch_live_desk_status(runner=runner, mew_path=mew_path, timeout_seconds=0.25)
+
+    assert calls[0][0] == [str(mew_path), 'desk', '--json']
+    assert calls[0][1]['shell'] is False
+    assert status['source'] == 'live-desk'
+    assert status['live_mew_reads'] is True
+    assert status['fallback'] is None
+    assert status['status'] == 'sleeping'
+    assert status['counts']['queue'] == {'ready': 2}
+    assert status['counts']['actions'] == 1
+    assert status['counts']['pets_total'] == 1
+    assert status['counts']['pet_states'] == {'sleeping': 1}
+    assert status['counts']['raw_grouped_details']['current_task']['title'] == 'SP18'
+    assert status['details'][0]['pet_state'] == 'sleeping'
+    assert status['details'][0]['presence_state'] == 'idle'
+    assert status['details'][0]['detail'] == 'resting on current branch'
+    assert status['details'][0]['focus']['summary'] == 'review queue'
+    assert status['details'][0]['raw_grouped_details']['watch'] == 'foreground'
+    assert status['details'][0]['current_git']['branch'] == 'sp18-live-desk'
+    assert status['primary_action']['source'] == 'live-desk'
+    assert status['primary_action']['command'] == ['mew', 'work', '18']
+    assert status['primary_action']['description'] == 'Resume provided by live desk.'
+    assert status['primary_action']['dry_run'] is True
+    assert status['primary_action']['executable'] is False
+
+
+def test_live_desk_status_reports_structured_fallbacks_without_real_subprocesses(tmp_path: Path) -> None:
+    mew_path = tmp_path / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+
+    missing = ghost.fetch_live_desk_status(runner=lambda command, **kwargs: _completed_process(), mew_path=tmp_path / 'missing')
+    nonzero = ghost.fetch_live_desk_status(runner=lambda command, **kwargs: _completed_process(stderr='boom', returncode=7), mew_path=mew_path)
+
+    def timeout_runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=command, timeout=kwargs.get('timeout'))
+
+    timed_out = ghost.fetch_live_desk_status(runner=timeout_runner, mew_path=mew_path)
+    malformed = ghost.fetch_live_desk_status(runner=lambda command, **kwargs: _completed_process(stdout='{not json'), mew_path=mew_path)
+    non_object = ghost.fetch_live_desk_status(runner=lambda command, **kwargs: _completed_process(stdout='[]'), mew_path=mew_path)
+
+    observed = [missing, nonzero, timed_out, malformed, non_object]
+    assert [status['fallback']['reason'] for status in observed] == [
+        'missing_command',
+        'nonzero_exit',
+        'timeout',
+        'malformed_json',
+        'non_object_json',
+    ]
+    assert all(status['source'] == 'live-desk' for status in observed)
+    assert all(status['live_mew_reads'] is True for status in observed)
+    assert all(status['status'] == 'fallback' for status in observed)
+    assert nonzero['fallback']['returncode'] == 7
 
 
 def test_live_osascript_provider_parses_injected_runner_success() -> None:
@@ -262,6 +381,99 @@ def test_cli_renders_desk_json_state_and_html(tmp_path: Path) -> None:
     assert 'typing' in html
 
 
+def test_cli_live_desk_opt_in_uses_injected_runner_without_spawning(capsys, tmp_path: Path) -> None:
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    mew_path = repo_root / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    original_repo_root = ghost.REPO_ROOT
+    calls: list[list[str]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs['shell'] is False
+        payload = {
+            'fixture_name': 'cli-live-desk',
+            'desk': {
+                'status': 'typing',
+                'pets': [{'name': 'mew', 'pet_state': 'typing', 'detail': 'live CLI task'}],
+                'primary_action': {'id': 'resume', 'label': 'Resume live CLI task', 'command': ['mew', 'code']},
+            },
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    ghost.REPO_ROOT = repo_root
+    try:
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--format', 'state', '--live-desk'],
+            live_desk_runner=runner,
+        ) == 0
+    finally:
+        ghost.REPO_ROOT = original_repo_root
+
+    state = json.loads(capsys.readouterr().out)
+
+    assert calls == [[str(mew_path), 'desk', '--json']]
+    assert state['desk']['source'] == 'live-desk'
+    assert state['desk']['live_mew_reads'] is True
+    assert state['desk']['command'] == ['./mew', 'desk', '--json']
+    assert state['presence']['live_mew_reads'] is True
+    assert state['desk']['primary_action']['dry_run'] is True
+    assert state['desk']['primary_action']['executable'] is False
+    assert state['launch_intents'][-1]['id'] == 'desk-primary-action'
+    assert state['launch_intents'][-1]['execution']['executed'] is False
+
+
+def test_watch_live_desk_reruns_only_when_opted_in(capsys, tmp_path: Path) -> None:
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    (repo_root / 'mew').write_text('#!/bin/sh\n', encoding='utf-8')
+    original_repo_root = ghost.REPO_ROOT
+    calls: list[list[str]] = []
+    statuses = iter(['thinking', 'alerting'])
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        status = next(statuses)
+        payload = {
+            'fixture_name': 'watch-live-desk',
+            'desk': {
+                'status': status,
+                'pets': [{'name': 'mew', 'pet_state': status, 'detail': 'foreground watch'}],
+            },
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    ghost.REPO_ROOT = repo_root
+    try:
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--format', 'state', '--watch-count', '2', '--interval', '0'],
+            live_desk_runner=runner,
+            clock=lambda: 'fixture-watch',
+            sleeper=lambda interval: None,
+        ) == 0
+        fixture_records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+        clocks = iter(['live-0', 'live-1'])
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--format', 'state', '--live-desk', '--watch-count', '2', '--interval', '0'],
+            live_desk_runner=runner,
+            clock=lambda: next(clocks),
+            sleeper=lambda interval: None,
+        ) == 0
+    finally:
+        ghost.REPO_ROOT = original_repo_root
+
+    live_records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    assert calls == [[str(repo_root / 'mew'), 'desk', '--json'], [str(repo_root / 'mew'), 'desk', '--json']]
+    assert [record['desk_status'] for record in fixture_records] == ['disabled', 'disabled']
+    assert all(record['state']['desk']['live_mew_reads'] is False for record in fixture_records)
+    assert [record['desk_status'] for record in live_records] == ['thinking', 'alerting']
+    assert all(record['state']['desk']['source'] == 'live-desk' for record in live_records)
+    assert all(record['state']['presence']['live_mew_reads'] is True for record in live_records)
+
+
 def test_watch_reloads_desk_fixture_each_iteration(tmp_path: Path, capsys) -> None:
     desk_path = tmp_path / 'desk.json'
     desk_path.write_text(json.dumps({'fixture_name': 'first', 'desk': {'status': 'thinking', 'pets': [{'name': 'mew', 'pet_state': 'thinking'}]}}), encoding='utf-8')
@@ -319,7 +531,7 @@ def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
     state = json.loads(state_output.read_text(encoding='utf-8'))
 
     assert html.startswith('<!doctype html>')
-    assert '<title>mew-ghost SP17 watch mode</title>' in html
+    assert '<title>mew-ghost SP18 watch mode</title>' in html
     assert 'single render' in html
     assert 'refresh 0' in html
     assert 'refresh 1' in html
@@ -460,6 +672,8 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 1',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --watch-count 2',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --execute-launchers',
     ]
@@ -482,7 +696,14 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert '--watch-count' in source
     assert '--interval' in source
     assert '--desk-json' in source
+    assert '--live-desk' in source
+    assert "SCHEMA_VERSION = 'mew-ghost.sp18.v1'" in source
+    assert 'Standalone SP18 mew-ghost foreground watch-mode shell' in source
+    assert "description='Render the SP18 mew-ghost watch-mode shell'" in source
+    assert '<title>mew-ghost SP18 watch mode</title>' in source
+    assert 'mew-ghost.sp17.v1' not in source
     assert 'sample_desk_view.json' in source
+    assert "'desk', '--json'" in source
     assert 'mew desk --json' not in source
     assert 'background_monitoring' in source
     assert 'network' in source

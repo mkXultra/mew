@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "task_id": 18,
+  "session_id": 40,
+  "side_project": "mew-ghost",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Add an explicit --live-desk opt-in to isolated mew-ghost while keeping default and --desk-json fixture paths deterministic and non-live.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/18-live-desk-opt-in-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+    "git diff --check",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk --output /tmp/mew-ghost-live-state.json",
+    "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 0"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 662,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "27 passed"
+    },
+    {
+      "tool_call_id": 666,
+      "command": "git diff --check",
+      "exit_code": 0,
+      "summary": "whitespace check passed before report creation"
+    },
+    {
+      "tool_call_ids": [
+        667,
+        668,
+        669
+      ],
+      "summary": "Refreshed current ghost.py, tests/test_mew_ghost.py, and README.md after applied SP18 edits."
+    },
+    {
+      "tool_call_ids": [
+        680,
+        681
+      ],
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "Reviewer schema/title closeout applied to ghost.py and tests; focused pytest passed with 27 tests."
+    },
+    {
+      "tool_call_id": 705,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "Issue #16 top-level live desk normalization repair passed with 28 tests after preserving sleeping -> idle presence mapping."
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk --output /tmp/mew-ghost-live-state.json",
+      "exit_code": 0,
+      "summary": "Operator real opt-in proof rendered schema_version=mew-ghost.sp18.v1, desk.status=typing, desk.live_mew_reads=true, presence.desk.state=coding, and a live-desk dry-run primary_action."
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 0",
+      "exit_code": 0,
+      "summary": "Operator HTML watch proof emitted two records with desk_status=typing and presence_state=coding while rewriting the target HTML file."
+    }
+  ],
+  "implemented_contract": {
+    "live_desk_opt_in": "--live-desk explicitly opts into repo-local live desk JSON.",
+    "command_execution": "Live desk uses an injected runner/subprocess argument list equivalent to ['./mew', 'desk', '--json'] with shell=false and a short timeout.",
+    "deterministic_defaults": "Default rendering and --desk-json remain fixture-only and non-live; --desk-json cannot be combined with --live-desk.",
+    "watch_behavior": "Foreground watch reruns the live desk provider on each iteration only when --live-desk is present.",
+    "fallbacks": [
+      "missing_command",
+      "nonzero_exit",
+      "timeout",
+      "malformed_json",
+      "non_object_json"
+    ],
+    "normalization_surface": "Live desk output is normalized through the existing desk status/counts/details/primary_action surface, with desk primary_action kept dry-run, non-executable, and given live-desk dry-run wording when the live payload has no specific description.",
+    "issue_16_precommit_fix": "Reviewer issue #16 was caught before commit: current top-level ./mew desk --json payloads with pet_state, focus, counts, details, actions, and current_git now normalize to the same live desk status/count/detail/action surface instead of unknown/empty details; pet_state sleeping intentionally maps to idle via DESK_PET_STATE_TO_PRESENCE.",
+    "live_read_marker": "live_mew_reads stays false for defaults and fixtures and is true only for opted-in live desk status.",
+    "schema_version_closeout": "Reviewer follow-up closed stale SP17 schema/title surfaces: SCHEMA_VERSION and expected schema are mew-ghost.sp18.v1, module/parser/test specs and HTML title use SP18 where appropriate, and fixture content labels such as Resume SP17 desk bridge remain fixture data."
+  },
+  "test_contract": {
+    "injected_runners_or_providers": true,
+    "real_mew_subprocesses_spawned_by_tests": false,
+    "covered_cases": [
+      "live desk runner command list and shell=false",
+      "live desk success normalization",
+      "current top-level pet_state/focus/counts/details/actions/current_git normalization with sleeping -> idle",
+      "missing command fallback",
+      "nonzero exit fallback",
+      "timeout fallback",
+      "malformed JSON fallback",
+      "non-object JSON fallback",
+      "CLI --live-desk injected-runner path",
+      "watch reruns live desk only when opted in",
+      "desk primary_action remains non-executable even with --execute-launchers",
+      "README usage examples include terminal and HTML live desk examples",
+      "source isolation from core src/mew imports and hidden/background monitoring"
+    ]
+  },
+  "reviewer_rejections": 3,
+  "verifier_failures": 3,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "sp18_live_desk_retry_after_prior_blocked_attempts",
+  "repair_required": false,
+  "prior_attempt_history": {
+    "blocked_ledger_rows_preserved": [
+      19,
+      20
+    ],
+    "issues_closed_before_retry": [
+      14,
+      15
+    ],
+    "origin_main_merge_commit": "c884efc"
+  },
+  "followup_session_ids": [
+    41
+  ],
+  "polish_issues_opened": [
+    16,
+    17
+  ],
+  "proof_artifacts": [
+    ".mew/sessions/40/snapshot.json",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/18-live-desk-opt-in-practical.json"
+  ],
+  "commit": "",
+  "notes": "SP18 is implemented only under experiments/mew-ghost. The default and --desk-json paths remain deterministic and fixture-only, while --live-desk is the only live desk opt-in and uses an injected/no-shell runner surface in tests. README terminal and HTML examples now document live desk usage. Reviewer follow-up closed stale SP17 schema/title surfaces by moving SCHEMA_VERSION, expected schema, module/parser/test specs, and HTML title to SP18 while preserving fixture labels such as Resume SP17 desk bridge. Reviewer issue #16 was repaired before commit by accepting current top-level live desk payloads, keeping sleeping mapped to idle, and proving the real opt-in path renders live desk status/presence instead of unknown. Issue #17 records the recurring final git_status/git_diff allow-read closeout failure; operator performed the final scope audit manually. No core src/mew imports, hidden/background monitoring, screen capture, network access, or real mew subprocesses are added by the test suite. rescue_edits remains 0; prior blocked attempts are retained as history."
+}
