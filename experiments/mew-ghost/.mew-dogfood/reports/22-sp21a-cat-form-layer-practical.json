@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "task_id": 22,
+  "session_id": 49,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP21a mew-wisp cat form layer: --format human now supports a swappable terminal form selector with default and cat forms; the cat form renders a state-varying ASCII cat while preserving state, HTML, live-read, and launcher safety behavior.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 5,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/22-sp21a-cat-form-layer-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #22",
+    "mew work session #49",
+    "experiments/mew-ghost/.mew-dogfood/reports/22-sp21a-cat-form-layer-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 947,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "34 passed after applying the cat form source, focused tests, and README usage edits."
+    }
+  ],
+  "implemented_contract": {
+    "terminal_form_selector": "--format human accepts --form with default and cat choices; default remains the implicit human terminal surface.",
+    "default_form_preserved": "The implicit human renderer and --form default return the existing terminal human output without cat-only headings.",
+    "cat_form_ascii_character": "--format human --form cat prepends an ASCII cat character surface before the existing terminal human view.",
+    "cat_state_variation": "The cat form varies pose/expression for idle, coding, waiting, and blocked-style presence states while retaining the underlying presence classification.",
+    "human_watch_cat_stdout": "Bounded human watch with --form cat prints the cat form once per foreground iteration without JSONL record markers.",
+    "state_json_preserved": "The state JSON renderer remains selected only by --format state and is not rewritten for terminal form presentation.",
+    "html_preserved": "The HTML renderer and html output/watch behavior remain in place; this slice does not remove HTML.",
+    "live_and_launcher_safety_preserved": "The slice does not change live-active-window, live-desk, hidden/background/network safety fields, or launcher execution gates."
+  },
+  "test_contract": {
+    "focused_cat_form_tests_added": true,
+    "readme_usage_test_updated": true,
+    "existing_state_jsonl_watch_test_preserved": true,
+    "existing_html_output_watch_test_preserved": true,
+    "covered_cases": [
+      "implicit human output equals --form default output",
+      "cat output is distinct from default and includes terminal form: cat metadata",
+      "idle, coding, waiting, and blocked presence states render distinct cat pose/expression markers",
+      "human --watch-count with --form cat prints two cat terminal surfaces for two iterations",
+      "human cat watch stdout omits JSON record_type and schema_version markers",
+      "README includes the --format human --form cat --watch-count usage command"
+    ]
+  },
+  "acceptance_notes": [
+    "The implementation is scoped under experiments/mew-ghost only.",
+    "The cat terminal form is a presentation layer for --format human; it does not alter the underlying state payload.",
+    "The report is local side-dogfood evidence for the SP21a practical slice."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "No broad HTML removal was attempted; SP21a is limited to the human terminal form layer and cat presentation.",
+  "created_at": "2026-04-28T11:37:39Z"
+}

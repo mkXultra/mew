@@ -85,6 +85,12 @@ Print two bounded foreground watch iterations as the terminal-first human surfac
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5
 ```
 
+Render the same bounded human watch as the cat terminal form, with state-varying ASCII cat pose/expression:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5
+```
+
 Rewrite local HTML on every bounded watch iteration and emit one CLI record per rewrite:
 
 ```bash

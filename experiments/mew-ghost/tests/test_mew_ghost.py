@@ -729,6 +729,65 @@ def test_watch_html_output_rewrites_each_iteration_with_freshness_metadata(tmp_p
     assert 'Notes' not in html
 
 
+def test_terminal_human_default_form_matches_existing_surface() -> None:
+    state, html = ghost.render_fixture(FIXTURE_PATH)
+
+    implicit = ghost._render_payload(state, html, 'human')
+    explicit = ghost._render_payload(state, html, 'human', terminal_form='default')
+    cat = ghost._render_payload(state, html, 'human', terminal_form='cat')
+
+    assert implicit == explicit
+    assert implicit.startswith('mew-wisp SP19a terminal human view')
+    assert 'terminal form: cat' not in implicit
+    assert cat.startswith('terminal form: cat\ncat state:')
+    assert 'mew-wisp SP19a terminal human view' in cat
+
+
+def test_cat_terminal_form_changes_expression_by_presence_state() -> None:
+    state, html = ghost.render_fixture(FIXTURE_PATH)
+    expected_markers = {
+        'idle': '( -.- ) zZ',
+        'coding': '( o_o ) code',
+        'waiting': '( o.o ) ...',
+        'blocked': '( x_x ) !',
+    }
+    rendered_by_state: dict[str, str] = {}
+
+    for presence_state, marker in expected_markers.items():
+        mutated = json.loads(json.dumps(state))
+        mutated['presence']['classification']['state'] = presence_state
+        rendered = ghost._render_payload(mutated, html, 'human', terminal_form='cat')
+
+        assert 'terminal form: cat' in rendered
+        assert 'cat state: %s' % presence_state in rendered
+        assert marker in rendered
+        rendered_by_state[presence_state] = rendered
+
+    assert len({tuple(rendered.splitlines()[:5]) for rendered in rendered_by_state.values()}) == len(expected_markers)
+
+
+def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
+    clocks = iter(['cat-0', 'cat-1'])
+    sleeps: list[float] = []
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--watch-count', '2', '--interval', '0'],
+        clock=lambda: next(clocks),
+        sleeper=lambda interval: sleeps.append(interval),
+    ) == 0
+
+    output = capsys.readouterr().out
+
+    assert sleeps == [0.0]
+    assert output.count('terminal form: cat') == 2
+    assert output.count('cat state:') == 2
+    assert output.count('mew-wisp SP19a terminal human view') == 2
+    assert 'freshness: foreground-watch | watch iteration 0 of 2 | refreshed: cat-0 | interval: 0.0' in output
+    assert 'freshness: foreground-watch | watch iteration 1 of 2 | refreshed: cat-1 | interval: 0.0' in output
+    assert 'record_type' not in output
+    assert 'schema_version' not in output
+
+
 def test_readme_usage_prefers_uv_run_python_commands() -> None:
     readme = README_PATH.read_text(encoding='utf-8')
     usage_lines = [line.strip() for line in readme.splitlines() if 'experiments/mew-ghost/ghost.py' in line]
@@ -737,6 +796,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',
@@ -749,6 +809,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     assert all(not line.startswith('python experiments/mew-ghost/ghost.py') for line in usage_lines)
     assert '--watch-count N' in readme
     assert '--format human' in readme
+    assert '--form cat' in readme
     assert 'KeyboardInterrupt' in readme
     assert 'rewrites the same local HTML file' in readme
 

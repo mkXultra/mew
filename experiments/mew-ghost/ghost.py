@@ -50,6 +50,39 @@ DEFAULT_REFRESH_COUNT = 3
 MAX_REFRESH_COUNT = 12
 DEFAULT_WATCH_INTERVAL_SECONDS = 2.0
 PRESENCE_STATES = ('idle', 'attentive', 'coding', 'waiting', 'blocked')
+TERMINAL_FORMS = ('default', 'cat')
+CAT_TERMINAL_FORM_BY_PRESENCE = {
+    'idle': (
+        'cat state: idle',
+        ' /\\_/\\ ',
+        '( -.- ) zZ',
+        ' > ^ <',
+    ),
+    'attentive': (
+        'cat state: attentive',
+        ' /\\_/\\ ',
+        '( o.o ) ?',
+        ' > ? <',
+    ),
+    'coding': (
+        'cat state: coding',
+        ' /\\_/\\ ',
+        '( o_o ) code',
+        ' > # <',
+    ),
+    'waiting': (
+        'cat state: waiting',
+        ' /\\_/\\ ',
+        '( o.o ) ...',
+        ' > ... <',
+    ),
+    'blocked': (
+        'cat state: blocked',
+        ' /\\_/\\ ',
+        '( x_x ) !',
+        ' > ! <',
+    ),
+}
 ACTIVE_WINDOW_OSASCRIPT = chr(10).join(
     [
         'tell application ' + chr(34) + 'System Events' + chr(34),
@@ -829,7 +862,15 @@ def render_local_html(state: Mapping[str, Any]) -> str:
     ) + chr(10)
 
 
-def render_terminal_human(state: Mapping[str, Any]) -> str:
+def _terminal_cat_lines(presence_state: str) -> list[str]:
+    form_lines = CAT_TERMINAL_FORM_BY_PRESENCE.get(
+        presence_state,
+        CAT_TERMINAL_FORM_BY_PRESENCE['attentive'],
+    )
+    return ['terminal form: cat'] + list(form_lines)
+
+
+def render_terminal_human(state: Mapping[str, Any], terminal_form: str = 'default') -> str:
     ghost = state['ghost']
     probe = state['active_window']
     presence = state['presence']
@@ -909,6 +950,10 @@ def render_terminal_human(state: Mapping[str, Any]) -> str:
         lines.append('  - %s: %s (%s)' % (intent.get('id', 'launcher'), command, execution))
     if lines[-1] == 'launcher intents:':
         lines.append('  - none')
+    if terminal_form == 'cat':
+        lines = _terminal_cat_lines(str(classification.get('state', 'attentive'))) + lines
+    elif terminal_form != 'default':
+        raise ValueError('unsupported terminal form: %s' % terminal_form)
     return chr(10).join(lines) + chr(10)
 
 
@@ -936,11 +981,16 @@ def render_fixture(
     return state, render_local_html(state)
 
 
-def _render_payload(state: Mapping[str, Any], html: str, format_name: str) -> str:
+def _render_payload(
+    state: Mapping[str, Any],
+    html: str,
+    format_name: str,
+    terminal_form: str = 'default',
+) -> str:
     if format_name == 'state':
         return json.dumps(state, indent=2, sort_keys=True) + chr(10)
     if format_name == 'human':
-        return render_terminal_human(state)
+        return render_terminal_human(state, terminal_form=terminal_form)
     if format_name == 'html':
         return html
     raise ValueError('unsupported format: %s' % format_name)
@@ -988,6 +1038,7 @@ def run_watch(
     desk_path: str | Path | None = None,
     desk_provider: DeskProvider | None = None,
     format_name: str = 'html',
+    terminal_form: str = 'default',
     output: str | Path | None = None,
     probe_provider: ProbeProvider | None = None,
     platform_name: str | None = None,
@@ -1032,7 +1083,7 @@ def run_watch(
                     runner=launcher_runner or subprocess.run,
                 )
                 html = render_local_html(state)
-            rendered = _render_payload(state, html, format_name)
+            rendered = _render_payload(state, html, format_name, terminal_form=terminal_form)
             if output_path is not None:
                 output_path.write_text(rendered, encoding='utf-8')
             if format_name == 'human' and output_path is None:
@@ -1077,6 +1128,7 @@ def main(
     parser.add_argument('--live-desk', action='store_true', help='explicitly opt into repo-local live desk JSON state')
     parser.add_argument('--output', help='write rendered output to this path')
     parser.add_argument('--format', choices=('html', 'state', 'human'), default='html')
+    parser.add_argument('--form', choices=TERMINAL_FORMS, default='default', help='terminal form for --format human')
     parser.add_argument('--refresh-count', type=int, default=DEFAULT_REFRESH_COUNT, help='single-render snapshot count, clamped locally')
     parser.add_argument('--watch', action='store_true', help='run foreground watch until KeyboardInterrupt')
     parser.add_argument('--watch-count', type=int, help='run exactly this many foreground watch iterations')
@@ -1106,6 +1158,7 @@ def main(
             desk_path=args.desk_json,
             desk_provider=desk_provider,
             format_name=args.format,
+            terminal_form=args.form,
             output=args.output,
             probe_provider=provider,
             platform_name=platform_name,
@@ -1133,7 +1186,7 @@ def main(
             runner=launcher_runner or subprocess.run,
         )
         html = render_local_html(state)
-    rendered = _render_payload(state, html, args.format)
+    rendered = _render_payload(state, html, args.format, terminal_form=args.form)
     if args.output:
         Path(args.output).write_text(rendered, encoding='utf-8')
     else:
