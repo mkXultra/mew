@@ -175,8 +175,9 @@ M6.24 Batch 1:
   - `fix-git`: 5/5, matched Codex target 5/5, no Harbor errors.
   - `kv-store-grpc`: latest 5/5 after generic exact-schema repair, above Codex
     target 4/5; previous baseline was 2/5.
-  - `raman-fitting`: latest 0/5 after generic numeric plausibility guidance,
-    below Codex target 2/5; previous baseline was 0/5.
+  - `raman-fitting`: latest 0/5 after generic `analyze_table` and numeric
+    artifact-quality finish gating, below Codex target 2/5; previous baseline
+    and numeric-plausibility repair were both 0/5.
   - measured latest task total: 22/40 against frozen Codex target 25/40.
   - best observed measured total: 23/40 if `build-cython-ext` uses its best
     observed 1/5 rerun.
@@ -427,10 +428,17 @@ M6.24 Batch 1:
   single-fit residual evidence unless the acceptance check cites an independent
   cross-check or alternative validation from a completed grounding tool.
 - current route:
-  rerun `raman-fitting` with the normal M6.24 Harbor command to test whether
-  `analyze_table` plus the numeric artifact-quality finish gate improves the
-  0/5 result toward the frozen Codex target of 2/5. Classify the result before
-  spending another repair cycle.
+  the post-`8cec348` rerun of `raman-fitting` used `analyze_table` in the
+  completed trials and changed finish behavior, but still scored 0/5 with one
+  `AgentTimeoutError` in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-raman-fitting-5attempts-analyze-table-20260428-0926/result.json`.
+  Classify the new blocker as
+  `numeric_independent_validation_not_objective_grounded`: the loop now
+  grounds in the source table and cites independent checks, but still
+  validates the wrong objective/scale/model family. Stop `raman-fitting`-only
+  repair cycles unless a small generic objective-grounding check is obvious;
+  continue broad M6.24 measurement or build a reusable numeric objective
+  substrate from multiple numeric/data tasks.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
   passed with 743 tests and 30 subtests; `uv run ruff check` on changed files
