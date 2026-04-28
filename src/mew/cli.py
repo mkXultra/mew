@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import sys
 
 from .dogfood import DOGFOOD_SCENARIOS, M2_COMPARATIVE_TASK_SHAPES
 from .typed_memory import CODING_MEMORY_KINDS
@@ -2140,6 +2141,16 @@ def require_positive_float(parser, args, attribute, flag):
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    if os.environ.get("MEW_WORK_COMMAND_GUARD") and getattr(args, "command", None) in {
+        "attach",
+        "chat",
+        "do",
+        "run",
+        "session",
+        "work",
+    }:
+        print("mew resident commands are disabled inside run_command", file=sys.stderr)
+        return 126
 
     if hasattr(args, "interval_minutes") and args.interval_minutes is not None:
         require_positive_float(parser, args, "interval_minutes", "--interval-minutes")

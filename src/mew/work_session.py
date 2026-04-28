@@ -262,6 +262,11 @@ GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 SHELL_CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
+RESIDENT_MEW_LOOP_TEXT_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:\S*/)?mew\s+(?:attach|chat|do|run|session|work)\b"
+    r"|(?<![A-Za-z0-9_])(?:\S*/)?python(?:\d+(?:\.\d+)?)?\s+-m\s+mew\s+"
+    r"(?:attach|chat|do|run|session|work)\b"
+)
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 
@@ -2148,10 +2153,10 @@ def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=
     return turn
 
 
-def run_command_for_work(command, cwd=".", timeout=300, on_output=None):
+def run_command_for_work(command, cwd=".", timeout=300, on_output=None, use_shell=False):
     if on_output:
-        return run_command_record_streaming(command, cwd=cwd, timeout=timeout, on_output=on_output)
-    return run_command_record(command, cwd=cwd, timeout=timeout)
+        return run_command_record_streaming(command, cwd=cwd, timeout=timeout, on_output=on_output, use_shell=use_shell)
+    return run_command_record(command, cwd=cwd, timeout=timeout, use_shell=use_shell)
 
 
 def first_unquoted_shell_operator_span(command):
@@ -2308,13 +2313,70 @@ def reject_shell_control_tokens(command, *, tool_name="run_tests"):
     )
 
 
+def shell_interpreter_invocation(command):
+    try:
+        tokens = shlex.split(command or "")
+    except ValueError:
+        return bool(re.search(r"(?<![A-Za-z0-9_])(?:\S*/)?(?:bash|sh|zsh)\s+-[lc]{1,2}\b", str(command or "")))
+    for index, token in enumerate(tokens[:-1]):
+        executable = Path(str(token or "")).name
+        if executable in {"bash", "sh", "zsh"} and tokens[index + 1] in {"-c", "-lc", "-cl"}:
+            return True
+    return False
+
+
+def command_has_shell_execution_surface(command):
+    operator, _kind = first_unquoted_shell_operator(command)
+    return bool(operator) or shell_interpreter_invocation(command)
+
+
+def _shell_resident_loop_scan_text(command):
+    text = str(command or "").replace("\\", "").replace("'", "").replace('"', "")
+    return re.sub(r"[^A-Za-z0-9_./-]+", " ", text)
+
+
 def reject_resident_mew_loop_command(command, *, tool_name="run_command"):
-    if not is_resident_mew_loop_command(command):
-        return
+    command_text = str(command or "")
+    shell_scan_text = _shell_resident_loop_scan_text(command_text)
+    if (
+        not is_resident_mew_loop_command(command_text)
+        and not (
+            command_has_shell_execution_surface(command_text)
+            and RESIDENT_MEW_LOOP_TEXT_RE.search(shell_scan_text)
+        )
+    ):
+        for segment in split_unquoted_shell_command_segments(command):
+            if segment != command_text and is_resident_mew_loop_command(segment):
+                break
+        else:
+            return
     raise ValueError(
         f"{tool_name} must not invoke resident mew loops such as mew do, mew chat, mew run, or mew work; "
         "use native work tools, finish, remember, or ask_user instead"
     )
+
+
+def split_unquoted_shell_command_segments(command):
+    text = str(command or "")
+    segments = []
+    search_start = 0
+    segment_start = 0
+    while search_start < len(text):
+        operator, kind, start, end = first_unquoted_shell_operator_span(text[search_start:])
+        if not operator:
+            break
+        absolute_start = search_start + start
+        absolute_end = search_start + end
+        if kind == "chain":
+            prefix = text[segment_start:absolute_start].strip()
+            if prefix:
+                segments.append(prefix)
+            segment_start = absolute_end
+        search_start = absolute_end
+    tail = text[segment_start:].strip()
+    if tail:
+        segments.append(tail)
+    return segments or [text]
 
 
 def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, model_context=None):
@@ -2451,11 +2513,13 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
     if not command:
         raise ValueError("run_command command is empty")
     reject_resident_mew_loop_command(command, tool_name="run_command")
+    shell_operator, _shell_operator_kind = first_unquoted_shell_operator(command)
     return run_command_for_work(
         command,
         cwd=parameters.get("cwd") or ".",
         timeout=parameters.get("timeout", 300),
         on_output=on_output,
+        use_shell=bool(shell_operator),
     )
 
 

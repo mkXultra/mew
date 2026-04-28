@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-012 Harbor wrapper timeout/report mapping is repaired; M6.24 can resume broad measurement. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-013 run_command shell-operator execution mismatch is repaired; M6.24 can resume broad measurement. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Resumed after SR-012 repair; continue Batch 3 and route any new accepted structural blockers back through M6.14. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Resumed after SR-013 repair; rerun `mcmc-sampling-stan` on repaired head, then continue Batch 3. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -89,6 +89,12 @@ Why M6.24 is active now:
   the local Harbor wrapper imposed an inner 900 second timeout and used
   container-local report paths even though the task timeout is 3600 seconds.
   It is now repaired.
+- M6.24 Batch 3 `mcmc-sampling-stan` pre-repair attempt exposed SR-013:
+  `run_command` still treated top-level shell operators as argv tokens, so
+  `mkdir -p ... && HOME=... Rscript -e ...` failed as `mkdir: invalid option
+  -- 'e'`. It is now repaired by shell execution for top-level
+  `run_command` operators, non-shell `run_tests` preservation, and
+  resident-loop guardrails.
 - M6.20 closed the first fixed terminal gate on current head:
   `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
   errors 0.
@@ -258,14 +264,21 @@ M6.24 resume condition:
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__00-29-51/result.json`.
   This is recorded as task-solving / surrogate-build evidence, not an accepted
   structural blocker yet.
+- M6.24 Batch 3 `mcmc-sampling-stan` pre-repair attempt
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__00-45-34`
+  was interrupted after SR-013 was accepted and is not counted as a score.
+  Same-shape substrate proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr013-run-command-shell-chain-20260428T161435Z/result.json`
+  passed with `execution_mode=shell`, `exit_code=0`, environment propagation,
+  shell redirection, and nested resident-loop rejection.
 
 Next concrete action:
 
 - Continue M6.24 Batch 3 task-by-task measurement from
-  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md`, starting with the remaining
-  pending task list: `mcmc-sampling-stan` and `video-processing`. If a new
-  failure is accepted as structural rather than an ordinary task miss, append
-  it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
+  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md`, starting by rerunning
+  `mcmc-sampling-stan` on the repaired head, then `video-processing`. If a
+  new failure is accepted as structural rather than an ordinary task miss,
+  append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
 
 Closed M6.22 result:
 

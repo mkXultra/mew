@@ -106,6 +106,7 @@ Status vocabulary:
 | SR-010 | repaired | M6.24 Batch 3 | exact command example finish gap | `polyglot-rust-c` scored 0/5 against Codex target 4/5; trials self-finished after nearby verifier commands that changed cwd or used Python wrappers instead of proving the exact backticked command examples from the task text | Add exact-command-example finish grounding: when a task says a backticked command can be run, `task_done=true` requires completed `run_command`/`run_tests` evidence for that advertised command shape without a preceding cwd-changing `cd` wrapper | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `polyglot-rust-c` same failed shape | Repaired by acceptance finish gate and prompt update; same-shape proof stopped with `ask_user` after detecting the exact Rust command writes `/app/main`, not `/app/polyglot/main`, so it did not false-finish. |
 | SR-011 | repaired | M6.24 Batch 3 | query-only hidden-model visible fixture false green | `model-extraction-relu-logits` scored 0/5 against Codex target 4/5; trials self-finished after reading/checking visible `forward.A1` fixture internals or validating only the visible fixture, while Harbor's hidden generated model failed | Add query-only hidden-model finish grounding: block generated source that reads visible hidden weights/source and require synthetic/randomized/holdout generalization evidence before `task_done=true` | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `model-extraction-relu-logits` same failed shape | Repaired by acceptance finish gate, prompt update, focused regressions, and same-shape proof reaching 1/1 after first blocking visible-fixture-only finish and then requiring synthetic validation. |
 | SR-012 | repaired | M6.24 Batch 3 | Harbor wrapper inner timeout cap and unmapped partial report | `install-windows-3.11` / Harbor `install-windows-3-11` scored 0/5 with 5 wrapper `RuntimeError: Command timed out after 900 seconds` exceptions despite task `agent.timeout_sec=3600`; the run also used container-local report paths so partial reports were not preserved on the host | Remove the wrapper's default inner timeout cap, let Harbor task timeout govern by default, capture explicit wrapper timeout exceptions as normal command transcripts, and require `container_repo_root=/mew` in benchmark run manifests | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | wrapper timeout no-error proof plus future long-task reruns | Repaired by `.harbor/mew_terminal_bench_agent.py` default `timeout_seconds=None`, timeout exception capture with `exit_code=124`, manifest `container_repo_root=/mew`, focused tests, and a light Harbor proof with `n_errors=0`. |
+| SR-013 | repaired | M6.24 Batch 3 | run_command shell-operator execution mismatch | `mcmc-sampling-stan` pre-repair reports showed `mkdir -p ... && HOME=... Rscript -e ...` executed as a single argv command, producing `mkdir: invalid option -- 'e'` instead of a shell chain | Execute `run_command` through a bash-compatible shell only when top-level shell operators are present, keep `run_tests` non-shell, and add resident-loop guards for accidental nested `mew run` / `mew work` shell invocations | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` executor safety notes | direct shell-chain proof plus rerun `mcmc-sampling-stan` after repair | Repaired by `use_shell` execution mode for `run_command`, prompt update, focused tests, runtime `MEW_WORK_COMMAND_GUARD`, and codex-ultra review with no blocking findings. |
 
 ## SR-001 Progress
 
@@ -466,6 +467,53 @@ Status vocabulary:
   reward 0.0, and a host-visible timeout transcript. This satisfies SR-012:
   wrapper timeout no longer becomes a Harbor exception or drops the report
   artifact.
+
+## SR-013 Progress
+
+- 2026-04-29: M6.24 Batch 3 `mcmc-sampling-stan` pre-repair attempt
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__00-45-34`
+  exposed that `run_command` still executed top-level shell operators as argv
+  tokens. Several partial `mew-report.json` files contained failures like
+  `mkdir: invalid option -- 'e'` for commands shaped as
+  `mkdir -p /app/Rlib /app/tmp && HOME=/app TMPDIR=/app/tmp R_LIBS_USER=/app/Rlib Rscript -e ...`.
+- Generic repair:
+  `run_command` now detects top-level shell operators and executes those
+  commands through a bash-compatible `-lc` shell. Simple argv commands still
+  use the existing argv path. `run_tests` remains non-shell and continues to
+  reject shell operators.
+- Safety repair:
+  the resident-loop guard now scans shell execution surfaces for accidental
+  nested `mew run`, `mew work`, `python -m mew run`, and quote/backslash
+  obfuscations, and shell-mode child processes receive
+  `MEW_WORK_COMMAND_GUARD=1`. The CLI exits 126 for resident commands under
+  that guard, giving a runtime backstop if a nested mew command reaches
+  process execution.
+- Prompt repair:
+  the work THINK prompt now says `run_command` can execute top-level shell
+  operators through a bash-compatible shell when shell access is granted, while
+  `run_tests` stays single-argv.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'cli_rejects_resident_command_inside_guarded_shell_environment or reject_resident_mew_loop_command_recognizes_wrappers or rejects_resident_mew_loop_inside_shell_chain or run_command_executes_shell_chains or work_think_prompt_includes_work_guidance' -q`
+  passed with 4 selected tests and 10 subtests.
+- Broader nearby validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'run_command or shell_control or shell_wrapper or resident_mew_loop' -q`
+  passed with 9 selected tests and 10 subtests, and
+  `uv run pytest --no-testmon tests/test_acceptance.py::test_acceptance_finish_blocker_rejects_subshell_cd_for_command_example -q`
+  passed.
+- Lint passed:
+  `uv run ruff check src/mew/cli.py src/mew/toolbox.py src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py`.
+- Review:
+  `codex-ultra` session `019dd4cd-62a4-7b62-add2-d8eb8e8c66e6` initially
+  found resident-loop guard bypasses and a stale prompt assertion, then
+  returned `No blocking findings` after the guard and tests were hardened.
+- Same-shape substrate proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr013-run-command-shell-chain-20260428T161435Z/result.json`
+  executed the same practical shape `mkdir -p ... && HOME=... TMPDIR=... R_LIBS_USER=... python3 -c ... && cat ... > ...`
+  with `execution_mode=shell`, `exit_code=0`, preserved the shell child guard
+  in the environment, and rejected `true && bash -lc "m'ew' run"`.
+- The interrupted pre-repair `mcmc-sampling-stan` Harbor run is not counted as
+  a Batch 3 score because it was stopped after SR-013 was selected; rerun the
+  full task after this repair before recording the task result.
 
 ## Repaired / Superseded Rows
 
