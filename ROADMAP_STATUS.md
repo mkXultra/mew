@@ -142,6 +142,16 @@ M6.24 resume condition:
   reached 1/1 with errors 0 after extracting 96 frames into eight contact
   sheets and writing `/app/solution.txt`.
 - Closed M6.14 follow-on episode:
+  SR-004 shell-wrapper literal parse gap is `repaired`. M6.24 Batch 3
+  `build-pov-ray` scored 2/5 against Codex target 5/5, with two failed trials
+  stopping on `No closing quotation` before practical multiline
+  `bash -lc 'python3 - <<"PY" ... PY'` scripts could execute. `split_command_env`
+  now falls back for recognized `bash`/`sh`/`zsh` `-c`/`-lc`/`-cl` wrappers when
+  normal shlex parsing fails, passing `[shell, flag, script]` under
+  `shell=False`. Same-shape proof
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-33-30/result.json`
+  reached 1/1 with no `No closing quotation` recurrence.
+- Closed M6.14 follow-on episode:
   SR-007 coordinated multi-file patch shape failure from GitHub issue #18 is
   `repaired`. Mixed write/wait batches now normalize to an actionable
   top-level blocker, and the executor no longer runs a synthetic `wait`
@@ -179,6 +189,13 @@ M6.24 resume condition:
   against Codex target 5/5 and selected SR-008 for immediate repair. After the
   repair proof, the remaining 0/5 is a task-solving gap rather than the direct
   Python pytest-file false-green substrate bug.
+- M6.24 Batch 3 `build-pov-ray` scored 2/5 against Codex target 5/5, errors 0,
+  runtime 11m 58s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-16-05/result.json`.
+  It selected and repaired SR-004. One additional failed trial finished despite
+  a hidden source/archive completeness miss (`file_id.diz` and related files
+  absent), which remains implementation-lane evidence rather than a selected
+  core repair.
 
 Next concrete action:
 

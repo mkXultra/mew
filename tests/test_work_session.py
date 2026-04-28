@@ -7732,6 +7732,44 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_run_command_salvages_multiline_shell_wrapper_quotes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = "bash -lc 'python3 - <<\"PY\"\nprint(\"literal single quote: '\")\nPY'"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                command,
+                                "--allow-shell",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertEqual(result["exit_code"], 0)
+                self.assertEqual(result["argv"][0], "bash")
+                self.assertEqual(result["argv"][1], "-lc")
+                self.assertIn("literal single quote: '", result["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_rejects_run_command_resident_mew_loop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

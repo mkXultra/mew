@@ -98,7 +98,7 @@ Status vocabulary:
 | SR-001 | repaired | M6.22 / M6.24 | `agent_wall_timeout_without_report` / timeout partial observability | `gcode-to-text` had timeout without useful report; `financial-document-processor` and `dna-assembly` later hit long domain/document repair timeouts | Add generic partial progress / timeout observability so long work loops emit actionable reports before command or wall timeout | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` streaming executor notes | rerun `financial-document-processor` or `dna-assembly` same failed shape | Repaired by atomic partial `mew work --oneshot --report` writes plus Harbor `container_repo_root` mapping; same-shape timeout left a host-visible actionable report. |
 | SR-002 | repaired | M6.22 / M6.24 | finish/verifier grounding false green | `overfull-hbox` self-reported acceptance despite verifier rejection; `dna-assembly` used surrogate primer Tm checks instead of exact named ground-truth tool | Strengthen finish gate/task contract so named external ground-truth tools or acceptance constraints must be executed exactly, or finish must be blocked | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/review/verify and todo patterns | rerun `dna-assembly`; optionally rerun an acceptance-grounding task | Repaired by exact external-tool finish gate plus exact-tool-unavailable blocker guidance; smaller proof stopped with `task_done=false` after the required command was missing. |
 | SR-003 | repaired | M6.22 / M6.24 | artifact observation substrate gap | `gcode-to-text` visual/geometric grounding gap; `code-from-image` fixed by `read_image`; `financial-document-processor` exposed PDF/document observation gap; `extract-moves-from-video` generated contact sheets then timed out across 5/5 trials while sequentially inspecting visual artifacts | Add bounded generic multi-artifact observation: ordered `read_images`, resume-visible observation transcripts, and large chronological chunk guidance | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md` | rerun `extract-moves-from-video` same failed shape | Repaired by generic `read_images` with 16-image / aggregate-byte caps, `recent_read_images_observations`, and large chronological chunk guidance; same-shape proof `mew-m6-14-sr003-extract-moves-from-video-1attempt-read-images-largechunks-20260428-1843` reached 1/1 with errors 0. |
-| SR-004 | candidate | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure | Add safer multiline command guidance or command-shape helper, likely heredoc/script-first policy | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | rerun a task that exercises multiline verification | Lower priority than timeout/grounding unless it blocks a selected repair. |
+| SR-004 | repaired | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure; `build-pov-ray` failed 2/5 trials with `No closing quotation` after `bash -lc 'python3 - <<...` scripts containing embedded single quotes | Add shell-wrapper literal fallback for `bash/sh/zsh -c/-lc/-cl <script>` when normal `shlex.split` fails, preserving argv execution while avoiding false parser failures on practical multiline shell wrappers | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | direct regression plus one-trial `build-pov-ray` same-shape rerun | Repaired by toolbox fallback plus focused regression; same-shape `build-pov-ray` rerun reached 1/1 with no `No closing quotation` recurrence. |
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
 | SR-007 | repaired | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen write-batch normalization/execution so blockers are top-level waits, not pseudo-tools inside a write batch; preserve the exact blocker instead of surfacing `batch write tool is not ... wait` | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for mixed `edit_file_hunks` + `wait` batch | Repaired by normalizer and executor guards: mixed write/wait batches now become an actionable top-level blocker, and command execution blocks before any pseudo-tool execution. Focused regression passed. |
 | SR-008 | repaired | M6.24 Batch 3 | direct Python pytest-file false green | `break-filter-js-from-html` scored 0/5 while several trials claimed `python /app/test_outputs.py` passed; direct Python execution only defined pytest tests and exited 0, while Harbor pytest verifier failed | Normalize `run_tests` commands that directly execute pytest-style `test_*.py` files through Python into `python -m pytest -q <file>` so no-op verifiers fail loudly | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `break-filter-js-from-html` same failed shape | Repaired by executor normalization plus focused regression; same-shape rerun no longer false-greened and preserved `python -m pytest -q /app/test_outputs.py` failure evidence. |
@@ -224,6 +224,32 @@ Status vocabulary:
   eight chronological contact sheets, read them with one ordered `read_images`
   call, performed an independent visual audit, and wrote the required
   `/app/solution.txt` before the 30-step budget expired.
+
+## SR-004 Progress
+
+- 2026-04-28: M6.24 Batch 3 `build-pov-ray` scored 2/5 against a frozen Codex
+  target of 5/5. Two failed trials stopped at step 4 with `No closing
+  quotation` before the broader mirror-search script could run. The model had
+  produced a practical multiline `bash -lc 'python3 - <<"PY" ... PY'` wrapper,
+  but the embedded Python regex/string single quotes made `shlex.split`
+  reject the entire command before execution.
+- Generic repair:
+  `split_command_env` now falls back only for recognized shell wrappers
+  (`bash`, `sh`, or `zsh` with `-c`, `-lc`, or `-cl`) when normal shlex parsing
+  fails. It strips one outer quote pair from the script and passes
+  `[shell, flag, script]` directly to subprocess with `shell=False`, preserving
+  the existing argv execution model while removing the false parser blocker.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py::WorkSessionTests::test_work_session_run_command_salvages_multiline_shell_wrapper_quotes tests/test_work_session.py::WorkSessionTests::test_work_session_runs_command_behind_shell_gate -q`.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/toolbox.py tests/test_work_session.py`
+  and `git diff --check`.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-33-30/result.json`
+  reran `build-pov-ray` for one trial after the repair and reached 1/1 with
+  errors 0. Transcript inspection found no `No closing quotation` failure, and
+  the work session finished after 19 steps with the installed
+  `/usr/local/bin/povray` rendering `/app/deps/illum1.pov`.
 
 ## SR-007 Progress
 
