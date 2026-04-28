@@ -102,18 +102,24 @@ M6.24 resume condition:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
 - Current M6.14 episode:
-  SR-001 timeout / partial observability is `in_repair`; generic code landed in
-  `a87754e`. The first same-shape Harbor rerun reproduced the 900s timeout but
-  showed the wrapper needed container-visible report paths; `container_repo_root`
-  support is now implemented and a container-visible rerun is the required proof
-  before marking SR-001 `repaired`.
+  SR-001 timeout / partial observability is `repaired`; generic code landed in
+  `a87754e` and wrapper path mapping in `a3cf090`. Same-shape Harbor rerun
+  `mew-m6-14-sr001-financial-document-processor-1attempt-container-report-20260428-1640`
+  still timed out after 900s, but preserved host-visible `mew-report.json` with
+  the active work-session resume bundle, unresolved failures, recent decisions,
+  current working memory, and next action.
 - Current M6.14 follow-on episode:
   SR-002 finish/verifier grounding false green is `in_repair`. The first
   generic code slice blocks `finish task_done=true` when the task names an
   exact external ground-truth command/tool and flags but acceptance evidence
   does not cite a completed `run_command` or `run_tests` containing the exact
-  command shape. Source/test validation passed; same-shape `dna-assembly` rerun
-  is still required before marking the row `repaired`.
+  command shape. Same-shape `dna-assembly` rerun
+  `mew-m6-14-sr002-dna-assembly-1attempt-exact-ground-truth-20260428-1645`
+  did not false-green, but timed out after detecting `oligotm NOT_FOUND` and
+  drifting into local `primer3-py` surrogate exploration. The next SR-002 slice
+  is exact-tool-unavailable blocking: when the required exact ground-truth
+  command is unavailable, mew must run/install the exact command within current
+  capabilities or return `wait`/`remember`, not substitute a surrogate.
 
 Closed M6.22 result:
 
