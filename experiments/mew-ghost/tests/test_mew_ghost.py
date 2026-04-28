@@ -729,6 +729,62 @@ def test_watch_html_output_rewrites_each_iteration_with_freshness_metadata(tmp_p
     assert 'Notes' not in html
 
 
+CAT_REFERENCE_MASK = (
+    '.####.......####......',
+    '.#####.....#####......',
+    '.##.###....##.##......',
+    '.##..#######..##......',
+    '.##...######..##......',
+    '.##...........##......',
+    '###.##....###.####....',
+    '##..##....###..###....',
+    '##..##....###..###....',
+    '###.##.##..##.###.....',
+    '.#####.##....###......',
+    '...###......####......',
+    '...###.......#####....',
+    '....##........#####...',
+    '....##.........####...',
+    '....##.##.##....###...',
+    '....##.##.##.....####.',
+    '....##.##.##.....####.',
+    '....##.##.##.....##.##',
+    '...#########....###.##',
+    '...##.#####....###..##',
+    '...#############...##.',
+    '...##################.',
+    '..............#####...',
+)
+
+
+def _cat_sprite_lines(rendered: str) -> list[str]:
+    lines = rendered.splitlines()
+    cat_state_index = next(index for index, line in enumerate(lines) if line.startswith('cat state: '))
+    start = cat_state_index + 1
+    end = start + len(CAT_REFERENCE_MASK)
+    return lines[start:end]
+
+
+def _cat_sprite_mask(rendered: str) -> tuple[str, ...]:
+    mask_lines: list[str] = []
+    for expected_row, rendered_row in zip(CAT_REFERENCE_MASK, _cat_sprite_lines(rendered), strict=True):
+        assert len(rendered_row) == len(expected_row) * 2
+        mask_lines.append(
+            ''.join(
+                '#' if rendered_row[index:index + 2] == '██' else '.'
+                for index in range(0, len(rendered_row), 2)
+            )
+        )
+    return tuple(mask_lines)
+
+
+def _cat_sprite_similarity(rendered: str) -> float:
+    actual = ''.join(_cat_sprite_mask(rendered))
+    expected = ''.join(CAT_REFERENCE_MASK)
+    matches = sum(1 for actual_cell, expected_cell in zip(actual, expected, strict=True) if actual_cell == expected_cell)
+    return matches / len(expected)
+
+
 def test_terminal_human_default_form_matches_existing_surface() -> None:
     state, html = ghost.render_fixture(FIXTURE_PATH)
 
@@ -739,19 +795,12 @@ def test_terminal_human_default_form_matches_existing_surface() -> None:
     assert implicit == explicit
     assert implicit.startswith('mew-wisp SP19a terminal human view')
     assert 'terminal form: cat' not in implicit
-    assert cat.startswith('terminal form: cat\ncat state:')
+    assert cat.splitlines()[0] == 'terminal form: cat'
+    assert cat.splitlines()[1].startswith('cat state:')
     assert 'mew-wisp SP19a terminal human view' in cat
-    assert '      ██        ██       ' in cat
-    assert '     ████      ████      ' in cat
-    assert '    ██  ████████  ██     ' in cat
-    assert '    ██            ██     ' in cat
-    assert '    ██   ██  ██   ██     ' in cat
-    assert '    ██      ██    ██  ██ ' in cat
-    assert '    ██            ██ █  █' in cat
-    assert '     ████████████  █   █' in cat
-    assert '        ██  ██      █  █' in cat
-    assert '        ██  ██    ████  ' in cat
-    assert '       ███  ███   *     ' in cat
+    assert _cat_sprite_similarity(cat) >= 0.90
+    assert 'state marker: *' in cat
+    assert 'state marker: *' not in '\n'.join(_cat_sprite_lines(cat))
     assert '  code  ' not in cat
     assert '   /\\_____/\\        ' not in cat
     assert ' |  \\_____/  |__/   ' not in cat
@@ -760,13 +809,13 @@ def test_terminal_human_default_form_matches_existing_surface() -> None:
 def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:
     state, html = ghost.render_fixture(FIXTURE_PATH)
     expected_markers = {
-        'idle': '       ███  ███  zZ     ',
-        'attentive': '       ███  ███   ?     ',
-        'coding': '       ███  ███   *     ',
-        'waiting': '       ███  ███  ...    ',
-        'blocked': '       ███  ███   !     ',
+        'idle': 'state marker: zZ',
+        'attentive': 'state marker: ?',
+        'coding': 'state marker: *',
+        'waiting': 'state marker: ...',
+        'blocked': 'state marker: !',
     }
-    rendered_by_state: dict[str, str] = {}
+    masks_by_state: dict[str, tuple[str, ...]] = {}
 
     for presence_state, marker in expected_markers.items():
         mutated = json.loads(json.dumps(state))
@@ -775,25 +824,14 @@ def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_stat
 
         assert 'terminal form: cat' in rendered
         assert 'cat state: %s' % presence_state in rendered
-        assert '      ██        ██       ' in rendered
-        assert '     ████      ████      ' in rendered
-        assert '    ██  ████████  ██     ' in rendered
-        assert '    ██            ██     ' in rendered
-        assert '    ██   ██  ██   ██     ' in rendered
-        assert '    ██      ██    ██  ██ ' in rendered
-        assert '    ██            ██ █  █' in rendered
-        assert '     ████████████  █   █' in rendered
-        assert '        ██  ██      █  █' in rendered
-        assert '        ██  ██    ████  ' in rendered
+        assert marker in rendered
+        assert marker not in '\n'.join(_cat_sprite_lines(rendered))
+        assert _cat_sprite_similarity(rendered) >= 0.90
         assert '  code  ' not in rendered
         assert '  /  ▌   ▌  \\___   ' not in rendered
-        assert marker in rendered
-        rendered_by_state[presence_state] = rendered
+        masks_by_state[presence_state] = _cat_sprite_mask(rendered)
 
-    sprite_lines_by_state = {state: rendered.splitlines()[2:13] for state, rendered in rendered_by_state.items()}
-    assert all(len(lines) == 11 for lines in sprite_lines_by_state.values())
-    assert len({tuple(lines[:-1]) for lines in sprite_lines_by_state.values()}) == 1
-    assert len({lines[-1] for lines in sprite_lines_by_state.values()}) == len(expected_markers)
+    assert len({mask for mask in masks_by_state.values()}) == 1
 
 
 def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:

@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "task_id": 24,
+  "session_id": 53,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP21c implements a bounded mew-wisp cat CLI polish slice: --format human --form cat now uses a literal 22x24 coarse-grid sprite derived from repo-root cat.png, with visible block cells for black mask cells and state markers outside the silhouette. The slice keeps mew connection work out of scope and preserves default, state JSON, HTML, watch, live-read, and launcher safety behavior.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/24-sp21c-cat-mask-similarity-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #24",
+    "mew work session #53",
+    "repo-root cat.png read_image tool #1053",
+    "applied sprite source edit tool #1072",
+    "applied similarity test edit and focused pytest verification tool #1073",
+    "experiments/mew-ghost/.mew-dogfood/reports/24-sp21c-cat-mask-similarity-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 1073,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "34 passed after applying the cat.png-derived 22x24 sprite renderer and focused similarity tests."
+    }
+  ],
+  "implemented_contract": {
+    "reference_image_inspected": "repo-root cat.png was inspected first with read_image tool #1053 before encoding the target mask.",
+    "target_mask_size": "22x24 cells",
+    "cat_form_pixel_sprite": "--format human --form cat prepends a terminal-friendly sprite generated from CAT_TERMINAL_SPRITE_MASK. Each # cell renders as a visible ██ block and each . cell renders as two spaces.",
+    "similarity_threshold": 0.9,
+    "observed_similarity": 1.0,
+    "cat_state_variation": "Idle, attentive, coding, waiting, and blocked states share the same 22x24 sprite mask; only the separate state marker line changes.",
+    "default_form_preserved": "The implicit human renderer and --form default remain the existing terminal human surface without cat-only headings.",
+    "state_json_preserved": "The state JSON renderer remains selected only by --format state and is not rewritten for terminal form presentation.",
+    "html_preserved": "HTML rendering and output/watch behavior remain outside the sprite presentation change.",
+    "watch_preserved": "Bounded human watch with --form cat continues to print one cat terminal surface per foreground iteration without JSONL record markers.",
+    "live_and_launcher_safety_preserved": "The slice does not add mew connection work and does not change live-active-window, live-desk, hidden/background/network safety fields, or launcher execution gates."
+  },
+  "target_mask": [
+    ".####.......####......",
+    ".#####.....#####......",
+    ".##.###....##.##......",
+    ".##..#######..##......",
+    ".##...######..##......",
+    ".##...........##......",
+    "###.##....###.####....",
+    "##..##....###..###....",
+    "##..##....###..###....",
+    "###.##.##..##.###.....",
+    ".#####.##....###......",
+    "...###......####......",
+    "...###.......#####....",
+    "....##........#####...",
+    "....##.........####...",
+    "....##.##.##....###...",
+    "....##.##.##.....####.",
+    "....##.##.##.....####.",
+    "....##.##.##.....##.##",
+    "...#########....###.##",
+    "...##.#####....###..##",
+    "...#############...##.",
+    "...##################.",
+    "..............#####..."
+  ],
+  "test_contract": {
+    "focused_cat_similarity_tests_added": true,
+    "similarity_computed_from_rendered_cells": true,
+    "state_marker_outside_silhouette_checked": true,
+    "covered_cases": [
+      "implicit human output equals explicit --form default output",
+      "cat output includes terminal form metadata and cat state metadata",
+      "cat sprite lines are extracted from --form cat output and converted back from ██/space pairs to #/. cells",
+      "cell-wise similarity to the 22x24 cat.png-derived target mask is asserted >= 0.90",
+      "idle, attentive, coding, waiting, and blocked states share the same sprite mask while separate state marker lines vary",
+      "bounded --format human --form cat watch still prints one cat surface per iteration",
+      "README retains the uv run human cat usage command and documents the literal cat.png-derived sprite"
+    ]
+  },
+  "acceptance_notes": [
+    "The implementation is scoped under experiments/mew-ghost only.",
+    "No mew connection work is included in this slice.",
+    "The report is local side-dogfood evidence for the SP21c practical slice."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "similarity_requirement_repair_after_initial_source_edit",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "Similarity is measured against the committed 22x24 cat.png-derived coarse mask, not against a full-resolution perceptual image metric.",
+  "created_at": "2026-04-28T18:10:35Z",
+  "updated_at": "2026-04-28T18:10:35Z"
+}
