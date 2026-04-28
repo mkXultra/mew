@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 `sam-cell-seg` matched target; `train-fasttext` partial 0/3 is recorded but excluded; continue with `make-mips-interpreter`. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 `make-mips-interpreter` recorded as task-solving gap; continue with `torch-pipeline-parallelism`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -307,12 +307,19 @@ M6.24 resume condition:
   an exit event`. Because the frozen Codex target is 0/5 and the completed
   trials already matched 0/3, record this as partial runner/benchmark-harness
   debt and do not select a core M6.14 repair from it.
+- M6.24 Batch 4 `make-mips-interpreter` scored 0/5 against Codex target 3/5,
+  with 1 `AgentTimeoutError`, runtime 32m 17s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__03-53-16/result.json`.
+  Several trials created `/tmp/frame.bmp` close enough to pass frame checks but
+  missed the exact Doom initialization stdout string. Treat this as
+  task-solving / surrogate execution fidelity evidence, not an accepted M6.14
+  structural blocker.
 
 Next concrete action:
 
 - Run M6.24 Batch 4 task-by-task from
   `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, continuing with
-  `make-mips-interpreter`. If a new accepted structural blocker appears,
+  `torch-pipeline-parallelism`. If a new accepted structural blocker appears,
   append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` and repair through
   M6.14 before continuing broad measurement.
 
