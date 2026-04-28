@@ -631,6 +631,27 @@ def test_watch_count_emits_exact_records_and_rebuilds_each_iteration(capsys) -> 
     assert records[1]['state']['presence']['refresh_count'] == 1
 
 
+def test_human_watch_count_prints_terminal_surface_instead_of_jsonl(capsys) -> None:
+    clocks = iter(['human-0', 'human-1'])
+    sleeps: list[float] = []
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--watch-count', '2', '--interval', '0'],
+        clock=lambda: next(clocks),
+        sleeper=lambda interval: sleeps.append(interval),
+    ) == 0
+
+    output = capsys.readouterr().out
+
+    assert sleeps == [0.0]
+    assert output.count('mew-wisp SP19a terminal human view') == 2
+    assert 'freshness: foreground-watch | watch iteration 0 of 2 | refreshed: human-0 | interval: 0.0' in output
+    assert 'freshness: foreground-watch | watch iteration 1 of 2 | refreshed: human-1 | interval: 0.0' in output
+    assert 'record_type' not in output
+    assert 'schema_version' not in output
+    assert not output.lstrip().startswith('{')
+
+
 def test_watch_without_count_runs_until_keyboard_interrupt(capsys) -> None:
     clocks = iter(['loop-0', 'loop-1', 'loop-2'])
     sleeps: list[float] = []
@@ -652,6 +673,31 @@ def test_watch_without_count_runs_until_keyboard_interrupt(capsys) -> None:
     assert [record['watch_iteration'] for record in records] == [0, 1]
     assert [record['watch_total'] for record in records] == [None, None]
     assert sleeps == [0.5, 0.5]
+
+
+def test_human_watch_without_count_prints_surface_until_keyboard_interrupt(capsys) -> None:
+    clocks = iter(['human-loop-0', 'human-loop-1', 'human-loop-2'])
+    sleeps: list[float] = []
+
+    def sleeper(interval: float) -> None:
+        sleeps.append(interval)
+        if len(sleeps) >= 2:
+            raise KeyboardInterrupt
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--watch', '--interval', '0.5'],
+        clock=lambda: next(clocks),
+        sleeper=sleeper,
+    ) == 0
+
+    output = capsys.readouterr().out
+
+    assert sleeps == [0.5, 0.5]
+    assert output.count('mew-wisp SP19a terminal human view') == 2
+    assert 'watch iteration 0 | refreshed: human-loop-0' in output
+    assert 'watch iteration 1 | refreshed: human-loop-1' in output
+    assert 'record_type' not in output
+    assert 'schema_version' not in output
 
 
 def test_watch_html_output_rewrites_each_iteration_with_freshness_metadata(tmp_path: Path, capsys) -> None:
@@ -690,6 +736,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     assert usage_lines == [
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',

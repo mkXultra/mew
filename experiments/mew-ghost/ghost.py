@@ -1035,19 +1035,22 @@ def run_watch(
             rendered = _render_payload(state, html, format_name)
             if output_path is not None:
                 output_path.write_text(rendered, encoding='utf-8')
-            print(
-                json.dumps(
-                    _watch_record(
-                        state,
-                        format_name=format_name,
-                        rendered=rendered,
-                        output_path=output_path,
-                        launchers_executed=execute_launchers,
+            if format_name == 'human' and output_path is None:
+                stream.write(rendered)
+            else:
+                print(
+                    json.dumps(
+                        _watch_record(
+                            state,
+                            format_name=format_name,
+                            rendered=rendered,
+                            output_path=output_path,
+                            launchers_executed=execute_launchers,
+                        ),
+                        sort_keys=True,
                     ),
-                    sort_keys=True,
-                ),
-                file=stream,
-            )
+                    file=stream,
+                )
             iteration += 1
             if watch_count is not None and iteration >= watch_count:
                 break

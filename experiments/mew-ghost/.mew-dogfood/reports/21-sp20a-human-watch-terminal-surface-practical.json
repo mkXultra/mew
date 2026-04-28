@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "task_id": 21,
+  "session_id": 48,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP20a human watch terminal surface: --format human with --watch or --watch-count and no --output now prints the terminal-first human surface per iteration instead of JSONL watch records.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/21-sp20a-human-watch-terminal-surface-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #21",
+    "mew work session #48",
+    "experiments/mew-ghost/.mew-dogfood/reports/21-sp20a-human-watch-terminal-surface-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 913,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "31 passed after applying source, focused tests, and README usage edits."
+    }
+  ],
+  "implemented_contract": {
+    "human_watch_stdout": "When --format human is used with --watch or --watch-count and no --output, each foreground iteration writes render_terminal_human output directly to stdout.",
+    "state_watch_preserved": "--format state watch output remains newline-delimited JSONL watch records.",
+    "html_watch_preserved": "--format html --output PATH continues rewriting the same local HTML file and emitting watch records.",
+    "bounded_watch": "--watch-count N still performs exactly N foreground iterations and exits.",
+    "unbounded_watch": "--watch without --watch-count still runs in the foreground until KeyboardInterrupt and returns cleanly.",
+    "launcher_live_safety": "The slice does not change launcher execution gates, live-active-window opt-in, live-desk opt-in, or hidden/background/network safety fields."
+  },
+  "test_contract": {
+    "focused_human_watch_tests_added": true,
+    "readme_usage_test_updated": true,
+    "existing_state_jsonl_watch_test_preserved": true,
+    "existing_html_output_watch_test_preserved": true,
+    "covered_cases": [
+      "human --watch-count prints the terminal human header twice for two iterations",
+      "human --watch-count includes foreground-watch freshness metadata for iteration 0 and 1",
+      "human --watch-count stdout omits JSON record_type and schema_version markers",
+      "human --watch runs until injected KeyboardInterrupt and prints two terminal surfaces",
+      "state JSONL watch records still parse as JSON and expose watch_iteration values",
+      "html output watch still rewrites the target file with latest iteration freshness",
+      "README includes the --format human --watch-count usage command"
+    ]
+  },
+  "acceptance_notes": [
+    "The implementation intentionally keeps the prior HTML renderer and default html format intact.",
+    "The change is scoped under experiments/mew-ghost only.",
+    "The report is local dogfood evidence for the SP20a practical slice."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "No broad HTML removal was attempted; this slice only changes human watch stdout behavior when no output file is requested.",
+  "created_at": "2026-04-28T11:24:42Z"
+}

@@ -34,7 +34,9 @@ Single renders still build one local state/HTML document and then stop. Watch mo
 - `--watch` without `--watch-count` runs in the foreground until `KeyboardInterrupt`.
 - `--interval SECONDS` controls the sleep between iterations.
 - Tests can inject the sleeper, clock, probe provider, and launcher runner.
-- Every iteration reloads the ghost fixture and optional desk fixture or opted-in live desk status, rebuilds state, reruns the selected probe path, and emits one newline-delimited CLI JSON record.
+- Every iteration reloads the ghost fixture and optional desk fixture or opted-in live desk status, rebuilds state, and reruns the selected probe path.
+- With `--format state`, stdout remains newline-delimited JSONL watch records.
+- With `--format human` and no `--output`, stdout prints the terminal-first human surface for each iteration instead of JSONL watch records.
 - With `--format html --output PATH`, each iteration rewrites the same local HTML file with freshness metadata for that iteration.
 
 Watch mode does not create a daemon, background monitor, hidden capture loop, or network connection. Live desk reads occur only during foreground `--live-desk` renders.
@@ -75,6 +77,12 @@ Print three bounded foreground watch records as newline-delimited JSON:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5
+```
+
+Print two bounded foreground watch iterations as the terminal-first human surface, without JSONL records:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5
 ```
 
 Rewrite local HTML on every bounded watch iteration and emit one CLI record per rewrite:
