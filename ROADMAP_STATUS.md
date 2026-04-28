@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 5 `bn-fit-modify` reached 5/5; continue with `circuit-fibsqrt`. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 5 `circuit-fibsqrt` reached 5/5; continue with `compile-compcert`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -368,13 +368,17 @@ M6.24 resume condition:
   0, runtime 6m 38s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-36-31/result.json`.
   Treat this as clean parity evidence.
+- M6.24 Batch 5 `circuit-fibsqrt` scored 5/5 against Codex target 5/5, errors
+  0, runtime 11m 38s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-44-55/result.json`.
+  Batch 5 measured total is now **10/10** against frozen Codex target **10/10**.
 
 Next concrete action:
 
 - Run M6.24 Batch 5 task-by-task from
   `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md`, using the aligned
   `--agent-timeout-multiplier 2`, `timeout_seconds=1800`, and
-  `{max_wall_seconds_option}` run shape. Next task: `circuit-fibsqrt`. If a new
+  `{max_wall_seconds_option}` run shape. Next task: `compile-compcert`. If a new
   accepted structural blocker appears, append it to
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair through M6.14, rerun the
   same failed shape, then resume broad measurement.
