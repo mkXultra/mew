@@ -141,15 +141,24 @@ M6.24 resume condition:
   `mew-m6-14-sr003-extract-moves-from-video-1attempt-read-images-largechunks-20260428-1843`
   reached 1/1 with errors 0 after extracting 96 frames into eight contact
   sheets and writing `/app/solution.txt`.
+- Closed M6.14 follow-on episode:
+  SR-007 coordinated multi-file patch shape failure from GitHub issue #18 is
+  `repaired`. Mixed write/wait batches now normalize to an actionable
+  top-level blocker, and the executor no longer runs a synthetic `wait`
+  pseudo-tool when write-batch normalization fails. Focused regression covered
+  `edit_file_hunks` plus `wait` and verified zero tool calls plus
+  `batch_blocked=true`.
+- M6.24 Batch 2 `dna-insert` was measured after SR-003 and before the #18
+  repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.
+  This is broad parity evidence, not yet an accepted structural repair signal.
 
 Next concrete action:
 
 - Continue M6.24 Batch 2 / broad parity measurement from the current manifest.
   If a new failure is accepted as structural rather than ordinary task miss,
-  append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing. The
-  only currently open GitHub issue is #18, recorded as SR-007 candidate for a
-  coordinated multi-file patch lifecycle repair; it is not blocking the
-  current SR-003 close-out.
+  append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
+  Remaining unmeasured Batch 2 task is `caffe-cifar-10`.
 
 Closed M6.22 result:
 

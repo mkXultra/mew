@@ -99,7 +99,7 @@ Status vocabulary:
 | SR-003 | repaired | M6.22 / M6.24 | artifact observation substrate gap | `gcode-to-text` visual/geometric grounding gap; `code-from-image` fixed by `read_image`; `financial-document-processor` exposed PDF/document observation gap; `extract-moves-from-video` generated contact sheets then timed out across 5/5 trials while sequentially inspecting visual artifacts | Add bounded generic multi-artifact observation: ordered `read_images`, resume-visible observation transcripts, and large chronological chunk guidance | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md` | rerun `extract-moves-from-video` same failed shape | Repaired by generic `read_images` with 16-image / aggregate-byte caps, `recent_read_images_observations`, and large chronological chunk guidance; same-shape proof `mew-m6-14-sr003-extract-moves-from-video-1attempt-read-images-largechunks-20260428-1843` reached 1/1 with errors 0. |
 | SR-004 | candidate | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure | Add safer multiline command guidance or command-shape helper, likely heredoc/script-first policy | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | rerun a task that exercises multiline verification | Lower priority than timeout/grounding unless it blocks a selected repair. |
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
-| SR-007 | candidate | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen structured multi-file patch lifecycle: one frontier, paired source/test/docs/report edits, stale-hunk reread/repair, and write-batch semantics that never mix wait with write tools | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | side-project SP19 retry or a small in-repo coordinated source/test/docs task | Open issue remains unresolved; not blocking the current SR-003 close-out, but should be selected before continuing broad mew-first implementation if the same coordinated-patch shape repeats. |
+| SR-007 | repaired | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen write-batch normalization/execution so blockers are top-level waits, not pseudo-tools inside a write batch; preserve the exact blocker instead of surfacing `batch write tool is not ... wait` | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for mixed `edit_file_hunks` + `wait` batch | Repaired by normalizer and executor guards: mixed write/wait batches now become an actionable top-level blocker, and command execution blocks before any pseudo-tool execution. Focused regression passed. |
 
 ## SR-001 Progress
 
@@ -221,6 +221,30 @@ Status vocabulary:
   eight chronological contact sheets, read them with one ordered `read_images`
   call, performed an independent visual audit, and wrote the required
   `/app/solution.txt` before the 30-step budget expired.
+
+## SR-007 Progress
+
+- 2026-04-28: issue #18 showed that a side-project coordinated patch could
+  reach a repair frontier but then emit a write batch containing
+  `edit_file_hunks` plus `wait`. The command executor treated that synthetic
+  `wait` as a batch sub-tool and stopped with the misleading error
+  `batch write tool is not a paired write/edit: wait`.
+- Generic repair:
+  `normalize_work_model_action` now rejects write batches that contain
+  non-write tools such as `wait` with an actionable top-level blocker. The work
+  prompt also says not to mix reads, wait, remember, finish, or blockers into
+  write batches.
+- Executor repair:
+  `run_work_batch_action` no longer inserts a synthetic `wait` sub-tool when a
+  write batch cannot be normalized. It finishes the model turn with
+  `batch_blocked=true`, zero tool calls, and the original actionable blocker.
+  This makes the next turn repair the patch shape instead of debugging a fake
+  wait-tool execution failure.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'mixed_write_wait or refuses_wait_inside_write_batch or work_session_resume_surfaces_working_memory or batch_refuses_partial_truncated_write_batches' -q`.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/commands.py src/mew/work_loop.py tests/test_work_session.py`
+  and `git diff --check`.
 
 ## Repaired / Superseded Rows
 

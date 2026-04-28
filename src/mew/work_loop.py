@@ -6140,7 +6140,7 @@ def build_work_think_prompt(context):
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. If a needed recent_read_file_windows entry is context_truncated, fall back to the matching read_file tool_calls result text before declaring that old text unrecoverable. "
-        "If you already know the exact scoped edits, you may use one batch action with up to five write/edit tools under capabilities.allowed_write_roots. For mew core source edits under src/mew/**, include a paired tests/** edit in the same batch; this paired-write constraint applies to code write batches under mew core paths. For non-core product roots such as experiments/**, keep every write under the declared root and include local tests when the task scope calls for them. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If a large full-file write set cannot safely fit in one strict JSON batch, emit one complete file write/edit as a direct action and continue with the remaining sibling files on later turns; do not return wait solely because the multi-file batch would be too large. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice, one complete file action, or one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you already know the exact scoped edits, you may use one batch action with up to five write/edit tools under capabilities.allowed_write_roots. For mew core source edits under src/mew/**, include a paired tests/** edit in the same batch; this paired-write constraint applies to code write batches under mew core paths. For non-core product roots such as experiments/**, keep every write under the declared root and include local tests when the task scope calls for them. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If a large full-file write set cannot safely fit in one strict JSON batch, emit one complete file write/edit as a direct action and continue with the remaining sibling files on later turns; do not return wait solely because the multi-file batch would be too large. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice, one complete file action, or one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads, wait, remember, finish, or blockers into write batches; if you cannot produce the complete write/edit slice, return one top-level wait instead of a batch containing wait. "
         "If you can make a small safe edit, use edit_file, edit_file_hunks, or write_file. For edit_file you must include exact old and new strings; for edit_file_hunks you must give one path plus a non-empty edits list of exact old/new pairs for disjoint hunks in that same file. If you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file or edit_file_hunks. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
@@ -6290,10 +6290,12 @@ def normalize_work_model_action(
         normalized_tools = []
         saw_write_tool = False
         saw_non_write_tool = False
+        invalid_write_batch_tool_types = []
         dropped_tool_count = 0
         for item in raw_tools:
             if not isinstance(item, dict):
                 continue
+            raw_sub_type = str(item.get("type") or item.get("tool") or "").strip()
             sub_action = normalize_work_model_action(
                 {"action": item},
                 verify_command=verify_command,
@@ -6319,10 +6321,21 @@ def normalize_work_model_action(
                     normalized_tools.append(candidate)
                 else:
                     saw_non_write_tool = True
+                    if raw_sub_type and raw_sub_type not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
+                        invalid_write_batch_tool_types.append(raw_sub_type)
         if not normalized_tools:
             return {"type": "wait", "reason": "batch requires at least one read-only tool"}
         if saw_write_tool:
             if saw_non_write_tool:
+                if invalid_write_batch_tool_types:
+                    unique_types = ", ".join(dict.fromkeys(invalid_write_batch_tool_types))
+                    return {
+                        "type": "wait",
+                        "reason": (
+                            f"write batch cannot mix non-write tools ({unique_types}); "
+                            "emit the blocker/wait as a separate turn before or after paired writes"
+                        ),
+                    }
                 return {
                     "type": "wait",
                     "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",

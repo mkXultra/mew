@@ -3931,6 +3931,28 @@ def _paired_write_batch_actions(actions, allowed_write_roots=None, cwd=""):
     )
 
 
+def _work_batch_block_reason(actions, *, write_batch=False, allowed_write_roots=None, cwd=""):
+    actions = [action for action in actions or [] if isinstance(action, dict)]
+    if write_batch:
+        non_write_types = [
+            str(action.get("type") or action.get("tool") or "missing").strip() or "missing"
+            for action in actions
+            if (action.get("type") or action.get("tool")) not in BATCH_WRITE_WORK_TOOLS
+        ]
+        if non_write_types:
+            unique_types = ", ".join(dict.fromkeys(non_write_types))
+            return (
+                f"write batch cannot mix non-write tools ({unique_types}); "
+                "emit the blocker/wait as a separate turn before or after the paired write batch"
+            )
+        if any(_work_path_is_mew_source_path((action or {}).get("path")) for action in actions):
+            return "batch requires write/edit tools under tests/** and src/mew/** with at least one of each"
+        if allowed_write_roots:
+            return "batch requires write/edit tools inside the declared allowed write roots"
+        return "batch requires a complete paired write/edit slice"
+    return "batch has no read-only tools"
+
+
 def run_work_batch_action(
     session_id,
     task_id,
@@ -3944,12 +3966,20 @@ def run_work_batch_action(
 ):
     raw_sub_actions = [sub_action for sub_action in (action.get("tools") or [])[:5] if isinstance(sub_action, dict)]
     write_batch = any((sub_action.get("type") or sub_action.get("tool")) in BATCH_WRITE_WORK_TOOLS for sub_action in raw_sub_actions)
+    batch_block_reason = ""
     if write_batch:
         sub_actions = _paired_write_batch_actions(
             raw_sub_actions,
             allowed_write_roots=getattr(args, "allow_write", []) or [],
             cwd=getattr(args, "cwd", "") or "",
         )
+        if not sub_actions:
+            batch_block_reason = _work_batch_block_reason(
+                raw_sub_actions,
+                write_batch=True,
+                allowed_write_roots=getattr(args, "allow_write", []) or [],
+                cwd=getattr(args, "cwd", "") or "",
+            )
     else:
         sub_actions = [
             sub_action
@@ -3957,20 +3987,7 @@ def run_work_batch_action(
             if (sub_action.get("type") or sub_action.get("tool")) in BATCH_READ_WORK_TOOLS
         ]
     if not sub_actions:
-        write_block_reason = "batch has no read-only tools"
-        if write_batch:
-            if any(_work_path_is_mew_source_path((action or {}).get("path")) for action in raw_sub_actions):
-                write_block_reason = (
-                    "batch requires write/edit tools under tests/** and src/mew/** with at least one of each"
-                )
-            else:
-                write_block_reason = "batch requires write/edit tools inside the declared allowed write roots"
-        sub_actions = [
-            {
-                "type": "wait",
-                "reason": write_block_reason,
-            }
-        ]
+        batch_block_reason = batch_block_reason or _work_batch_block_reason(raw_sub_actions, write_batch=write_batch)
     turn = None
     with state_lock():
         state = load_state()
@@ -3997,6 +4014,32 @@ def run_work_batch_action(
             )
         turn_id = turn.get("id")
         save_state(state)
+
+    if batch_block_reason:
+        with state_lock():
+            state = load_state()
+            blocked_turn = finish_work_model_turn(state, session_id, turn_id)
+            if blocked_turn is not None:
+                blocked_turn["summary"] = clip_output(batch_block_reason, 4000)
+                record_active_work_todo_executor_lifecycle(
+                    state,
+                    session_id,
+                    "failed",
+                    model_turn=blocked_turn,
+                    tool_call={},
+                    reason=batch_block_reason,
+                )
+            save_state(state)
+        return {
+            "index": index,
+            "status": "failed",
+            "action": action,
+            "model_turn": blocked_turn or turn,
+            "tool_calls": [],
+            "error": batch_block_reason,
+            "summary": batch_block_reason,
+            "batch_blocked": True,
+        }
 
     tool_calls = []
     pending_approval_ids = []

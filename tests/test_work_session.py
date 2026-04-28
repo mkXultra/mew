@@ -1753,6 +1753,63 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("-before", text)
         self.assertIn("+after", text)
 
+    def test_run_work_batch_action_blocks_mixed_write_wait_without_wait_tool_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                    save_state(state)
+
+                args = SimpleNamespace(
+                    allow_write=["."],
+                    allow_verify=False,
+                    verify_command="",
+                    verify_timeout=300,
+                    max_steps=30,
+                    cwd=tmp,
+                )
+                action = {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "experiments/mew-ghost/ghost.py",
+                            "edits": [{"old": "render_html()\n", "new": "render_cli()\n"}],
+                        },
+                        {
+                            "type": "wait",
+                            "reason": "need tests/README sibling edits before applying",
+                        },
+                    ],
+                }
+
+                step = commands.run_work_batch_action(
+                    session["id"],
+                    task["id"],
+                    0,
+                    {"decision_plan": {"summary": "draft coordinated patch"}, "action_plan": {"summary": "mixed"}},
+                    action,
+                    args,
+                    progress=lambda _message: None,
+                )
+
+                self.assertEqual(step["status"], "failed")
+                self.assertTrue(step["batch_blocked"])
+                self.assertEqual(step["tool_calls"], [])
+                self.assertIn("write batch cannot mix non-write tools (wait)", step["error"])
+                self.assertNotIn("batch write tool is not a paired write/edit", step["error"])
+                with state_lock():
+                    saved = load_state()
+                saved_session = saved["work_sessions"][0]
+                self.assertEqual(saved_session["model_turns"][-1]["status"], "completed")
+                self.assertIn("write batch cannot mix non-write tools", saved_session["model_turns"][-1]["summary"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_action_single_dry_run_edit_displays_diff_preview(self):
         text = format_work_action(
             {
@@ -8834,6 +8891,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
         self.assertIn("large multi-file write_file batch would be too large", fast_prompt)
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
+        self.assertIn("return one top-level wait instead of a batch containing wait", prompt)
         self.assertIn(
             '"type": "batch|inspect_dir|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
             fast_prompt,
@@ -33693,6 +33751,35 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(action["type"], "wait")
         self.assertIn("write batch exceeds 5 tools", action["reason"])
         self.assertIn("narrower complete slice", action["reason"])
+
+    def test_work_model_batch_refuses_wait_inside_write_batch(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "experiments/mew-ghost/ghost.py",
+                            "edits": [{"old": "render_html()\n", "new": "render_cli()\n"}],
+                        },
+                        {
+                            "type": "wait",
+                            "reason": "need sibling tests/docs before applying",
+                        },
+                    ],
+                    "reason": "draft coordinated CLI-first patch",
+                },
+            },
+            allowed_write_roots=["experiments/mew-ghost"],
+            default_cwd=".",
+        )
+
+        self.assertEqual(action["type"], "wait")
+        self.assertIn("write batch cannot mix non-write tools (wait)", action["reason"])
+        self.assertIn("separate turn", action["reason"])
 
     def test_work_model_batch_collapses_same_path_write_edits(self):
         from mew.work_loop import normalize_work_model_action
