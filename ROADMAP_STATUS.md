@@ -491,8 +491,18 @@ M6.24 Batch 1:
   `financial-document-processor` 5-trial reruns until a generic timeout /
   partial-report repair is selected or another document/artifact task confirms
   the same shape.
-  Batch 2 measured latest total is 15/20 against frozen Codex target 19/20 for
-  measured tasks.
+  `dna-assembly` then scored 0/2 completed reward trials with 3 Harbor errors
+  in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-dna-assembly-5attempts-20260428-1440/result.json`,
+  against Codex target 3/5. The completed trials false-greened local primer
+  verification but failed hidden checks on melting-temperature constraints; the
+  dominant reusable class is
+  `domain_ground_truth_verifier_surrogate_false_green`, with secondary
+  `agent_command_timeout_after_domain_repair_loop`,
+  `agent_setup_timeout_under_parallel_install`, and
+  `shell_quoting_multiline_command`. Batch 2 measured latest total is 15/25
+  against frozen Codex target 22/25 for measured tasks, with runner-error debt
+  still requiring cleanup before M6.24 can close.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
   passed with 743 tests and 30 subtests; `uv run ruff check` on changed files
