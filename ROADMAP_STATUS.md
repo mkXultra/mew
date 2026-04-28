@@ -449,6 +449,11 @@ M6.24 Batch 1:
   `large-scale-text-editing`, with frozen Codex target 27/40. The next chain
   is `M6.24 broad parity -> all 89 frozen registry tasks measured -> run Batch
   2 task-by-task through normal mew work --oneshot`.
+- completed Batch 2 control:
+  `git-leak-recovery` matched Codex target 5/5 with no Harbor errors in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-git-leak-recovery-5attempts-20260428-0953/result.json`.
+  Batch 2 measured latest total is 5/5 against frozen Codex target 5/5 for
+  measured tasks.
 - latest source/test validation:
   `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
   passed with 743 tests and 30 subtests; `uv run ruff check` on changed files
