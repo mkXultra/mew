@@ -324,3 +324,27 @@ Done when:
 - tests cover bounded CLI watch output, bounded HTML output, interval handling,
   dry-run launcher safety, and no real `mew` subprocess execution
 - README examples show safe CLI and HTML watch usage
+
+### SP17: mew-ghost Desk Bridge
+
+Connect the ghost shell to the core `mew desk --json` contract without making
+the side project read live `.mew` state or import core mew.
+
+Done when:
+
+- a static desk-view-model fixture can be loaded by `mew-ghost`, for example
+  with `--desk-json <path>`
+- `mew desk` pet states such as `sleeping`, `thinking`, `typing`, and
+  `alerting` map into ghost presence states without replacing the existing
+  active-window classification path
+- primary action data from the desk view model is rendered as an explicit,
+  dry-run command intent alongside `mew chat` / `mew code`
+- CLI state output and HTML output show the desk-derived status, counts, and
+  primary action in a deterministic way
+- watch mode can rebuild from the desk fixture on each bounded iteration
+  without executing `mew desk --json`
+- live command execution for `mew desk --json` remains deferred to a later
+  explicit opt-in slice
+- tests cover fixture loading, pet-state mapping, primary-action rendering,
+  bounded watch rebuilds, and no live `.mew`/core import coupling
+- README examples show safe desk-fixture usage

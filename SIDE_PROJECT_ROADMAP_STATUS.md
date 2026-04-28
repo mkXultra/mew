@@ -1,6 +1,6 @@
 # Mew Side Project Implementation Status
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 This file is the compact operational dashboard for side-project implementation
 dogfood. It is intentionally separate from `ROADMAP_STATUS.md`; the main
@@ -27,10 +27,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP14 mew-ghost Presence Loop | `done` | Presence loop landed practical: deterministic idle/attentive/coding/waiting/blocked classification, bounded refresh snapshots, README refresh contract, output proof, and focused tests are in place. |
 | SP15 mew-ghost Launcher Contract | `done` | Launcher contract landed practical: explicit `mew chat`/`mew code` commands, dry-run default state, `--execute-launchers` opt-in execution gate, injected-runner tests, README usage, local report, and focused proof are in place. |
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
+| SP17 mew-ghost Desk Bridge | `planned` | Next slice: let `mew-ghost` consume a static `mew desk --json` fixture so desk pet state and primary action can be rendered as ghost presence without reading live `.mew` state or running core commands. |
 
 ## Active Focus
 
-Active side-project focus: **post-SP16 side-project selection**.
+Active side-project focus: **SP17 mew-ghost Desk Bridge**.
 
 Current target:
 
@@ -45,7 +46,13 @@ Current target:
   controls injected/testable sleeping, CLI watch emits one JSONL record per
   iteration, and HTML watch rewrites the same output file with freshness
   metadata each iteration
+- next planned bridge: load a static `mew desk --json`-like fixture, map
+  `sleeping`/`thinking`/`typing`/`alerting` into ghost presence, and render the
+  desk `primary_action` as an explicit dry-run command intent
 - live macOS probing remains explicit through `--live-active-window`
+- live `mew desk --json` subprocess execution remains deferred to a later
+  explicit opt-in slice; SP17 should not read live `.mew` state or import
+  `src/mew/**`
 - preserve the bounded deterministic presence loop without background
   monitoring or hidden capture
 - preserve structured fallback for missing `osascript`, non-macOS platforms,
@@ -443,6 +450,7 @@ Current target:
 - SP14 is closed for the second `mew-ghost` cohort.
 - SP15 is closed for the second `mew-ghost` cohort.
 - SP16 is closed for the second `mew-ghost` cohort.
+- SP17 has not started; desk-view-model fixture bridging is not implemented.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -455,13 +463,18 @@ Current target:
 
 ## Next Action
 
-Pick the next side-project milestone deliberately before coding:
+Start SP17 with mew as first implementer:
 
-1. either add SP17 to continue `mew-ghost` from the now-working watch surface,
-   likely a local status view/digest that consumes the watch JSONL/HTML output
-2. or pause side-project implementation and feed rows `13` through `17` into
-   core M6.16/M6.17 implementation-lane polish
-3. before any new mew coding operation, run the repo-root sync rule from
+1. create a coding task for `mew-ghost` SP17
+2. run repo-root `./mew work` from `/Users/mk/dev/personal-pj/mew_side_pj`
+   with `--model gpt-5.5`
+3. allow writes only under `experiments/mew-ghost`
+4. add a desk-view-model fixture bridge without live `.mew` reads, core imports,
+   or `mew desk --json` subprocess execution
+5. verify with
+   `UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py`
+6. write a canonical local side-dogfood report and append it to the ledger
+7. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
 
 ## Non-Goals
