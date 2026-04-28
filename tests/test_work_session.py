@@ -7587,6 +7587,46 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_tests_normalizes_direct_pytest_file_invocation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("test_outputs.py").write_text("def test_breaks():\n    assert False\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = f"{shlex.quote(sys.executable)} test_outputs.py"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertIn("-m pytest -q test_outputs.py", call["result"]["command"])
+                self.assertEqual(call["result"]["original_command"], command)
+                self.assertTrue(call["result"]["normalized_pytest_file_invocation"])
+                self.assertIn("verification failed with exit_code=1", call["error"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_run_tests_allows_quoted_shell_operator_literals(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
