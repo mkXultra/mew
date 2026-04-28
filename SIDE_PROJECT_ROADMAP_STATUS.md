@@ -30,7 +30,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
 | SP18 mew-ghost Live Desk Opt-In | `done` | Live desk opt-in landed practical: explicit `--live-desk`, no-shell repo-local desk command, timeout/fallback handling, fixture-only defaults, top-level real desk JSON normalization, README examples, local report, real live-desk proof, and focused tests are in place. |
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `blocked/partial` | Broad HTML removal remains blocked by issue #18, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
-| SP20 mew-wisp Watch TUI Experience | `planned` | Build the foreground terminal resident view before adding more live mew coupling. |
+| SP20 mew-wisp Watch TUI Experience | `blocked` | SP20a task #21 stopped before product edits on repeated gpt-5.5 model timeouts; issue #19 tracks the implementation-lane blocker. |
 | SP21 mew-wisp Form Layer | `planned` | Separate the wisp surface from the displayed character so forms/skins can change later. |
 | SP22 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
@@ -61,6 +61,10 @@ Current target:
   text for operator consoles, desk fixture status/action details are visible,
   focused tests cover the new surface, and existing `html`/`state` outputs stay
   intact while the broad SP19 removal remains deferred behind issue `#18`
+- SP20a task `#21` is blocked before product edits; session `#47` hit repeated
+  gpt-5.5 model timeouts before any source/test/report writes, ledger row `25`
+  records the failed attempt, and issue `#19` tracks the implementation-lane
+  blocker
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -116,6 +120,8 @@ Current target:
   closed issue `#17` evidence for implementation-lane hardening
 - route watch-mode verifier semantics as closed issue `#12` evidence; SP16
   operator review confirmed multiple CLI records and HTML rewrite behavior
+- route repeated pre-edit SP20a model timeouts as open issue `#19` evidence for
+  implementation-lane hardening
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -133,6 +139,11 @@ Current target:
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`. Ledger row
   `23` records the post-issue-18-close SP19 retry failure, and row `24`
   records the additive SP19a terminal human renderer.
+- `./mew side-dogfood append --input
+  experiments/mew-ghost/.mew-dogfood/reports/21-sp20a-human-watch-model-timeout-blocked.json`
+  appended ledger row `25`: outcome `failed`, failure class
+  `sp20a_repeated_model_timeout_before_product_edits`, rescue edits `0`, issue
+  `#19` opened.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,
