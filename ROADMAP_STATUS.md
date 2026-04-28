@@ -158,6 +158,14 @@ M6.24 resume condition:
   proof `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-55-56/result.json`
   scored 0/1 but no longer false-greened; the report shows the normalized
   pytest command failed before the model continued with verifier feedback.
+- Closed M6.14 follow-on episode:
+  SR-009 broad rollback slice repair from reopened GitHub issue #18 is
+  `repaired`. Repeated verifier rollbacks or broad failed-test output now
+  surface `broad_rollback_slice_repair` in the work-session resume, formatted
+  resume, main/write-ready prompts, and deliberation context. The next turn is
+  steered away from retrying the whole coordinated patch and toward one smaller
+  complete source/test/docs slice while carrying remaining scope in
+  `working_memory`.
 - M6.24 Batch 2 `dna-insert` was measured after SR-003 and before the #18
   repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.

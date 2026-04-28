@@ -1176,6 +1176,7 @@ def build_work_deliberation_prompt(context, decision):
         "recent_decisions": list((resume or {}).get("recent_decisions") or [])[-3:],
         "working_memory": (resume or {}).get("working_memory") or {},
         "failed_patch_repair": (resume or {}).get("failed_patch_repair") or {},
+        "broad_rollback_slice_repair": (resume or {}).get("broad_rollback_slice_repair") or {},
         "retry_context": (resume or {}).get("retry_context") or {},
     }
     return (
@@ -6135,6 +6136,7 @@ def build_work_think_prompt(context):
         "If work_session.resume.adjacent_read_observations shows overlapping or near-adjacent read_file windows on the same path, use its suggested_next merged read instead of inching through more small reads. "
         "If work_session.resume.repair_anchor_observations lists source/test windows from a failed batch or repair loop, prefer those exact anchors before fresh same-surface search_text or broader rereads. "
         "If work_session.resume.failed_patch_repair is present, the previous write proposal was on-task but failed on exact old text; repair that same proposal using current anchors, preserve its must_preserve_terms/proposal_snippets, and do not substitute a nearby patch. "
+        "If work_session.resume.broad_rollback_slice_repair is present, stop retrying the whole broad patch. Choose one smaller complete slice that includes its source, local tests/docs/report evidence, and verifier; record the remaining scope in working_memory before continuing. "
         "If work_session.resume.retry_context is present, treat it as the authoritative compact state after a rejected or rolled-back write: use its latest failure/status, target_windows, and pending_constraints, and do not reuse raw patch bodies from rejected or rolled-back tool_calls. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
@@ -6210,6 +6212,7 @@ def build_work_write_ready_think_prompt(context):
         "Keep the action inside active_work_todo.source.target_paths and allowed_roots.write.\n"
         "Treat required terms as semantic anchors, not fields to copy; return wait with blocker task_goal_term_missing if they cannot naturally fit this scoped edit.\n"
         "If failed_patch_repair or retry_context is present, repair that same proposal/current target window and keep its constraints instead of switching to a nearby easier patch.\n"
+        "If broad_rollback_slice_repair is present, do not retry the full broad patch; select one smaller complete source/test/docs slice and carry remaining scope in working_memory.\n"
         "Use current_run as the active invocation budget; historical effort pressure is not a hard stop while current_run can continue.\n"
         "Preserve exact public contract names from the task text: methods, fields, flags, endpoints, filenames, CLI strings, and documented output names.\n"
         "For numeric, artifact, visual, watch, cancellation, or concurrency tasks, draft code/tests that make semantic verification possible rather than schema-only or smoke-only proof.\n"
@@ -6236,6 +6239,7 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts for patch content.\n"
         "For task_goal.required_terms, use semantic anchors from the task goal, not product fields to copy; do not add fields or keys solely because a required term names them. Never persist a key named required_terms unless explicitly asked. Use blocker task_goal_term_missing when anchors cannot fit naturally.\n"
         "Repair the same failed_patch_repair or retry_context target. Use current_run as the active invocation budget.\n"
+        "If broad_rollback_slice_repair is present, do not retry the full broad patch; select one smaller complete source/test/docs slice and carry remaining scope in working_memory.\n"
         "Verifier keys: prefer behavior, contract, output, state, or docs-visible assertions; over exact source text phrase assertions; unless the task explicitly requires a literal public string or security-sensitive marker; contract/docs-heavy slices; documented headings/surfaces; actual renderer or CLI output; file creation as proof; watch, continuous, polling, listen; bounded-loop or repeated-observation proof; interval/interrupt handling or output-rewrite evidence; do not accept internal mode flags alone; KeyboardInterrupt, Ctrl-C, SIGINT; process-level cancellation/interrupt behavior; in-process coroutine cancellation; structured concurrency such as asyncio.TaskGroup; gather/semaphore code cancels and awaits only the started work; below-limit, exactly-at-limit, and above-limit; one happy-path concurrency check is not enough.\n"
         "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run still has remaining steps, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
         "Stay inside allowed_roots.write; do not invent uncached old text.\n"

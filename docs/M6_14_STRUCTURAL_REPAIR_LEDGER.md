@@ -102,6 +102,7 @@ Status vocabulary:
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
 | SR-007 | repaired | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen write-batch normalization/execution so blockers are top-level waits, not pseudo-tools inside a write batch; preserve the exact blocker instead of surfacing `batch write tool is not ... wait` | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for mixed `edit_file_hunks` + `wait` batch | Repaired by normalizer and executor guards: mixed write/wait batches now become an actionable top-level blocker, and command execution blocks before any pseudo-tool execution. Focused regression passed. |
 | SR-008 | repaired | M6.24 Batch 3 | direct Python pytest-file false green | `break-filter-js-from-html` scored 0/5 while several trials claimed `python /app/test_outputs.py` passed; direct Python execution only defined pytest tests and exited 0, while Harbor pytest verifier failed | Normalize `run_tests` commands that directly execute pytest-style `test_*.py` files through Python into `python -m pytest -q <file>` so no-op verifiers fail loudly | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `break-filter-js-from-html` same failed shape | Repaired by executor normalization plus focused regression; same-shape rerun no longer false-greened and preserved `python -m pytest -q /app/test_outputs.py` failure evidence. |
+| SR-009 | repaired | side-project issue #18 reopen | broad rollback loop keeps retrying whole coordinated patch | Reopened issue #18 after SR-007: SP19 still could not land broad HTML removal; coordinated source/test/report attempts rolled back with 9 failed / 19 passed, then 1 failed / 27 passed, then regressed to 8 failed / 20 passed before timeout | Surface `broad_rollback_slice_repair` in work-session resume/prompt/deliberation so repeated verifier rollbacks or broad failed-test output steer the next turn to one smaller complete source/test/docs slice instead of retrying the whole patch | issue #18 reopen, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for two rolled-back verifier failures spanning source/test/docs | Repaired by resume diagnostic and prompt guidance; focused regression verifies the diagnostic, formatter, and deliberation context. |
 
 ## SR-001 Progress
 
@@ -267,6 +268,27 @@ Status vocabulary:
   `uv run pytest --no-testmon tests/test_work_session.py -k 'run_tests' -q`.
 - Lint/diff validation passed:
   `uv run ruff check src/mew/work_session.py tests/test_work_session.py`
+  and `git diff --check`.
+
+## SR-009 Progress
+
+- 2026-04-28: issue #18 reopened after SR-007. The side-project retry no
+  longer hit the mixed write/wait pseudo-tool bug, but broad SP19 HTML removal
+  still failed because coordinated source/test/report edits repeatedly rolled
+  back under verifier output: first `9 failed, 19 passed`, then
+  `1 failed, 27 passed`, then `8 failed, 20 passed` before timeout.
+- Generic repair:
+  work-session resumes now build `broad_rollback_slice_repair` when repeated
+  rolled-back writes, multiple involved paths, or multi-failure verifier output
+  indicate that the next turn should not retry the whole broad patch. The
+  formatter, main think prompt, write-ready prompts, and deliberation context
+  all surface the same instruction: choose one smaller complete
+  source/test/docs slice, verify it, and carry remaining scope in
+  `working_memory`.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py::WorkSessionTests::test_work_think_prompt_guides_independent_reads_to_batch tests/test_work_session.py::WorkSessionTests::test_work_resume_surfaces_broad_rollback_slice_repair -q`.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py`
   and `git diff --check`.
 - Same-shape proof result:
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-55-56/result.json`
