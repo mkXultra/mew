@@ -979,6 +979,19 @@ def summarize_read_result(action_type, result):
             f"mime={result.get('mime_type')} detail={result.get('detail')}\n"
             f"{result.get('text') or ''}"
         )
+    if action_type == "read_images":
+        suffix = " (truncated)" if result.get("truncated") else ""
+        image_bits = []
+        for item in (result.get("images") or [])[:10]:
+            image_bits.append(
+                f"[{item.get('index')}] {item.get('path')} size={item.get('size')} mime={item.get('mime_type')}"
+            )
+        return (
+            f"Read images count={result.get('count')} total_size={result.get('total_size')} "
+            f"detail={result.get('detail')}{suffix}\n"
+            f"{chr(10).join(image_bits)}\n"
+            f"{result.get('text') or ''}"
+        )
     if action_type == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""
         pattern = f" pattern={result.get('pattern')!r}" if result.get("pattern") else ""

@@ -1303,6 +1303,7 @@ def build_parser():
             "inspect_dir",
             "read_file",
             "read_image",
+            "read_images",
             "search_text",
             "glob",
             "git_status",
@@ -1321,6 +1322,7 @@ def build_parser():
     work_parser.add_argument("--allow-shell", action="store_true", help="allow run_command work-session tool; persisted on the work session")
     work_parser.add_argument("--allow-verify", action="store_true", help="allow run_tests work-session tool; persisted on the work session")
     work_parser.add_argument("--path", default=".", help="path for a native work tool")
+    work_parser.add_argument("--paths-json", help="JSON list of paths for read_images")
     work_parser.add_argument("--query", help="query for search_text")
     work_parser.add_argument("--pattern", help="pattern for glob")
     work_parser.add_argument("--command", help="command for run_command or run_tests")
@@ -1346,8 +1348,9 @@ def build_parser():
     work_parser.add_argument("--offset", type=int, default=0, help="character offset for read_file")
     work_parser.add_argument("--line-start", type=int, help="1-based starting line for read_file")
     work_parser.add_argument("--line-count", type=int, help="number of lines to read with --line-start")
-    work_parser.add_argument("--detail", choices=("low", "high", "auto"), help="detail level for read_image")
-    work_parser.add_argument("--prompt", help="inspection prompt for read_image")
+    work_parser.add_argument("--detail", choices=("low", "high", "auto"), help="detail level for read_image/read_images")
+    work_parser.add_argument("--prompt", help="inspection prompt for read_image/read_images")
+    work_parser.add_argument("--max-output-chars", type=int, help="maximum read_images output characters")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
     work_parser.add_argument("--context-lines", type=int, default=3, help="context lines around search_text matches")
     work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")

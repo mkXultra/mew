@@ -96,9 +96,10 @@ Status vocabulary:
 |---|---|---|---|---|---|---|---|---|
 | SR-001 | repaired | M6.22 / M6.24 | `agent_wall_timeout_without_report` / timeout partial observability | `gcode-to-text` had timeout without useful report; `financial-document-processor` and `dna-assembly` later hit long domain/document repair timeouts | Add generic partial progress / timeout observability so long work loops emit actionable reports before command or wall timeout | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` streaming executor notes | rerun `financial-document-processor` or `dna-assembly` same failed shape | Repaired by atomic partial `mew work --oneshot --report` writes plus Harbor `container_repo_root` mapping; same-shape timeout left a host-visible actionable report. |
 | SR-002 | repaired | M6.22 / M6.24 | finish/verifier grounding false green | `overfull-hbox` self-reported acceptance despite verifier rejection; `dna-assembly` used surrogate primer Tm checks instead of exact named ground-truth tool | Strengthen finish gate/task contract so named external ground-truth tools or acceptance constraints must be executed exactly, or finish must be blocked | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/review/verify and todo patterns | rerun `dna-assembly`; optionally rerun an acceptance-grounding task | Repaired by exact external-tool finish gate plus exact-tool-unavailable blocker guidance; smaller proof stopped with `task_done=false` after the required command was missing. |
-| SR-003 | candidate | M6.22 / M6.24 | artifact observation substrate gap | `gcode-to-text` visual/geometric grounding gap; `code-from-image` fixed by `read_image`; `financial-document-processor` exposed PDF/document observation gap | Add generic document/PDF or broader artifact observation only if selected as bounded repair slice | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md` | rerun `financial-document-processor` or a visual/document task | Partly repaired for images; PDF/document remains open. |
+| SR-003 | repaired | M6.22 / M6.24 | artifact observation substrate gap | `gcode-to-text` visual/geometric grounding gap; `code-from-image` fixed by `read_image`; `financial-document-processor` exposed PDF/document observation gap; `extract-moves-from-video` generated contact sheets then timed out across 5/5 trials while sequentially inspecting visual artifacts | Add bounded generic multi-artifact observation: ordered `read_images`, resume-visible observation transcripts, and large chronological chunk guidance | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md` | rerun `extract-moves-from-video` same failed shape | Repaired by generic `read_images` with 16-image / aggregate-byte caps, `recent_read_images_observations`, and large chronological chunk guidance; same-shape proof `mew-m6-14-sr003-extract-moves-from-video-1attempt-read-images-largechunks-20260428-1843` reached 1/1 with errors 0. |
 | SR-004 | candidate | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure | Add safer multiline command guidance or command-shape helper, likely heredoc/script-first policy | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | rerun a task that exercises multiline verification | Lower priority than timeout/grounding unless it blocks a selected repair. |
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
+| SR-007 | candidate | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen structured multi-file patch lifecycle: one frontier, paired source/test/docs/report edits, stale-hunk reread/repair, and write-batch semantics that never mix wait with write tools | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | side-project SP19 retry or a small in-repo coordinated source/test/docs task | Open issue remains unresolved; not blocking the current SR-003 close-out, but should be selected before continuing broad mew-first implementation if the same coordinated-patch shape repeats. |
 
 ## SR-001 Progress
 
@@ -179,6 +180,47 @@ Status vocabulary:
   `run_command` evidence. It did not install or use a surrogate validator and
   did not claim task completion. This satisfies the SR-002 repair proof for the
   false-green/unavailable-tool shape.
+
+## SR-003 Progress
+
+- 2026-04-28: implemented a bounded generic multi-image observation slice:
+  `read_images` lets a work session send an ordered set of related images to
+  the model in one read-only tool call. It is not video-specific: bash/Python
+  remain responsible for extracting frames, contact sheets, PDFs, or other
+  artifacts into image files, then `read_images` observes the ordered artifact
+  set.
+- Safety and ergonomics:
+  `read_images` enforces allowed read roots, sensitive-path checks, image MIME
+  validation, per-image size caps, a 16-image count cap, and an aggregate byte
+  cap. The error for over-large image sets tells the model to split the set
+  into ordered chunks.
+- Resume repair:
+  work-session resumes now preserve recent `read_images` observations with
+  ordered paths and clipped transcript text. The prompt tells the model to
+  reuse those transcripts instead of rereading the same visual artifacts, and
+  to carry compact transcripts forward in working memory for long artifact
+  tasks.
+- Prompt policy:
+  visual/document/video artifact tasks should use bash/Python to transform the
+  raw file into a small ordered image set, then use the largest chronological
+  `read_images` chunks that fit. This avoids the previous one-contact-sheet-at-
+  a-time loop that consumed wall-clock and context budget.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_image_tools.py tests/test_work_session.py -k 'read_images or work_think_prompt_includes_work_guidance or write_ready or resume_preserves_recent_read_images' -q`.
+- Lint passed:
+  `uv run ruff check src/mew/image_tools.py src/mew/read_tools.py src/mew/work_session.py src/mew/commands.py src/mew/cli.py src/mew/plan_schema.py src/mew/acceptance.py src/mew/work_loop.py tests/test_image_tools.py tests/test_work_session.py`.
+- Same-shape proof sequence:
+  the first `read_images` proof avoided command errors but failed because the
+  8-image cap was too small for the contact-sheet set; the second proof with a
+  16-image cap successfully transcribed chunks but lost earlier transcript
+  context; the third proof preserved `recent_read_images_observations` but
+  still used chunks that were too small for the step budget.
+- Final same-shape proof result:
+  `mew-m6-14-sr003-extract-moves-from-video-1attempt-read-images-largechunks-20260428-1843`
+  reached reward 1/1 with exceptions 0. The session extracted 96 frames into
+  eight chronological contact sheets, read them with one ordered `read_images`
+  call, performed an independent visual audit, and wrote the required
+  `/app/solution.txt` before the 30-step budget expired.
 
 ## Repaired / Superseded Rows
 

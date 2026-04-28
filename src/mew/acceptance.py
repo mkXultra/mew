@@ -45,6 +45,7 @@ _GROUNDING_TOOLS = {
     "git_status",
     "glob",
     "read_image",
+    "read_images",
     "read_file",
     "run_command",
     "run_tests",
