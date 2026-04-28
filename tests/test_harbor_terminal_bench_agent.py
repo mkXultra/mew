@@ -237,6 +237,56 @@ def test_run_passes_configured_command_cwd_and_template_placeholder(tmp_path):
     assert transcript["cwd"] == "/app"
 
 
+def test_run_expands_mew_wall_budget_placeholders_from_timeout_seconds(tmp_path):
+    module = load_agent_module()
+
+    agent = module.MewTerminalBenchAgent(
+        command_template=(
+            "mew work --oneshot {max_wall_seconds_option} "
+            "--wall-value {mew_max_wall_seconds} --outer-timeout {timeout_seconds}"
+        ),
+        artifact_root=tmp_path,
+        timeout_seconds=120,
+        timeout_reserve_seconds=30,
+    )
+    environment = FakeHarborEnvironment(SimpleNamespace(return_code=0, stdout="out", stderr=""))
+    context = {"task_id": "wall-budget-task"}
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    command = environment.commands[0]
+    transcript = json.loads((tmp_path / "wall-budget-task" / "command-transcript.json").read_text(encoding="utf-8"))
+
+    assert "--max-wall-seconds 108" in command
+    assert "--wall-value 108" in command
+    assert "--outer-timeout 120" in command
+    assert environment.exec_kwargs[0]["timeout_sec"] == 120
+    assert transcript["timeout_seconds"] == 120
+    assert transcript["mew_max_wall_seconds"] == 108
+
+
+def test_run_omits_mew_wall_budget_option_when_timeout_delegates_to_harbor(tmp_path):
+    module = load_agent_module()
+
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew work --oneshot {max_wall_seconds_option} --wall-value {mew_max_wall_seconds}",
+        artifact_root=tmp_path,
+    )
+    environment = FakeHarborEnvironment(SimpleNamespace(return_code=0, stdout="out", stderr=""))
+    context = {"task_id": "outer-timeout-task"}
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    command = environment.commands[0]
+    transcript = json.loads((tmp_path / "outer-timeout-task" / "command-transcript.json").read_text(encoding="utf-8"))
+
+    assert "--max-wall-seconds" not in command
+    assert "--wall-value " in command
+    assert environment.exec_kwargs[0]["timeout_sec"] is None
+    assert transcript["timeout_seconds"] is None
+    assert transcript["mew_max_wall_seconds"] is None
+
+
 def test_run_can_map_artifact_placeholders_to_container_repo_root(tmp_path, monkeypatch):
     module = load_agent_module()
     monkeypatch.chdir(tmp_path)

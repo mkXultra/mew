@@ -107,6 +107,7 @@ Status vocabulary:
 | SR-011 | repaired | M6.24 Batch 3 | query-only hidden-model visible fixture false green | `model-extraction-relu-logits` scored 0/5 against Codex target 4/5; trials self-finished after reading/checking visible `forward.A1` fixture internals or validating only the visible fixture, while Harbor's hidden generated model failed | Add query-only hidden-model finish grounding: block generated source that reads visible hidden weights/source and require synthetic/randomized/holdout generalization evidence before `task_done=true` | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `model-extraction-relu-logits` same failed shape | Repaired by acceptance finish gate, prompt update, focused regressions, and same-shape proof reaching 1/1 after first blocking visible-fixture-only finish and then requiring synthetic validation. |
 | SR-012 | repaired | M6.24 Batch 3 | Harbor wrapper inner timeout cap and unmapped partial report | `install-windows-3.11` / Harbor `install-windows-3-11` scored 0/5 with 5 wrapper `RuntimeError: Command timed out after 900 seconds` exceptions despite task `agent.timeout_sec=3600`; the run also used container-local report paths so partial reports were not preserved on the host | Remove the wrapper's default inner timeout cap, let Harbor task timeout govern by default, capture explicit wrapper timeout exceptions as normal command transcripts, and require `container_repo_root=/mew` in benchmark run manifests | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | wrapper timeout no-error proof plus future long-task reruns | Repaired by `.harbor/mew_terminal_bench_agent.py` default `timeout_seconds=None`, timeout exception capture with `exit_code=124`, manifest `container_repo_root=/mew`, focused tests, and a light Harbor proof with `n_errors=0`. |
 | SR-013 | repaired | M6.24 Batch 3 | run_command shell-operator execution mismatch | `mcmc-sampling-stan` pre-repair reports showed `mkdir -p ... && HOME=... Rscript -e ...` executed as a single argv command, producing `mkdir: invalid option -- 'e'` instead of a shell chain | Execute `run_command` through a bash-compatible shell only when top-level shell operators are present, keep `run_tests` non-shell, and add resident-loop guards for accidental nested `mew run` / `mew work` shell invocations | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` executor safety notes | direct shell-chain proof plus rerun `mcmc-sampling-stan` after repair | Repaired by `use_shell` execution mode for `run_command`, prompt update, focused tests, runtime `MEW_WORK_COMMAND_GUARD`, and codex-ultra review with no blocking findings. |
+| SR-014 | repaired | M6.24 Batch 4 | terminal-bench agent timeout self-budget not propagated | `protein-assembly` scored 0/5 with 3 `AgentTimeoutError`s. Timed-out trials left host-visible partial mew reports with running model turns around the outer 1800s timeout because the Harbor wrapper delegated timeout to the outer runner without passing an inner `--max-wall-seconds` budget to `mew work --oneshot` | Add Harbor wrapper wall-budget placeholders derived from explicit `timeout_seconds`, then run terminal-bench mew commands with both wrapper timeout and inner `--max-wall-seconds` so long tasks self-stop with final `wall_timeout` reports before the outer timeout | `docs/M6_24_BATCH_4_RUNS_2026-04-29.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | focused wrapper tests plus a bounded `protein-assembly` same-shape proof with no `AgentTimeoutError` | Repaired by `.harbor/mew_terminal_bench_agent.py` `{max_wall_seconds_option}` / `{mew_max_wall_seconds}` placeholders, focused tests, and a bounded `protein-assembly` proof with `n_errors=0` and final `wall_timeout` report. |
 
 ## SR-001 Progress
 
@@ -518,6 +519,48 @@ Status vocabulary:
   analysis, and verifier output failed on missing `rstan` or non-`rstan`
   sampling. This keeps SR-013 repaired and records the remaining gap as
   task-solving / long dependency strategy evidence.
+
+## SR-014 Progress
+
+- 2026-04-29: M6.24 Batch 4 `protein-assembly` scored 0/5 against Codex target
+  4/5 with 3 `AgentTimeoutError`s:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__04-59-28/result.json`.
+  The three timed-out trials preserved partial `mew-report.json` files but did
+  not write final reports. Their effort state showed running model turns near
+  the outer Harbor agent timeout (`wall_elapsed_seconds` about 1774-1798s).
+- Diagnosis:
+  SR-001 fixed timeout observability after external timeout, and SR-012 removed
+  the wrapper's accidental default inner timeout cap. The missing piece is
+  self-budget propagation: when the wrapper is given an explicit
+  `timeout_seconds`, the command template needs a derived
+  `--max-wall-seconds` budget so `mew work --oneshot` can stop itself and
+  report `wall_timeout` before Harbor kills the agent.
+- Generic repair target:
+  add `{max_wall_seconds_option}` / `{mew_max_wall_seconds}` placeholders to
+  `.harbor/mew_terminal_bench_agent.py`, derived from explicit
+  `timeout_seconds` with a cleanup reserve. Update Terminal-Bench run shapes to
+  pass an explicit wrapper timeout and include the inner wall-budget option.
+- Generic repair:
+  `.harbor/mew_terminal_bench_agent.py` now derives
+  `mew_max_wall_seconds` from explicit `timeout_seconds` using a bounded
+  cleanup reserve, exposes `{max_wall_seconds_option}` and
+  `{mew_max_wall_seconds}` command-template placeholders, and records the
+  derived wall budget in `command-transcript.json`.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_harbor_terminal_bench_agent.py -q`
+  passed with 16 tests.
+- Lint/diff validation passed:
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`
+  and `git diff --check`.
+- Same-shape bounded proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr014-protein-wall-budget/2026-04-29__05-38-06/result.json`
+  reran `protein-assembly` for one trial with explicit
+  `timeout_seconds=120` and the new `{max_wall_seconds_option}` in the normal
+  mew command template. Harbor recorded `n_errors=0`; the transcript recorded
+  `timeout_seconds=120`, `mew_max_wall_seconds=108`, `timed_out=false`, and
+  the final `mew-report.json` had `work_report.stop_reason=wall_timeout`
+  rather than `partial_report` or `AgentTimeoutError`. This satisfies SR-014:
+  the outer timeout is no longer the first component to terminate long work.
 
 ## Repaired / Superseded Rows
 

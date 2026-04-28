@@ -66,6 +66,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         command_cwd: str | Path | None = None,
         artifact_root: str | Path | None = None,
         timeout_seconds: int | str | None = None,
+        timeout_reserve_seconds: int | str | None = 60,
         install_command: str | None = None,
         install_env: dict[str, str] | None = None,
         capture_nonzero_command_exit: bool = True,
@@ -98,6 +99,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
                 artifact_root = Path("artifacts/terminal-bench-harbor-smoke")
         self.artifact_root = Path(artifact_root)
         self.timeout_seconds = self._parse_timeout_seconds(timeout_seconds)
+        self.timeout_reserve_seconds = self._parse_timeout_seconds(timeout_reserve_seconds)
         self.install_command = install_command
         self.install_env = install_env
         self.capture_nonzero_command_exit = capture_nonzero_command_exit
@@ -132,6 +134,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             },
         )
 
+        mew_max_wall_seconds = self._mew_max_wall_seconds()
         command = self.command_template.format(
             instruction=instruction,
             instruction_shell=shlex.quote(instruction),
@@ -143,6 +146,13 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
             host_instruction_json=shlex.quote(str(task_dir / "instruction.json")),
             command_cwd=self.command_cwd or "",
             command_cwd_shell=shlex.quote(self.command_cwd or ""),
+            timeout_seconds="" if self.timeout_seconds is None else str(self.timeout_seconds),
+            mew_max_wall_seconds="" if mew_max_wall_seconds is None else str(mew_max_wall_seconds),
+            max_wall_seconds_option=(
+                ""
+                if mew_max_wall_seconds is None
+                else f"--max-wall-seconds {mew_max_wall_seconds}"
+            ),
         )
         if self.capture_nonzero_command_exit:
             result = await self._exec_as_agent_capture(
@@ -169,6 +179,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
                 "exit_code": exit_code,
                 "timed_out": timed_out,
                 "timeout_seconds": self.timeout_seconds,
+                "mew_max_wall_seconds": mew_max_wall_seconds,
                 "cwd": self.command_cwd,
             },
         )
@@ -326,6 +337,15 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
                 return None
             return int(float(stripped))
         return int(value)
+
+    def _mew_max_wall_seconds(self) -> int | None:
+        if self.timeout_seconds is None:
+            return None
+        timeout_seconds = max(1, int(self.timeout_seconds))
+        configured_reserve = max(0, int(self.timeout_reserve_seconds or 0))
+        proportional_reserve = max(1, int(timeout_seconds * 0.1))
+        reserve = min(configured_reserve, proportional_reserve)
+        return max(1, timeout_seconds - reserve)
 
     @staticmethod
     def _is_command_timeout_exception(exc: RuntimeError) -> bool:

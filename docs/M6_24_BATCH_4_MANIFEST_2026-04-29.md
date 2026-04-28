@@ -61,13 +61,19 @@ env PYTHONPATH=.harbor harbor run \
   --ak install_command='apt-get update && apt-get install -y python3 python3-pip python3-venv && python3 -m pip install --break-system-packages -e /mew' \
   --ak command_cwd=/app \
   --ak container_repo_root=/mew \
-  --ak command_template='mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-write . --allow-write /usr/local/bin --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json' \
+  --ak timeout_seconds=1800 \
+  --ak command_template='mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-write . --allow-write /usr/local/bin --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 {max_wall_seconds_option} --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json' \
   --mounts-json '[{"type":"bind","source":"/Users/mk/dev/personal-pj/mew","target":"/mew"},{"type":"bind","source":"/Users/mk/.codex/auth.json","target":"/codex-auth/auth.json"}]'
 ```
 
 The `/etc/apt` read root and `/usr/local/bin` write root are generic
 container-system task permissions for package-source inspection and requested
 binary installation. They are not task solvers.
+
+`timeout_seconds=1800` plus `{max_wall_seconds_option}` is a generic
+self-budgeting guard: the wrapper still records command timeout transcripts,
+while `mew work --oneshot` gets an inner wall budget and can write a final
+`wall_timeout` report before Harbor raises `AgentTimeoutError`.
 
 ## Next
 
