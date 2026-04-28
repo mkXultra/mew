@@ -403,6 +403,64 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertEqual(unapproved_resume["preference_signal_refs"], [])
 
+    def test_work_session_resume_preserves_recent_read_images_observations(self):
+        task = {
+            "id": 1,
+            "title": "Transcribe frames",
+            "description": "Read contact sheets and write a solution.",
+            "status": "todo",
+            "kind": "coding",
+        }
+        session = {
+            "id": 7,
+            "task_id": task["id"],
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": 11,
+                    "tool": "read_images",
+                    "status": "completed",
+                    "parameters": {
+                        "paths": ["sheet_001.jpg", "sheet_002.jpg"],
+                        "prompt": "transcribe commands",
+                    },
+                    "result": {
+                        "type": "images",
+                        "count": 2,
+                        "paths": ["/app/sheets/sheet_001.jpg", "/app/sheets/sheet_002.jpg"],
+                        "total_size": 1234,
+                        "detail": "high",
+                        "prompt": "transcribe commands",
+                        "text": "n\nopen mailbox\nget leaflet",
+                    },
+                    "summary": "Read images count=2",
+                    "started_at": "2026-04-17T00:00:30Z",
+                    "finished_at": "2026-04-17T00:00:40Z",
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session, task=task, current_time="2026-04-17T00:01:00Z")
+        observations = resume["recent_read_images_observations"]
+        self.assertEqual(observations[0]["tool_call_id"], 11)
+        self.assertIn("open mailbox", observations[0]["text"])
+        self.assertEqual(observations[0]["count"], 2)
+        resume_text = format_work_session_resume(resume)
+        self.assertIn("Recent read_images observations", resume_text)
+        self.assertIn("tool_call=#11", resume_text)
+
+        from mew.work_loop import build_work_model_context, build_work_think_prompt
+
+        context = build_work_model_context({"tasks": [task]}, session, task, "2026-04-17T00:01:00Z")
+        prompt_text = build_work_think_prompt(context)
+        self.assertIn("recent_read_images_observations", prompt_text)
+        self.assertIn("reuse that observation instead of re-reading", prompt_text)
+
     def test_work_session_effort_budget_counts_steps_duration_and_warnings(self):
         session = {
             "id": 1,
@@ -1694,6 +1752,63 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Diff preview (+1 -1)", text)
         self.assertIn("-before", text)
         self.assertIn("+after", text)
+
+    def test_run_work_batch_action_blocks_mixed_write_wait_without_wait_tool_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                    save_state(state)
+
+                args = SimpleNamespace(
+                    allow_write=["."],
+                    allow_verify=False,
+                    verify_command="",
+                    verify_timeout=300,
+                    max_steps=30,
+                    cwd=tmp,
+                )
+                action = {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "experiments/mew-ghost/ghost.py",
+                            "edits": [{"old": "render_html()\n", "new": "render_cli()\n"}],
+                        },
+                        {
+                            "type": "wait",
+                            "reason": "need tests/README sibling edits before applying",
+                        },
+                    ],
+                }
+
+                step = commands.run_work_batch_action(
+                    session["id"],
+                    task["id"],
+                    0,
+                    {"decision_plan": {"summary": "draft coordinated patch"}, "action_plan": {"summary": "mixed"}},
+                    action,
+                    args,
+                    progress=lambda _message: None,
+                )
+
+                self.assertEqual(step["status"], "failed")
+                self.assertTrue(step["batch_blocked"])
+                self.assertEqual(step["tool_calls"], [])
+                self.assertIn("write batch cannot mix non-write tools (wait)", step["error"])
+                self.assertNotIn("batch write tool is not a paired write/edit", step["error"])
+                with state_lock():
+                    saved = load_state()
+                saved_session = saved["work_sessions"][0]
+                self.assertEqual(saved_session["model_turns"][-1]["status"], "completed")
+                self.assertIn("write batch cannot mix non-write tools", saved_session["model_turns"][-1]["summary"])
+            finally:
+                os.chdir(old_cwd)
 
     def test_work_action_single_dry_run_edit_displays_diff_preview(self):
         text = format_work_action(
@@ -8776,8 +8891,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
         self.assertIn("large multi-file write_file batch would be too large", fast_prompt)
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
+        self.assertIn("return one top-level wait instead of a batch containing wait", prompt)
         self.assertIn(
-            '"type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
+            '"type": "batch|inspect_dir|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
             fast_prompt,
         )
         self.assertNotIn("patch_proposal", fast_prompt)
@@ -33357,6 +33473,11 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prove completeness instead of writing a single plausible answer", prompt)
         self.assertIn("When a source artifact is an image, screenshot, diagram", prompt)
         self.assertIn("prefer read_image before lossy ASCII rendering or manual OCR commands", prompt)
+        self.assertIn("prefer one read_images call with a narrow task-specific prompt", prompt)
+        self.assertIn("use bash/Python to transform video or documents into a small ordered image set", prompt)
+        self.assertIn("read_images can accept up to 16 images", prompt)
+        self.assertIn("use the largest chronological chunks that fit", prompt)
+        self.assertIn("carry forward a compact transcript in working_memory", prompt)
         self.assertIn("exact external ground-truth command", prompt)
         self.assertIn("surrogate libraries, approximations, or nearby tools are not enough", prompt)
         self.assertIn("If prior command output says the exact command is NOT_FOUND", prompt)
@@ -33483,6 +33604,53 @@ class WorkSessionTests(unittest.TestCase):
             ],
         )
 
+    def test_work_model_preserves_read_images_paths(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "summary": "inspect ordered contact sheets",
+                "action": {
+                    "type": "read_images",
+                    "paths": ["sheet_01.png", "sheet_02.png"],
+                    "prompt": "transcribe visible moves in order",
+                    "detail": "low",
+                    "max_output_chars": 4000,
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "read_images")
+        self.assertEqual(action["paths"], ["sheet_01.png", "sheet_02.png"])
+        self.assertEqual(action["prompt"], "transcribe visible moves in order")
+        self.assertEqual(action["detail"], "low")
+        self.assertEqual(action["max_output_chars"], 4000)
+        self.assertEqual(action["summary"], "inspect ordered contact sheets")
+
+    def test_work_model_batch_accepts_read_images_paths(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "read_images",
+                            "paths": ["frame_001.png", "frame_002.png"],
+                            "prompt": "summarize changes between frames",
+                        },
+                        {"type": "read_file", "path": "README.md"},
+                    ],
+                }
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(action["tools"][0]["type"], "read_images")
+        self.assertEqual(action["tools"][0]["paths"], ["frame_001.png", "frame_002.png"])
+        self.assertEqual(action["tools"][1]["type"], "read_file")
+
     def test_work_model_batch_reports_truncated_pipe_search_text_queries(self):
         from mew.work_loop import normalize_work_model_action
 
@@ -33583,6 +33751,35 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(action["type"], "wait")
         self.assertIn("write batch exceeds 5 tools", action["reason"])
         self.assertIn("narrower complete slice", action["reason"])
+
+    def test_work_model_batch_refuses_wait_inside_write_batch(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "experiments/mew-ghost/ghost.py",
+                            "edits": [{"old": "render_html()\n", "new": "render_cli()\n"}],
+                        },
+                        {
+                            "type": "wait",
+                            "reason": "need sibling tests/docs before applying",
+                        },
+                    ],
+                    "reason": "draft coordinated CLI-first patch",
+                },
+            },
+            allowed_write_roots=["experiments/mew-ghost"],
+            default_cwd=".",
+        )
+
+        self.assertEqual(action["type"], "wait")
+        self.assertIn("write batch cannot mix non-write tools (wait)", action["reason"])
+        self.assertIn("separate turn", action["reason"])
 
     def test_work_model_batch_collapses_same_path_write_edits(self):
         from mew.work_loop import normalize_work_model_action

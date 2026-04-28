@@ -18,7 +18,7 @@ from .read_tools import (
     search_text,
     summarize_read_result,
 )
-from .image_tools import read_image_with_model
+from .image_tools import read_image_with_model, read_images_with_model
 from .state import next_id
 from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
@@ -240,6 +240,7 @@ WORK_TOOLS = {
     "inspect_dir",
     "read_file",
     "read_image",
+    "read_images",
     "search_text",
     "glob",
     "run_command",
@@ -256,7 +257,7 @@ APPROVAL_WAIT_RE = re.compile(
     r"|\b(?:approval|approve|rejection|reject)\b.*\b(?:wait|waiting|await|awaiting)\b",
     re.IGNORECASE,
 )
-READ_ONLY_WORK_TOOLS = {"analyze_table", "inspect_dir", "read_file", "read_image", "search_text", "glob"}
+READ_ONLY_WORK_TOOLS = {"analyze_table", "inspect_dir", "read_file", "read_image", "read_images", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
@@ -292,6 +293,18 @@ def _work_path_for_cwd(path, cwd, default="."):
     if candidate.is_absolute():
         return str(candidate)
     return str((Path(cwd) / candidate).resolve(strict=False))
+
+
+def _work_paths_for_cwd(paths, cwd):
+    if not isinstance(paths, list):
+        return []
+    resolved = []
+    for item in paths:
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        resolved.append(_work_path_for_cwd(raw, cwd, default=""))
+    return resolved
 
 
 def _work_roots_for_cwd(roots, cwd):
@@ -337,7 +350,9 @@ def _workspace_relative_work_parameters(tool, parameters, allowed_read_roots):
     cwd = _work_tool_workspace_cwd(parameters)
     parameters["cwd"] = str(cwd)
     read_roots = _work_roots_for_cwd(allowed_read_roots or [], cwd)
-    if tool in READ_ONLY_WORK_TOOLS:
+    if tool == "read_images":
+        parameters["paths"] = _work_paths_for_cwd(parameters.get("paths") or [], cwd)
+    elif tool in READ_ONLY_WORK_TOOLS:
         parameters["path"] = _work_path_for_cwd(parameters.get("path"), cwd)
     elif tool in GIT_WORK_TOOLS:
         parameters["cwd"] = _work_path_for_cwd(parameters.get("cwd"), cwd)
@@ -418,6 +433,7 @@ WORK_REPEAT_SIGNATURE_IGNORED_FIELDS = {
 }
 WORK_ACTION_DISPLAY_FIELDS = (
     "path",
+    "paths",
     "query",
     "pattern",
     "command",
@@ -432,6 +448,9 @@ WORK_ACTION_DISPLAY_FIELDS = (
     "replace_all",
     "staged",
     "stat",
+    "detail",
+    "prompt",
+    "max_output_chars",
 )
 ACTIVE_MEMORY_ALWAYS_TYPES = {"user"}
 ACTIVE_MEMORY_RELEVANT_TYPES = {"feedback", "project", "reference", "unknown"}
@@ -1252,6 +1271,16 @@ def work_tool_signature(tool, parameters):
         else:
             normalized["offset"] = _clamped_int_work_parameter(parameters, "offset", 0, 0, 1_000_000)
         parameters = normalized
+    elif tool == "read_images":
+        raw_paths = parameters.get("paths") or []
+        if not isinstance(raw_paths, list):
+            raw_paths = []
+        parameters = {
+            "paths": [str(path or "") for path in raw_paths if str(path or "").strip()][:16],
+            "detail": parameters.get("detail") or "",
+            "prompt": parameters.get("prompt") or "",
+            "max_output_chars": _clamped_int_work_parameter(parameters, "max_output_chars", 12_000, 1, 50_000),
+        }
     elif tool == "search_text":
         parameters = {
             "query": parameters.get("query") or "",
@@ -2283,6 +2312,20 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
             timeout=context.get("timeout") or parameters.get("timeout") or 300,
             prompt=parameters.get("prompt"),
             detail=parameters.get("detail"),
+        )
+    if tool == "read_images":
+        context = model_context or {}
+        return read_images_with_model(
+            parameters.get("paths") or [],
+            allowed_read_roots,
+            model_backend=context.get("model_backend") or "codex",
+            model_auth=context.get("model_auth"),
+            model=context.get("model"),
+            base_url=context.get("base_url"),
+            timeout=context.get("timeout") or parameters.get("timeout") or 300,
+            prompt=parameters.get("prompt"),
+            detail=parameters.get("detail"),
+            max_output_chars=parameters.get("max_output_chars"),
         )
     if tool == "search_text":
         return search_text(
@@ -3834,6 +3877,37 @@ def build_adjacent_read_observations(calls, *, limit=3, gap_lines=2):
             }
         )
     observations.sort(key=lambda item: item.get("last_tool_call_id") or 0)
+    return observations[-limit:]
+
+
+def build_recent_read_images_observations(calls, *, limit=3, text_limit=12_000):
+    observations = []
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if call.get("tool") != "read_images" or call.get("status") != "completed":
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+        text = str(result.get("text") or "").strip()
+        if not text:
+            continue
+        paths = result.get("paths") or parameters.get("paths") or []
+        if not isinstance(paths, list):
+            paths = []
+        observation = {
+            "tool_call_id": call.get("id"),
+            "count": result.get("count") or len(paths),
+            "total_size": result.get("total_size"),
+            "detail": result.get("detail") or parameters.get("detail") or "",
+            "paths": [str(path) for path in paths[:20]],
+            "prompt": clip_output(str(result.get("prompt") or parameters.get("prompt") or ""), 1000),
+            "text": clip_output(text, text_limit),
+            "source_text_chars": len(text),
+            "context_truncated": len(text) > text_limit,
+            "suggested_next": "reuse this transcript instead of re-reading the same ordered visual chunk",
+        }
+        observations.append({key: value for key, value in observation.items() if value not in (None, "", [], {})})
     return observations[-limit:]
 
 
@@ -7628,6 +7702,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": adjacent_read_observations,
         "demoted_adjacent_read_observations": demoted_adjacent_read_observations,
+        "recent_read_images_observations": build_recent_read_images_observations(calls, limit=3),
         "target_path_cached_window_observations": target_path_cached_window_observations,
         "plan_item_observations": plan_item_observations,
         "skipped_exact_read_plan_items": skipped_exact_read_plan_items,
@@ -8082,6 +8157,21 @@ def format_work_session_resume(resume):
                 f"- {item.get('tool')} {item.get('path')} repeated with adjacent windows "
                 f"{item.get('count')}x; last_tool=#{item.get('last_tool_call_id')}{line_range}"
             )
+            if item.get("suggested_next"):
+                lines.append(f"  suggested_next: {item.get('suggested_next')}")
+
+    read_images_observations = resume.get("recent_read_images_observations") or []
+    if read_images_observations:
+        lines.extend(["", "Recent read_images observations"])
+        for item in read_images_observations:
+            lines.append(
+                "- "
+                f"tool_call=#{item.get('tool_call_id')} count={item.get('count')} "
+                f"chars={item.get('source_text_chars')} truncated={bool(item.get('context_truncated'))}"
+            )
+            paths = item.get("paths") or []
+            if paths:
+                lines.append(f"  paths: {', '.join(str(path) for path in paths[:6])}")
             if item.get("suggested_next"):
                 lines.append(f"  suggested_next: {item.get('suggested_next')}")
 

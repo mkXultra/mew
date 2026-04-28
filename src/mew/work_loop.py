@@ -1626,6 +1626,7 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         "effort",
         "low_yield_observations",
         "search_anchor_observations",
+        "recent_read_images_observations",
         "failures",
         "unresolved_failure",
         "recurring_failures",
@@ -6053,10 +6054,11 @@ def _work_action_schema_text():
         '  "summary": "short reason",\n'
         '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state", "acceptance_constraints": ["explicit stated constraints still relevant"], "acceptance_checks": [{"constraint": "constraint text", "status": "unknown|verified|blocked", "evidence": "tool output, diff, or file inspection used as proof"}]},\n'
         '  "action": {\n'
-        '    "type": "batch|inspect_dir|analyze_table|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
+        '    "type": "batch|inspect_dir|analyze_table|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
-        '{"type": "inspect_dir|analyze_table|read_file|read_image|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
+        '{"type": "inspect_dir|analyze_table|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
         '"path": "required for analyze_table/read_file/read_image/glob/search_text", '
+        '"paths": "required list for read_images", '
         '"query": "required for search_text; literal fixed-string, so use batch for OR searches", '
         '"pattern": "required for glob; optional rg glob filter for search_text", '
         '"max_chars": "optional read_file cap", '
@@ -6077,8 +6079,10 @@ def _work_action_schema_text():
         '    "line_count": "optional read_file line count",\n'
         '    "max_rows": "optional analyze_table row cap",\n'
         '    "max_extrema": "optional analyze_table local-extrema cap",\n'
-        '    "detail": "optional read_image detail low|high|auto",\n'
-        '    "prompt": "optional read_image inspection prompt",\n'
+        '    "paths": "required list for read_images",\n'
+        '    "detail": "optional read_image/read_images detail low|high|auto",\n'
+        '    "prompt": "optional read_image/read_images inspection prompt",\n'
+        '    "max_output_chars": "optional read_images output cap",\n'
         '    "stat": "optional git_diff diffstat; set false only when full diff is needed",\n'
         '    "command": "run_tests/run_command command",\n'
         '    "content": "write_file content",\n'
@@ -6136,7 +6140,7 @@ def build_work_think_prompt(context):
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
         "If you need multiple independent read-only observations, prefer one batch action with up to five read-only tools. If work_session.recent_read_file_windows already contains the exact recent path/span or old text needed for edit preparation, reuse that recent window instead of issuing another same-span read_file. If a needed recent_read_file_windows entry is context_truncated, fall back to the matching read_file tool_calls result text before declaring that old text unrecoverable. "
-        "If you already know the exact scoped edits, you may use one batch action with up to five write/edit tools under capabilities.allowed_write_roots. For mew core source edits under src/mew/**, include a paired tests/** edit in the same batch; this paired-write constraint applies to code write batches under mew core paths. For non-core product roots such as experiments/**, keep every write under the declared root and include local tests when the task scope calls for them. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If a large full-file write set cannot safely fit in one strict JSON batch, emit one complete file write/edit as a direct action and continue with the remaining sibling files on later turns; do not return wait solely because the multi-file batch would be too large. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice, one complete file action, or one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads with write batches. "
+        "If you already know the exact scoped edits, you may use one batch action with up to five write/edit tools under capabilities.allowed_write_roots. For mew core source edits under src/mew/**, include a paired tests/** edit in the same batch; this paired-write constraint applies to code write batches under mew core paths. For non-core product roots such as experiments/**, keep every write under the declared root and include local tests when the task scope calls for them. Docs-only single edit_file/write_file actions in other allowed write roots may be proposed directly when the target path is clear. Use at most one write/edit per file path in the batch; if the same file needs multiple disjoint hunks, prefer one edit_file_hunks action for that path instead of multiple same-path writes. If exact old text is already cached for those same-file hunks, do not return wait just because of the one-write-per-path rule; rewrite that file as one edit_file_hunks action and continue toward the reviewer-visible dry-run batch. If a large full-file write set cannot safely fit in one strict JSON batch, emit one complete file write/edit as a direct action and continue with the remaining sibling files on later turns; do not return wait solely because the multi-file batch would be too large. If the full required write set would exceed five tools, do not propose a partial batch that drops sibling edits; choose a narrower complete slice, one complete file action, or one more narrow read to reduce the write set first. mew will force writes to dry-run previews and keep approval/verification gated. Do not mix reads, wait, remember, finish, or blockers into write batches; if you cannot produce the complete write/edit slice, return one top-level wait instead of a batch containing wait. "
         "If you can make a small safe edit, use edit_file, edit_file_hunks, or write_file. For edit_file you must include exact old and new strings; for edit_file_hunks you must give one path plus a non-empty edits list of exact old/new pairs for disjoint hunks in that same file. If you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file or edit_file_hunks. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
@@ -6149,7 +6153,9 @@ def build_work_think_prompt(context):
         "For answer-from-artifact tasks such as images, boards, puzzles, diagrams, screenshots, or data files, reading back the output file or checking output format is not enough; independently derive or verify the semantic answer from the source artifact, and if the task asks for all winning/valid answers, prove completeness instead of writing a single plausible answer. "
         "When a source artifact is a PDF or text-bearing document, prefer read_file first; it extracts PDF text when possible and avoids lossy shell-side rendering. "
         "When a source artifact is an image, screenshot, diagram, board, plot, or code screenshot and read_image is available, prefer read_image before lossy ASCII rendering or manual OCR commands. "
-        "read_image supports image files only; if it reports an unsupported document type, continue with read_file or other document/text observations instead of repeating the same read_image. "
+        "When you have multiple related frames, pages, screenshots, or contact sheets, prefer one read_images call with a narrow task-specific prompt over repeated read_image calls; use bash/Python to transform video or documents into a small ordered image set, then read_images to summarize or transcribe the sequence. read_images can accept up to 16 images when the total payload is within limits; for long ordered sequences, use the largest chronological chunks that fit instead of many small chunks. If the ordered set is too large for one read_images call, split it into chronological chunks and summarize each chunk compactly before continuing. "
+        "If work_session.resume.recent_read_images_observations contains a transcript or visual summary for a needed ordered chunk, reuse that observation instead of re-reading the same images; after a long read_images chunk, carry forward a compact transcript in working_memory before reading another chunk. "
+        "read_image/read_images support image files only; if they report an unsupported document type, continue with read_file or other document/text observations instead of repeating the same visual read. "
         "If a task names an exact external ground-truth command, tool, binary, or required flags, run that exact command shape or a verifier that invokes it before finish; surrogate libraries, approximations, or nearby tools are not enough unless the task explicitly allows them. If prior command output says the exact command is NOT_FOUND, command not found, executable not found, or otherwise unavailable, do not install or use a surrogate package/library/API as a substitute; either run/install the exact command within current capabilities or return wait/remember with that exact blocker. Cite the completed run_command or run_tests tool id in acceptance_checks evidence. "
         "Treat task.acceptance_constraints as a first-class checklist. Keep working_memory.acceptance_constraints and working_memory.acceptance_checks current. Before finish with task_done=true, action.acceptance_checks must cover every stated constraint with status=verified and direct evidence from recent tool output, diff, or file inspection. If one constraint is an edit-scope rule such as only allowed edits, specified replacements, or do-not-edit paths, verify that constraint explicitly with a post-edit validator, diff, or final inspection tool call after the latest write, and cite that tool id in the evidence; a successful compile, smoke command, output file, or write history alone does not prove it. "
         "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure. "
@@ -6184,7 +6190,7 @@ def build_work_write_ready_think_prompt(context):
         '"open_questions":["unknowns"],"last_verified_state":"latest verifier state",'
         '"acceptance_constraints":["task constraints"],'
         '"acceptance_checks":[{"constraint":"text","status":"unknown|verified|blocked","evidence":"proof"}]},'
-        '"action":{"type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",'
+        '"action":{"type": "batch|inspect_dir|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",'
         '"tools":[{"type":"write_file|edit_file|edit_file_hunks","path":"target path",'
         '"content":"write_file content","old":"exact old text","new":"replacement",'
         '"edits":[{"old":"exact old text","new":"replacement"}],"create":false,'
@@ -6284,10 +6290,12 @@ def normalize_work_model_action(
         normalized_tools = []
         saw_write_tool = False
         saw_non_write_tool = False
+        invalid_write_batch_tool_types = []
         dropped_tool_count = 0
         for item in raw_tools:
             if not isinstance(item, dict):
                 continue
+            raw_sub_type = str(item.get("type") or item.get("tool") or "").strip()
             sub_action = normalize_work_model_action(
                 {"action": item},
                 verify_command=verify_command,
@@ -6313,10 +6321,21 @@ def normalize_work_model_action(
                     normalized_tools.append(candidate)
                 else:
                     saw_non_write_tool = True
+                    if raw_sub_type and raw_sub_type not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS):
+                        invalid_write_batch_tool_types.append(raw_sub_type)
         if not normalized_tools:
             return {"type": "wait", "reason": "batch requires at least one read-only tool"}
         if saw_write_tool:
             if saw_non_write_tool:
+                if invalid_write_batch_tool_types:
+                    unique_types = ", ".join(dict.fromkeys(invalid_write_batch_tool_types))
+                    return {
+                        "type": "wait",
+                        "reason": (
+                            f"write batch cannot mix non-write tools ({unique_types}); "
+                            "emit the blocker/wait as a separate turn before or after paired writes"
+                        ),
+                    }
                 return {
                     "type": "wait",
                     "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",
@@ -6360,9 +6379,13 @@ def normalize_work_model_action(
     normalized = {"type": action_type}
     for key in (
         "path",
+        "paths",
         "query",
         "pattern",
         "max_chars",
+        "max_output_chars",
+        "detail",
+        "prompt",
         "command",
         "cwd",
         "base",
@@ -6511,6 +6534,9 @@ def valid_batch_sub_action(action):
     action_type = (action or {}).get("type")
     if action_type in {"analyze_table", "read_file", "read_image"}:
         return bool(action.get("path"))
+    if action_type == "read_images":
+        paths = action.get("paths")
+        return isinstance(paths, list) and bool(paths)
     if action_type == "search_text":
         return bool(action.get("query"))
     if action_type == "glob":

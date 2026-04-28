@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Selected M6.24 structural blockers SR-001 and SR-002 are repaired; the previous close gate remains historical and future repairs reopen/append here. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Selected M6.24 structural blockers SR-001, SR-002, and SR-003 are repaired; the previous close gate remains historical and future repairs reopen/append here. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -91,12 +91,15 @@ Why M6.24 is active now:
   `domain_ground_truth_verifier_surrogate_false_green` / exact external-tool
   verifier grounding from `dna-assembly`, and timeout / partial observability
   for long domain/document repair loops from `financial-document-processor`
-  and `dna-assembly`.
+  and `dna-assembly`, plus video/frame artifact observation timeout from
+  `extract-moves-from-video`.
 - M6.14 repair episode for those selected blockers is now closed:
   SR-001 timeout / partial observability is repaired by atomic partial reports
   plus Harbor `container_repo_root` report mapping; SR-002 exact external-tool
   false green is repaired by the exact-command finish gate plus exact-tool
-  unavailable blocker proof.
+  unavailable blocker proof; SR-003 artifact observation is repaired by generic
+  ordered `read_images`, resume-visible observation transcripts, and large
+  chronological chunk guidance.
 
 M6.24 resume condition:
 
@@ -128,12 +131,34 @@ M6.24 resume condition:
   then ran the required exact command, observed executable-not-found, and
   stopped with `task_done=false` plus a blocked acceptance check instead of
   substituting a surrogate.
+- Closed M6.14 follow-on episode:
+  SR-003 artifact observation substrate is `repaired` for ordered image
+  artifact sets. The generic repair added `read_images` with allowed-root,
+  MIME, per-image, aggregate-byte, and 16-image caps; work-session resumes now
+  preserve recent `read_images` observation transcripts; and the prompt tells
+  visual/document/video tasks to transform raw artifacts with bash/Python and
+  read the largest chronological image chunks that fit. Same-shape Harbor proof
+  `mew-m6-14-sr003-extract-moves-from-video-1attempt-read-images-largechunks-20260428-1843`
+  reached 1/1 with errors 0 after extracting 96 frames into eight contact
+  sheets and writing `/app/solution.txt`.
+- Closed M6.14 follow-on episode:
+  SR-007 coordinated multi-file patch shape failure from GitHub issue #18 is
+  `repaired`. Mixed write/wait batches now normalize to an actionable
+  top-level blocker, and the executor no longer runs a synthetic `wait`
+  pseudo-tool when write-batch normalization fails. Focused regression covered
+  `edit_file_hunks` plus `wait` and verified zero tool calls plus
+  `batch_blocked=true`.
+- M6.24 Batch 2 `dna-insert` was measured after SR-003 and before the #18
+  repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.
+  This is broad parity evidence, not yet an accepted structural repair signal.
 
 Next concrete action:
 
 - Continue M6.24 Batch 2 / broad parity measurement from the current manifest.
   If a new failure is accepted as structural rather than ordinary task miss,
   append it to `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
+  Remaining unmeasured Batch 2 task is `caffe-cifar-10`.
 
 Closed M6.22 result:
 
