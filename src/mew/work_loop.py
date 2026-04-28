@@ -6319,21 +6319,22 @@ def normalize_work_model_action(
                     "type": "wait",
                     "reason": "write batch cannot mix read-only tools; use a separate read step before paired writes",
                 }
-            normalized_tools = collapse_same_path_edit_file_write_batch_tools(normalized_tools)
-            if dropped_tool_count or len(normalized_tools) > 5:
+            raw_write_tools = list(normalized_tools)
+            collapsed_write_tools = collapse_same_path_edit_file_write_batch_tools(raw_write_tools)
+            if dropped_tool_count or len(collapsed_write_tools) > 5:
                 return {
                     "type": "wait",
                     "reason": "write batch exceeds 5 tools; choose a narrower complete slice instead of dropping required sibling edits",
                 }
             paired_reason = paired_write_batch_rejection_reason(
-                normalized_tools,
+                raw_write_tools,
                 allowed_write_roots=allowed_write_roots,
                 cwd=default_cwd,
             )
             if paired_reason:
                 return {"type": "wait", "reason": paired_reason}
             paired_tools = normalize_paired_write_batch_tools(
-                normalized_tools,
+                raw_write_tools,
                 allowed_write_roots=allowed_write_roots,
                 cwd=default_cwd,
             )
@@ -6597,13 +6598,44 @@ def collapse_same_path_edit_file_write_batch_tools(tools):
     duplicate_paths = [path for path, indexes in path_indexes.items() if len(indexes) > 1]
     if not duplicate_paths:
         return copied_tools
+
+    def collapseable_edits(tool):
+        tool_type = tool.get("type")
+        if tool_type == "edit_file":
+            if tool.get("replace_all"):
+                return None
+            old = tool.get("old")
+            new = tool.get("new")
+            if not isinstance(old, str) or old == "" or not isinstance(new, str):
+                return None
+            return [{"old": old, "new": new}]
+        if tool_type == "edit_file_hunks":
+            edits = tool.get("edits")
+            if not isinstance(edits, list) or not edits:
+                return None
+            normalized_edits = []
+            for edit in edits:
+                if not isinstance(edit, dict):
+                    return None
+                old = edit.get("old")
+                new = edit.get("new")
+                if not isinstance(old, str) or old == "" or not isinstance(new, str):
+                    return None
+                normalized_edits.append({"old": old, "new": new})
+            return normalized_edits
+        return None
+
+    path_edits = {}
     for path in duplicate_paths:
-        if not all(
-            copied_tools[index].get("type") == "edit_file"
-            and not copied_tools[index].get("replace_all")
-            for index in path_indexes[path]
-        ):
+        edits = []
+        for index in path_indexes[path]:
+            collapsed_edits = collapseable_edits(copied_tools[index])
+            if collapsed_edits is None:
+                return copied_tools
+            edits.extend(collapsed_edits)
+        if not edits:
             return copied_tools
+        path_edits[path] = edits
     normalized = []
     collapsed_paths = set()
     for tool in copied_tools:
@@ -6615,10 +6647,7 @@ def collapse_same_path_edit_file_write_batch_tools(tools):
             collapsed_tool.pop('old', None)
             collapsed_tool.pop('new', None)
             collapsed_tool['type'] = 'edit_file_hunks'
-            collapsed_tool['edits'] = [
-                {'old': copied_tools[index]['old'], 'new': copied_tools[index]['new']}
-                for index in path_indexes[path]
-            ]
+            collapsed_tool['edits'] = path_edits[path]
             normalized.append(collapsed_tool)
             collapsed_paths.add(path)
             continue
@@ -6627,14 +6656,20 @@ def collapse_same_path_edit_file_write_batch_tools(tools):
 
 
 def paired_write_batch_rejection_reason(tools, allowed_write_roots=None, cwd=""):
-    write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
+    write_tools = []
+    for raw_tool in tools or []:
+        tool = dict(raw_tool)
+        if not tool.get("type") and tool.get("tool"):
+            tool["type"] = tool.get("tool")
+        if tool.get("type") in WRITE_WORK_TOOLS:
+            write_tools.append(tool)
     if len(write_tools) < 2:
         return "write batch requires at least two write/edit tools for a complete scoped slice"
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
         return "write batch contains an invalid write/edit tool; provide path and exact content or old/new hunks"
     write_tools = collapse_same_path_edit_file_write_batch_tools(write_tools)
-    if len(write_tools) < 2:
-        return "write batch requires at least two write/edit tools for a complete scoped slice"
+    if not write_tools:
+        return "write batch requires at least one write/edit tool"
     duplicates = duplicate_paired_write_batch_paths(write_tools)
     if duplicates:
         return (
@@ -6681,13 +6716,19 @@ def valid_paired_write_batch_sub_action(action):
 
 
 def normalize_paired_write_batch_tools(tools, allowed_write_roots=None, cwd=""):
-    write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
+    write_tools = []
+    for raw_tool in tools or []:
+        tool = dict(raw_tool)
+        if not tool.get("type") and tool.get("tool"):
+            tool["type"] = tool.get("tool")
+        if tool.get("type") in WRITE_WORK_TOOLS:
+            write_tools.append(tool)
     if len(write_tools) < 2:
         return []
     if not all(valid_paired_write_batch_sub_action(tool) for tool in write_tools):
         return []
     write_tools = collapse_same_path_edit_file_write_batch_tools(write_tools)
-    if len(write_tools) < 2:
+    if not write_tools:
         return []
     if duplicate_paired_write_batch_paths(write_tools):
         return []
