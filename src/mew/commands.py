@@ -3475,6 +3475,51 @@ def convert_repairable_wait_to_remember(action, index, max_steps, *, continue_af
     }
 
 
+def _work_wait_mentions_large_patch_packaging_blocker(action):
+    text = " ".join(
+        str((action or {}).get(key) or "")
+        for key in ("reason", "summary", "note", "text")
+        if str((action or {}).get(key) or "").strip()
+    ).casefold()
+    if not text:
+        return False
+    has_packaging = "strict json" in text or "emit" in text or "package" in text
+    has_write_file = "write_file" in text
+    has_full_file_patch = ("full-file" in text or "full file" in text) and any(
+        marker in text for marker in ("write", "edit", "patch")
+    )
+    has_large_patch = has_write_file or has_full_file_patch
+    return has_packaging and has_large_patch and ("too large" in text or "risking truncation" in text)
+
+
+def convert_large_patch_packaging_wait_to_remember(action, index, max_steps):
+    action = action or {}
+    if (action.get("type") or "") != "wait":
+        return action
+    try:
+        current_index = int(index)
+        current_max_steps = int(max_steps)
+    except (TypeError, ValueError):
+        return action
+    if current_index >= current_max_steps:
+        return action
+    if not _work_wait_mentions_large_patch_packaging_blocker(action):
+        return action
+    note = _work_control_text(action, "Large patch packaging blocker recorded.")
+    return {
+        "type": "remember",
+        "note": (
+            "Large patch packaging wait was deferred so the work loop can continue. "
+            "On the next turn, prefer one complete file write/edit as a direct action, "
+            "then continue remaining sibling files on later turns. "
+            f"Original wait: {clip_output(note, 500)}"
+        ),
+        "reason": "converted large patch packaging wait to continuity note",
+        "converted_from_wait": "large_patch_packaging",
+        "continue_after_remember": True,
+    }
+
+
 def work_finish_blocker_allows_continue(finished_note):
     text = str(finished_note or "").casefold()
     if not text.startswith("finish blocked:"):
@@ -4128,6 +4173,10 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             not write_batch
             and _recoverable_git_inspection_unavailable_error(action_type, error, result, index, batch_max_steps)
         )
+        recoverable_patch_shape_edit = (
+            write_batch
+            and _recoverable_patch_shape_edit_error(action_type, parameters, error, args, index, batch_max_steps)
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
@@ -4138,6 +4187,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 recoverable_missing_read_file = False
                 recoverable_unsupported_observation_type = False
                 recoverable_git_inspection_unavailable = False
+                recoverable_patch_shape_edit = False
             if recoverable_missing_observation_path:
                 tool_call["recoverable_missing_observation_path"] = True
             if recoverable_missing_read_file:
@@ -4146,6 +4196,8 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                 tool_call["recoverable_unsupported_observation_type"] = True
             if recoverable_git_inspection_unavailable:
                 tool_call["recoverable_git_inspection_unavailable"] = True
+            if recoverable_patch_shape_edit:
+                tool_call["recoverable_patch_shape_edit"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             record_active_work_todo_executor_lifecycle(
@@ -4210,14 +4262,38 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
                     progress(f"step #{index}: batch unsupported observation type; continuing with partial observations")
                 error = ""
                 continue
+            if recoverable_patch_shape_edit and index < batch_max_steps:
+                if pending_approval_ids:
+                    invalidation_reason = f"batch halted for patch-shape repair: {error}"
+                    _invalidate_pending_approval_batch(
+                        session_id,
+                        pending_approval_ids,
+                        invalidation_reason,
+                    )
+                    _mark_local_pending_approvals_indeterminate(tool_calls, pending_approval_ids, invalidation_reason)
+                    pending_approval_ids = []
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "path": parameters.get("path") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch patch shape failed; continuing with repair context")
+                error = ""
+                break
             break
 
     if error and write_batch and pending_approval_ids:
+        invalidation_reason = f"batch halted after sibling tool failed: {error}"
         _invalidate_pending_approval_batch(
             session_id,
             pending_approval_ids,
-            f"batch halted after sibling tool failed: {error}",
+            invalidation_reason,
         )
+        _mark_local_pending_approvals_indeterminate(tool_calls, pending_approval_ids, invalidation_reason)
         pending_approval_ids = []
 
     tool_call_ids = [call.get("id") for call in tool_calls if call]
@@ -5942,6 +6018,11 @@ def cmd_work_ai(args):
             max_steps,
             continue_after_remember=bool(getattr(effective_args, "continue_after_remember", False)),
         )
+        action = convert_large_patch_packaging_wait_to_remember(
+            action,
+            index,
+            max_steps,
+        )
         action_type = action.get("type")
         session_trace_patch = (
             planned.get("session_trace_patch") if isinstance(planned.get("session_trace_patch"), dict) else {}
@@ -6244,7 +6325,14 @@ def cmd_work_ai(args):
                     ),
                 }
             )
-            if action_type == "remember" and getattr(effective_args, "continue_after_remember", False) and index < max_steps:
+            if (
+                action_type == "remember"
+                and (
+                    getattr(effective_args, "continue_after_remember", False)
+                    or bool(action.get("continue_after_remember"))
+                )
+                and index < max_steps
+            ):
                 report["steps"][-1]["continued_after_remember"] = True
                 if progress:
                     progress(f"step #{index}: remembered context; continuing")
@@ -6658,6 +6746,14 @@ def cmd_work_ai(args):
             index,
             max_steps,
         )
+        recoverable_patch_shape_edit = _recoverable_patch_shape_edit_error(
+            action_type,
+            parameters,
+            error,
+            effective_args,
+            index,
+            max_steps,
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
@@ -6666,12 +6762,15 @@ def cmd_work_ai(args):
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
                 recoverable_missing_observation_path = False
                 recoverable_unsupported_observation_type = False
+                recoverable_patch_shape_edit = False
             if recoverable_missing_observation_path:
                 tool_call["recoverable_missing_observation_path"] = True
                 if action_type == "read_file":
                     tool_call["recoverable_missing_read_file"] = True
             if recoverable_unsupported_observation_type:
                 tool_call["recoverable_unsupported_observation_type"] = True
+            if recoverable_patch_shape_edit:
+                tool_call["recoverable_patch_shape_edit"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             if pending_steer and not steer_consumed:
@@ -6869,6 +6968,11 @@ def cmd_work_ai(args):
                 report["steps"][-1]["recoverable_stale_edit_file"] = True
                 if progress:
                     progress(f"step #{index}: stale edit target; continuing with refresh context")
+                continue
+            if _recoverable_patch_shape_edit_error(action_type, parameters, error, effective_args, index, max_steps):
+                report["steps"][-1]["recoverable_patch_shape_edit"] = True
+                if progress:
+                    progress(f"step #{index}: patch shape failed; continuing with repair context")
                 continue
             if _recoverable_git_inspection_unavailable_error(action_type, error, result, index, max_steps):
                 report["steps"][-1]["recoverable_git_inspection_unavailable"] = True
@@ -7112,6 +7216,27 @@ def _recoverable_stale_edit_file_error(action_type, parameters, error, args, ind
     if action_type not in {"edit_file", "edit_file_hunks"} or (max_steps is not None and index >= max_steps):
         return False
     if "old text was not found" not in str(error or ""):
+        return False
+    allowed_write = getattr(args, "allow_write", None) or []
+    if not allowed_write:
+        return False
+    try:
+        resolve_allowed_write_path(parameters.get("path") or "", allowed_write, create=False)
+        return True
+    except ValueError:
+        return False
+
+
+def _recoverable_patch_shape_edit_error(action_type, parameters, error, args, index, max_steps):
+    if action_type not in {"edit_file", "edit_file_hunks"} or (max_steps is not None and index >= max_steps):
+        return False
+    normalized = str(error or "").lower()
+    recoverable_markers = (
+        "old text matched",
+        "edit hunks overlap",
+        "duplicated adjacent context",
+    )
+    if not any(marker in normalized for marker in recoverable_markers):
         return False
     allowed_write = getattr(args, "allow_write", None) or []
     if not allowed_write:
@@ -7654,6 +7779,19 @@ def _invalidate_pending_approval_batch(session_id, approve_ids, reason):
         if session is not None:
             session["updated_at"] = now_iso()
         save_state(state)
+
+
+def _mark_local_pending_approvals_indeterminate(tool_calls, approve_ids, reason):
+    approve_id_set = set(approve_ids or [])
+    if not approve_id_set:
+        return
+    for call in tool_calls or []:
+        if call.get("id") not in approve_id_set:
+            continue
+        if call.get("approval_status") in NON_PENDING_APPROVAL_STATUSES:
+            continue
+        call["approval_status"] = APPROVAL_STATUS_INDETERMINATE
+        call["approval_error"] = reason
 
 
 def _apply_work_approval_batch(args, approve_ids=None):

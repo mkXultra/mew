@@ -19,6 +19,7 @@ from mew.commands import (
     build_work_reply_schema,
     broad_read_guard_replacement_parameters,
     convert_budget_pressure_finish_to_remember,
+    convert_large_patch_packaging_wait_to_remember,
     convert_repairable_wait_to_remember,
     detect_default_verify_command,
     detect_instruction_verify_command,
@@ -32,6 +33,7 @@ from mew.commands import (
     work_finish_blocker_allows_continue,
     work_recovery_suggestion_from_plan,
     work_session_default_verify_command,
+    _recoverable_patch_shape_edit_error,
 )
 from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
@@ -8478,6 +8480,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Use write_ready_fast_path.cached_window_texts as the exact old text source", fast_prompt)
         self.assertIn("Use current_run as the active invocation budget", fast_prompt)
         self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
+        self.assertIn("large multi-file write_file batch would be too large", fast_prompt)
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
         self.assertIn(
             '"type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
@@ -30362,6 +30365,274 @@ class WorkSessionTests(unittest.TestCase):
                 state = load_state()
                 self.assertEqual(len(state["work_sessions"][0]["tool_calls"]), 1)
                 self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_patch_shape_recovery_requires_allowed_write_root_and_budget(self):
+        allowed_args = SimpleNamespace(allow_write=["src"])
+        self.assertTrue(
+            _recoverable_patch_shape_edit_error(
+                "edit_file_hunks",
+                {"path": "src/mew/commands.py"},
+                "old text matched 2 times",
+                allowed_args,
+                1,
+                2,
+            )
+        )
+        self.assertFalse(
+            _recoverable_patch_shape_edit_error(
+                "edit_file_hunks",
+                {"path": "pyproject.toml"},
+                "old text matched 2 times",
+                allowed_args,
+                1,
+                2,
+            )
+        )
+        self.assertFalse(
+            _recoverable_patch_shape_edit_error(
+                "edit_file_hunks",
+                {"path": "src/mew/commands.py"},
+                "old text matched 2 times",
+                allowed_args,
+                2,
+                2,
+            )
+        )
+        self.assertFalse(
+            _recoverable_patch_shape_edit_error(
+                "read_file",
+                {"path": "src/mew/commands.py"},
+                "old text matched 2 times",
+                allowed_args,
+                1,
+                2,
+            )
+        )
+
+    def test_large_patch_packaging_wait_conversion_ignores_non_write_batch(self):
+        action = {
+            "type": "wait",
+            "reason": "strict JSON read-only batch is too large to emit in one turn",
+        }
+        self.assertEqual(convert_large_patch_packaging_wait_to_remember(action, 1, 2), action)
+        action = {
+            "type": "wait",
+            "reason": "strict JSON multi-file batch is too large to emit in one turn",
+        }
+        self.assertEqual(convert_large_patch_packaging_wait_to_remember(action, 1, 2), action)
+        action = {
+            "type": "wait",
+            "reason": "strict JSON full file read output is too large to emit in one turn",
+        }
+        self.assertEqual(convert_large_patch_packaging_wait_to_remember(action, 1, 2), action)
+        action = {
+            "type": "wait",
+            "reason": "strict JSON write_file batch is too large to emit in one turn",
+        }
+        converted = convert_large_patch_packaging_wait_to_remember(action, 1, 2)
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_wait"], "large_patch_packaging")
+        self.assertEqual(convert_large_patch_packaging_wait_to_remember(action, 2, 2), action)
+        action = {
+            "type": "wait",
+            "reason": "strict JSON full file patch is too large to emit in one turn",
+        }
+        converted = convert_large_patch_packaging_wait_to_remember(action, 1, 2)
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_wait"], "large_patch_packaging")
+
+    def test_work_ai_continues_after_ambiguous_edit_file_hunks(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("duplicate\nmiddle\nduplicate\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "preview ambiguous hunk",
+                        "action": {
+                            "type": "edit_file_hunks",
+                            "path": "README.md",
+                            "edits": [{"old": "duplicate", "new": "unique"}],
+                        },
+                    },
+                    {"summary": "record retry path", "action": {"type": "finish", "summary": "retry context recorded"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "finish")
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_patch_shape_edit"])
+                self.assertIn("old text matched 2 times", report["steps"][0]["error"])
+                tool_call = load_state()["work_sessions"][0]["tool_calls"][0]
+                self.assertTrue(tool_call["recoverable_patch_shape_edit"])
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "duplicate\nmiddle\nduplicate\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_batch_invalidates_sibling_preview_after_patch_shape_error(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                Path("ghost.py").write_text("duplicate\nmiddle\nduplicate\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "preview multi-file edit",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "edit_file", "path": "README.md", "old": "old text", "new": "new text"},
+                                {
+                                    "type": "edit_file_hunks",
+                                    "path": "ghost.py",
+                                    "edits": [{"old": "duplicate", "new": "unique"}],
+                                },
+                            ],
+                        },
+                    },
+                    {"summary": "record retry path", "action": {"type": "finish", "summary": "retry context recorded"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "finish")
+                self.assertEqual(call_model.call_count, 2)
+                first_step = report["steps"][0]
+                self.assertEqual(first_step["status"], "completed")
+                self.assertEqual(len(first_step["recoverable_errors"]), 1)
+                self.assertIn("old text matched 2 times", first_step["recoverable_errors"][0]["error"])
+                self.assertEqual(first_step["tool_calls"][0]["approval_status"], "indeterminate")
+                self.assertIn("patch-shape repair", first_step["tool_calls"][0]["approval_error"])
+                session = load_state()["work_sessions"][0]
+                readme_call = session["tool_calls"][0]
+                hunk_call = session["tool_calls"][1]
+                self.assertEqual(readme_call["approval_status"], "indeterminate")
+                self.assertIn("patch-shape repair", readme_call["approval_error"])
+                self.assertTrue(hunk_call["recoverable_patch_shape_edit"])
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
+                self.assertEqual(Path("ghost.py").read_text(encoding="utf-8"), "duplicate\nmiddle\nduplicate\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_converts_large_patch_packaging_wait_to_continue(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("ghost.py").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "large patch cannot be packaged",
+                        "action": {
+                            "type": "wait",
+                            "reason": (
+                                "the project context is sufficient, but I cannot safely emit the required "
+                                "complete three-file write_file dry-run batch as strict JSON in this turn "
+                                "without risking truncation or malformed content"
+                            ),
+                        },
+                    },
+                    {"summary": "record single-file path", "action": {"type": "finish", "summary": "retry as one file"}},
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "finish")
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["action"]["type"], "remember")
+                self.assertEqual(report["steps"][0]["action"]["converted_from_wait"], "large_patch_packaging")
+                self.assertTrue(report["steps"][0]["continued_after_remember"])
+                self.assertIn("one complete file write/edit", report["steps"][0]["action"]["note"])
+                self.assertEqual(Path("ghost.py").read_text(encoding="utf-8"), "old text\n")
             finally:
                 os.chdir(old_cwd)
 
