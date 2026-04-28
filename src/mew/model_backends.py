@@ -1,7 +1,7 @@
 from typing import Protocol
 
 from .anthropic_api import call_anthropic_json, load_anthropic_auth
-from .codex_api import call_codex_json, load_codex_oauth
+from .codex_api import call_codex_json, call_codex_web_api, load_codex_oauth
 from .config import (
     DEFAULT_ANTHROPIC_BASE_URL,
     DEFAULT_CODEX_MODEL,
@@ -22,6 +22,9 @@ class ModelBackend(Protocol):
         pass
 
     def call_json(self, auth, prompt, model, base_url, timeout, on_text_delta=None):
+        pass
+
+    def call_text(self, auth, prompt, model, base_url, timeout, on_text_delta=None, image_inputs=None):
         pass
 
 
@@ -62,6 +65,15 @@ class CodexModelBackend:
             return call_codex_json(*args, on_text_delta=on_text_delta)
         return call_codex_json(*args)
 
+    def call_text(self, auth, prompt, model, base_url, timeout, on_text_delta=None, image_inputs=None):
+        args = (auth, prompt, model or self.default_model, base_url or self.default_base_url, timeout)
+        kwargs = {}
+        if on_text_delta:
+            kwargs["on_text_delta"] = on_text_delta
+        if image_inputs:
+            kwargs["image_inputs"] = image_inputs
+        return call_codex_web_api(*args, **kwargs)
+
 
 class ClaudeModelBackend:
     name = "claude"
@@ -78,6 +90,17 @@ class ClaudeModelBackend:
         if on_text_delta:
             return call_anthropic_json(*args, on_text_delta=on_text_delta)
         return call_anthropic_json(*args)
+
+    def call_text(self, auth, prompt, model, base_url, timeout, on_text_delta=None, image_inputs=None):
+        if image_inputs:
+            raise MewError("image inputs are currently supported only for the Codex backend")
+        payload = self.call_json(auth, prompt, model, base_url, timeout, on_text_delta=on_text_delta)
+        if isinstance(payload, dict):
+            for key in ("text", "summary", "message"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        return str(payload)
 
 
 register_model_backend(CodexModelBackend())
@@ -121,6 +144,35 @@ def call_model_json(backend, auth, prompt, model, base_url, timeout, on_text_del
         if on_text_delta:
             return model_backend.call_json(auth, prompt, model, base_url, timeout, on_text_delta=on_text_delta)
         return model_backend.call_json(auth, prompt, model, base_url, timeout)
+    except ModelBackendError:
+        raise
+    except MewError:
+        raise
+    except Exception as exc:
+        raise ModelBackendError(f"{model_backend_label(backend)} error: {exc}") from exc
+
+
+def call_model_text(
+    backend,
+    auth,
+    prompt,
+    model,
+    base_url,
+    timeout,
+    on_text_delta=None,
+    image_inputs=None,
+):
+    try:
+        model_backend = get_model_backend(backend)
+        return model_backend.call_text(
+            auth,
+            prompt,
+            model,
+            base_url,
+            timeout,
+            on_text_delta=on_text_delta,
+            image_inputs=image_inputs,
+        )
     except ModelBackendError:
         raise
     except MewError:

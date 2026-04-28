@@ -44,6 +44,24 @@ HIGH_RISK_KEEP_DIRTY_MARKERS = (
     "roadmap_status.md",
     "proofs",
 )
+COMPLEX_IMPLEMENTATION_TERMS = (
+    "compiler",
+    "concurrent",
+    "distributed",
+    "emulator",
+    "interpreter",
+    "linker",
+    "loader",
+    "multi-file",
+    "multi file",
+    "parser",
+    "runtime",
+    "scheduler",
+    "state machine",
+    "terminal-bench",
+    "virtual machine",
+)
+COMPLEX_IMPLEMENTATION_TEXT_CHARS = 1200
 
 
 def normalize_reasoning_effort(value):
@@ -80,6 +98,15 @@ def _matching_high_risk_terms(text):
         for term in HIGH_RISK_TERMS:
             if term in lowered and term not in matches:
                 matches.append(term)
+    return matches
+
+
+def _matching_complex_implementation_terms(text):
+    lowered = str(text or "").casefold()
+    matches = []
+    for term in COMPLEX_IMPLEMENTATION_TERMS:
+        if term in lowered and term not in matches:
+            matches.append(term)
     return matches
 
 
@@ -131,7 +158,25 @@ def select_work_reasoning_policy(task=None, *, guidance="", capabilities=None, e
         }
 
     write_roots = capabilities.get("allowed_write_roots") or capabilities.get("allow_write_roots")
-    if write_roots or capabilities.get("allow_verify"):
+    implementation_capable = bool(write_roots or capabilities.get("allow_verify"))
+    if implementation_capable:
+        complex_terms = _matching_complex_implementation_terms(text)
+        if complex_terms or len(text) >= COMPLEX_IMPLEMENTATION_TEXT_CHARS:
+            reason = (
+                f"matched complex implementation terms: {', '.join(complex_terms[:5])}"
+                if complex_terms
+                else f"task text is long enough for complex implementation: {len(text)} chars"
+            )
+            result = {
+                "effort": "high",
+                "source": "auto",
+                "work_type": "complex_implementation",
+                "reason": reason,
+            }
+            if complex_terms:
+                result["matched_terms"] = complex_terms
+            return result
+
         return {
             "effort": "medium",
             "source": "auto",

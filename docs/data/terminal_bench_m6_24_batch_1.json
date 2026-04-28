@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "source_registry": "docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json",
+  "purpose": "M6.24 broad Terminal-Bench parity campaign batch 1",
+  "selection_rule": "Unseen registry tasks spanning Codex success bands 0/1/2/3/4/5, plus two 5/5 controls with different task shapes. Excludes M6.20/M6.22 tasks already measured.",
+  "codex_target_successes": 25,
+  "codex_target_trials": 40,
+  "tasks": [
+    {
+      "avgResolutionRate": 0,
+      "nTrials": 5,
+      "resolutionRatePct": 0.0,
+      "successCount": 0,
+      "taskChecksum": "3ebefab7ff093813f99af237de90b1ed73363a4eb42ea8a17096939922a16bcf",
+      "taskName": "configure-git-webserver"
+    },
+    {
+      "avgResolutionRate": 0.2,
+      "nTrials": 5,
+      "resolutionRatePct": 20.0,
+      "successCount": 1,
+      "taskChecksum": "01f470c86f3a1f7ce4d91bdf0aaaa89fa96a4124ac48617990e2735b5291913a",
+      "taskName": "db-wal-recovery"
+    },
+    {
+      "avgResolutionRate": 0.4,
+      "nTrials": 5,
+      "resolutionRatePct": 40.0,
+      "successCount": 2,
+      "taskChecksum": "732d69b125ace5638478701cfdfa709836b7f9e48b1d24f5ffdbdc19ea538c36",
+      "taskName": "raman-fitting"
+    },
+    {
+      "avgResolutionRate": 0.6,
+      "nTrials": 5,
+      "resolutionRatePct": 60.0,
+      "successCount": 3,
+      "taskChecksum": "a31d482d846322d57f0e3ee3c56d4ff2171fe39908dadd8092d036f17114fbef",
+      "taskName": "chess-best-move"
+    },
+    {
+      "avgResolutionRate": 0.8,
+      "nTrials": 5,
+      "resolutionRatePct": 80.0,
+      "successCount": 4,
+      "taskChecksum": "9cadf1bf085c84578136694353c11b9994a645e814307cd5ce1071b800cd6a62",
+      "taskName": "kv-store-grpc"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "2ee06f290911251b296fa2e57db2da0c2c399e326585f3ed47531bb43887d4dd",
+      "taskName": "build-cython-ext"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "179258dd4d90a45c225beff94152358b15906668f95bde3330a7d3c755dcf387",
+      "taskName": "code-from-image"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "7fa0a681f751d73f290d862522a82a5e448fa529834987ee1b80e5665c51aa7e",
+      "taskName": "fix-git"
+    }
+  ]
+}

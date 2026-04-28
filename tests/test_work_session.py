@@ -18,12 +18,18 @@ from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
     broad_read_guard_replacement_parameters,
+    convert_budget_pressure_finish_to_remember,
+    convert_repairable_wait_to_remember,
+    detect_default_verify_command,
+    detect_instruction_verify_command,
     format_work_cli_controls,
     format_work_cockpit_controls,
     format_work_live_step_result,
     pause_work_session_after_user_interrupt,
     remember_successful_work_verification,
+    recoverable_work_model_error,
     work_cockpit_recovery_command,
+    work_finish_blocker_allows_continue,
     work_recovery_suggestion_from_plan,
     work_session_default_verify_command,
 )
@@ -462,6 +468,159 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("warnings: step_budget_near, failure_budget_near, wall_time_near", resume_text)
         self.assertEqual(context["work_session"]["effort"]["pressure"], "medium")
         self.assertEqual(context["work_session"]["resume"]["effort"]["steps"]["used"], 24)
+
+    def test_work_model_context_includes_current_run_budget(self):
+        task = {"id": 1, "title": "Budgeted run", "status": "ready", "kind": "coding"}
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Budgeted run",
+            "goal": "Keep invocation budget visible.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        from mew.work_loop import build_work_model_context
+
+        context = build_work_model_context(
+            {"tasks": [task]},
+            session,
+            task,
+            "2026-04-17T00:01:00Z",
+            run_step_index=11,
+            run_max_steps=30,
+        )
+
+        current_run = context["work_session"]["current_run"]
+        self.assertEqual(current_run["step_index"], 11)
+        self.assertEqual(current_run["max_steps"], 30)
+        self.assertEqual(current_run["remaining_steps_including_current"], 20)
+        self.assertEqual(current_run["remaining_steps_after_current"], 19)
+        self.assertTrue(current_run["can_continue_after_current"])
+        self.assertEqual(current_run["budget_source"], "current_cli_invocation")
+
+    def test_convert_budget_pressure_finish_to_remember_when_oneshot_can_continue(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Repair task",
+            "goal": "Repair after verification failure.",
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [
+                {
+                    "id": index + 1,
+                    "tool": "write_file",
+                    "status": "completed",
+                    "summary": "verification failed and rolled back",
+                    "started_at": "2026-04-17T00:00:00Z",
+                    "finished_at": "2026-04-17T00:00:01Z",
+                    "parameters": {"path": "vm.js"},
+                    "result": {
+                        "path": "vm.js",
+                        "changed": True,
+                        "verification": {"command": "node vm.js", "exit_code": 1},
+                    },
+                    "approval_status": "auto_rolled_back",
+                    "approval_error": "verification failed after apply; rolled back",
+                }
+                for index in range(4)
+            ],
+            "model_turns": [],
+        }
+        action = {
+            "type": "finish",
+            "summary": "Stopped due exhausted step/failure budget. Repair vm.js next.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            11,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_finish"], "budget_pressure")
+        self.assertIn("19 step(s)", converted["note"])
+        self.assertIn("Original finish note", converted["note"])
+
+    def test_convert_budget_pressure_finish_keeps_final_step_finish(self):
+        action = {
+            "type": "finish",
+            "summary": "Stopped due exhausted step/failure budget.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            {"tool_calls": [], "model_turns": []},
+            30,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertIs(converted, action)
+
+    def test_convert_budget_pressure_finish_keeps_non_budget_safety_finish(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {"command": "pytest", "exit_code": 1},
+                }
+            ],
+            "model_turns": [],
+        }
+        action = {
+            "type": "finish",
+            "summary": "Stopping: verification failure appears environmental; ask the user to replan.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            11,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertIs(converted, action)
+
+    def test_convert_budget_pressure_finish_requires_repair_or_pressure_context(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        action = {
+            "type": "finish",
+            "summary": "Stopped due exhausted failure budget.",
+            "task_done": False,
+        }
+
+        converted = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            11,
+            30,
+            continue_after_remember=True,
+        )
+
+        self.assertIs(converted, action)
 
     def test_resume_surfaces_same_surface_audit_for_mew_source_edit(self):
         task = {"id": 1, "title": "Audit surface", "status": "ready", "kind": "coding", "notes": ""}
@@ -1049,6 +1208,52 @@ class WorkSessionTests(unittest.TestCase):
         )
 
         self.assertEqual(search_guard["reason"], "consecutive_repeat")
+
+    def test_work_tool_repeat_guard_resets_after_workspace_write(self):
+        command = "python -m pip install --no-build-isolation /app/pkg"
+        session = {
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "parameters": {"command": command, "cwd": "/app"},
+                    "status": "completed",
+                    "result": {"exit_code": 0},
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "parameters": {"path": "/app/pkg/module.py"},
+                    "status": "completed",
+                    "result": {"changed": True, "written": True},
+                },
+            ]
+        }
+
+        guard = work_tool_repeat_guard(session, "run_command", {"command": command, "cwd": "/app"})
+
+        self.assertEqual(guard, {})
+
+    def test_work_tool_repeat_guard_still_blocks_repeats_after_latest_write(self):
+        command = "python -m pip install --no-build-isolation /app/pkg"
+        session = {
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "edit_file",
+                    "parameters": {"path": "/app/pkg/module.py"},
+                    "status": "completed",
+                    "result": {"changed": True, "written": True},
+                },
+                {"id": 2, "tool": "run_command", "parameters": {"command": command, "cwd": "/app"}},
+                {"id": 3, "tool": "run_command", "parameters": {"command": command, "cwd": "/app"}},
+            ]
+        }
+
+        guard = work_tool_repeat_guard(session, "run_command", {"command": command, "cwd": "/app"})
+
+        self.assertEqual(guard["reason"], "consecutive_repeat")
+        self.assertEqual(guard["matching_tool_call_ids"], [2, 3])
 
     def test_first_unquoted_shell_operator_respects_quotes_and_adjacency(self):
         self.assertEqual(first_unquoted_shell_operator("python -V&& python -V"), ("&&", "chain"))
@@ -4033,6 +4238,165 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Recurring failures", text)
         self.assertIn("run_tests uv run pytest -q failed 2x", text)
 
+    def test_work_session_resume_builds_verifier_failure_repair_agenda(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        stderr = "\n".join(
+            [
+                "Traceback (most recent call last):",
+                '  File "/usr/local/lib/python3.13/site-packages/pkg/invariants.py", line 137, in run',
+                "    dtype = n.complex if isinstance(variable, n.complex) else n.float",
+                "AttributeError: module 'numpy' has no attribute 'complex'.",
+                "AttributeError: module 'numpy' has no attribute 'float'.",
+                "ImportError: cannot import name 'gcd' from 'fractions'",
+                "tests/test_widget.py:42: AssertionError: legacy alias still broken",
+            ]
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Repair verifier failure",
+            "goal": "Use verifier output to drive the next edit.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "python -m pytest"},
+                    "result": {"command": "python -m pytest", "cwd": "/app", "exit_code": 1, "stderr": stderr},
+                    "error": "run_command failed with exit_code=1",
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "pkg/invariants.py"},
+                    "result": {
+                        "path": "pkg/invariants.py",
+                        "changed": True,
+                        "dry_run": True,
+                        "written": False,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        agenda = resume["verifier_failure_repair_agenda"]
+        self.assertEqual(agenda["source_tool_call_id"], 1)
+        self.assertEqual(agenda["exit_code"], 1)
+        self.assertIn("complex", agenda["symbols"])
+        self.assertIn("float", agenda["symbols"])
+        self.assertIn("gcd", agenda["symbols"])
+        self.assertEqual(
+            agenda["sibling_search_queries"],
+            [
+                "numpy.complex",
+                "np.complex",
+                "numpy.float",
+                "np.float",
+                "from fractions import gcd",
+                "fractions.gcd",
+            ],
+        )
+        self.assertEqual(
+            agenda["source_locations"][0],
+            {"path": "/usr/local/lib/python3.13/site-packages/pkg/invariants.py", "line": "137"},
+        )
+        self.assertIn({"path": "tests/test_widget.py", "line": "42"}, agenda["source_locations"])
+        self.assertEqual(agenda["latest_changed_dry_run_write"]["tool_call_id"], 2)
+        self.assertIn("small applied edit batch", agenda["suggested_next"])
+
+        text = format_work_session_resume(resume)
+        self.assertIn("verifier_failure_repair_agenda: tool=#1 exit=1 run_command", text)
+        self.assertIn("verifier_failure_symbols: complex, float, gcd", text)
+        self.assertIn(
+            "verifier_failure_sibling_searches: "
+            "numpy.complex, np.complex, numpy.float, np.float, from fractions import gcd, fractions.gcd",
+            text,
+        )
+        self.assertIn("/usr/local/lib/python3.13/site-packages/pkg/invariants.py:137", text)
+        self.assertIn("verifier_failure_latest_dry_run: #2 pkg/invariants.py", text)
+
+    def test_work_session_resume_clears_verifier_failure_agenda_after_later_green_command(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Repair verifier failure",
+            "goal": "Use verifier output to drive the next edit.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_tests",
+                    "status": "failed",
+                    "parameters": {"command": "pytest"},
+                    "result": {
+                        "command": "pytest",
+                        "exit_code": 1,
+                        "stderr": "AttributeError: module 'numpy' has no attribute 'complex'.",
+                    },
+                    "error": "verification failed with exit_code=1",
+                },
+                {
+                    "id": 2,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "pkg/invariants.py"},
+                    "result": {
+                        "path": "pkg/invariants.py",
+                        "changed": True,
+                        "dry_run": True,
+                        "written": False,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "parameters": {"command": "pytest"},
+                    "result": {"command": "pytest", "exit_code": 0, "stdout": "passed"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["verifier_failure_repair_agenda"], {})
+
+    def test_work_session_resume_ignores_wrapper_only_verifier_failure_for_repair_agenda(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Wrapper-only failure",
+            "goal": "Do not turn generic wrappers into edit agendas.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "failed",
+                    "parameters": {"command": "pytest"},
+                    "result": {"command": "pytest", "exit_code": 1},
+                    "error": "run_command failed with exit_code=1",
+                    "summary": "verification failed with exit_code=1",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["verifier_failure_repair_agenda"], {})
+
     def test_work_session_resume_detects_low_yield_search_traps(self):
         session = {
             "id": 1,
@@ -4178,6 +4542,117 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn(
             "suggested_next: read_file path=src/mew/work_loop.py line_start=897 line_count=20",
             text,
+        )
+
+    def test_work_session_search_anchor_observations_capture_single_match(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Search anchor",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "query": "build_work_think_prompt"},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "query": "build_work_think_prompt",
+                        "matches": ["src/mew/work_loop.py:897:def build_work_think_prompt"],
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        anchor = resume["search_anchor_observations"][0]
+        text = format_work_session_resume(resume)
+
+        self.assertEqual(anchor["path"], "src/mew/work_loop.py")
+        self.assertEqual(anchor["query"], "build_work_think_prompt")
+        self.assertEqual(anchor["tool_call_id"], 1)
+        self.assertEqual(anchor["first_match_line"], 897)
+        self.assertEqual(
+            anchor["suggested_next"],
+            "read_file path=src/mew/work_loop.py line_start=892 line_count=80",
+        )
+        self.assertIn("Search anchor observations", text)
+        self.assertIn(
+            "search_text src/mew/work_loop.py query=build_work_think_prompt found matches; tool=#1 first_match_line=897",
+            text,
+        )
+        self.assertIn(
+            "suggested_next: read_file path=src/mew/work_loop.py line_start=892 line_count=80",
+            text,
+        )
+
+    def test_work_session_search_anchor_observations_clear_after_covering_read(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Search anchor consumed",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "query": "build_work_think_prompt"},
+                    "result": {
+                        "path": "src/mew/work_loop.py",
+                        "query": "build_work_think_prompt",
+                        "matches": ["src/mew/work_loop.py:897:def build_work_think_prompt"],
+                    },
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew/work_loop.py", "line_start": 880, "line_count": 40},
+                    "result": {"path": "src/mew/work_loop.py", "line_start": 880, "line_end": 919, "text": "window"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["search_anchor_observations"], [])
+
+    def test_work_session_search_anchor_observations_use_match_path_for_directory_search(self):
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Directory search anchor",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": "src/mew", "query": "def cmd_proof_summary"},
+                    "result": {
+                        "path": "src/mew",
+                        "query": "def cmd_proof_summary",
+                        "matches": ["src/mew/commands.py:12040:def cmd_proof_summary(args):"],
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        anchor = resume["search_anchor_observations"][0]
+
+        self.assertEqual(anchor["path"], "src/mew/commands.py")
+        self.assertEqual(
+            anchor["suggested_next"],
+            "read_file path=src/mew/commands.py line_start=12035 line_count=80",
         )
 
     def test_work_session_adjacent_read_observations_capture_merge_candidate(self):
@@ -4486,6 +4961,700 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Read file", session_text)
                 self.assertIn("matches=1", session_text)
                 self.assertNotIn("hello native hands", session_text)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_creates_generic_task_session_and_report(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            report_path = Path(tmp) / "report.json"
+            os.chdir(state_root)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "Inspect this workspace.",
+                                "--title",
+                                "Generic one-shot",
+                                "--cwd",
+                                str(workspace),
+                                "--allow-read",
+                                ".",
+                                "--max-steps",
+                                "0",
+                                "--report",
+                                str(report_path),
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["summary"], "mew work --oneshot completed generic work-session attempt")
+                self.assertEqual(payload["workspace_cwd"], str(workspace))
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertTrue(report_path.exists())
+                saved = json.loads(report_path.read_text(encoding="utf-8"))
+                self.assertEqual(saved["task_id"], payload["task_id"])
+
+                state = load_state()
+                task = state["tasks"][0]
+                self.assertEqual(task["title"], "Generic one-shot")
+                self.assertEqual(task["description"], "Inspect this workspace.")
+                self.assertEqual(task["cwd"], str(workspace))
+                self.assertEqual(state["work_sessions"][0]["task_id"], task["id"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_requires_instruction(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "--oneshot", "--max-steps", "0"]), 1)
+                self.assertIn("--oneshot requires --instruction", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_stops_before_model_when_wall_budget_too_small(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries") as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-wall-seconds",
+                                        "0.001",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                call_model.assert_not_called()
+                self.assertEqual(payload["work_exit_code"], 1)
+                self.assertEqual(report["stop_reason"], "wall_timeout")
+                self.assertEqual(report["max_wall_seconds"], 0.001)
+                self.assertEqual(report["steps"], [])
+                self.assertEqual(report["wall_timeout"]["model_timeout_seconds"], 60.0)
+                self.assertIn("not enough wall-clock budget remains", report["wall_timeout"]["reason"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_reduces_model_timeout_to_fit_wall_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "finish after one bounded turn",
+                    "action": {
+                        "type": "finish",
+                        "status": "done",
+                        "summary": "done",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--no-auto-deliberation",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-wall-seconds",
+                                        "20",
+                                        "--max-steps",
+                                        "1",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertEqual(report["stop_reason"], "finish")
+                call_model.assert_called_once()
+                timeout = call_model.call_args.args[5]
+                self.assertGreaterEqual(timeout, 5.0)
+                self.assertLess(timeout, 60.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_keeps_model_timeout_when_wall_budget_has_room(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "finish after one normal turn",
+                    "action": {
+                        "type": "finish",
+                        "status": "done",
+                        "summary": "done",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output) as call_model:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--no-auto-deliberation",
+                                        "--model-timeout",
+                                        "60",
+                                        "--max-wall-seconds",
+                                        "1000",
+                                        "--max-steps",
+                                        "1",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                call_model.assert_called_once()
+                self.assertEqual(call_model.call_args.args[5], 60.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_rejects_non_positive_wall_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "Inspect this workspace.",
+                                "--max-wall-seconds",
+                                "0",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--max-wall-seconds must be > 0", stderr.getvalue())
+                self.assertEqual(load_state()["tasks"], [])
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "Inspect this workspace.",
+                                "--max-wall-seconds",
+                                "nan",
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("--max-wall-seconds must be a finite number", stderr.getvalue())
+                self.assertEqual(load_state()["tasks"], [])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_reads_instruction_file(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            instruction_path = Path(tmp) / "instruction.txt"
+            state_root.mkdir()
+            workspace.mkdir()
+            instruction_path.write_text("Build the thing.\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction-file",
+                                str(instruction_path),
+                                "--cwd",
+                                str(workspace),
+                                "--allow-read",
+                                ".",
+                                "--max-steps",
+                                "0",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                task = load_state()["tasks"][0]
+                self.assertEqual(payload["task_id"], task["id"])
+                self.assertEqual(task["description"], "Build the thing.\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_continues_after_remember_note(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_outputs = [
+                    {
+                        "summary": "remember useful state",
+                        "action": {"type": "remember", "note": "looked at the workspace"},
+                    },
+                    {
+                        "summary": "finish after note",
+                        "action": {"type": "finish", "reason": "done after note"},
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(payload["work_report"]["stop_reason"], "finish")
+                self.assertTrue(payload["work_report"]["steps"][0]["continued_after_remember"])
+                self.assertEqual(payload["work_report"]["steps"][0]["work_note"]["text"], "looked at the workspace")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_converts_budget_pressure_finish_and_continues(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_outputs = [
+                    {
+                        "summary": "write then verify",
+                        "action": {
+                            "type": "write_file",
+                            "path": "out.txt",
+                            "content": "bad\n",
+                            "create": True,
+                            "apply": True,
+                        },
+                    },
+                    {
+                        "summary": "budget pressure closeout",
+                        "action": {
+                            "type": "finish",
+                            "summary": "Stopped due exhausted step/failure budget. Repair out.txt next.",
+                            "task_done": False,
+                        },
+                    },
+                    {
+                        "summary": "finish after converted checkpoint",
+                        "action": {"type": "finish", "reason": "done after converted budget note"},
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Create out.txt and verify with false.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "false",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "3",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                self.assertEqual(call_model.call_count, 3)
+                self.assertEqual(report["stop_reason"], "finish")
+                self.assertTrue(report["steps"][0]["recoverable_verification_failure"])
+                self.assertEqual(report["steps"][1]["action"]["type"], "remember")
+                self.assertEqual(report["steps"][1]["action"]["converted_from_finish"], "budget_pressure")
+                self.assertTrue(report["steps"][1]["continued_after_remember"])
+                self.assertFalse((workspace / "out.txt").exists())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_recoverable_work_model_error_detects_transient_backend_errors(self):
+        self.assertTrue(recoverable_work_model_error("Codex Web API error: IncompleteRead(3116 bytes read)"))
+        self.assertTrue(recoverable_work_model_error("request timed out"))
+        self.assertTrue(recoverable_work_model_error("HTTP 503 temporarily unavailable"))
+        self.assertTrue(recoverable_work_model_error("HTTP 500 backend unavailable"))
+        self.assertTrue(recoverable_work_model_error("upstream returned 529"))
+        self.assertTrue(recoverable_work_model_error("HTTP/1.1 502 Bad Gateway"))
+        self.assertFalse(recoverable_work_model_error("model returned invalid JSON"))
+        self.assertFalse(recoverable_work_model_error("model returned invalid JSON at char 500"))
+        self.assertFalse(recoverable_work_model_error("permission denied"))
+        self.assertFalse(recoverable_work_model_error("read 5000 bytes"))
+
+    def test_work_oneshot_continues_after_recoverable_model_error(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                from mew.errors import ModelBackendError
+
+                model_outputs = [
+                    ModelBackendError("Codex Web API error: IncompleteRead(3116 bytes read)"),
+                    {
+                        "summary": "finish after transient backend error",
+                        "action": {"type": "finish", "reason": "done after retry"},
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Inspect this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                report = payload["work_report"]
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["stop_reason"], "finish")
+                self.assertTrue(report["steps"][0]["recoverable_model_error"])
+                self.assertTrue(report["steps"][0]["continued_after_model_error"])
+                self.assertEqual(report["steps"][1]["action"]["type"], "finish")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_does_not_continue_after_recoverable_model_error_without_oneshot(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                from mew.errors import MewError
+
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch(
+                        "mew.work_loop.call_model_json_with_retries",
+                        side_effect=MewError("HTTP 503 temporarily unavailable"),
+                    ) as call_model:
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 1)
+                self.assertEqual(report["stop_reason"], "model_error")
+                self.assertTrue(recoverable_work_model_error(report["steps"][0]["error"]))
+                self.assertNotIn("recoverable_model_error", report["steps"][0])
+                self.assertNotIn("continued_after_model_error", report["steps"][0])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_detect_default_verify_command_prefers_instruction_backtick_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+                Path("tests").mkdir()
+                instruction = "Implement the program and verify it with `node vm.js`."
+                self.assertEqual(detect_instruction_verify_command(instruction), "node vm.js")
+                self.assertEqual(detect_default_verify_command(cwd=".", instruction=instruction), "node vm.js")
+                avoid_setup = "Do not run `npm install`; verify the change with `pytest`."
+                self.assertEqual(detect_instruction_verify_command(avoid_setup), "pytest")
+                later_verify = "The app runs with `node vm.js`. Verify with `pytest`."
+                self.assertEqual(detect_instruction_verify_command(later_verify), "pytest")
+                inline_python = "Verify with `python -I -c \"print(1)\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_python), "")
+                inline_python_cluster = "Verify with `python3 -qIc \"print(1)\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_python_cluster), "")
+                inline_node = "Verify with `node --eval \"console.log(1)\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_node), "")
+                inline_node_joined = "Verify with `node --eval=console.log(1)`."
+                self.assertEqual(detect_instruction_verify_command(inline_node_joined), "")
+                inline_node_cluster = "Verify with `node -pe \"1+1\"`."
+                self.assertEqual(detect_instruction_verify_command(inline_node_cluster), "")
+                wrapper_install = "Verify with `uv run python -m pip install -e .`."
+                self.assertEqual(detect_instruction_verify_command(wrapper_install), "")
+                npm_update = "Verify with `npm run update:snapshots`."
+                self.assertEqual(detect_instruction_verify_command(npm_update), "")
+                npm_ci = "Verify with `npm ci`."
+                self.assertEqual(detect_instruction_verify_command(npm_ci), "")
+                npm_i = "Verify with `npm i`."
+                self.assertEqual(detect_instruction_verify_command(npm_i), "")
+                make_update = "Verify with `make update-snapshots`."
+                self.assertEqual(detect_instruction_verify_command(make_update), "")
+                make_deploy = "Verify with `make deploy`."
+                self.assertEqual(detect_instruction_verify_command(make_deploy), "")
+                make_test = "Verify with `make test`."
+                self.assertEqual(detect_instruction_verify_command(make_test), "make test")
+                local_deploy = "Verify with `./deploy`."
+                self.assertEqual(detect_instruction_verify_command(local_deploy), "")
+                local_update = "Verify with `./updateSnapshots`."
+                self.assertEqual(detect_instruction_verify_command(local_update), "")
+                yarn_build = "Verify with `yarn build:ci`."
+                self.assertEqual(detect_instruction_verify_command(yarn_build), "")
+                npm_deploy = "Verify with `npm run deploy`."
+                self.assertEqual(detect_instruction_verify_command(npm_deploy), "")
+                npm_test_default = "Verify with `npm test`."
+                self.assertEqual(detect_instruction_verify_command(npm_test_default), "npm test")
+                npm_test = "Verify with `npm run test:unit`."
+                self.assertEqual(detect_instruction_verify_command(npm_test), "npm run test:unit")
+                jest_update_snapshot = "Verify with `npm test -- --updateSnapshot`."
+                self.assertEqual(detect_instruction_verify_command(jest_update_snapshot), "")
+                eslint_fix = "Verify with `npm run lint -- --fix`."
+                self.assertEqual(detect_instruction_verify_command(eslint_fix), "")
+                address_script = "Verify with `npm run test:address`."
+                self.assertEqual(detect_instruction_verify_command(address_script), "npm run test:address")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_auto_detects_verify_command_from_instruction(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            report_path = Path(tmp) / "report.json"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "write verifier target",
+                    "action": {
+                        "type": "write_file",
+                        "path": "check.py",
+                        "content": "print('ok')\n",
+                        "create": True,
+                        "apply": True,
+                    },
+                }
+                instruction = "Create check.py and verify it with `python3 check.py`."
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        instruction,
+                                        "--cwd",
+                                        str(workspace),
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--auth",
+                                        "auth.json",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "1",
+                                        "--report",
+                                        str(report_path),
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["verification"]["command"], "python3 check.py")
+                self.assertEqual(payload["verification"]["source"], "auto_detected")
+                self.assertEqual(payload["auto_verify_command"], "python3 check.py")
+                self.assertEqual((workspace / "check.py").read_text(encoding="utf-8"), "print('ok')\n")
+
+                state = load_state()
+                defaults = state["work_sessions"][0]["default_options"]
+                self.assertTrue(defaults["allow_verify"])
+                self.assertEqual(defaults["verify_command"], "python3 check.py")
+                tool_call = state["work_sessions"][0]["tool_calls"][0]
+                self.assertEqual(tool_call["status"], "completed")
+                self.assertEqual(tool_call["parameters"]["verify_command"], "python3 check.py")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_rejects_ambiguous_inputs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            instruction_path = Path(tmp) / "instruction.txt"
+            instruction_path.write_text("Build the thing.\n", encoding="utf-8")
+            os.chdir(tmp)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "--oneshot",
+                                "--instruction",
+                                "one",
+                                "--instruction-file",
+                                str(instruction_path),
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertIn("accepts only one", stderr.getvalue())
+
+                with redirect_stderr(StringIO()) as stderr:
+                    self.assertEqual(main(["work", "1", "--oneshot", "--instruction", "one"]), 1)
+                self.assertIn("omit task_id", stderr.getvalue())
             finally:
                 os.chdir(old_cwd)
 
@@ -4955,22 +6124,20 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(resume["recovery_plan"]["items"][0]["action"], "retry_verification")
 
                 with redirect_stdout(StringIO()) as stdout:
-                    self.assertEqual(
-                        main(
-                            [
-                                "work",
-                                "1",
-                                "--recover-session",
-                                "--allow-read",
-                                ".",
-                                "--allow-verify",
-                                "--verify-command",
-                                command,
-                                "--json",
-                            ]
-                        ),
-                        0,
+                    exit_code = main(
+                        [
+                            "work",
+                            "1",
+                            "--recover-session",
+                            "--allow-read",
+                            ".",
+                            "--allow-verify",
+                            "--verify-command",
+                            command,
+                            "--json",
+                        ]
                     )
+                self.assertEqual(exit_code, 0, stdout.getvalue())
                 recovered = json.loads(stdout.getvalue())
                 self.assertEqual(recovered["recovery"]["action"], "retry_tool")
                 self.assertEqual(recovered["tool_call"]["status"], "completed")
@@ -5820,6 +6987,52 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_tests_records_non_utf8_output_with_replacement(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                script = (
+                    "import sys; "
+                    "sys.stdout.buffer.write(bytes([0xe2,0x28])); "
+                    "sys.stderr.buffer.write(bytes([0xff])); "
+                    "sys.exit(1)"
+                )
+                command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "failed")
+                self.assertEqual(call["result"]["exit_code"], 1)
+                self.assertEqual(call["result"]["stdout"], "�(")
+                self.assertEqual(call["result"]["stderr"], "�")
+                self.assertIn("verification failed with exit_code=1", call["error"])
+                self.assertIn("stdout:\n�(", call["summary"])
+                self.assertIn("stderr:\n�", call["summary"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_run_tests_rejects_shell_control_operators(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -5853,6 +7066,47 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("run_tests executes one argv command without a shell", call["error"])
                 self.assertIn("shell operator '&&'", call["error"])
                 self.assertIsNone(call["result"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_tests_normalizes_leading_cd_and_then_operator(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("pkg")
+                target.mkdir()
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                script = "from pathlib import Path; assert Path.cwd().name == 'pkg'"
+                command = f"cd {shlex.quote(str(target))} && {shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_tests",
+                                "--command",
+                                command,
+                                "--allow-verify",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                call = json.loads(stdout.getvalue())["tool_call"]
+                self.assertEqual(call["status"], "completed")
+                self.assertEqual(call["result"]["exit_code"], 0)
+                self.assertEqual(call["result"]["command"], f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}")
+                self.assertEqual(Path(call["result"]["cwd"]).name, "pkg")
             finally:
                 os.chdir(old_cwd)
 
@@ -7000,6 +8254,8 @@ class WorkSessionTests(unittest.TestCase):
             session,
             {"id": 1, "title": "Memory", "description": "Reenter with a compact hypothesis.", "status": "todo"},
             "now",
+            run_step_index=2,
+            run_max_steps=5,
         )
         self.assertEqual(
             context["work_session"]["resume"]["working_memory"]["next_step"],
@@ -7068,6 +8324,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer one paired dry-run edit over another same-path reread", prompt)
         fast_context = build_write_ready_work_model_context(context)
         self.assertTrue(fast_context["write_ready_fast_path"]["active"])
+        self.assertEqual(fast_context["current_run"]["remaining_steps_after_current"], 3)
         self.assertEqual(
             [item["path"] for item in fast_context["write_ready_fast_path"]["cached_window_texts"]],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
@@ -7079,10 +8336,11 @@ class WorkSessionTests(unittest.TestCase):
         fast_prompt = build_work_write_ready_think_prompt(fast_context)
         self.assertIn("Write-ready fast path is active.", fast_prompt)
         self.assertIn("Use write_ready_fast_path.cached_window_texts as the exact old text source", fast_prompt)
+        self.assertIn("Use current_run as the active invocation budget", fast_prompt)
         self.assertIn("use a single edit_file_hunks action for that path", fast_prompt)
         self.assertIn("Prefer one paired dry-run batch", fast_prompt)
         self.assertIn(
-            '"type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
+            '"type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait"',
             fast_prompt,
         )
         self.assertNotIn("patch_proposal", fast_prompt)
@@ -7106,12 +8364,20 @@ class WorkSessionTests(unittest.TestCase):
             self.assertIn("bounded-loop or repeated-observation proof", verifier_prompt)
             self.assertIn("interval/interrupt handling or output-rewrite evidence", verifier_prompt)
             self.assertIn("do not accept internal mode flags alone", verifier_prompt)
+            self.assertIn("KeyboardInterrupt, Ctrl-C, SIGINT", verifier_prompt)
+            self.assertIn("process-level cancellation/interrupt behavior", verifier_prompt)
+            self.assertIn("in-process coroutine cancellation", verifier_prompt)
+            self.assertIn("structured concurrency such as asyncio.TaskGroup", verifier_prompt)
+            self.assertIn("gather/semaphore code cancels and awaits only the started work", verifier_prompt)
+            self.assertIn("below-limit, exactly-at-limit, and above-limit", verifier_prompt)
+            self.assertIn("one happy-path concurrency check is not enough", verifier_prompt)
 
         def assert_rollback_repair_guidance(repair_prompt):
             self.assertIn(
-                "When a rollback verifier failure has one small clear localized cause and the worktree is clean",
+                "When a rollback verifier failure has one small clear localized cause",
                 repair_prompt,
             )
+            self.assertIn("the worktree is clean", repair_prompt)
             self.assertIn(
                 "center it on the failed assertion/output and target path",
                 repair_prompt,
@@ -7127,15 +8393,17 @@ class WorkSessionTests(unittest.TestCase):
         assert_rollback_repair_guidance(fast_prompt)
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
+        self.assertEqual(tiny_context["current_run"]["remaining_steps_after_current"], 3)
         self.assertEqual(
             [item["path"] for item in tiny_context["write_ready_fast_path"]["cached_window_texts"]],
             ["src/mew/workbench.py", "tests/test_workbench.py"],
         )
         self.assertEqual(tiny_context["task_goal"]["required_terms"], [])
         self.assertIn("Write-ready tiny draft lane is active.", tiny_prompt)
+        self.assertIn("Use current_run as the active invocation budget", tiny_prompt)
         self.assertIn("task_goal.required_terms", tiny_prompt)
         self.assertIn('"kind": "patch_proposal|patch_blocker"', tiny_prompt)
-        self.assertNotIn('"type": "batch|inspect_dir|read_file|search_text|glob', tiny_prompt)
+        self.assertNotIn('"type": "batch|inspect_dir|read_file|read_image|search_text|glob', tiny_prompt)
         assert_behavior_verifier_guidance(tiny_prompt)
         assert_rollback_repair_guidance(tiny_prompt)
         self.assertLess(len(tiny_prompt), len(fast_prompt))
@@ -7202,6 +8470,42 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("test-only", required_terms)
         self.assertIn("user-facing", required_terms)
         self.assertIn("output-file", required_terms)
+
+    def test_tiny_write_ready_draft_context_ignores_self_improve_boilerplate_terms(self):
+        from mew.work_loop import build_write_ready_tiny_draft_model_context
+
+        context = self._build_write_ready_fast_path_context(
+            source_text="def record_signal_observation():\n    return {'noticed': True}\n",
+            test_text="def test_signal_observation():\n    assert True\n",
+        )
+        context["task"]["title"] = "Improve mew itself from native self-improve"
+        context["task"]["description"] = (
+            "Improve mew through one small, reviewable code or documentation change. "
+            "Advance M7 Senses: close the passive proof-window gate for audited "
+            "signal-observation provenance. Route any mew-first failure through "
+            "M6.18 diagnosis before M6.14 repair.\n\n"
+            "Current coding focus:\n"
+            "Next: start a native self-improvement session with "
+            "`./mew self-improve --start-session --focus 'Advance M7 Senses'`\n\n"
+            "Recent friction (historical; no active blockers)\n"
+            "- approval_rejection=0.667 verification_failure=0.111\n\n"
+            "Constraints:\n"
+            "- Keep the change small.\n"
+            "Created by mew self-improve."
+        )
+        context["guidance"] = "Native self-improvement work session. Draft the paired patch."
+
+        tiny_context = build_write_ready_tiny_draft_model_context(context)
+        required_terms = tiny_context["task_goal"]["required_terms"]
+
+        self.assertNotIn("mew-first", required_terms)
+        self.assertNotIn("self-improve", required_terms)
+        self.assertNotIn("self-improvement", required_terms)
+        self.assertNotIn("start-session", required_terms)
+        self.assertNotIn("approval_rejection", required_terms)
+        self.assertNotIn("verification_failure", required_terms)
+        self.assertIn("proof-window", required_terms)
+        self.assertIn("signal-observation", required_terms)
 
     def test_tiny_write_ready_draft_context_keeps_milestone_and_required_field_terms(self):
         from mew.work_loop import build_write_ready_tiny_draft_model_context
@@ -7578,8 +8882,9 @@ class WorkSessionTests(unittest.TestCase):
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         self.assertEqual(
             set(tiny_context.keys()),
-            {"active_work_todo", "write_ready_fast_path", "allowed_roots", "task_goal"},
+            {"current_run", "active_work_todo", "write_ready_fast_path", "allowed_roots", "task_goal"},
         )
+        self.assertEqual(tiny_context["current_run"], {})
         self.assertEqual(tiny_context["task_goal"]["required_terms"], ["Scope-limited"])
         self.assertEqual(set(tiny_context["active_work_todo"].keys()), {"source"})
         self.assertEqual(
@@ -20856,6 +22161,149 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_ai_continues_after_rolled_back_write_verification_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("repair context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                calls = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    calls.append(prompt)
+                    if len(calls) == 1:
+                        return {
+                            "summary": "write then verify",
+                            "action": {
+                                "type": "write_file",
+                                "path": "out.txt",
+                                "content": "bad\n",
+                                "create": True,
+                                "apply": True,
+                            },
+                        }
+                    return {"summary": "inspect after failed verify", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "false",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "max_steps")
+                self.assertEqual(len(calls), 2)
+                self.assertTrue(report["steps"][0]["recoverable_verification_failure"])
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                self.assertFalse(Path("out.txt").exists())
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["write_file", "read_file"])
+                self.assertTrue(session["tool_calls"][0]["result"]["rolled_back"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_ai_continues_after_auto_approval_verification_failure(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                calls = []
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    calls.append(prompt)
+                    if len(calls) == 1:
+                        return {
+                            "summary": "preview then verify",
+                            "action": {
+                                "type": "edit_file",
+                                "path": "README.md",
+                                "old": "old text",
+                                "new": "bad text",
+                            },
+                        }
+                    return {"summary": "inspect after auto approval failure", "action": {"type": "read_file", "path": "README.md"}}
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--verify-command",
+                                        "false",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "max_steps")
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(report["steps"][0]["inline_approval"], "auto_failed")
+                self.assertTrue(report["steps"][0]["inline_approval_recoverable_verification_failure"])
+                self.assertEqual(report["steps"][0]["inline_approval_status"], "failed")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "old text\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual([call["tool"] for call in session["tool_calls"]], ["edit_file", "edit_file", "read_file"])
+                self.assertEqual(session["tool_calls"][0]["approval_status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "failed")
+                self.assertTrue(session["tool_calls"][1]["result"]["rolled_back"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_replay_bundle_written_for_write_ready_timeout_failure(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -22582,22 +24030,20 @@ class WorkSessionTests(unittest.TestCase):
                         )
 
                 with redirect_stdout(StringIO()) as stdout:
-                    self.assertEqual(
-                        main(
-                            [
-                                "work",
-                                "1",
-                                "--recover-session",
-                                "--allow-read",
-                                ".",
-                                "--allow-verify",
-                                "--verify-command",
-                                command,
-                                "--json",
-                            ]
-                        ),
-                        0,
+                    exit_code = main(
+                        [
+                            "work",
+                            "1",
+                            "--recover-session",
+                            "--allow-read",
+                            ".",
+                            "--allow-verify",
+                            "--verify-command",
+                            command,
+                            "--json",
+                        ]
                     )
+                self.assertEqual(exit_code, 0, stdout.getvalue())
                 report = json.loads(stdout.getvalue())
                 self.assertEqual(report["recovery"]["source_tool_call_id"], 2)
                 self.assertEqual(report["tool_call"]["status"], "completed")
@@ -24518,6 +25964,94 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_recover_session_retries_apply_write_with_session_cwd(self):
+        from mew.work_session import workspace_relative_work_parameters
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            target = workspace / "target.txt"
+            target.write_text("before\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                command = (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "'from pathlib import Path; assert Path(\"target.txt\").read_text().startswith(\"after\")'"
+                )
+                parameters = {
+                    "path": "target.txt",
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "cwd": str(workspace),
+                    "allowed_write_roots": ["."],
+                    "allow_verify": True,
+                    "verify_command": command,
+                    "verify_cwd": str(workspace),
+                }
+                intent_parameters, _read_roots = workspace_relative_work_parameters("edit_file", parameters)
+                intent = build_write_intent("edit_file", intent_parameters)
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["cwd"] = str(workspace)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover apply write in workspace.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "default_options": {"cwd": str(workspace)},
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "edit_file",
+                                    "status": "interrupted",
+                                    "parameters": parameters,
+                                    "write_intent": intent,
+                                    "summary": "interrupted workspace apply write",
+                                    "error": "Interrupted before write completed.",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--recover-session",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "retry_apply_write")
+                self.assertEqual(report["tool_call"]["status"], "completed")
+                self.assertEqual(report["tool_call"]["result"]["verification_exit_code"], 0)
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_recover_session_skips_completed_write_and_verifies(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -24597,6 +26131,94 @@ class WorkSessionTests(unittest.TestCase):
                 session = load_state()["work_sessions"][0]
                 self.assertEqual(session["tool_calls"][0]["recovery_status"], "superseded")
                 self.assertEqual(session["tool_calls"][0]["recovered_by_tool_call_id"], 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_recover_session_verifies_completed_write_with_session_cwd(self):
+        from mew.work_session import workspace_relative_work_parameters
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            target = workspace / "target.txt"
+            target.write_text("before\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                command = (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "'from pathlib import Path; assert Path(\"target.txt\").read_text().startswith(\"after\")'"
+                )
+                parameters = {
+                    "path": "target.txt",
+                    "old": "before\n",
+                    "new": "after\n",
+                    "apply": True,
+                    "cwd": str(workspace),
+                    "allowed_write_roots": ["."],
+                    "allow_verify": True,
+                    "verify_command": command,
+                    "verify_cwd": ".",
+                }
+                intent_parameters, _read_roots = workspace_relative_work_parameters("edit_file", parameters)
+                intent = build_write_intent("edit_file", intent_parameters)
+                target.write_text("after\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["cwd"] = str(workspace)
+                    state["work_sessions"].append(
+                        {
+                            "id": 1,
+                            "task_id": 1,
+                            "status": "active",
+                            "title": "Build native hands",
+                            "goal": "Recover completed workspace write.",
+                            "created_at": "then",
+                            "updated_at": "then",
+                            "default_options": {"cwd": str(workspace)},
+                            "tool_calls": [
+                                {
+                                    "id": 1,
+                                    "session_id": 1,
+                                    "task_id": 1,
+                                    "tool": "edit_file",
+                                    "status": "interrupted",
+                                    "parameters": parameters,
+                                    "write_intent": intent,
+                                    "summary": "interrupted after workspace write",
+                                    "error": "Interrupted before verifier completed.",
+                                }
+                            ],
+                            "model_turns": [],
+                        }
+                    )
+                    save_state(state)
+
+                with redirect_stdout(StringIO()) as stdout:
+                    exit_code = main(
+                        [
+                            "work",
+                            "1",
+                            "--recover-session",
+                            "--allow-read",
+                            ".",
+                            "--allow-verify",
+                            "--verify-command",
+                            command,
+                            "--json",
+                        ]
+                    )
+                self.assertEqual(exit_code, 0, stdout.getvalue())
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["recovery"]["action"], "verify_completed_write")
+                self.assertEqual(report["tool_call"]["tool"], "run_tests")
+                self.assertEqual(report["tool_call"]["status"], "completed")
+                self.assertEqual(report["tool_call"]["result"]["exit_code"], 0)
+                self.assertEqual(Path(report["tool_call"]["result"]["cwd"]), workspace.resolve())
             finally:
                 os.chdir(old_cwd)
 
@@ -29739,6 +31361,823 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_json_accept_edits_can_defer_verification_without_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview edit for external verifier",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "README.md",
+                        "old": "old text",
+                        "new": "new text",
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                step = report["steps"][0]
+                self.assertEqual(step["inline_approval"], "auto_applied")
+                self.assertEqual(step["inline_approval_status"], "completed")
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
+                session = load_state()["work_sessions"][0]
+                apply_call = session["tool_calls"][1]
+                self.assertTrue(apply_call["parameters"]["defer_verify"])
+                self.assertTrue(apply_call["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", apply_call["result"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_direct_applied_write_can_defer_verification_without_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "write implementation for external verifier",
+                    "action": {
+                        "type": "write_file",
+                        "path": "run.py",
+                        "content": "print('ok')\n",
+                        "create": True,
+                        "apply": True,
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                step = report["steps"][0]
+                self.assertEqual(step["status"], "completed")
+                self.assertEqual(Path("run.py").read_text(encoding="utf-8"), "print('ok')\n")
+                session = load_state()["work_sessions"][0]
+                tool_call = session["tool_calls"][0]
+                self.assertTrue(tool_call["parameters"]["apply"])
+                self.assertTrue(tool_call["parameters"]["defer_verify"])
+                self.assertTrue(tool_call["result"]["verification_deferred"])
+                self.assertNotIn("verification_exit_code", tool_call["result"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_missing_read_file_under_write_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect target before create",
+                        "action": {
+                            "type": "read_file",
+                            "path": "run.py",
+                        },
+                    },
+                    {
+                        "summary": "create missing target",
+                        "action": {
+                            "type": "write_file",
+                            "path": "run.py",
+                            "content": "print('ok')\n",
+                            "create": True,
+                            "apply": True,
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_missing_read_file"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                self.assertEqual(Path("run.py").read_text(encoding="utf-8"), "print('ok')\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertTrue(session["tool_calls"][1]["result"]["verification_deferred"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_read_batch_continues_after_missing_file_under_write_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect missing target and sibling context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "read_file", "path": "run.py"},
+                                {"type": "read_file", "path": "README.md"},
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "create missing target",
+                        "action": {
+                            "type": "write_file",
+                            "path": "run.py",
+                            "content": "print('ok')\n",
+                            "create": True,
+                            "apply": True,
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["path"], "run.py")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                self.assertEqual(Path("run.py").read_text(encoding="utf-8"), "print('ok')\n")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_missing_read_file"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertEqual(session["tool_calls"][2]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_read_batch_continues_after_missing_directory_observation(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("pkg").mkdir()
+                Path("pkg/setup.py").write_text("setup context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect missing generated metadata and sibling context",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "read_file", "path": "pkg/setup.py"},
+                                {"type": "inspect_dir", "path": "pkg/pkg.egg-info"},
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "continue after missing metadata observation",
+                        "action": {
+                            "type": "read_file",
+                            "path": "pkg/setup.py",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "inspect_dir")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["path"], "pkg/pkg.egg-info")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "completed")
+                self.assertEqual(session["tool_calls"][1]["status"], "failed")
+                self.assertTrue(session["tool_calls"][1]["recoverable_missing_observation_path"])
+                self.assertEqual(session["tool_calls"][2]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_missing_directory_observation_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("pkg").mkdir()
+                Path("pkg/setup.py").write_text("setup context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect missing generated metadata",
+                        "action": {
+                            "type": "inspect_dir",
+                            "path": "pkg/pkg.egg-info",
+                        },
+                    },
+                    {
+                        "summary": "fall back to setup context",
+                        "action": {
+                            "type": "read_file",
+                            "path": "pkg/setup.py",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertTrue(report["steps"][0]["recoverable_missing_observation_path"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_missing_observation_path"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_stale_edit_file_under_write_root(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("actual text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "try stale patch",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "README.md",
+                            "old": "missing text",
+                            "new": "new text",
+                        },
+                    },
+                    {
+                        "summary": "refresh after stale edit",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_stale_edit_file"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_git_status_outside_repository(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect git state",
+                        "action": {
+                            "type": "git_status",
+                            "cwd": ".",
+                        },
+                    },
+                    {
+                        "summary": "fall back to files",
+                        "action": {
+                            "type": "inspect_dir",
+                            "path": ".",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_git_inspection_unavailable"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_batch_git_status_outside_repository(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect git and files",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "git_status",
+                                    "cwd": ".",
+                                },
+                                {
+                                    "type": "inspect_dir",
+                                    "path": ".",
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "continue from files",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "git_status")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_git_inspection_unavailable"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertEqual(session["tool_calls"][2]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_batch_git_diff_outside_repository(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "inspect git diff and files",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {
+                                    "type": "git_diff",
+                                    "cwd": ".",
+                                },
+                                {
+                                    "type": "inspect_dir",
+                                    "path": ".",
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "summary": "continue from files",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "git_diff")
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertTrue(session["tool_calls"][0]["recoverable_git_inspection_unavailable"])
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+                self.assertEqual(session["tool_calls"][2]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_recovers_run_tests_failure_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "run failing verifier",
+                        "action": {
+                            "type": "run_tests",
+                            "command": "python -c \"import sys; sys.exit(1)\"",
+                            "cwd": ".",
+                        },
+                    },
+                    {
+                        "summary": "inspect after failure",
+                        "action": {
+                            "type": "read_file",
+                            "path": "README.md",
+                        },
+                    },
+                ]
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-verify",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertTrue(report["steps"][0]["recoverable_run_tests_failure"])
+                self.assertEqual(report["steps"][1]["status"], "completed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][0]["status"], "failed")
+                self.assertEqual(session["tool_calls"][1]["status"], "completed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_accept_edits_batch_can_defer_verification_without_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "preview batch for external verifier",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {
+                                "type": "edit_file",
+                                "path": "README.md",
+                                "old": "old text",
+                                "new": "new text",
+                            },
+                            {
+                                "type": "write_file",
+                                "path": "report.jsonl",
+                                "content": "{}\n",
+                                "create": True,
+                            },
+                        ],
+                    },
+                }
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--defer-verify",
+                                        "--max-steps",
+                                        "1",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                step = report["steps"][0]
+                self.assertEqual(step["inline_approval"], "auto_applied")
+                self.assertEqual(step["inline_approval_count"], 2)
+                self.assertEqual(Path("README.md").read_text(encoding="utf-8"), "new text\n")
+                self.assertEqual(Path("report.jsonl").read_text(encoding="utf-8"), "{}\n")
+                session = load_state()["work_sessions"][0]
+                apply_results = [call["result"] for call in session["tool_calls"][2:4]]
+                self.assertEqual(sum(1 for result in apply_results if result.get("verification_deferred")), 2)
+                self.assertTrue(all("verification_exit_code" not in result for result in apply_results))
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_think_prompt_guides_independent_reads_to_batch(self):
         from mew.work_loop import build_work_think_prompt
 
@@ -29755,8 +32194,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("work_session.resume.active_memory", prompt)
         self.assertIn("durable typed recall", prompt)
         self.assertIn("Do not use read_file on .mew/memory/private paths", prompt)
-        self.assertIn("Use work_session.effort as operational pressure", prompt)
-        self.assertIn("If effort.pressure is high, avoid broad exploration", prompt)
+        self.assertIn("Use work_session.current_run as the active invocation budget", prompt)
+        self.assertIn("work_session.effort as historical session pressure", prompt)
+        self.assertIn("Do not claim the step or failure budget is exhausted", prompt)
+        self.assertIn("current_run still has remaining steps", prompt)
         self.assertIn("If effort.pressure is medium, choose a narrow next action", prompt)
         self.assertIn("working_memory.target_paths", prompt)
         self.assertIn("prefer a direct read_file on one of those target_paths before repeating same-surface search_text", prompt)
@@ -29772,6 +32213,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Drop a working_memory.target_paths entry once it is no longer needed for the next step", prompt)
         self.assertIn("do not rerun that same search_text", prompt)
         self.assertIn("switch to a narrow read_file on the anchored window instead", prompt)
+        self.assertIn("work_session.resume.search_anchor_observations", prompt)
+        self.assertIn("use its suggested_next read_file before repeating that same search_text", prompt)
         self.assertIn("work_session.resume.low_yield_observations", prompt)
         self.assertIn("do not keep searching that same path/pattern", prompt)
         self.assertIn("work_session.resume.redundant_search_observations", prompt)
@@ -29813,6 +32256,25 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("finish with a no-change summary", prompt)
         self.assertIn("prefer run_tests with that broader suggested verifier before finish", prompt)
         self.assertIn("If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user", prompt)
+        self.assertIn("A runnable smoke command with exit_code=0 is not enough to finish", prompt)
+        self.assertIn("generated artifacts, saved files, stdout/stderr text, rendered frames", prompt)
+        self.assertIn("inspect those artifact/output properties or run a small command that asserts them", prompt)
+        self.assertIn("remember the exact unverified acceptance gap", prompt)
+        self.assertIn("For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks", prompt)
+        self.assertIn("prefer analyze_table on CSV/TSV/whitespace numeric source files", prompt)
+        self.assertIn("schema-only, finite-number, or single-fit residual check is not enough", prompt)
+        self.assertIn("completed grounding tool whose output contains an independent cross-check", prompt)
+        self.assertIn("alternative method, recomputation, holdout, bootstrap", prompt)
+        self.assertIn("residual/error checks, expected peak/location windows", prompt)
+        self.assertIn("For answer-from-artifact tasks such as images, boards, puzzles", prompt)
+        self.assertIn("reading back the output file or checking output format is not enough", prompt)
+        self.assertIn("prove completeness instead of writing a single plausible answer", prompt)
+        self.assertIn("When a source artifact is an image, screenshot, diagram", prompt)
+        self.assertIn("prefer read_image before lossy ASCII rendering or manual OCR commands", prompt)
+        self.assertIn("preserve exact literal contract names from the task text", prompt)
+        self.assertIn("Do not substitute synonyms or nearby response-field names", prompt)
+        self.assertIn("using val when the task says value", prompt)
+        self.assertIn("verifier commands must instantiate and assert the exact names from the task text", prompt)
         self.assertIn("When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure", prompt)
         self.assertIn("Include a compact working_memory object", prompt)
         self.assertIn("If more than one concrete step remains, keep working_memory.plan_items", prompt)
@@ -29830,6 +32292,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("explicitly unverified modes", prompt)
         self.assertIn("same_surface_audit.status indicates a sibling-surface audit is still needed", prompt)
         self.assertIn("do one narrow audit step or record why the sibling surface is already covered or out of scope before finish", prompt)
+        self.assertIn("Do not use finish merely because historical effort warnings mention step_budget or failure_budget", prompt)
         self.assertIn("do not finish merely because the next edit is clear", prompt)
         self.assertIn("propose the dry-run edit_file/write_file action instead", prompt)
         self.assertIn("include the concrete conclusion in action.summary or action.reason", prompt)
@@ -30418,6 +32881,63 @@ class WorkSessionTests(unittest.TestCase):
             self.assertIn("docs/note.md", matches)
             self.assertNotIn("outside.txt", matches)
 
+    def test_search_text_falls_back_when_rg_is_missing(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / ".mew").mkdir()
+            (root / "src" / "app.py").write_text("before\nneedle here\nafter\n", encoding="utf-8")
+            (root / ".mew" / "state.json").write_text("needle hidden\n", encoding="utf-8")
+
+            with patch("mew.read_tools.subprocess.run", side_effect=FileNotFoundError()):
+                result = search_text(
+                    "needle",
+                    str(root),
+                    [str(root)],
+                    max_matches=5,
+                    context_lines=1,
+                    pattern="src/**",
+                )
+
+            self.assertEqual(result["engine"], "python")
+            self.assertEqual(len(result["matches"]), 1)
+            self.assertIn("src/app.py", result["matches"][0])
+            self.assertNotIn(".mew", "\n".join(result["matches"]))
+            self.assertEqual(result["snippets"][0]["start_line"], 1)
+            self.assertEqual(result["snippets"][0]["end_line"], 3)
+
+    def test_search_text_python_fallback_skips_symlink_targets(self):
+        from mew.read_tools import search_text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            outside = Path(tmp) / "outside"
+            root.mkdir()
+            outside.mkdir()
+            (root / "visible.txt").write_text("ordinary text\n", encoding="utf-8")
+            secret = outside / "secret.txt"
+            secret.write_text("needle outside root\n", encoding="utf-8")
+            try:
+                (root / "linked-secret.txt").symlink_to(secret)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+
+            with patch("mew.read_tools.subprocess.run", side_effect=FileNotFoundError()):
+                result = search_text(
+                    "needle",
+                    str(root),
+                    [str(root)],
+                    max_matches=5,
+                    context_lines=0,
+                    pattern="*.txt",
+                )
+
+            self.assertEqual(result["engine"], "python")
+            self.assertEqual(result["matches"], [])
+            self.assertGreaterEqual(result["skipped_sensitive"], 1)
+
     def test_work_model_rejects_resident_loop_as_verification_command(self):
         from mew.work_loop import normalize_work_model_action
 
@@ -30527,6 +33047,70 @@ class WorkSessionTests(unittest.TestCase):
 
         explicit_diff_parameters = work_tool_parameters_from_action({"type": "git_diff", "stat": False})
         self.assertFalse(explicit_diff_parameters["stat"])
+
+        default_cwd_parameters = work_tool_parameters_from_action(
+            {"type": "read_file", "path": "README.md", "cwd": "."},
+            default_cwd="/tmp/workspace",
+        )
+        self.assertEqual(default_cwd_parameters["cwd"], "/tmp/workspace")
+        self.assertEqual(default_cwd_parameters["verify_cwd"], "/tmp/workspace")
+
+    def test_work_model_write_batch_allows_relative_paths_under_default_cwd_root(self):
+        from mew.work_loop import normalize_work_model_action
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            os.chdir(outside)
+            try:
+                action = normalize_work_model_action(
+                    {
+                        "summary": "write two workspace files",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "write_file", "path": "README.md", "content": "hello\n"},
+                                {"type": "write_file", "path": "notes/todo.md", "content": "todo\n"},
+                            ],
+                        },
+                    },
+                    allowed_write_roots=[str(workspace)],
+                    default_cwd=str(workspace),
+                )
+
+                self.assertEqual(action["type"], "batch")
+                self.assertEqual([tool["path"] for tool in action["tools"]], ["README.md", "notes/todo.md"])
+                self.assertTrue(all(tool["dry_run"] for tool in action["tools"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_command_write_batch_allows_relative_paths_under_cwd_root(self):
+        from mew.commands import _paired_write_batch_actions
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            os.chdir(outside)
+            try:
+                actions = _paired_write_batch_actions(
+                    [
+                        {"type": "write_file", "path": "README.md", "content": "hello\n"},
+                        {"type": "write_file", "path": "notes/todo.md", "content": "todo\n"},
+                    ],
+                    allowed_write_roots=[str(workspace)],
+                    cwd=str(workspace),
+                )
+
+                self.assertEqual([action["path"] for action in actions], ["README.md", "notes/todo.md"])
+                self.assertTrue(all(action["dry_run"] for action in actions))
+            finally:
+                os.chdir(old_cwd)
 
     def test_work_model_context_digests_older_tool_calls(self):
         from mew.work_loop import build_work_model_context
@@ -31948,6 +34532,336 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("Work session finish blocked", task["notes"])
                 self.assertNotIn("Work session finished:", task["notes"])
 
+    def test_work_finish_blocks_task_done_without_acceptance_checks(self):
+        from mew.commands import apply_work_control_action
+
+        state = {}
+        session = {"id": 9, "status": "active", "goal": "Ensure output exists. Do not edit config.json."}
+        task = {
+            "id": 15,
+            "description": "Ensure output exists. Do not edit config.json.",
+            "status": "ready",
+            "notes": "",
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(
+                state,
+                session,
+                task,
+                {"type": "finish", "reason": "implemented and verified", "task_done": True},
+            )
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("acceptance constraints unchecked", result["finished_note"])
+        self.assertIn("Work session finish blocked", task["notes"])
+
+    def test_work_finish_blocks_ungrounded_edit_scope_acceptance_after_write(self):
+        from mew.commands import apply_work_control_action
+
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": "Ensure output exists. The only edits you may make are specified replacements.",
+            "tool_calls": [
+                {"id": 1, "tool": "read_file", "status": "completed"},
+                {"id": 2, "tool": "edit_file", "status": "completed"},
+                {"id": 3, "tool": "run_command", "status": "completed"},
+            ],
+        }
+        task = {
+            "id": 15,
+            "description": "Ensure output exists. The only edits you may make are specified replacements.",
+            "status": "ready",
+            "notes": "",
+        }
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {"constraint": "Ensure output exists.", "status": "verified", "evidence": "tool #3 passed"},
+                {
+                    "constraint": "The only edits you may make are specified replacements.",
+                    "status": "verified",
+                    "evidence": "Applied edit_file tool #2 using write history.",
+                },
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("edit-scope acceptance evidence ungrounded", result["finished_note"])
+        self.assertIn("Work session finish blocked", task["notes"])
+
+    def test_work_finish_blocks_all_valid_answer_without_completeness_evidence(self):
+        from mew.commands import apply_work_control_action
+
+        state = {}
+        description = (
+            "The file chess_board.png has an image of a chess board. It is currently white to move. "
+            "Write the best move for white to play to /app/move.txt. "
+            "If there are multiple winning moves, print them all, one per line."
+        )
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_image",
+                    "status": "completed",
+                    "summary": "Read board image and found a likely best move.",
+                },
+                {"id": 2, "tool": "write_file", "status": "completed"},
+                {
+                    "id": 3,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "summary": "Read file /app/move.txt size=5 chars\ne2e4\n",
+                },
+            ],
+        }
+        task = {
+            "id": 15,
+            "title": "Solve chess board",
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Print all winning moves, one per line.",
+                    "status": "verified",
+                    "evidence": "tool #3 read move.txt and found e2e4.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("all-valid answer completeness evidence ungrounded", result["finished_note"])
+        self.assertIn("Work session finish blocked", task["notes"])
+
+    def test_work_finish_allows_all_valid_answer_with_enumeration_evidence(self):
+        from mew.commands import apply_work_control_action
+
+        state = {"tasks": [], "questions": []}
+        description = (
+            "The file chess_board.png has an image of a chess board. It is currently white to move. "
+            "Write the best move for white to play to /app/move.txt. "
+            "If there are multiple winning moves, print them all, one per line."
+        )
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "read_image",
+                    "status": "completed",
+                    "summary": "Read board image and derived the FEN.",
+                },
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {
+                        "stdout": "Enumerated all legal moves; mates ['e2e4', 'g2g4']; no other mate moves."
+                    },
+                },
+                {"id": 3, "tool": "write_file", "status": "completed"},
+                {
+                    "id": 4,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "summary": "Read file /app/move.txt size=10 chars\ne2e4\ng2g4\n",
+                },
+            ],
+        }
+        task = {
+            "id": 15,
+            "title": "Solve chess board",
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        state["tasks"].append(task)
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "completion_summary": "wrote all winning moves",
+            "acceptance_checks": [
+                {
+                    "constraint": "Print all winning moves, one per line.",
+                    "status": "verified",
+                    "evidence": (
+                        "tool #2 enumerated all legal moves and found both e2e4 and g2g4; "
+                        "tool #4 read move.txt."
+                    ),
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_called_once_with(session)
+        self.assertTrue(result["task_done"])
+        self.assertIn("Work session finished: implemented and verified", task["notes"])
+        self.assertIn("done: wrote all winning moves", task["notes"])
+
+    def test_repairable_wait_converts_to_remember_when_continuation_allowed(self):
+        action = {
+            "type": "wait",
+            "reason": "The proposed edit is unsafe under the stated constraint; revised edit needed.",
+        }
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            3,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_wait"], "repairable_blocker")
+        self.assertIn("unsafe under the stated constraint", converted["note"])
+
+    def test_repairable_wait_converts_write_batch_blocker_to_remember(self):
+        action = {
+            "type": "wait",
+            "reason": (
+                "write batch may include at most one write/edit per file path; "
+                "collapse same-file hunks into a single edit_file_hunks action"
+            ),
+        }
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            3,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted["type"], "remember")
+        self.assertEqual(converted["converted_from_wait"], "repairable_blocker")
+        self.assertIn("write batch may include", converted["note"])
+
+    def test_repairable_wait_does_not_convert_generic_write_batch_blocker(self):
+        action = {
+            "type": "wait",
+            "reason": "write batch contains paths outside the declared allowed_write_roots",
+        }
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            3,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted, action)
+
+    def test_work_finish_blocker_allows_acceptance_repair_continuation(self):
+        self.assertTrue(
+            work_finish_blocker_allows_continue(
+                "finish blocked: all-valid answer completeness evidence ungrounded"
+            )
+        )
+        self.assertTrue(
+            work_finish_blocker_allows_continue("finish blocked: edit-scope acceptance evidence missing")
+        )
+        self.assertTrue(
+            work_finish_blocker_allows_continue("finish blocked: acceptance constraints unchecked")
+        )
+        self.assertTrue(
+            work_finish_blocker_allows_continue("finish blocked: numeric artifact quality evidence ungrounded")
+        )
+        self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))
+
+    def test_work_finish_blocks_numeric_artifact_without_independent_cross_check(self):
+        from mew.commands import apply_work_control_action
+
+        description = (
+            "Fit the G and 2D Peak of the spectrum and return the x0, gamma, "
+            "amplitude and offset of the peaks."
+        )
+        state = {"tasks": [], "questions": []}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {"stdout": "rmse=0.05 rel_rmse=0.02 finite parameters"},
+                },
+                {"id": 2, "tool": "read_file", "status": "completed"},
+            ],
+        }
+        task = {
+            "id": 15,
+            "title": "Fit Raman peaks",
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        state["tasks"].append(task)
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Verify numeric plausibility against the input data.",
+                    "status": "verified",
+                    "evidence": "Tool #1 residual checks and finite parameter assertions passed.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertIn("numeric artifact quality evidence ungrounded", result["finished_note"])
+
+    def test_repairable_wait_does_not_convert_on_final_step(self):
+        action = {"type": "wait", "reason": "unsupported replacement"}
+
+        converted = convert_repairable_wait_to_remember(
+            action,
+            10,
+            10,
+            continue_after_remember=True,
+        )
+
+        self.assertEqual(converted, action)
+
     def test_work_finish_allows_completed_same_surface_audit(self):
         from mew.commands import apply_work_control_action
 
@@ -33306,6 +36220,233 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(Path(world["git_status"]["cwd"]), repo.resolve())
                 self.assertEqual(world["files"][0]["path"], str(repo / "README.md"))
                 self.assertTrue(world["files"][0]["exists"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_world_state_resolves_relative_roots_against_explicit_cwd(self):
+        from mew.work_world import build_work_world_state
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "README.md").write_text("workspace root\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                world = build_work_world_state({}, ["."], cwd=str(workspace))
+
+                self.assertEqual(Path(world["git_status"]["cwd"]), workspace.resolve())
+                self.assertEqual(world["git_status"]["exit_code"], 128)
+                self.assertTrue(any(item["path"] == "README.md" for item in world["files"]))
+                self.assertFalse(any(str(outside) in item["path"] for item in world["files"]))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_tools_resolve_relative_paths_against_explicit_cwd(self):
+        from mew.work_session import execute_work_tool
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "README.md").write_text("workspace root\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                read_result = execute_work_tool(
+                    "read_file",
+                    {"path": "README.md", "cwd": str(workspace)},
+                    ["."],
+                )
+                self.assertEqual(Path(read_result["path"]), (workspace / "README.md").resolve())
+                self.assertEqual(read_result["text"], "workspace root\n")
+
+                write_result = execute_work_tool(
+                    "write_file",
+                    {
+                        "path": "out.txt",
+                        "content": "created from workspace\n",
+                        "create": True,
+                        "cwd": str(workspace),
+                        "allowed_write_roots": ["."],
+                    },
+                    [],
+                )
+                self.assertEqual(Path(write_result["path"]), (workspace / "out.txt").resolve())
+                self.assertTrue(write_result["changed"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_defaults_persist_cwd_for_relative_tool_paths(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            (workspace / "README.md").write_text("workspace default\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--cwd",
+                                str(workspace),
+                                "--allow-read",
+                                ".",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--tool", "read_file", "--path", "README.md", "--json"]),
+                        0,
+                    )
+                payload = json.loads(stdout.getvalue())
+                result = payload["tool_call"]["result"]
+                self.assertEqual(Path(result["path"]), (workspace / "README.md").resolve())
+                self.assertEqual(result["text"], "workspace default\n")
+                self.assertEqual(payload["tool_call"]["parameters"]["cwd"], str(workspace))
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(["work", "1", "--session", "--resume", "--allow-read", ".", "--json"]),
+                        0,
+                    )
+                resume_payload = json.loads(stdout.getvalue())
+                world_state = resume_payload["resume"]["world_state"]
+                self.assertEqual(Path(world_state["git_status"]["cwd"]), workspace.resolve())
+                self.assertTrue(
+                    any(
+                        item["path"] == "README.md" or Path(item["path"]) == (workspace / "README.md").resolve()
+                        for item in world_state["files"]
+                    )
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_approval_write_intent_and_deferred_snapshot_use_session_cwd(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            target = workspace / "notes.md"
+            target.write_text("before\n", encoding="utf-8")
+            os.chdir(state_root)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--start-session",
+                                "--cwd",
+                                str(workspace),
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "before",
+                                "--new",
+                                "after",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-tool",
+                                "1",
+                                "--allow-write",
+                                ".",
+                                "--defer-verify",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                approved = json.loads(stdout.getvalue())
+
+                self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+                self.assertEqual(Path(approved["tool_call"]["write_intent"]["path"]), target.resolve())
+                self.assertEqual(Path(approved["tool_call"]["write_intent"]["verify_cwd"]), workspace.resolve())
+                self.assertEqual(Path(approved["rollback_snapshot"]["path"]), target.resolve())
+                self.assertEqual(approved["rollback_snapshot"]["content"], "before\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_model_context_uses_task_cwd_for_workspace_state(self):
+        from mew.work_loop import build_work_model_context
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "README.md").write_text("model workspace\n", encoding="utf-8")
+            os.chdir(outside)
+            try:
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    task["cwd"] = str(workspace)
+                    session, _created = create_work_session(state, task)
+                    save_state(state)
+
+                context = build_work_model_context(
+                    state,
+                    session,
+                    task,
+                    "2026-04-27T00:00:00Z",
+                    allowed_read_roots=["."],
+                )
+
+                self.assertEqual(context["task"]["cwd"], str(workspace))
+                world_state = context["work_session"]["resume"]["world_state"]
+                self.assertEqual(Path(world_state["git_status"]["cwd"]), workspace.resolve())
+                self.assertTrue(any(item["path"] == "README.md" for item in world_state["files"]))
             finally:
                 os.chdir(old_cwd)
 

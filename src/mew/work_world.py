@@ -37,13 +37,44 @@ def _world_git_status_cwds(allowed_read_roots):
             path = path.parent
         if path.exists() and path not in cwds:
             cwds.append(path)
-    try:
-        cwd = Path(".").resolve()
-        if cwd not in cwds:
-            cwds.append(cwd)
-    except OSError:
-        pass
+    if not cwds:
+        try:
+            cwd = Path(".").resolve()
+            if cwd not in cwds:
+                cwds.append(cwd)
+        except OSError:
+            pass
     return cwds
+
+
+def _world_base(cwd=None):
+    path = Path(cwd or ".").expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.resolve(strict=False)
+
+
+def _world_path_for_cwd(path, base):
+    candidate = Path(path or ".").expanduser()
+    if candidate.is_absolute():
+        return str(candidate)
+    return str((base / candidate).resolve(strict=False))
+
+
+def _world_roots_for_cwd(allowed_read_roots, cwd=None):
+    base = _world_base(cwd)
+    roots = []
+    for root in allowed_read_roots or []:
+        raw = str(root or "").strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        text = str(path.resolve(strict=False))
+        if text not in roots:
+            roots.append(text)
+    return roots
 
 
 def _world_git_status(allowed_read_roots):
@@ -58,9 +89,10 @@ def _world_git_status(allowed_read_roots):
     return first or run_git_tool("status", cwd=".")
 
 
-def _display_world_path(path):
+def _display_world_path(path, cwd=None):
+    base = _world_base(cwd)
     try:
-        return str(path.relative_to(Path(".").resolve()))
+        return str(path.relative_to(base))
     except ValueError:
         return str(path)
     except OSError:
@@ -84,13 +116,14 @@ def _world_file_record(path, display_path, source):
     return record
 
 
-def _allowed_missing_path(path, allowed_read_roots):
+def _allowed_missing_path(path, allowed_read_roots, cwd=None):
     requested = str(path or "").strip()
     if not requested:
         raise ValueError("path is required")
+    base = _world_base(cwd)
     candidate = Path(requested).expanduser()
     if not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
+        candidate = base / candidate
     try:
         resolved = candidate.resolve(strict=False)
     except OSError as exc:
@@ -101,7 +134,7 @@ def _allowed_missing_path(path, allowed_read_roots):
         try:
             allowed_root = Path(root).expanduser()
             if not allowed_root.is_absolute():
-                allowed_root = Path.cwd() / allowed_root
+                allowed_root = base / allowed_root
             allowed_root = allowed_root.resolve(strict=False)
         except OSError:
             continue
@@ -142,7 +175,7 @@ def _resume_world_path_records(resume):
     return _resume_target_path_records(resume)
 
 
-def _workspace_snapshot_records(allowed_read_roots, file_limit):
+def _workspace_snapshot_records(allowed_read_roots, file_limit, cwd=None):
     records = []
     count = max(0, int(file_limit))
     if count == 0:
@@ -158,7 +191,7 @@ def _workspace_snapshot_records(allowed_read_roots, file_limit):
             continue
         if path.is_file():
             records.append(
-                _world_file_record(path, _display_world_path(path), "workspace_snapshot")
+                _world_file_record(path, _display_world_path(path, cwd=cwd), "workspace_snapshot")
             )
             continue
         try:
@@ -174,15 +207,17 @@ def _workspace_snapshot_records(allowed_read_roots, file_limit):
             if child.name in WORLD_STATE_SNAPSHOT_SKIP_NAMES:
                 continue
             records.append(
-                _world_file_record(child, _display_world_path(child), "workspace_snapshot")
+                _world_file_record(child, _display_world_path(child, cwd=cwd), "workspace_snapshot")
             )
     return records
 
 
-def build_work_world_state(resume, allowed_read_roots, file_limit=None):
+def build_work_world_state(resume, allowed_read_roots, file_limit=None, cwd=None):
     if not allowed_read_roots:
         return {}
 
+    base = _world_base(cwd)
+    allowed_read_roots = _world_roots_for_cwd(allowed_read_roots, cwd=base)
     world = {"files": []}
     git_status = _world_git_status(allowed_read_roots)
     world["git_status"] = {
@@ -199,7 +234,7 @@ def build_work_world_state(resume, allowed_read_roots, file_limit=None):
     for path, source in paths:
         record = {"path": path}
         try:
-            resolved = resolve_allowed_path(path, allowed_read_roots)
+            resolved = resolve_allowed_path(_world_path_for_cwd(path, base), allowed_read_roots)
             if is_sensitive_path(resolved):
                 raise ValueError(f"refusing to inspect sensitive path: {path}")
             record.update(_world_file_record(resolved, path, source))
@@ -208,7 +243,7 @@ def build_work_world_state(resume, allowed_read_roots, file_limit=None):
         except ValueError as exc:
             if "path does not exist" in str(exc):
                 try:
-                    resolved = _allowed_missing_path(path, allowed_read_roots)
+                    resolved = _allowed_missing_path(path, allowed_read_roots, cwd=base)
                     record.update(_world_file_record(resolved, path, source))
                 except ValueError as missing_exc:
                     record.update({"exists": None, "error": str(missing_exc)})
@@ -216,5 +251,5 @@ def build_work_world_state(resume, allowed_read_roots, file_limit=None):
                 record.update({"exists": None, "error": str(exc)})
         world["files"].append(record)
     if not world["files"]:
-        world["files"] = _workspace_snapshot_records(allowed_read_roots, snapshot_limit)
+        world["files"] = _workspace_snapshot_records(allowed_read_roots, snapshot_limit, cwd=base)
     return world

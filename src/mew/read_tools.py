@@ -308,6 +308,106 @@ def _strip_wrapping_search_quotes(query):
     return inner or text
 
 
+def _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines):
+    base_root = resolved if resolved.is_dir() else resolved.parent
+
+    def ignored(candidate):
+        try:
+            parts = candidate.relative_to(base_root).parts
+        except ValueError:
+            parts = candidate.parts
+        return any(part in DEFAULT_GLOB_IGNORED_PARTS for part in parts)
+
+    def included(candidate):
+        if not include_patterns:
+            return True
+        try:
+            rel = candidate.relative_to(base_root)
+            rel_text = rel.as_posix()
+        except ValueError:
+            rel_text = candidate.name
+        return any(
+            fnmatch.fnmatch(rel_text, include_pattern) or fnmatch.fnmatch(candidate.name, include_pattern)
+            for include_pattern in include_patterns
+        )
+
+    if resolved.is_file():
+        candidates = [resolved]
+    elif resolved.is_dir():
+        candidates = sorted((candidate for candidate in resolved.rglob("*") if candidate.is_file()), key=lambda item: str(item))
+    else:
+        raise ValueError(f"path is not searchable: {resolved}")
+
+    matches = []
+    snippets = []
+    total_matches = 0
+    skipped_sensitive = 0
+    for candidate in candidates:
+        if ignored(candidate) or not included(candidate):
+            continue
+        if candidate.is_symlink():
+            skipped_sensitive += 1
+            continue
+        try:
+            target = candidate.resolve(strict=True)
+        except OSError:
+            continue
+        if not (target == base_root or _is_relative_to(target, base_root)):
+            skipped_sensitive += 1
+            continue
+        if is_sensitive_path(candidate) or is_sensitive_path(target):
+            skipped_sensitive += 1
+            continue
+        try:
+            stat = target.stat()
+        except OSError:
+            continue
+        if stat.st_size > 5_000_000:
+            continue
+        try:
+            sample = candidate.open("rb").read(4096)
+        except OSError:
+            continue
+        if b"\0" in sample:
+            continue
+        try:
+            lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line_number, line_text in enumerate(lines, 1):
+            if search_query not in line_text:
+                continue
+            total_matches += 1
+            if len(matches) >= max_matches:
+                continue
+            matches.append(f"{candidate}:{line_number}:{line_text}")
+            if context_lines > 0:
+                start = max(1, line_number - context_lines)
+                end = min(len(lines), line_number + context_lines)
+                snippets.append(
+                    {
+                        "path": str(candidate),
+                        "line": line_number,
+                        "start_line": start,
+                        "end_line": end,
+                        "lines": [
+                            {
+                                "line": number,
+                                "text": lines[number - 1],
+                                "match": number == line_number,
+                            }
+                            for number in range(start, end + 1)
+                        ],
+                    }
+                )
+    return {
+        "matches": matches,
+        "snippets": snippets,
+        "truncated": total_matches > max_matches,
+        "skipped_sensitive": skipped_sensitive,
+    }
+
+
 def search_text(
     query,
     path,
@@ -356,18 +456,57 @@ def search_text(
         )
 
     search_query = original_query
+    used_python_fallback = False
     try:
         result = run_search(search_query)
-    except FileNotFoundError as exc:
-        raise ValueError("rg is required for search_text but was not found") from exc
+    except FileNotFoundError:
+        used_python_fallback = True
+        result = None
     except subprocess.TimeoutExpired as exc:
         raise ValueError("search timed out") from exc
 
     stripped_query = _strip_wrapping_search_quotes(original_query)
+    if used_python_fallback:
+        fallback = _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines)
+        if not fallback["matches"] and stripped_query != original_query:
+            search_query = stripped_query
+            fallback = _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines)
+        payload = {
+            "path": str(resolved),
+            "query": search_query,
+            "pattern": include_patterns[0] if len(include_patterns) == 1 else None,
+            "patterns": include_patterns,
+            "matches": fallback["matches"],
+            "snippets": fallback["snippets"],
+            "context_lines": context_lines,
+            "truncated": fallback["truncated"],
+            "skipped_sensitive": fallback["skipped_sensitive"],
+            "engine": "python",
+        }
+        if search_query != original_query:
+            payload["original_query"] = original_query
+        return payload
+
     if result.returncode == 1 and stripped_query != original_query:
         search_query = stripped_query
         try:
             result = run_search(search_query)
+        except FileNotFoundError:
+            fallback = _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines)
+            payload = {
+                "path": str(resolved),
+                "query": search_query,
+                "pattern": include_patterns[0] if len(include_patterns) == 1 else None,
+                "patterns": include_patterns,
+                "matches": fallback["matches"],
+                "snippets": fallback["snippets"],
+                "context_lines": context_lines,
+                "truncated": fallback["truncated"],
+                "skipped_sensitive": fallback["skipped_sensitive"],
+                "engine": "python",
+                "original_query": original_query,
+            }
+            return payload
         except subprocess.TimeoutExpired as exc:
             raise ValueError("search timed out") from exc
 
@@ -554,6 +693,12 @@ def summarize_read_result(action_type, result):
         return (
             f"Read file {result.get('path')} size={result.get('size')} chars "
             f"offset={offset}{next_text}{suffix}\n{result.get('text') or ''}"
+        )
+    if action_type == "read_image":
+        return (
+            f"Read image {result.get('path')} size={result.get('size')} "
+            f"mime={result.get('mime_type')} detail={result.get('detail')}\n"
+            f"{result.get('text') or ''}"
         )
     if action_type == "search_text":
         suffix = " (truncated)" if result.get("truncated") else ""

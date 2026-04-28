@@ -29,6 +29,46 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertEqual(policy["effort"], "medium")
         self.assertEqual(policy["work_type"], "small_implementation")
 
+    def test_selects_high_for_complex_implementation_terms(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Build MIPS interpreter",
+                "kind": "coding",
+                "description": "Implement a MIPS interpreter that loads an ELF and executes the program.",
+            },
+            capabilities={"allowed_write_roots": ["."], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "complex_implementation")
+        self.assertIn("interpreter", policy["matched_terms"])
+
+    def test_selects_high_for_long_implementation_spec(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Implement benchmark task",
+                "kind": "coding",
+                "description": "Implement the requested program.\n" + ("Acceptance detail. " * 90),
+            },
+            capabilities={"allowed_write_roots": ["."], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "complex_implementation")
+        self.assertIn("task text is long enough", policy["reason"])
+
+    def test_complex_terms_do_not_raise_read_only_exploration(self):
+        policy = select_work_reasoning_policy(
+            {"title": "Inspect interpreter architecture", "kind": "coding"},
+            capabilities={"allowed_write_roots": [], "allow_verify": False},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "low")
+        self.assertEqual(policy["work_type"], "exploration")
+
     def test_selects_high_for_safety_recovery_or_roadmap_work(self):
         policy = select_work_reasoning_policy(
             {"title": "Update roadmap recovery gate", "kind": "coding"},
@@ -40,6 +80,18 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertEqual(policy["work_type"], "high_risk")
         self.assertIn("roadmap", policy["matched_terms"])
         self.assertIn("recovery", policy["matched_terms"])
+
+    def test_high_risk_takes_precedence_over_complex_implementation(self):
+        policy = select_work_reasoning_policy(
+            {"title": "Update security policy for interpreter runtime", "kind": "coding"},
+            capabilities={"allowed_write_roots": ["."], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "high_risk")
+        self.assertIn("policy", policy["matched_terms"])
+        self.assertIn("security", policy["matched_terms"])
 
     def test_high_risk_title_is_not_suppressed_by_out_of_scope_guidance(self):
         policy = select_work_reasoning_policy(

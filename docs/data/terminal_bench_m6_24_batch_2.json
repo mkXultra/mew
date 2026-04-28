@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "source_registry": "docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json",
+  "purpose": "M6.24 broad Terminal-Bench parity campaign batch 2",
+  "selection_rule": "Next unseen registry slice after M6.20/M6.22/M6.24 Batch 1, spanning remaining low/medium/high Codex success bands and task shapes without Terminal-Bench-specific solvers.",
+  "codex_target_successes": 27,
+  "codex_target_trials": 40,
+  "tasks": [
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "55f554b8d07c2ec69aa88e385675925e684eb09c256610e0abca10375efc3876",
+      "taskName": "build-pmars"
+    },
+    {
+      "avgResolutionRate": 0,
+      "nTrials": 5,
+      "resolutionRatePct": 0.0,
+      "successCount": 0,
+      "taskChecksum": "69e68a75ace210a7fdbce0d1605c0d530a7b5119791d91c6786f84313b30fc3a",
+      "taskName": "caffe-cifar-10"
+    },
+    {
+      "avgResolutionRate": 0.6,
+      "nTrials": 5,
+      "resolutionRatePct": 60.0,
+      "successCount": 3,
+      "taskChecksum": "7bf6f42ea794b180079f40bfae015198142dd763242c16e58e817950aac53e6d",
+      "taskName": "dna-assembly"
+    },
+    {
+      "avgResolutionRate": 0.6,
+      "nTrials": 5,
+      "resolutionRatePct": 60.0,
+      "successCount": 3,
+      "taskChecksum": "162cd54836ca70b3a4c62f7fab0e369007f76488213865efdf563b20dceebb15",
+      "taskName": "dna-insert"
+    },
+    {
+      "avgResolutionRate": 0.4,
+      "nTrials": 5,
+      "resolutionRatePct": 40.0,
+      "successCount": 2,
+      "taskChecksum": "605fb166c0af666150b184a6ca50f1ca1c2221a5b93e44efd21c7ea40d746d54",
+      "taskName": "extract-moves-from-video"
+    },
+    {
+      "avgResolutionRate": 0.8,
+      "nTrials": 5,
+      "resolutionRatePct": 80.0,
+      "successCount": 4,
+      "taskChecksum": "e8ee9e8948d949d0abe46d431736d1cf04e8aab76d98fc9c819fb26960ab1352",
+      "taskName": "financial-document-processor"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "6e313b191485295fc042ddfdc4d1184dc9588de1fa57f7513685fec67a7d7d9d",
+      "taskName": "git-leak-recovery"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "c7e5e082f251c7c83d53f7b645d97ab3152cc5fffe42d88ff9cce5c62c35ce16",
+      "taskName": "large-scale-text-editing"
+    }
+  ]
+}

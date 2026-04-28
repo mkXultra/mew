@@ -207,6 +207,45 @@ def record_signal_observation(
         return {"status": "blocked", "reason": "source_disabled", "source": source}
     budget = _refresh_budget_window(source, current_time)
     cost = max(0, int(budget_cost or 0))
+    journal = ensure_signal_state(state)["journal"]
+    normalized_kind = (kind or "observation").strip() or "observation"
+    normalized_summary = summary or ""
+    normalized_payload = deepcopy(payload or {})
+    payload_url = ""
+    if isinstance(normalized_payload, dict):
+        payload_url = str(normalized_payload.get("url") or "").strip()
+    for existing in reversed(journal):
+        existing_budget = existing.get("budget") or {}
+        if existing_budget.get("window") != budget.get("window"):
+            continue
+        if existing_budget.get("window_key") != budget.get("window_key"):
+            continue
+        existing_payload = existing.get("payload") or {}
+        existing_payload_url = ""
+        if isinstance(existing_payload, dict):
+            existing_payload_url = str(existing_payload.get("url") or "").strip()
+        same_payload_url = bool(payload_url and existing_payload_url == payload_url)
+        if same_payload_url:
+            return {
+                "status": "blocked",
+                "reason": "duplicate_suppressed",
+                "source": source,
+                "signal": deepcopy(existing),
+                "budget": deepcopy(budget),
+            }
+        same_source_kind_summary = (
+            existing.get("source") == source.get("name")
+            and existing.get("kind") == normalized_kind
+            and existing.get("summary") == normalized_summary
+        )
+        if same_source_kind_summary:
+            return {
+                "status": "blocked",
+                "reason": "duplicate_suppressed",
+                "source": source,
+                "signal": deepcopy(existing),
+                "budget": deepcopy(budget),
+            }
     if budget["used"] + cost > budget["limit"]:
         return {
             "status": "blocked",
@@ -216,14 +255,13 @@ def record_signal_observation(
         }
 
     budget["used"] += cost
-    journal = ensure_signal_state(state)["journal"]
     item = {
         "id": next_id(state, "signal"),
         "source": source.get("name"),
         "source_kind": source.get("kind"),
-        "kind": (kind or "observation").strip() or "observation",
-        "summary": summary or "",
-        "payload": deepcopy(payload or {}),
+        "kind": normalized_kind,
+        "summary": normalized_summary,
+        "payload": normalized_payload,
         "reason_for_use": reason_for_use or "",
         "budget_cost": cost,
         "budget": {

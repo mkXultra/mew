@@ -26,7 +26,9 @@ the work. Do not hide failures behind supervisor rescue edits.
 2. Start with mew as implementer. Codex acts as human-style reviewer/approver.
 3. Require a scoped patch, proof command, and reviewer-visible rationale.
 4. If mew succeeds, classify the result as `success_mew_first`.
-5. If mew fails, classify the failure before fixing any product code.
+5. If mew fails, classify the failure scope before fixing any product code:
+   `polish`, `structural`, `invalid_task_spec`, `transient_model`, or
+   `ambiguous`.
 6. If the failure is a reproducible loop/substrate blocker, immediately pause
    the active product milestone as `pending`, record or activate a bounded
    repair episode under the M6.14 repair ledger, make the bounded substrate
@@ -39,6 +41,42 @@ the work. Do not hide failures behind supervisor rescue edits.
    M6.14 repair episode with the new blocker or explicitly record why the
    failure is invalid/transient. Do not move to unrelated polish while the
    same class blocks mew-owned implementation.
+
+## Failure Scope Diagnosis
+
+Before routing a mew-first failure, record an evidence-based failure scope.
+This is triage, not omniscience; use `ambiguous` when the evidence is not
+strong enough.
+
+- `polish`: the task, target paths, patch artifact, and verifier are basically
+  correct; a reviewer rejection or small verifier miss can be repaired by
+  retrying the same task without substrate surgery.
+- `structural`: the failure points at the implementation body itself, such as
+  wrong target, task-goal miss, missing patch artifact, lost retry frontier,
+  stale/incomplete cached window, permission/scope ambiguity, repeated
+  first-edit latency, or supervisor product rescue required.
+- `invalid_task_spec`: the task scope, expected proof, acceptance criterion, or
+  verifier command was wrong or underspecified.
+- `transient_model`: timeout, API, quota, backend, or other service instability
+  that does not yet imply a durable loop problem.
+- `ambiguous`: the failure cannot be confidently routed until replay bundles,
+  reviewer findings, metrics, or proof artifacts are collected.
+
+Route decisions:
+
+- `polish` -> retry the same task with the reviewer finding or verifier miss as
+  the next frontier.
+- `structural` -> pause the active product milestone and use M6.14 repair.
+- `invalid_task_spec` -> fix the task/spec first, then retry.
+- `transient_model` -> retry without changing product code or substrate.
+- `ambiguous` -> collect replay/proof evidence before claiming structural
+  repair or autonomy credit.
+
+For structural claims, record `confidence`, `signals`, `recommended_route`,
+and a stable `structural_reason` when possible. Reference-derived changes from
+`docs/ADOPT_FROM_REFERENCES.md` or
+`docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` are candidates only after
+the recorded signal points there.
 
 ## Failure Classes
 

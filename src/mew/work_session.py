@@ -5,7 +5,9 @@ from pathlib import Path
 import re
 import shlex
 
+from .acceptance import coerce_acceptance_checks
 from .cli_command import mew_command, mew_executable
+from .data_tools import analyze_table
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
     glob_paths,
@@ -16,6 +18,7 @@ from .read_tools import (
     search_text,
     summarize_read_result,
 )
+from .image_tools import read_image_with_model
 from .state import next_id
 from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
@@ -233,8 +236,10 @@ def _apply_tiny_write_ready_draft_outcome_to_active_work_todo(
     return todo
 
 WORK_TOOLS = {
+    "analyze_table",
     "inspect_dir",
     "read_file",
+    "read_image",
     "search_text",
     "glob",
     "run_command",
@@ -251,13 +256,83 @@ APPROVAL_WAIT_RE = re.compile(
     r"|\b(?:approval|approve|rejection|reject)\b.*\b(?:wait|waiting|await|awaiting)\b",
     re.IGNORECASE,
 )
-READ_ONLY_WORK_TOOLS = {"inspect_dir", "read_file", "search_text", "glob"}
+READ_ONLY_WORK_TOOLS = {"analyze_table", "inspect_dir", "read_file", "read_image", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
 COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 SHELL_CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
 APPROVAL_STATUS_INDETERMINATE = "indeterminate"
 NON_PENDING_APPROVAL_STATUSES = {"applying", "applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
+
+
+def _truthy_path(value):
+    text = str(value or "").strip()
+    return text if text and text != "." else ""
+
+
+def work_session_default_cwd(session=None, task=None):
+    defaults = (session or {}).get("default_options") if isinstance(session, dict) else {}
+    task = task if isinstance(task, dict) else {}
+    return _truthy_path((defaults or {}).get("cwd")) or _truthy_path(task.get("cwd"))
+
+
+def _work_tool_workspace_cwd(parameters):
+    raw = str((parameters or {}).get("cwd") or ".").strip() or "."
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.resolve(strict=False)
+
+
+def _work_path_for_cwd(path, cwd, default="."):
+    if path in (None, "") and default == "":
+        return ""
+    raw = str(path if path not in (None, "") else default)
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        return str(candidate)
+    return str((Path(cwd) / candidate).resolve(strict=False))
+
+
+def _work_roots_for_cwd(roots, cwd):
+    resolved = []
+    for root in roots or []:
+        raw = str(root or "").strip()
+        if not raw:
+            continue
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = Path(cwd) / path
+        text = str(path.resolve(strict=False))
+        if text not in resolved:
+            resolved.append(text)
+    return resolved
+
+
+def _workspace_relative_work_parameters(tool, parameters, allowed_read_roots):
+    parameters = dict(parameters or {})
+    cwd = _work_tool_workspace_cwd(parameters)
+    parameters["cwd"] = str(cwd)
+    read_roots = _work_roots_for_cwd(allowed_read_roots or [], cwd)
+    if tool in READ_ONLY_WORK_TOOLS:
+        parameters["path"] = _work_path_for_cwd(parameters.get("path"), cwd)
+    elif tool in GIT_WORK_TOOLS:
+        parameters["cwd"] = _work_path_for_cwd(parameters.get("cwd"), cwd)
+    elif tool in WRITE_WORK_TOOLS:
+        parameters["path"] = _work_path_for_cwd(parameters.get("path"), cwd, default="")
+        parameters["allowed_write_roots"] = _work_roots_for_cwd(parameters.get("allowed_write_roots") or [], cwd)
+        verify_cwd = parameters.get("verify_cwd")
+        if verify_cwd in (None, "", "."):
+            parameters["verify_cwd"] = str(cwd)
+        else:
+            parameters["verify_cwd"] = _work_path_for_cwd(verify_cwd, cwd)
+    elif tool in COMMAND_WORK_TOOLS:
+        parameters["cwd"] = _work_path_for_cwd(parameters.get("cwd"), cwd)
+    return parameters, read_roots
+
+
+def workspace_relative_work_parameters(tool, parameters, allowed_read_roots=None):
+    return _workspace_relative_work_parameters(tool, parameters, allowed_read_roots or [])
 RESOLVED_APPROVAL_MEMORY_STATUSES = {"applied", "rejected", APPROVAL_STATUS_INDETERMINATE}
 RECOVERY_PLAN_ACTION_PRIORITY = (
     "needs_user_review",
@@ -1276,6 +1351,14 @@ def work_tool_repeat_guard(
     for call in reversed(session.get("tool_calls") or []):
         if not isinstance(call, dict):
             continue
+        result = call.get("result") or {}
+        if (
+            call.get("tool") in WRITE_WORK_TOOLS
+            and call.get("status") == "completed"
+            and result.get("changed")
+            and result.get("written")
+        ):
+            break
         call_signature = work_tool_signature(call.get("tool"), call.get("parameters") or {})
         is_match = call_signature == signature
         if is_match:
@@ -1839,7 +1922,8 @@ def start_work_tool_call(state, session, tool, parameters):
     write_intent_error = ""
     if tool in WRITE_WORK_TOOLS and (parameters or {}).get("apply"):
         try:
-            write_intent = build_write_intent(tool, parameters or {})
+            intent_parameters, _read_roots = workspace_relative_work_parameters(tool, parameters or {})
+            write_intent = build_write_intent(tool, intent_parameters)
         except (OSError, ValueError) as exc:
             write_intent_error = str(exc)
     tool_call = {
@@ -2018,7 +2102,7 @@ def run_command_for_work(command, cwd=".", timeout=300, on_output=None):
     return run_command_record(command, cwd=cwd, timeout=timeout)
 
 
-def first_unquoted_shell_operator(command):
+def first_unquoted_shell_operator_span(command):
     text = command or ""
     in_single = False
     in_double = False
@@ -2047,17 +2131,17 @@ def first_unquoted_shell_operator(command):
             continue
 
         if char in {"\n", "\r"}:
-            return char, "chain"
+            return char, "chain", index, index + 1
         two_chars = text[index : index + 2]
         if two_chars == "&>":
             end = index + 2
             if end < len(text) and text[end] == ">":
                 end += 1
-            return text[index:end], "redirection"
+            return text[index:end], "redirection", index, end
         if two_chars in SHELL_CHAIN_OPERATORS:
-            return two_chars, "chain"
+            return two_chars, "chain", index, index + 2
         if char in SHELL_CHAIN_OPERATORS:
-            return char, "chain"
+            return char, "chain", index, index + 1
         if char in {">", "<"}:
             end = index + 1
             if end < len(text) and text[end] == char:
@@ -2066,7 +2150,7 @@ def first_unquoted_shell_operator(command):
                 end += 1
                 while end < len(text) and text[end].isdigit():
                     end += 1
-            return text[index:end], "redirection"
+            return text[index:end], "redirection", index, end
         if char.isdigit() and index + 1 < len(text) and text[index + 1] in {">", "<"}:
             end = index + 2
             if end < len(text) and text[end] == text[index + 1]:
@@ -2075,9 +2159,34 @@ def first_unquoted_shell_operator(command):
                 end += 1
                 while end < len(text) and text[end].isdigit():
                     end += 1
-            return text[index:end], "redirection"
+            return text[index:end], "redirection", index, end
         index += 1
-    return None, ""
+    return None, "", -1, -1
+
+
+def first_unquoted_shell_operator(command):
+    operator, kind, _start, _end = first_unquoted_shell_operator_span(command)
+    return operator, kind
+
+
+def normalize_run_tests_cd_prefix(command, cwd):
+    operator, kind, start, end = first_unquoted_shell_operator_span(command)
+    if kind != "chain" or operator != "&&":
+        return command, cwd, False
+    prefix = command[:start].strip()
+    suffix = command[end:].strip()
+    if not prefix or not suffix:
+        return command, cwd, False
+    try:
+        prefix_tokens = shlex.split(prefix)
+    except ValueError:
+        return command, cwd, False
+    if len(prefix_tokens) != 2 or prefix_tokens[0] != "cd":
+        return command, cwd, False
+    target_cwd = prefix_tokens[1]
+    if not Path(target_cwd).is_absolute():
+        target_cwd = str(Path(cwd or ".") / target_cwd)
+    return suffix, target_cwd, True
 
 
 def reject_shell_control_tokens(command, *, tool_name="run_tests"):
@@ -2104,10 +2213,15 @@ def reject_resident_mew_loop_command(command, *, tool_name="run_command"):
     )
 
 
-def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
+def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, model_context=None):
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
+    parameters, allowed_read_roots = _workspace_relative_work_parameters(
+        tool,
+        parameters,
+        allowed_read_roots,
+    )
     if tool in READ_ONLY_WORK_TOOLS and not allowed_read_roots:
         raise ValueError("work tool read access is disabled; pass --allow-read PATH")
     if tool in GIT_WORK_TOOLS and not allowed_read_roots:
@@ -2115,6 +2229,14 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
 
     if tool == "inspect_dir":
         return inspect_dir(parameters.get("path") or ".", allowed_read_roots, limit=parameters.get("limit", 50))
+    if tool == "analyze_table":
+        return analyze_table(
+            parameters.get("path") or "",
+            allowed_read_roots,
+            max_bytes=parameters.get("max_bytes"),
+            max_rows=parameters.get("max_rows"),
+            max_extrema=parameters.get("max_extrema"),
+        )
     if tool == "read_file":
         return read_file(
             parameters.get("path") or "",
@@ -2123,6 +2245,19 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
             offset=parameters.get("offset", 0),
             line_start=parameters.get("line_start"),
             line_count=parameters.get("line_count"),
+        )
+    if tool == "read_image":
+        context = model_context or {}
+        return read_image_with_model(
+            parameters.get("path") or "",
+            allowed_read_roots,
+            model_backend=context.get("model_backend") or "codex",
+            model_auth=context.get("model_auth"),
+            model=context.get("model"),
+            base_url=context.get("base_url"),
+            timeout=context.get("timeout") or parameters.get("timeout") or 300,
+            prompt=parameters.get("prompt"),
+            detail=parameters.get("detail"),
         )
     if tool == "search_text":
         return search_text(
@@ -2161,10 +2296,15 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None):
         command = parameters.get("command") or ""
         if not command:
             raise ValueError("run_tests command is empty")
+        command, cwd, normalized_cd_prefix = normalize_run_tests_cd_prefix(command, parameters.get("cwd") or ".")
+        if normalized_cd_prefix:
+            parameters["normalized_cd_prefix"] = True
+            parameters["command"] = command
+            parameters["cwd"] = cwd
         reject_shell_control_tokens(command, tool_name="run_tests")
         return run_command_for_work(
             command,
-            cwd=parameters.get("cwd") or ".",
+            cwd=cwd,
             timeout=parameters.get("timeout", 300),
             on_output=on_output,
         )
@@ -3156,6 +3296,213 @@ def build_recurring_work_failures(calls, limit=3):
     return repeated[-limit:]
 
 
+_VERIFIER_LOCATION_PATTERNS = (
+    re.compile(r'File "([^"]+)", line (\d+)'),
+    re.compile(
+        r"(?m)(?:^|[\s(])((?:[A-Za-z]:)?/?[^\s:]+(?:\.py|\.pyx|\.c|\.cpp|\.h|\.hpp|\.js|\.ts|\.go|\.rs|\.java|\.rb|\.php|\.sh)):(\d+)"
+    ),
+)
+_VERIFIER_ERROR_LINE_RE = re.compile(
+    r"(Traceback|AssertionError|AttributeError|ImportError|ModuleNotFoundError|NameError|TypeError|ValueError|"
+    r"\bFAILED\b|\bERROR\b|No module named|cannot import name|has no attribute)",
+    re.IGNORECASE,
+)
+_GENERIC_VERIFIER_WRAPPER_LINE_RE = re.compile(
+    r"^(?:run_command|run_tests|verification)\s+failed with exit_code=\d+$",
+    re.IGNORECASE,
+)
+_VERIFIER_SYMBOL_PATTERNS = (
+    re.compile(r"has no attribute ['\"]([^'\"]+)['\"]"),
+    re.compile(r"cannot import name ['\"]([^'\"]+)['\"]"),
+    re.compile(r"No module named ['\"]([^'\"]+)['\"]"),
+    re.compile(r"NameError: name ['\"]([^'\"]+)['\"]"),
+)
+_VERIFIER_MISSING_ATTRIBUTE_RE = re.compile(
+    r"module ['\"]([^'\"]+)['\"] has no attribute ['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_VERIFIER_IMPORT_NAME_RE = re.compile(
+    r"cannot import name ['\"]([^'\"]+)['\"] from ['\"]([^'\"]+)['\"]",
+    re.IGNORECASE,
+)
+_VERIFIER_MODULE_ALIAS_QUERIES = {
+    "numpy": ("np",),
+    "pandas": ("pd",),
+}
+
+
+def _latest_failed_command_call(calls):
+    for call in reversed(list(calls or [])):
+        if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+            continue
+        if call.get("status") in ("failed", "interrupted") or work_tool_failure_record(call):
+            return call
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("exit_code") == 0:
+            return {}
+    return {}
+
+
+def _verifier_failure_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    running = call.get("running_output") if isinstance(call.get("running_output"), dict) else {}
+    parts = [
+        call.get("error") or "",
+        call.get("summary") or "",
+        result.get("stderr") or running.get("stderr") or "",
+        result.get("stdout") or running.get("stdout") or "",
+    ]
+    return "\n".join(str(part) for part in parts if part)
+
+
+def _extract_verifier_error_lines(text, limit=6):
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or not _VERIFIER_ERROR_LINE_RE.search(line):
+            continue
+        if _GENERIC_VERIFIER_WRAPPER_LINE_RE.match(line):
+            continue
+        clipped = clip_inline_text(line, 240)
+        if clipped not in lines:
+            lines.append(clipped)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _extract_verifier_source_locations(text, limit=8):
+    locations = []
+    seen = set()
+    for pattern in _VERIFIER_LOCATION_PATTERNS:
+        for match in pattern.finditer(str(text or "")):
+            path = str(match.group(1) or "").strip()
+            line = str(match.group(2) or "").strip()
+            if not path or not line:
+                continue
+            key = (path, line)
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append({"path": path, "line": line})
+            if len(locations) >= limit:
+                return locations
+    return locations
+
+
+def _extract_verifier_symbols(text, limit=8):
+    symbols = []
+    for pattern in _VERIFIER_SYMBOL_PATTERNS:
+        for match in pattern.finditer(str(text or "")):
+            symbol = str(match.group(1) or "").strip()
+            if not symbol or symbol in symbols:
+                continue
+            symbols.append(clip_inline_text(symbol, 120))
+            if len(symbols) >= limit:
+                return symbols
+    return symbols
+
+
+def _extract_verifier_sibling_search_queries(text, limit=8):
+    queries = []
+
+    def add_query(query):
+        query = clip_inline_text(str(query or "").strip(), 160)
+        if query and query not in queries:
+            queries.append(query)
+        return len(queries) >= limit
+
+    for match in _VERIFIER_MISSING_ATTRIBUTE_RE.finditer(str(text or "")):
+        module = str(match.group(1) or "").strip()
+        attr = str(match.group(2) or "").strip()
+        if not module or not attr:
+            continue
+        if add_query(f"{module}.{attr}"):
+            return queries
+        for alias in _VERIFIER_MODULE_ALIAS_QUERIES.get(module, ()):
+            if add_query(f"{alias}.{attr}"):
+                return queries
+
+    for match in _VERIFIER_IMPORT_NAME_RE.finditer(str(text or "")):
+        symbol = str(match.group(1) or "").strip()
+        module = str(match.group(2) or "").strip()
+        if not symbol or not module:
+            continue
+        if add_query(f"from {module} import {symbol}"):
+            return queries
+        if add_query(f"{module}.{symbol}"):
+            return queries
+
+    return queries
+
+
+def _latest_changed_dry_run_write(calls, *, after_tool_call_id=None):
+    try:
+        after_id = int(after_tool_call_id) if after_tool_call_id is not None else None
+    except (TypeError, ValueError):
+        after_id = None
+    for call in reversed(list(calls or [])):
+        if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        if after_id is not None:
+            try:
+                call_id = int(call.get("id"))
+            except (TypeError, ValueError):
+                call_id = None
+            if call_id is not None and call_id <= after_id:
+                continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("dry_run") is True and result.get("changed"):
+            return call
+    return {}
+
+
+def build_verifier_failure_repair_agenda(calls):
+    call = _latest_failed_command_call(calls)
+    if not call:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    failure_record = work_tool_failure_record(call) or result
+    text = _verifier_failure_text(call)
+    error_lines = _extract_verifier_error_lines(text)
+    source_locations = _extract_verifier_source_locations(text)
+    symbols = _extract_verifier_symbols(text)
+    sibling_search_queries = _extract_verifier_sibling_search_queries(text)
+    if not any((error_lines, source_locations, symbols)):
+        return {}
+    dry_run_call = _latest_changed_dry_run_write(calls, after_tool_call_id=call.get("id"))
+    agenda = {
+        "kind": "verifier_failure_repair_agenda",
+        "source_tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "command": result.get("command") or (call.get("parameters") or {}).get("command") or "",
+        "cwd": result.get("cwd") or (call.get("parameters") or {}).get("cwd") or "",
+        "exit_code": (failure_record or {}).get("exit_code"),
+        "error_lines": error_lines,
+        "source_locations": source_locations,
+        "symbols": symbols,
+        "sibling_search_queries": sibling_search_queries,
+        "suggested_next": (
+            "turn this verifier output into one small applied edit batch before broader exploration; "
+            "if multiple same-family errors are visible, repair the visible sibling set together"
+        ),
+        "installed_artifact_policy": (
+            "if a traceback points into an installed/generated artifact but the workspace contains matching source, "
+            "edit the matching workspace source under the allowed write root and reinstall/reverify"
+        ),
+    }
+    if dry_run_call:
+        agenda["latest_changed_dry_run_write"] = {
+            "tool_call_id": dry_run_call.get("id"),
+            "tool": dry_run_call.get("tool") or "",
+            "path": work_call_path(dry_run_call),
+            "summary": clip_inline_text(dry_run_call.get("summary") or "", 240),
+        }
+    return agenda
+
+
 def build_low_yield_observation_warnings(calls, *, threshold=3, limit=3):
     groups = {}
     for call in calls or []:
@@ -3199,7 +3546,8 @@ def build_low_yield_observation_warnings(calls, *, threshold=3, limit=3):
     return warnings[-limit:]
 
 
-def _search_result_first_match_line(result):
+def _search_result_first_match_anchor(result):
+    result = result or {}
     matches = (result or {}).get("matches") or []
     for match in matches:
         if isinstance(match, dict):
@@ -3207,17 +3555,117 @@ def _search_result_first_match_line(result):
                 value = match.get(key)
                 try:
                     if value is not None:
-                        return max(1, int(value))
+                        return str(match.get("path") or result.get("path") or ""), max(1, int(value))
                 except (TypeError, ValueError):
                     continue
         if isinstance(match, str):
             parts = match.split(":", 2)
             if len(parts) >= 2:
                 try:
-                    return max(1, int(parts[1]))
+                    return str(parts[0] or result.get("path") or ""), max(1, int(parts[1]))
                 except (TypeError, ValueError):
                     continue
-    return None
+    snippets = (result or {}).get("snippets") or []
+    for snippet in snippets:
+        if not isinstance(snippet, dict):
+            continue
+        for key in ("line", "start_line"):
+            value = snippet.get(key)
+            try:
+                if value is not None:
+                    return str(snippet.get("path") or result.get("path") or ""), max(1, int(value))
+            except (TypeError, ValueError):
+                continue
+    return "", None
+
+
+def _search_result_first_match_line(result):
+    _path, line = _search_result_first_match_anchor(result)
+    return line
+
+
+def _work_paths_refer_to_same_file(left, right):
+    left = _working_memory_target_path_text(left)
+    right = _working_memory_target_path_text(right)
+    if not left or not right:
+        return False
+    return left == right or left.endswith(f"/{right}") or right.endswith(f"/{left}")
+
+
+def _read_file_calls_cover_line(calls, path, line, *, after_tool_call_id=None):
+    try:
+        line = int(line or 0)
+    except (TypeError, ValueError):
+        return False
+    if line <= 0:
+        return False
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") != "read_file" or call.get("status") != "completed":
+            continue
+        call_id = call.get("id")
+        if after_tool_call_id is not None:
+            try:
+                if int(call_id or 0) <= int(after_tool_call_id or 0):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if not _work_paths_refer_to_same_file(work_call_path(call), path):
+            continue
+        window = _read_file_call_line_window(call)
+        if window is None:
+            continue
+        start, end = window
+        if start <= line <= end:
+            return True
+    return False
+
+
+def build_search_anchor_observations(calls, *, limit=5, read_line_count=80):
+    observations = []
+    seen = set()
+    calls = list(calls or [])
+    for call in reversed(calls):
+        if not isinstance(call, dict) or call.get("tool") != "search_text" or call.get("status") != "completed":
+            continue
+        result = call.get("result") or {}
+        matches = result.get("matches")
+        snippets = result.get("snippets")
+        if not matches and not snippets:
+            continue
+        match_path, first_match_line = _search_result_first_match_anchor(result)
+        path = match_path or result.get("path") or (call.get("parameters") or {}).get("path") or ""
+        query = result.get("query") or (call.get("parameters") or {}).get("query") or ""
+        pattern = result.get("pattern") or (call.get("parameters") or {}).get("pattern") or ""
+        if first_match_line is None:
+            continue
+        key = (path, query, pattern)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _read_file_calls_cover_line(calls, path, first_match_line, after_tool_call_id=call.get("id")):
+            continue
+        line_start = max(1, first_match_line - 5)
+        observations.append(
+            {
+                "tool": "search_text",
+                "path": path,
+                "query": query,
+                "pattern": pattern,
+                "tool_call_id": call.get("id"),
+                "first_match_line": first_match_line,
+                "reason": (
+                    "successful search_text returned a line anchor that has not yet been converted into "
+                    "a narrow read_file window"
+                ),
+                "suggested_next": (
+                    f"read_file path={path} line_start={line_start} line_count={read_line_count}"
+                ).strip(),
+            }
+        )
+        if len(observations) >= limit:
+            break
+    observations.sort(key=lambda item: item.get("tool_call_id") or 0)
+    return observations[-limit:]
 
 
 def build_redundant_search_observations(calls, *, limit=3, read_line_count=20):
@@ -3623,6 +4071,13 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
     observed_verified_state = ""
     if (verification_state or {}).get("status") != "not_run":
         observed_verified_state = format_work_verification_state(verification_state)
+    raw_acceptance_constraints = raw.get("acceptance_constraints") or raw.get("constraints") or []
+    if isinstance(raw_acceptance_constraints, str):
+        acceptance_constraint_items = [raw_acceptance_constraints]
+    elif isinstance(raw_acceptance_constraints, list):
+        acceptance_constraint_items = raw_acceptance_constraints
+    else:
+        acceptance_constraint_items = []
     memory = {
         "hypothesis": clip_output(str(raw.get("hypothesis") or raw.get("current_hypothesis") or "").strip(), 600),
         "next_step": clip_output(str(raw.get("next_step") or raw.get("next_intended_step") or "").strip(), 600),
@@ -3633,6 +4088,12 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
             600,
         ),
         "target_paths": _coerce_working_memory_target_paths(raw.get("target_paths") or raw.get("paths") or []),
+        "acceptance_constraints": [
+            clip_output(str(item or "").strip(), 260)
+            for item in acceptance_constraint_items
+            if str(item or "").strip()
+        ][:8],
+        "acceptance_checks": coerce_acceptance_checks(raw.get("acceptance_checks") or raw.get("checks") or []),
     }
     for path in _turn_action_target_paths(turn):
         if path not in memory["target_paths"]:
@@ -3643,7 +4104,16 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
         memory["last_verified_state"] = clip_output(format_work_verification_state(verification_state), 600)
     if not any(
         memory.get(key)
-        for key in ("hypothesis", "next_step", "plan_items", "open_questions", "last_verified_state", "target_paths")
+        for key in (
+            "hypothesis",
+            "next_step",
+            "plan_items",
+            "open_questions",
+            "last_verified_state",
+            "target_paths",
+            "acceptance_constraints",
+            "acceptance_checks",
+        )
     ):
         return {}
     if turn:
@@ -7055,6 +7525,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         working_memory=working_memory,
         limit=4,
     )
+    verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -7123,6 +7594,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
+        "search_anchor_observations": build_search_anchor_observations(calls, limit=5),
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": adjacent_read_observations,
         "demoted_adjacent_read_observations": demoted_adjacent_read_observations,
@@ -7130,6 +7602,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "plan_item_observations": plan_item_observations,
         "skipped_exact_read_plan_items": skipped_exact_read_plan_items,
         "repair_anchor_observations": repair_anchor_observations,
+        "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "failed_patch_repair": failed_patch_repair,
         "retry_context": retry_context,
         "pending_approvals": pending_approvals[-limit:],
@@ -7291,6 +7764,38 @@ def format_work_session_resume(resume):
             lines.append(f"retry_verification_exit_code: {retry_context.get('verification_exit_code')}")
         if retry_context.get("body_policy"):
             lines.append(f"retry_body_policy: {retry_context.get('body_policy')}")
+    verifier_agenda = resume.get("verifier_failure_repair_agenda") or {}
+    if verifier_agenda:
+        lines.append(
+            "verifier_failure_repair_agenda: "
+            f"tool=#{verifier_agenda.get('source_tool_call_id') or '-'} "
+            f"exit={format_exit_code(verifier_agenda.get('exit_code'))} "
+            f"{verifier_agenda.get('tool') or ''}"
+        )
+        if verifier_agenda.get("symbols"):
+            lines.append(f"verifier_failure_symbols: {', '.join(verifier_agenda.get('symbols') or [])}")
+        if verifier_agenda.get("sibling_search_queries"):
+            lines.append(
+                "verifier_failure_sibling_searches: "
+                f"{', '.join(verifier_agenda.get('sibling_search_queries') or [])}"
+            )
+        if verifier_agenda.get("source_locations"):
+            refs = []
+            for item in verifier_agenda.get("source_locations") or []:
+                refs.append(f"{item.get('path')}:{item.get('line')}")
+            lines.append(f"verifier_failure_locations: {', '.join(refs)}")
+        if verifier_agenda.get("error_lines"):
+            lines.append("verifier_failure_errors:")
+            for line in verifier_agenda.get("error_lines") or []:
+                lines.append(f"  {line}")
+        if verifier_agenda.get("suggested_next"):
+            lines.append(f"verifier_failure_next: {verifier_agenda.get('suggested_next')}")
+        dry_run_write = verifier_agenda.get("latest_changed_dry_run_write") or {}
+        if dry_run_write:
+            lines.append(
+                "verifier_failure_latest_dry_run: "
+                f"#{dry_run_write.get('tool_call_id')} {dry_run_write.get('path') or ''}"
+            )
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)
@@ -7502,6 +8007,22 @@ def format_work_session_resume(resume):
             if item.get("suggested_next"):
                 lines.append(f"  suggested_next: {item.get('suggested_next')}")
 
+    search_anchors = resume.get("search_anchor_observations") or []
+    if search_anchors:
+        lines.extend(["", "Search anchor observations"])
+        for item in search_anchors:
+            target = f" {item.get('path')}" if item.get("path") else ""
+            pattern = f" pattern={item.get('pattern')}" if item.get("pattern") else ""
+            query = f" query={item.get('query')}" if item.get("query") else ""
+            line = item.get("first_match_line")
+            line_text = f" first_match_line={line}" if line else ""
+            lines.append(
+                f"- {item.get('tool')}{target}{pattern}{query} found matches; "
+                f"tool=#{item.get('tool_call_id')}{line_text}"
+            )
+            if item.get("suggested_next"):
+                lines.append(f"  suggested_next: {item.get('suggested_next')}")
+
     redundant_search = resume.get("redundant_search_observations") or []
     if redundant_search:
         lines.extend(["", "Redundant search observations"])
@@ -7642,6 +8163,17 @@ def format_work_session_resume(resume):
             lines.extend(f"- {item}" for item in plan_items)
         if memory.get("target_paths"):
             lines.append(f"target_paths: {', '.join(str(path) for path in memory.get('target_paths') or [])}")
+        constraints = memory.get("acceptance_constraints") or []
+        if constraints:
+            lines.append("acceptance_constraints:")
+            lines.extend(f"- {constraint}" for constraint in constraints)
+        checks = memory.get("acceptance_checks") or []
+        if checks:
+            lines.append("acceptance_checks:")
+            for check in checks:
+                status = f" [{check.get('status')}]" if check.get("status") else ""
+                evidence = f" evidence={check.get('evidence')}" if check.get("evidence") else ""
+                lines.append(f"-{status} {check.get('constraint') or ''}{evidence}")
         questions = memory.get("open_questions") or []
         if questions:
             lines.append("open_questions:")

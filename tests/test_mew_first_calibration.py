@@ -269,6 +269,65 @@ def test_reviewer_steered_mew_first_attempt_is_practical_not_clean() -> None:
     assert attempts[-1].autonomy_credit == "practical"
     assert attempts[-1].drift_class == "wrong_target_substitution"
     assert attempts[-1].rejected_patch_family == "reviewer_rejected_patch"
+    assert attempts[-1].failure_scope == "polish"
+    assert attempts[-1].failure_scope_confidence == "medium"
+    assert attempts[-1].recommended_route == "same_task_retry_if_repeated"
+    assert "reviewer_steer_required" in attempts[-1].diagnosis_signals
+
+
+def test_failure_scope_diagnosis_routes_structural_invalid_transient_and_ambiguous() -> None:
+    text = """
+### M6.16: Codex-Grade Implementation Lane
+
+- Task `#680` added a slice as supervisor rescue after the mew-first session
+  repeatedly drifted into a wrong-target patch and lost the retry frontier.
+  Validation covered focused tests.
+- Task `#681` failed as a mew-first implementation attempt because the task
+  used an invalid task verifier. The task scope needed correction before retry.
+- Task `#682` failed as a mew-first implementation attempt after a transient
+  empty model response and restarted without changing product code.
+- Task `#683` landed as mixed mew-first/product progress, but the final route
+  is not clear from the evidence. Validation covered focused tests.
+"""
+
+    attempts = extract_mew_first_attempts(text, limit=10)
+    by_id = {attempt.task_id: attempt for attempt in attempts}
+
+    assert by_id[680].failure_scope == "structural"
+    assert by_id[680].recommended_route == "m6_14_repair"
+    assert by_id[680].structural_reason == "wrong_target_substitution"
+    assert "lost_retry_frontier" in by_id[680].diagnosis_signals
+    assert by_id[681].failure_scope == "invalid_task_spec"
+    assert by_id[681].recommended_route == "fix_task_spec_then_retry"
+    assert by_id[682].failure_scope == "transient_model"
+    assert by_id[682].recommended_route == "retry_same_task"
+    assert by_id[683].failure_scope == "ambiguous"
+    assert by_id[683].recommended_route == "collect_replay_or_reviewer_evidence"
+
+
+def test_mew_first_calibration_reports_failure_scope_counts(tmp_path: Path) -> None:
+    source = tmp_path / "ROADMAP_STATUS.md"
+    source.write_text(
+        """
+### M6.16: Codex-Grade Implementation Lane
+
+- Task `#690` produced a supervisor-owned rescue after a wrong-target patch.
+  Validation covered focused tests.
+- Task `#691` landed a practical mew-first slice after a reviewer steer. The
+  fresh mew-first session drafted the patch and the supervisor approved
+  without rescue edits. Validation covered focused tests.
+""",
+        encoding="utf-8",
+    )
+
+    summary = summarize_mew_first_calibration(source_path=source, limit=10)
+    text = format_mew_first_calibration_report(summary)
+
+    assert summary["counts"]["failure_scope"] == {"polish": 1, "structural": 1}
+    assert summary["counts"]["structural_reason"] == {"wrong_target_substitution": 1}
+    assert "failure_scopes: polish=1 structural=1" in text
+    assert "structural_reasons: wrong_target_substitution=1" in text
+    assert "route=m6_14_repair" in text
 
 
 def test_success_after_blocker_fixes_stays_in_attempt_window() -> None:

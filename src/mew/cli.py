@@ -1181,6 +1181,11 @@ def build_parser():
     work_parser.add_argument("--model", help="model name for --ai")
     work_parser.add_argument("--base-url", help="model API base URL for --ai")
     work_parser.add_argument("--model-timeout", type=float, default=60.0, help="model timeout for --ai")
+    work_parser.add_argument(
+        "--max-wall-seconds",
+        type=float,
+        help="maximum wall-clock seconds for this --ai run before stopping with a report",
+    )
     work_parser.add_argument("--max-steps", type=int, help="maximum model tool turns for --ai")
     work_parser.add_argument(
         "--act-mode",
@@ -1225,6 +1230,16 @@ def build_parser():
     work_parser.add_argument("--start-session", action="store_true", help="start or reuse a native work session")
     work_parser.add_argument("--session", action="store_true", help="show the active native work session")
     work_parser.add_argument("--close-session", action="store_true", help="close the active native work session")
+    work_parser.add_argument(
+        "--oneshot",
+        action="store_true",
+        help="create a temporary coding task from --instruction and run a bounded generic work session",
+    )
+    work_parser.add_argument("--instruction", help="instruction text for --oneshot")
+    work_parser.add_argument("--instruction-file", help="UTF-8 instruction file for --oneshot")
+    work_parser.add_argument("--title", default="One-shot mew work task", help="task title for --oneshot")
+    work_parser.add_argument("--report", help="write a JSON report for --oneshot")
+    work_parser.add_argument("--artifacts", help="artifact directory recorded in the --oneshot report")
     work_parser.add_argument("--stop-session", action="store_true", help="request the active native work loop to stop at the next boundary")
     work_parser.add_argument("--stop-reason", help="reason recorded with --stop-session")
     work_parser.add_argument(
@@ -1284,8 +1299,10 @@ def build_parser():
     work_parser.add_argument(
         "--tool",
         choices=(
+            "analyze_table",
             "inspect_dir",
             "read_file",
+            "read_image",
             "search_text",
             "glob",
             "git_status",
@@ -1320,13 +1337,17 @@ def build_parser():
     work_parser.add_argument("--verify-command", help="verification command required for applied writes; persisted on the work session")
     work_parser.add_argument("--verify-cwd", default=".", help="verification command cwd")
     work_parser.add_argument("--verify-timeout", type=float, default=300.0, help="verification timeout")
-    work_parser.add_argument("--cwd", default=".", help="cwd for run_command or run_tests")
+    work_parser.add_argument("--cwd", default=".", help="cwd for native work tools; persisted on the work session")
     work_parser.add_argument("--timeout", type=float, default=300.0, help="timeout for run_command or run_tests")
     work_parser.add_argument("--limit", type=int, default=50, help="maximum inspect_dir entries")
     work_parser.add_argument("--max-chars", type=int, default=DEFAULT_READ_MAX_CHARS, help="maximum read_file characters")
+    work_parser.add_argument("--max-rows", type=int, help="maximum rows for analyze_table")
+    work_parser.add_argument("--max-extrema", type=int, help="maximum local extrema per pair for analyze_table")
     work_parser.add_argument("--offset", type=int, default=0, help="character offset for read_file")
     work_parser.add_argument("--line-start", type=int, help="1-based starting line for read_file")
     work_parser.add_argument("--line-count", type=int, help="number of lines to read with --line-start")
+    work_parser.add_argument("--detail", choices=("low", "high", "auto"), help="detail level for read_image")
+    work_parser.add_argument("--prompt", help="inspection prompt for read_image")
     work_parser.add_argument("--max-matches", type=int, default=50, help="maximum search/glob matches")
     work_parser.add_argument("--context-lines", type=int, default=3, help="context lines around search_text matches")
     work_parser.add_argument("--details", action="store_true", help="show model turns, touched files, and tool details")

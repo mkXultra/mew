@@ -9,6 +9,7 @@ import time
 from io import StringIO
 import tokenize
 
+from .acceptance import extract_acceptance_constraints
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .deliberation import (
@@ -43,6 +44,7 @@ from .work_session import (
     attach_work_resume_world_state,
     build_work_session_resume,
     compact_model_turns_for_prompt,
+    work_session_default_cwd,
     work_turn_guidance_snapshot,
 )
 from .work_world import DEFAULT_WORLD_STATE_FILE_LIMIT, build_work_world_state
@@ -113,6 +115,9 @@ WORK_TASK_GOAL_TERM_STOPWORDS = {
     "no-testmon",
     "prompt-only",
     "roadmap_status",
+    "mew-first",
+    "self-improve",
+    "self-improvement",
     "side-pj",
     "side-project",
     "test-only",
@@ -121,6 +126,14 @@ WORK_TASK_GOAL_TERM_STOPWORDS = {
 WORK_TASK_GOAL_REQUIRED_TERMS_LIMIT = 10
 WORK_TASK_GOAL_MILESTONE_TERMS_LIMIT = 4
 WORK_TASK_GOAL_PATH_FRAGMENT_RE = re.compile(r"\b(?:src|tests)/[A-Za-z0-9_./-]+")
+WORK_TASK_GOAL_DESCRIPTION_APPENDIX_MARKERS = (
+    "\n\nRecently completed git commits.",
+    "\n\nCurrent coding focus:",
+    "\n\nRecent friction",
+    "\n\nActive work sessions",
+    "\n\nTasks",
+    "\n\nConstraints:",
+)
 
 
 def _work_model_timeout_guard_available():
@@ -1092,6 +1105,7 @@ def _work_deliberation_preflight_decision(
     guidance="",
     deliberation_requested=False,
     auto_deliberation=True,
+    timeout_ceiling=False,
 ):
     work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
     resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
@@ -1111,7 +1125,10 @@ def _work_deliberation_preflight_decision(
         draft_attempts = int(attempts.get("draft") or 0)
     except (TypeError, ValueError):
         draft_attempts = 0
-    deliberation_timeout = max(float(timeout or 0), WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS)
+    if timeout_ceiling:
+        deliberation_timeout = max(float(timeout or 0), 0.0)
+    else:
+        deliberation_timeout = max(float(timeout or 0), WORK_DELIBERATION_MODEL_TIMEOUT_SECONDS)
     return evaluate_deliberation_request(
         todo=active_todo,
         blocker_code=blocker_code,
@@ -1196,6 +1213,7 @@ def _attempt_work_deliberation_lane(
     guidance="",
     deliberation_requested=False,
     auto_deliberation=True,
+    timeout_ceiling=False,
     progress=None,
     current_time="",
 ):
@@ -1207,6 +1225,7 @@ def _attempt_work_deliberation_lane(
         guidance=guidance,
         deliberation_requested=deliberation_requested,
         auto_deliberation=auto_deliberation,
+        timeout_ceiling=timeout_ceiling,
     )
     if not decision:
         return {}
@@ -1606,6 +1625,7 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         "continuity",
         "effort",
         "low_yield_observations",
+        "search_anchor_observations",
         "failures",
         "unresolved_failure",
         "recurring_failures",
@@ -1812,15 +1832,19 @@ def build_work_model_context(
     verify_command="",
     guidance="",
     prompt_context_mode="full",
+    run_step_index=None,
+    run_max_steps=None,
 ):
     tool_calls = list(session.get("tool_calls") or [])
     model_turns = list(session.get("model_turns") or [])
+    work_cwd = work_session_default_cwd(session, task=task) or "."
     resume = build_work_session_resume(session, task=task, limit=8, state=state, current_time=current_time)
     prompt_context_mode = _effective_prompt_context_mode(prompt_context_mode, resume, model_turns)
     world_state = build_work_world_state(
         resume,
         allowed_read_roots or [],
         file_limit=DEFAULT_WORLD_STATE_FILE_LIMIT,
+        cwd=work_cwd,
     )
     resume = attach_work_resume_world_state(resume, world_state)
     if prompt_context_mode != "full":
@@ -1834,8 +1858,12 @@ def build_work_model_context(
         world_state,
         prompt_context_mode=prompt_context_mode,
     )
+    current_run = build_current_work_run_budget(run_step_index, run_max_steps)
+    if current_run:
+        work_context["current_run"] = current_run
     task_description = task.get("description") if task else session.get("goal")
     task_notes = (task or {}).get("notes") or ""
+    acceptance_constraints = extract_acceptance_constraints(task_description or "")
     if prompt_context_mode != "full":
         task_description = clip_output(task_description or "", WORK_COMPACT_TASK_TEXT_LIMIT)
         task_notes = clip_work_task_notes(task_notes, WORK_COMPACT_TASK_TEXT_LIMIT)
@@ -1848,7 +1876,8 @@ def build_work_model_context(
             "status": task.get("status") if task else "",
             "kind": task.get("kind") if task else "",
             "notes": clip_work_task_notes(task_notes, WORK_RESULT_TEXT_LIMIT),
-            "cwd": (task or {}).get("cwd") or ".",
+            "cwd": work_cwd,
+            "acceptance_constraints": acceptance_constraints,
         },
         "work_session": work_context,
         "capabilities": {
@@ -1861,6 +1890,28 @@ def build_work_model_context(
             "verify_command_configured": bool(verify_command),
         },
         "guidance": guidance or "",
+    }
+
+
+def build_current_work_run_budget(run_step_index=None, run_max_steps=None):
+    try:
+        step_index = int(run_step_index)
+        max_steps = int(run_max_steps)
+    except (TypeError, ValueError):
+        return {}
+    if step_index <= 0 or max_steps <= 0:
+        return {}
+    return {
+        "step_index": step_index,
+        "max_steps": max_steps,
+        "remaining_steps_including_current": max(0, max_steps - step_index + 1),
+        "remaining_steps_after_current": max(0, max_steps - step_index),
+        "can_continue_after_current": step_index < max_steps,
+        "budget_source": "current_cli_invocation",
+        "note": (
+            "This is the current command's step budget. work_session.effort is "
+            "historical session pressure, not a hard stop by itself."
+        ),
     }
 
 
@@ -3190,7 +3241,7 @@ def _write_ready_task_goal_required_terms(context, resume=None):
     task = context.get("task") if isinstance(context.get("task"), dict) else {}
     text_parts = [
         str(task.get("title") or ""),
-        str(task.get("description") or ""),
+        _write_ready_task_goal_description_text(task.get("description") or ""),
         str(context.get("guidance") or ""),
     ]
     pending_steer = resume.get("pending_steer") if isinstance(resume.get("pending_steer"), dict) else {}
@@ -3244,6 +3295,18 @@ def _write_ready_task_goal_required_terms(context, resume=None):
                     return selected
         return selected
     return terms[:4]
+
+
+def _write_ready_task_goal_description_text(description):
+    text = str(description or "")
+    focus_match = re.search(r"(?:^|\n)Focus:\n", text)
+    if focus_match:
+        text = text[focus_match.end() :]
+    for marker in WORK_TASK_GOAL_DESCRIPTION_APPENDIX_MARKERS:
+        marker_index = text.find(marker)
+        if marker_index >= 0:
+            text = text[:marker_index]
+    return text.strip()
 
 
 def _work_write_ready_fast_path_latest_completed_verifier_tool_call(context):
@@ -5084,6 +5147,12 @@ def _write_ready_patch_draft_environment(
     write_ready_fast_path,
     todo_id_override="",
 ):
+    raw_cwd = (((context or {}).get("task") or {}).get("cwd") or ".")
+    workspace_root = Path(raw_cwd).expanduser()
+    if not workspace_root.is_absolute():
+        workspace_root = Path.cwd() / workspace_root
+    workspace_root = workspace_root.resolve(strict=False)
+
     def canonical_path(path):
         normalized = normalize_work_path(path)
         if not normalized:
@@ -5092,13 +5161,13 @@ def _write_ready_patch_draft_environment(
         candidate = Path(normalized)
         if candidate.is_absolute():
             try:
-                return candidate.resolve(strict=False).relative_to(Path.cwd().resolve()).as_posix()
+                return candidate.resolve(strict=False).relative_to(workspace_root).as_posix()
             except ValueError:
                 return normalized
             except OSError:
                 return normalized
 
-        root_without_leading_slash = str(Path.cwd().resolve()).lstrip("/")
+        root_without_leading_slash = str(workspace_root).lstrip("/")
         if root_without_leading_slash and normalized.startswith(f"{root_without_leading_slash}/"):
             normalized = normalized[len(root_without_leading_slash) + 1 :]
 
@@ -5645,6 +5714,7 @@ def _attempt_write_ready_tiny_draft_turn(
     action = normalize_work_model_action(
         action_plan,
         allowed_write_roots=allowed_write_roots,
+        default_cwd=(((context or {}).get("task") or {}).get("cwd") or ""),
     )
     if action.get("type") == "wait":
         metrics["tiny_write_ready_draft_outcome"] = "fallback"
@@ -5824,6 +5894,7 @@ def build_write_ready_work_model_context(context):
     failed_patch_repair = _write_ready_failed_patch_repair_for_targets(resume, target_paths)
     required_terms = _write_ready_task_goal_required_terms(context, resume)
     result = {
+        "current_run": work_session.get("current_run") or {},
         "active_work_todo": active_work_todo,
         "write_ready_fast_path": {
             "active": True,
@@ -5858,7 +5929,8 @@ def build_write_ready_tiny_draft_model_context(context):
     write_ready_context = build_write_ready_work_model_context(context)
     if not write_ready_context:
         return {}
-    resume = ((context or {}).get("work_session") or {}).get("resume") or {}
+    work_session = (context or {}).get("work_session") or {}
+    resume = work_session.get("resume") or {}
     actionable_target_paths = _write_ready_tiny_draft_observation_target_paths(resume)
     if not actionable_target_paths:
         actionable_target_paths = [str(path or "") for path in (fast_path.get("cached_paths") or []) if str(path).strip()]
@@ -5942,6 +6014,7 @@ def build_write_ready_tiny_draft_model_context(context):
             f"Original proposal summary: {failed_patch_repair.get('proposal_summary') or ''}"
         ).strip()
     result = {
+        "current_run": work_session.get("current_run") or {},
         "active_work_todo": {
             "source": {
                 "plan_item": active_todo_plan_item,
@@ -5978,12 +6051,12 @@ def _work_action_schema_text():
     return (
         "{\n"
         '  "summary": "short reason",\n'
-        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state"},\n'
+        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state", "acceptance_constraints": ["explicit stated constraints still relevant"], "acceptance_checks": [{"constraint": "constraint text", "status": "unknown|verified|blocked", "evidence": "tool output, diff, or file inspection used as proof"}]},\n'
         '  "action": {\n'
-        '    "type": "batch|inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
+        '    "type": "batch|inspect_dir|analyze_table|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
-        '{"type": "inspect_dir|read_file|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
-        '"path": "required for read_file/glob/search_text", '
+        '{"type": "inspect_dir|analyze_table|read_file|read_image|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
+        '"path": "required for analyze_table/read_file/read_image/glob/search_text", '
         '"query": "required for search_text; literal fixed-string, so use batch for OR searches", '
         '"pattern": "required for glob; optional rg glob filter for search_text", '
         '"max_chars": "optional read_file cap", '
@@ -6002,6 +6075,10 @@ def _work_action_schema_text():
         '    "max_chars": "optional read_file cap",\n'
         '    "line_start": "optional 1-based read_file starting line from search_text results",\n'
         '    "line_count": "optional read_file line count",\n'
+        '    "max_rows": "optional analyze_table row cap",\n'
+        '    "max_extrema": "optional analyze_table local-extrema cap",\n'
+        '    "detail": "optional read_image detail low|high|auto",\n'
+        '    "prompt": "optional read_image inspection prompt",\n'
         '    "stat": "optional git_diff diffstat; set false only when full diff is needed",\n'
         '    "command": "run_tests/run_command command",\n'
         '    "content": "write_file content",\n'
@@ -6013,6 +6090,7 @@ def _work_action_schema_text():
         '    "question": "ask_user question",\n'
         '    "summary": "optional concrete result, recommendation, or stopping note",\n'
         '    "message_type": "assistant|info|warning",\n'
+        '    "acceptance_checks": [{"constraint": "constraint text", "status": "verified|blocked|unknown", "evidence": "direct evidence from recent tool output or file inspection"}],\n'
         '    "task_done": false,\n'
         '    "completion_summary": "optional task completion summary for finish",\n'
         '    "create": false,\n'
@@ -6038,7 +6116,7 @@ def build_work_think_prompt(context):
         "Treat the capabilities object as current and authoritative; if a read/write/verify root or command is allowed there, do not ask the user to pass the same flag again. "
         "Use prior tool_calls as your observation history. If you need more evidence, choose one narrow read tool. "
         "Use work_session.resume.active_memory as durable typed recall about the user, project, feedback, or references; treat it as relevant context, but verify project facts with tools before relying on them for code changes. If active_memory.compacted_for_prompt is true, memory bodies were intentionally omitted; use id/path/name/description as pointers and read only the narrow source you need. Do not use read_file on .mew/memory/private paths surfaced in active_memory; their excerpt is already present in the prompt and those files are sensitive. "
-        "Use work_session.effort as operational pressure. If effort.pressure is high, avoid broad exploration and prefer finish, remember, or ask_user with a concise state summary and a concrete replan. If effort.pressure is medium, choose a narrow next action and refresh working_memory so the next reentry is not stale. "
+        "Use work_session.current_run as the active invocation budget and work_session.effort as historical session pressure. Do not claim the step or failure budget is exhausted while work_session.current_run.can_continue_after_current is true; if effort.pressure is high but current_run still has remaining steps and a safe repair/read/write action is clear, prefer that bounded action over finish. If effort.pressure is high and no safe action remains, prefer remember or ask_user with a concise state summary and concrete replan. If effort.pressure is medium, choose a narrow next action and refresh working_memory so the next reentry is not stale. "
         "If working_memory.target_paths lists likely files or directories for the next step, and one already names the likely file or directory, prefer a direct read_file on one of those target_paths before repeating same-surface search_text; otherwise prefer those paths before a broader project search, and keep that list short and current. "
         "If work_session.world_state.files marks a target_path as exists=false, do not read_file that missing path; inspect its parent or sibling surface first, then use write_file with create=true when creating the new scoped file is the intended implementation step. "
         "If work_session.resume.target_path_cached_window_observations already names a recent read_file window for that target_path, prefer refreshing that direct cached window before repeating same-surface search_text to rediscover the file. "
@@ -6047,6 +6125,7 @@ def build_work_think_prompt(context):
         "To reduce first-edit-latency, do not spend another turn on same-surface rediscovery when the first-edit old text is already available in cached windows for the scoped source/test slice. "
         "Drop a working_memory.target_paths entry once it is no longer needed for the next step instead of carrying stale paths forward. "
         "If the latest search_text already returned the same path/query with the line anchor you need, do not rerun that same search_text; switch to a narrow read_file on the anchored window instead. "
+        "If work_session.resume.search_anchor_observations lists successful search_text anchors, use its suggested_next read_file before repeating that same search_text. "
         "If work_session.resume.low_yield_observations lists repeated zero-match searches, do not keep searching that same path/pattern; use the suggested_next to switch to a targeted read, a single broader path, an edit from known context, or finish with a concrete replan. "
         "If work_session.resume.redundant_search_observations shows that the same successful search_text was already repeated on this surface, use its suggested_next read_file replacement instead of rerunning search_text again. "
         "If work_session.resume.adjacent_read_observations shows overlapping or near-adjacent read_file windows on the same path, use its suggested_next merged read instead of inching through more small reads. "
@@ -6064,14 +6143,21 @@ def build_work_think_prompt(context):
         "If work_session.resume.suggested_verify_command.command is present and no verify_command is configured, prefer that suggested command before inventing a broader verifier. "
         "If verification_confidence.status is narrow after source edits and suggested_verify_command.command exists, prefer run_tests with that broader suggested verifier before finish unless guidance explicitly says the task is narrow-only. "
         "If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user. "
+        "If work_session.resume.verifier_failure_repair_agenda is present, treat it as the active repair queue: use its error_lines, source_locations, symbols, and latest_changed_dry_run_write to make one small applied edit batch before broader exploration. If the failure names multiple same-family symbols or source locations, repair the visible sibling set together instead of fixing only the first occurrence. If the traceback points into an installed/generated artifact but the workspace contains matching source under allowed write roots, inspect/edit the workspace source and reinstall or reverify rather than patching the installed artifact directly. "
+        "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
+        "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, prefer analyze_table on CSV/TSV/whitespace numeric source files before choosing fit windows, scales, extrema, or output values. A schema-only, finite-number, or single-fit residual check is not enough; before finish, cite a completed grounding tool whose output contains an independent cross-check such as an alternative method, recomputation, holdout, bootstrap, or sensitivity/stability validation against the input data, plus residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric. "
+        "For answer-from-artifact tasks such as images, boards, puzzles, diagrams, screenshots, or data files, reading back the output file or checking output format is not enough; independently derive or verify the semantic answer from the source artifact, and if the task asks for all winning/valid answers, prove completeness instead of writing a single plausible answer. "
+        "When a source artifact is an image, screenshot, diagram, board, plot, or code screenshot and read_image is available, prefer read_image before lossy ASCII rendering or manual OCR commands. "
+        "Treat task.acceptance_constraints as a first-class checklist. Keep working_memory.acceptance_constraints and working_memory.acceptance_checks current. Before finish with task_done=true, action.acceptance_checks must cover every stated constraint with status=verified and direct evidence from recent tool output, diff, or file inspection. If one constraint is an edit-scope rule such as only allowed edits, specified replacements, or do-not-edit paths, verify that constraint explicitly with a post-edit validator, diff, or final inspection tool call after the latest write, and cite that tool id in the evidence; a successful compile, smoke command, output file, or write history alone does not prove it. "
         "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure. "
-        "Do not invent test-only assertions for behavior you have not observed in source, command output, or current tests; inspect the producer first or make the paired source change in the same plan. For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone. "
+        "For API, schema, protocol, config, or CLI contract tasks, preserve exact literal contract names from the task text for messages, methods, fields, keys, flags, endpoints, ports, and filenames. Do not substitute synonyms or nearby response-field names, such as using val when the task says value. Internal smoke tests and verifier commands must instantiate and assert the exact names from the task text, not the names you accidentally implemented. "
+        "Do not invent test-only assertions for behavior you have not observed in source, command output, or current tests; inspect the producer first or make the paired source change in the same plan. For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone. If a task mentions KeyboardInterrupt, Ctrl-C, SIGINT, cancellation, canceling, or cleanup, verify process-level cancellation/interrupt behavior when practical instead of only checking in-process coroutine cancellation. For Python async task orchestration where cancellation cleanup matters, prefer structured concurrency such as asyncio.TaskGroup, or explicitly prove that gather/semaphore code cancels and awaits only the started work. When verifying concurrency limits with cancellation, cover below-limit, exactly-at-limit, and above-limit cases when practical; one happy-path concurrency check is not enough. "
         "If investigation shows the task premise is false, already covered, or intentionally handled by existing tests, do not force a source edit; prefer run_tests to validate the conclusion, then finish with a no-change summary and task_done=true only if the investigation task is complete. "
         "For unittest verification, prefer a module-level command unless you have confirmed the exact class and method name in the current file or just created that method in the applied write. "
         "Do not use run_tests to invoke resident mew loops such as mew do, mew chat, mew run, or mew work --live; finish, remember, or ask_user instead. "
         "Use run_command only when shell is explicitly allowed. run_command is parsed with shlex and executed without a shell, so do not use pipes, redirection, &&, ||, or ; unless you wrap the behavior in an interpreter such as python -c. "
         "Do not use run_command to invoke resident mew loops or the printed Next CLI controls such as mew work, mew do, mew chat, or mew run; those controls are for a human operator outside the active session. "
-        "Use finish when the task is done or when an investigation/recommendation task has a concrete conclusion. "
+        "Use finish when the task is done or when an investigation/recommendation task has a concrete conclusion. Do not use finish merely because historical effort warnings mention step_budget or failure_budget while current_run says another step is available. "
         "Before finishing an implementation task that touched user-facing surfaces, account for the task acceptance criteria, README or usage docs, CLI stdout or output-file behavior, tests run, and any explicitly unverified modes in action.summary or action.completion_summary. "
         "If work_session.resume.same_surface_audit.status indicates a sibling-surface audit is still needed after src/mew edits, do one narrow audit step or record why the sibling surface is already covered or out of scope before finish. "
         "For implementation tasks with allowed write roots, do not finish merely because the next edit is clear; if exact old/new text or file content is available, propose the dry-run edit_file/write_file action instead. "
@@ -6088,28 +6174,45 @@ def build_work_think_prompt(context):
 
 
 def build_work_write_ready_think_prompt(context):
+    schema = (
+        '{"summary":"short reason",'
+        '"working_memory":{"hypothesis":"current narrow read","next_step":"next reentry step",'
+        '"plan_items":["up to 3 remaining steps"],"target_paths":["scoped paths"],'
+        '"open_questions":["unknowns"],"last_verified_state":"latest verifier state",'
+        '"acceptance_constraints":["task constraints"],'
+        '"acceptance_checks":[{"constraint":"text","status":"unknown|verified|blocked","evidence":"proof"}]},'
+        '"action":{"type": "batch|inspect_dir|read_file|read_image|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",'
+        '"tools":[{"type":"write_file|edit_file|edit_file_hunks","path":"target path",'
+        '"content":"write_file content","old":"exact old text","new":"replacement",'
+        '"edits":[{"old":"exact old text","new":"replacement"}],"create":false,'
+        '"replace_all":false,"dry_run":true}],'
+        '"path":"target path","content":"write_file content","old":"exact old text",'
+        '"new":"replacement","edits":[{"old":"exact old text","new":"replacement"}],'
+        '"create":false,"replace_all":false,"dry_run":true,'
+        '"reason":"why this scoped draft or blocker is next"}}'
+    )
     return (
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Write-ready fast path is active.\n"
         "The active_work_todo already names the paired src/test slice to draft.\n"
-        "Return the standard work JSON schema below and exactly one next action.\n"
+        "Return exactly one next action using the schema below.\n"
         "Use write_ready_fast_path.cached_window_texts as the exact old text source for edit_file/edit_file_hunks.\n"
         "Keep the action inside active_work_todo.source.target_paths and allowed_roots.write.\n"
-        "If task_goal.required_terms is non-empty, treat those terms as semantic anchors from the task goal, not product fields to copy into code or metadata.\n"
-        "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
-        "If a required term cannot naturally appear in the scoped source/test edit, return wait with blocker task_goal_term_missing instead of inventing schema or switching to a nearby helper.\n"
-        "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
-        "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
-        "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
-        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone.\n"
+        "Treat required terms as semantic anchors, not fields to copy; return wait with blocker task_goal_term_missing if they cannot naturally fit this scoped edit.\n"
+        "If failed_patch_repair or retry_context is present, repair that same proposal/current target window and keep its constraints instead of switching to a nearby easier patch.\n"
+        "Use current_run as the active invocation budget; historical effort pressure is not a hard stop while current_run can continue.\n"
+        "Preserve exact public contract names from the task text: methods, fields, flags, endpoints, filenames, CLI strings, and documented output names.\n"
+        "For numeric, artifact, visual, watch, cancellation, or concurrency tasks, draft code/tests that make semantic verification possible rather than schema-only or smoke-only proof.\n"
+        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker; for contract/docs-heavy slices, compare documented headings/surfaces with actual renderer or CLI output instead of file creation as proof. For watch, continuous, polling, listen tasks require bounded-loop or repeated-observation proof plus interval/interrupt handling or output-rewrite evidence; do not accept internal mode flags alone. If task mentions KeyboardInterrupt, Ctrl-C, SIGINT, prefer process-level cancellation/interrupt behavior over in-process coroutine cancellation. For Python async cancellation, prefer structured concurrency such as asyncio.TaskGroup or prove gather/semaphore code cancels and awaits only the started work. For concurrency limits cover below-limit, exactly-at-limit, and above-limit; one happy-path concurrency check is not enough.\n"
+        "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run can continue, keep the compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
         "Prefer one scoped dry-run batch under active_work_todo.source.target_paths now. Prefer one paired dry-run batch for mew core target paths: paired tests/** plus src/mew/**. For non-core allowed roots, stay inside the declared product root and include local tests when they are in scope.\n"
         "If one file needs multiple hunks, use a single edit_file_hunks action for that path instead of returning wait for the one-write-per-path rule.\n"
         "Do not add read, search, glob, git, shell, or verification actions on this fast path.\n"
         "Do not broaden scope, roots, or the focused verify command.\n"
         "If you still cannot draft the dry-run batch, return wait with one exact blocker tied to the cached windows.\n"
         "Do not invent uncached old text and do not propose a partial sibling edit set.\n"
-        f"Schema:\n{_work_action_schema_text()}\n\n"
+        f"Schema:\n{schema}\n\n"
         f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
 
@@ -6119,32 +6222,18 @@ def build_work_write_ready_tiny_draft_prompt(context):
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
         "Write-ready tiny draft lane is active.\n"
-        "Return exactly one patch artifact for the active scoped implementation slice.\n"
-        "Do not return work action JSON; top-level kind must be patch_proposal or patch_blocker, not action/tools.\n"
-        "Allowed kinds are patch_proposal or patch_blocker.\n"
+        "Return patch_proposal or patch_blocker, not work action JSON/action/tools.\n"
         "Use only active_work_todo.source.target_paths and write_ready_fast_path.cached_window_texts for patch content.\n"
-        "If active_memory is present, use it only as distilled reasoning guidance for choosing the narrow patch shape; do not read memory files or copy memory metadata into code.\n"
-        "If task_goal.required_terms is non-empty, treat those terms as semantic anchors from the task goal, not product fields to copy into code or metadata.\n"
-        "Satisfy required terms only by implementing the requested behavior with existing APIs/schema; do not add fields or keys solely because a required term names them.\n"
-        "Never persist a key named required_terms unless the task explicitly asks to add a required_terms API.\n"
-        "If a required term cannot naturally appear in the scoped source/test edit, return patch_blocker with code task_goal_term_missing instead of inventing schema or proposing a nearby patch.\n"
-        "If failed_patch_repair is present, repair that same failed proposal only; preserve its must_preserve_terms and proposal_snippets, and do not switch to a nearby feature or easier patch.\n"
-        "If retry_context is present, prefer its latest failure/status, target_windows, and pending_constraints over raw rejected or rolled-back write tool bodies.\n"
-        "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
-        "For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone.\n"
-        "Stay inside allowed_roots.write and do not invent uncached old text.\n"
+        "For task_goal.required_terms, use semantic anchors from the task goal, not product fields to copy; do not add fields or keys solely because a required term names them. Never persist a key named required_terms unless explicitly asked. Use blocker task_goal_term_missing when anchors cannot fit naturally.\n"
+        "Repair the same failed_patch_repair or retry_context target. Use current_run as the active invocation budget.\n"
+        "Verifier keys: prefer behavior, contract, output, state, or docs-visible assertions; over exact source text phrase assertions; unless the task explicitly requires a literal public string or security-sensitive marker; contract/docs-heavy slices; documented headings/surfaces; actual renderer or CLI output; file creation as proof; watch, continuous, polling, listen; bounded-loop or repeated-observation proof; interval/interrupt handling or output-rewrite evidence; do not accept internal mode flags alone; KeyboardInterrupt, Ctrl-C, SIGINT; process-level cancellation/interrupt behavior; in-process coroutine cancellation; structured concurrency such as asyncio.TaskGroup; gather/semaphore code cancels and awaits only the started work; below-limit, exactly-at-limit, and above-limit; one happy-path concurrency check is not enough.\n"
+        "When a rollback verifier failure has one small clear localized cause, the worktree is clean, and current_run still has remaining steps, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure.\n"
+        "Stay inside allowed_roots.write; do not invent uncached old text.\n"
         "Do not return tool actions, read/search actions, shell commands, approvals, or verification steps.\n"
-        "For mew core target paths, keep the patch paired across src/mew/** and tests/**. For non-core target paths, stay inside active_work_todo.source.target_paths and allowed_roots.write. If one file needs multiple hunks, express them in one files[i].edits array.\n"
+        "Keep mew core patches paired across src/mew/** and tests/**; otherwise stay inside active_work_todo.source.target_paths. Put multiple hunks for one file in one files[i].edits array.\n"
         "If drafting cannot proceed from the cached windows, return patch_blocker with one stable code and detail.\n"
         "Use cached_window_incomplete when the cached text exists but ends mid-block; use missing_exact_cached_window_texts when exact cached text is absent.\n"
-        "Schema:\n"
-        "{\n"
-        '  "kind": "patch_proposal|patch_blocker",\n'
-        '  "summary": "short reason",\n'
-        '  "files": [{"path": "src/mew/file.py", "edits": [{"old": "exact old text", "new": "replacement text"}]}],\n'
-        '  "code": "blocker code when kind=patch_blocker",\n'
-        '  "detail": "why drafting cannot proceed"\n'
-        "}\n\n"
+        'Schema: {"kind": "patch_proposal|patch_blocker", "summary": "short", "files": [{"path": "src/mew/file.py", "edits": [{"old": "exact old text", "new": "replacement"}]}], "code": "blocker code", "detail": "blocker detail"}\n\n'
         f"FocusedContext JSON:\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}"
     )
 
@@ -6166,6 +6255,7 @@ def normalize_work_model_action(
     verify_command="",
     suggested_verify_command="",
     allowed_write_roots=None,
+    default_cwd="",
 ):
     if not isinstance(action_plan, dict):
         action_plan = {}
@@ -6199,6 +6289,7 @@ def normalize_work_model_action(
                 verify_command=verify_command,
                 suggested_verify_command=suggested_verify_command,
                 allowed_write_roots=allowed_write_roots,
+                default_cwd=default_cwd,
             )
             dropped_tool_count += int(sub_action.get("truncated_tools") or 0)
             if sub_action.get("type") == "batch":
@@ -6235,12 +6326,14 @@ def normalize_work_model_action(
             paired_reason = paired_write_batch_rejection_reason(
                 normalized_tools,
                 allowed_write_roots=allowed_write_roots,
+                cwd=default_cwd,
             )
             if paired_reason:
                 return {"type": "wait", "reason": paired_reason}
             paired_tools = normalize_paired_write_batch_tools(
                 normalized_tools,
                 allowed_write_roots=allowed_write_roots,
+                cwd=default_cwd,
             )
             if not paired_tools:
                 return {
@@ -6283,6 +6376,7 @@ def normalize_work_model_action(
         "question",
         "message_type",
         "completion_summary",
+        "acceptance_checks",
     ):
         if action.get(key) is not None:
             normalized[key] = action.get(key)
@@ -6410,7 +6504,7 @@ def split_pipe_search_query(query, limit=5):
 
 def valid_batch_sub_action(action):
     action_type = (action or {}).get("type")
-    if action_type == "read_file":
+    if action_type in {"analyze_table", "read_file", "read_image"}:
         return bool(action.get("path"))
     if action_type == "search_text":
         return bool(action.get("query"))
@@ -6445,22 +6539,34 @@ def _work_batch_path_is_mew_source(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
-def _work_batch_path_under_allowed_write_roots(path, allowed_write_roots=None):
-    normalized = _normalized_work_path(path)
-    if not normalized:
+def _work_batch_path_under_allowed_write_roots(path, allowed_write_roots=None, cwd=""):
+    if not str(path or "").strip():
         return False
-    roots = [
-        _normalized_work_path(root)
-        for root in (allowed_write_roots or [])
-        if _normalized_work_path(root)
-    ]
+    roots = [root for root in (allowed_write_roots or []) if str(root or "").strip()]
     if not roots:
         return False
+    base = Path(cwd or ".").expanduser()
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    candidate = candidate.resolve(strict=False)
     for root in roots:
-        if root in {".", "*"}:
+        root_text = str(root or "").strip()
+        if root_text in {".", "*"}:
             return True
-        if normalized == root or normalized.startswith(f"{root.rstrip('/')}/"):
+        root_path = Path(root_text).expanduser()
+        if not root_path.is_absolute():
+            root_path = base / root_path
+        root_path = root_path.resolve(strict=False)
+        try:
+            candidate.relative_to(root_path)
             return True
+        except ValueError:
+            continue
+        except OSError:
+            continue
     return False
 
 
@@ -6518,7 +6624,7 @@ def collapse_same_path_edit_file_write_batch_tools(tools):
     return normalized
 
 
-def paired_write_batch_rejection_reason(tools, allowed_write_roots=None):
+def paired_write_batch_rejection_reason(tools, allowed_write_roots=None, cwd=""):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
         return "write batch requires at least two write/edit tools for a complete scoped slice"
@@ -6540,7 +6646,7 @@ def paired_write_batch_rejection_reason(tools, allowed_write_roots=None):
     if source_tools:
         return ""
     if all(
-        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots, cwd=cwd)
         for tool in write_tools
     ):
         return ""
@@ -6572,7 +6678,7 @@ def valid_paired_write_batch_sub_action(action):
     return False
 
 
-def normalize_paired_write_batch_tools(tools, allowed_write_roots=None):
+def normalize_paired_write_batch_tools(tools, allowed_write_roots=None, cwd=""):
     write_tools = [dict(tool) for tool in tools or [] if (tool or {}).get("type") in WRITE_WORK_TOOLS]
     if len(write_tools) < 2:
         return []
@@ -6588,7 +6694,7 @@ def normalize_paired_write_batch_tools(tools, allowed_write_roots=None):
     if source_tools and (not tests_tools or len(tests_tools) + len(source_tools) != len(write_tools)):
         return []
     if not source_tools and not all(
-        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots)
+        _work_batch_path_under_allowed_write_roots(tool.get("path"), allowed_write_roots, cwd=cwd)
         for tool in write_tools
     ):
         return []
@@ -6613,16 +6719,22 @@ def work_tool_parameters_from_action(
     allow_verify=False,
     verify_command="",
     verify_timeout=300,
+    default_cwd="",
 ):
     parameters = dict(action or {})
     action_type = action.get("type") or action.get("tool")
     parameters.pop("type", None)
+    if default_cwd and parameters.get("cwd") in (None, "", "."):
+        parameters["cwd"] = default_cwd
     parameters["allowed_write_roots"] = allowed_write_roots or []
     parameters["allow_shell"] = bool(allow_shell)
     parameters["allow_verify"] = bool(allow_verify)
     if verify_command and not parameters.get("verify_command"):
         parameters["verify_command"] = verify_command
-    parameters.setdefault("verify_cwd", ".")
+    if default_cwd and parameters.get("verify_cwd") in (None, "", "."):
+        parameters["verify_cwd"] = parameters.get("cwd") or default_cwd
+    else:
+        parameters.setdefault("verify_cwd", parameters.get("cwd") or ".")
     parameters.setdefault("verify_timeout", verify_timeout)
     if action_type == "read_file":
         try:
@@ -6712,6 +6824,9 @@ def plan_work_model_turn(
     compact_live=False,
     deliberation_requested=False,
     auto_deliberation=True,
+    run_step_index=None,
+    run_max_steps=None,
+    timeout_ceiling=False,
 ):
     current_time = now_iso()
     capabilities = {
@@ -6744,6 +6859,8 @@ def plan_work_model_turn(
         verify_command=verify_command,
         guidance=guidance,
         prompt_context_mode=prompt_context_mode,
+        run_step_index=run_step_index,
+        run_max_steps=run_max_steps,
     )
     write_ready_fast_path = _work_write_ready_fast_path_details(context)
     write_ready_context = (
@@ -6777,11 +6894,9 @@ def plan_work_model_turn(
     think_prompt_dynamic_chars = 0
     if write_ready_fast_path.get("active"):
         think_prompt_static_chars, think_prompt_dynamic_chars = _write_ready_draft_prompt_chars(think_prompt)
-    think_timeout = (
-        max(float(timeout), WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
-        if write_ready_context
-        else float(timeout)
-    )
+    think_timeout = float(timeout)
+    if write_ready_context and not timeout_ceiling:
+        think_timeout = max(think_timeout, WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS)
     tiny_write_ready_prompt = (
         build_work_write_ready_tiny_draft_prompt(tiny_write_ready_context)
         if tiny_write_ready_context
@@ -6826,8 +6941,9 @@ def plan_work_model_turn(
         model_backend=model_backend,
         timeout=timeout,
         guidance=guidance,
-        deliberation_requested=deliberation_requested,
-        auto_deliberation=auto_deliberation,
+        deliberation_requested=deliberation_requested and not timeout_ceiling,
+        auto_deliberation=auto_deliberation and not timeout_ceiling,
+        timeout_ceiling=timeout_ceiling,
         progress=progress,
         current_time=current_time,
     )
@@ -7111,6 +7227,38 @@ def plan_work_model_turn(
                 },
                 session_trace_patch,
             )
+        if timeout_ceiling:
+            model_metrics["think"]["elapsed_seconds"] = _round_seconds(tiny_write_ready_elapsed)
+            model_metrics["act"] = {
+                "prompt_chars": 0,
+                "elapsed_seconds": 0.0,
+                "mode": "timeout_ceiling",
+            }
+            model_metrics["total_model_seconds"] = _round_seconds(tiny_write_ready_elapsed)
+            action = {
+                "type": "wait",
+                "reason": "wall-clock timeout ceiling prevented broad fallback after tiny write-ready draft",
+            }
+            action_plan = {
+                "summary": action["reason"],
+                "action": action,
+                "act_mode": "timeout_ceiling",
+            }
+            if pre_model_metrics_sink:
+                pre_model_metrics_sink(dict(model_metrics))
+            if progress:
+                progress(f"session #{session.get('id')}: timeout ceiling stopped broad fallback")
+            return _work_plan_with_session_trace_patch(
+                {
+                    "decision_plan": {"summary": action["reason"]},
+                    "action_plan": action_plan,
+                    "action": action,
+                    "context": context,
+                    "model_metrics": model_metrics,
+                    "model_stream": compact_model_stream(stream_deltas),
+                },
+                session_trace_patch,
+            )
         if pre_model_metrics_sink:
             pre_model_metrics_sink(dict(model_metrics))
     think_started = time.monotonic()
@@ -7175,12 +7323,14 @@ def plan_work_model_turn(
     if progress:
         progress(f"session #{session.get('id')}: THINK ok")
     model_metrics["think"]["elapsed_seconds"] = _round_seconds(tiny_write_ready_elapsed + think_elapsed)
+    work_default_cwd = (((context or {}).get("task") or {}).get("cwd") or "")
     if act_mode == "deterministic":
         action = normalize_work_model_action(
             decision_plan,
             verify_command=verify_command,
             suggested_verify_command=suggested_verify_command,
             allowed_write_roots=allowed_write_roots,
+            default_cwd=work_default_cwd,
         )
         action_summary = action.get("reason") if action.get("type") == "wait" and action.get("reason") else ""
         action_plan = {
@@ -7224,6 +7374,7 @@ def plan_work_model_turn(
         verify_command=verify_command,
         suggested_verify_command=suggested_verify_command,
         allowed_write_roots=allowed_write_roots,
+        default_cwd=work_default_cwd,
     )
     if write_ready_fast_path.get("active") and not skip_shadow_compile:
         model_metrics.update(

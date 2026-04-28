@@ -171,6 +171,89 @@ class SignalTests(unittest.TestCase):
         )
         self.assertEqual(disabled["reason"], "source_disabled")
 
+    def test_signal_duplicate_suppression_guard_blocks_current_budget_window_repeats(self):
+        state = default_state()
+        source = enable_signal_source(
+            state,
+            "hn",
+            kind="rss",
+            reason="track engineering stories",
+            budget_limit=1,
+            current_time="2026-04-20T00:00:00Z",
+        )
+
+        first = record_signal_observation(
+            state,
+            "hn",
+            kind="rss_item",
+            summary="Duplicate story",
+            reason_for_use="first useful observation",
+            payload={"url": "https://example.test/duplicate"},
+            current_time="2026-04-20T00:01:00Z",
+        )
+        same_source_kind_summary = record_signal_observation(
+            state,
+            "hn",
+            kind="rss_item",
+            summary="Duplicate story",
+            reason_for_use="blocked duplicate must not consume budget",
+            payload={"url": "https://example.test/other"},
+            current_time="2026-04-20T00:02:00Z",
+        )
+        same_payload_url = record_signal_observation(
+            state,
+            "hn",
+            kind="rss_item",
+            summary="Retitled duplicate story",
+            reason_for_use="blocked duplicate must not queue signal_observed",
+            payload={"url": "https://example.test/duplicate"},
+            current_time="2026-04-20T00:03:00Z",
+        )
+        enable_signal_source(
+            state,
+            "blog",
+            kind="rss",
+            reason="second source should still suppress duplicate URL",
+            budget_limit=1,
+            current_time="2026-04-20T00:03:30Z",
+        )
+        cross_source_payload_url = record_signal_observation(
+            state,
+            "blog",
+            kind="rss_item",
+            summary="Cross-source duplicate story",
+            reason_for_use="blocked duplicate URL must not consume other source budget",
+            payload={"url": "https://example.test/duplicate"},
+            current_time="2026-04-20T00:03:45Z",
+        )
+        next_budget_window = record_signal_observation(
+            state,
+            "hn",
+            kind="rss_item",
+            summary="Duplicate story",
+            reason_for_use="new current budget window is allowed",
+            payload={"url": "https://example.test/duplicate"},
+            current_time="2026-04-21T00:01:00Z",
+        )
+
+        self.assertEqual(first["status"], "recorded")
+        self.assertEqual(same_source_kind_summary["status"], "blocked")
+        self.assertEqual(same_source_kind_summary["reason"], "duplicate_suppressed")
+        self.assertEqual(same_payload_url["status"], "blocked")
+        self.assertEqual(same_payload_url["reason"], "duplicate_suppressed")
+        self.assertEqual(cross_source_payload_url["status"], "blocked")
+        self.assertEqual(cross_source_payload_url["reason"], "duplicate_suppressed")
+        self.assertEqual(next_budget_window["status"], "recorded")
+        self.assertEqual(source["budget"]["used"], 1)
+        self.assertEqual(state["signals"]["sources"][1]["budget"]["used"], 0)
+        self.assertEqual(len(state["signals"]["journal"]), 2)
+        self.assertEqual(
+            [event["type"] for event in state["inbox"]],
+            ["signal_observed", "signal_observed"],
+        )
+        self.assertEqual(state["signals"]["journal"][0]["summary"], "Duplicate story")
+        self.assertEqual(state["signals"]["journal"][1]["budget"]["window_key"], "2026-04-21")
+
     def test_signals_cli_proof_source_help_exposes_reviewer_visible_auto_fetch(self):
         with redirect_stdout(StringIO()) as stdout:
             with self.assertRaises(SystemExit) as raised:

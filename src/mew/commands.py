@@ -1,5 +1,7 @@
 import json
+import math
 import os
+import re
 import select
 import shlex
 import signal
@@ -9,11 +11,14 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .acceptance import acceptance_finish_blocker
 from .agent_runs import (
     build_ai_cli_run_command,
     create_agent_run,
@@ -280,6 +285,7 @@ from .work_session import (
     select_work_recovery_plan_item,
     start_work_model_turn,
     find_model_turn_for_tool_call,
+    first_unquoted_shell_operator,
     work_tool_result_error,
     start_work_tool_call,
     broad_read_after_search_miss_guard,
@@ -300,9 +306,11 @@ from .work_session import (
     work_session_for_task,
     work_recovery_read_root,
     work_call_path,
+    work_session_default_cwd,
     work_session_runtime_command,
     work_session_task,
     work_write_pairing_status,
+    workspace_relative_work_parameters,
 )
 from .work_loop import (
     _is_calibration_measured_patch_draft_task,
@@ -322,6 +330,8 @@ RESERVED_EVENT_TYPES = {"startup", "passive_tick", "tick", "user_message"}
 MAX_OUTBOX_TEXT_CHARS = 2000
 RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS = 0.5
 RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
+WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
+WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS = 5.0
 APPROVAL_MODE_ACCEPT_EDITS = "accept-edits"
 APPROVAL_MODES = ("default", APPROVAL_MODE_ACCEPT_EDITS)
 
@@ -390,6 +400,35 @@ def cmd_task_add(args):
         return 0
     print(format_task(task))
     return 0
+
+
+def create_oneshot_work_task(state, *, title, instruction, cwd):
+    current_time = now_iso()
+    task = {
+        "id": next_id(state, "task"),
+        "title": title or "One-shot mew work task",
+        "kind": "coding",
+        "description": instruction or "",
+        "status": "ready",
+        "priority": "normal",
+        "notes": "Created by `mew work --oneshot`.",
+        "command": "",
+        "cwd": cwd or "",
+        "auto_execute": False,
+        "agent_backend": "",
+        "agent_model": "",
+        "agent_prompt": "",
+        "agent_run_id": None,
+        "scope": normalize_task_scope({}),
+        "plans": [],
+        "latest_plan_id": None,
+        "runs": [],
+        "created_at": current_time,
+        "updated_at": current_time,
+    }
+    state["tasks"].append(task)
+    return task
+
 
 def cmd_task_list(args):
     state = load_state()
@@ -1846,6 +1885,13 @@ def format_work_ai_report(report, compact=False):
         lines.append(f"interrupt_note: {report.get('interrupt_note')}")
     if report.get("max_steps_note"):
         lines.append(f"max_steps_note: {report.get('max_steps_note')}")
+    wall_timeout = report.get("wall_timeout") or {}
+    if wall_timeout:
+        lines.append(
+            "wall_timeout: "
+            f"remaining={wall_timeout.get('remaining_seconds')}s "
+            f"model_timeout={wall_timeout.get('model_timeout_seconds')}s"
+        )
     return "\n".join(lines)
 
 
@@ -2237,11 +2283,21 @@ def _work_control_options(args, session=None):
             return value
         return getattr(args, name, fallback)
 
+    def cwd_option():
+        explicit = getattr(args, "cwd", None)
+        if explicit not in (None, "", "."):
+            return explicit
+        value = defaults.get("cwd")
+        if value not in (None, "", "."):
+            return value
+        return ""
+
     options = {
         "auth": option("auth"),
         "model_backend": option("model_backend"),
         "model": option("model"),
         "base_url": option("base_url"),
+        "cwd": cwd_option(),
         "allow_read": list(option("allow_read", []) or []),
         "allow_write": list(option("allow_write", []) or []),
         "allow_shell": bool(option("allow_shell", False)),
@@ -2336,6 +2392,7 @@ def remember_work_session_default_options(session, args):
             options.get("approval_mode"),
             options.get("model"),
             options.get("base_url"),
+            options.get("cwd"),
             options.get("act_mode") and options.get("act_mode") != "model",
             options.get("compact_live"),
             options.get("quiet"),
@@ -2382,6 +2439,7 @@ def remember_work_session_default_options(session, args):
         "model_backend": merged_scalar("model_backend"),
         "model": merged_scalar("model"),
         "base_url": merged_scalar("base_url"),
+        "cwd": merged_scalar("cwd"),
         "allow_read": merged_list("allow_read"),
         "allow_write": [] if clear_write_defaults else merged_list("allow_write"),
         "allow_shell": False if clear_write_defaults else bool(current.get("allow_shell") or options.get("allow_shell")),
@@ -2515,6 +2573,8 @@ def work_chat_continue_options(session):
         parts.extend(["--allow-read", root])
     for root in options.get("allow_write") or []:
         parts.extend(["--allow-write", root])
+    if options.get("cwd"):
+        parts.extend(["--cwd", options["cwd"]])
     if options.get("allow_shell"):
         parts.append("--allow-shell")
     if options.get("allow_verify"):
@@ -3296,6 +3356,139 @@ def _work_finish_text(action, fallback):
     return fallback
 
 
+def _work_budget_pressure_finish_text(action):
+    return " ".join(
+        str((action or {}).get(key) or "")
+        for key in ("summary", "reason", "completion_summary", "note", "text")
+        if str((action or {}).get(key) or "").strip()
+    ).casefold()
+
+
+def _work_finish_mentions_budget_pressure(action):
+    text = _work_budget_pressure_finish_text(action)
+    if not text:
+        return False
+    budget_marker = any(marker in text for marker in ("budget", "pressure"))
+    stop_marker = any(marker in text for marker in ("exhaust", "near", "limit", "stop", "stopp", "replan"))
+    return budget_marker and stop_marker
+
+
+def convert_budget_pressure_finish_to_remember(action, session, index, max_steps, *, continue_after_remember=False):
+    action = action or {}
+    if (action.get("type") or "") != "finish":
+        return action
+    if action.get("task_done"):
+        return action
+    if not continue_after_remember:
+        return action
+    try:
+        current_index = int(index)
+        current_max_steps = int(max_steps)
+    except (TypeError, ValueError):
+        return action
+    if current_index >= current_max_steps:
+        return action
+    if not _work_finish_mentions_budget_pressure(action):
+        return action
+    resume = build_work_session_resume(session) if session else {}
+    effort = (resume or {}).get("effort") or {}
+    warnings = set(effort.get("warnings") or [])
+    pressure_related = bool(
+        warnings
+        & {
+            "step_budget_near",
+            "step_budget_exhausted",
+            "failure_budget_near",
+            "failure_budget_exhausted",
+        }
+    )
+    has_repair_context = bool(
+        (resume or {}).get("failures")
+        or (resume or {}).get("unresolved_failure")
+        or (resume or {}).get("retry_context")
+        or (resume or {}).get("suggested_safe_reobserve")
+    )
+    if not pressure_related and not has_repair_context:
+        return action
+    remaining_after_current = max(0, current_max_steps - current_index)
+    note = _work_finish_text(action, "Budget-pressure finish deferred.")
+    return {
+        "type": "remember",
+        "note": (
+            "Budget-pressure finish was deferred because this invocation still has "
+            f"{remaining_after_current} step(s) after the current step. "
+            f"Original finish note: {clip_output(note, 500)}"
+        ),
+        "reason": "converted budget-pressure finish to continuity note",
+        "converted_from_finish": "budget_pressure",
+    }
+
+
+def _work_wait_mentions_repairable_blocker(action):
+    text = " ".join(
+        str((action or {}).get(key) or "")
+        for key in ("reason", "summary", "note", "text")
+        if str((action or {}).get(key) or "").strip()
+    ).casefold()
+    if not text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "constraint",
+            "collapse same-file",
+            "invalid",
+            "repair",
+            "revised",
+            "unsupported",
+            "unsafe",
+            "violat",
+        )
+    )
+
+
+def convert_repairable_wait_to_remember(action, index, max_steps, *, continue_after_remember=False):
+    action = action or {}
+    if (action.get("type") or "") != "wait":
+        return action
+    if not continue_after_remember:
+        return action
+    try:
+        current_index = int(index)
+        current_max_steps = int(max_steps)
+    except (TypeError, ValueError):
+        return action
+    if current_index >= current_max_steps:
+        return action
+    if not _work_wait_mentions_repairable_blocker(action):
+        return action
+    note = _work_control_text(action, "Repairable blocker recorded.")
+    return {
+        "type": "remember",
+        "note": (
+            "Repairable wait was deferred so the work loop can continue in this "
+            f"invocation. Original wait: {clip_output(note, 500)}"
+        ),
+        "reason": "converted repairable wait to continuity note",
+        "converted_from_wait": "repairable_blocker",
+    }
+
+
+def work_finish_blocker_allows_continue(finished_note):
+    text = str(finished_note or "").casefold()
+    if not text.startswith("finish blocked:"):
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "acceptance constraints unchecked",
+            "edit-scope acceptance evidence",
+            "all-valid answer completeness evidence",
+            "numeric artifact quality evidence",
+        )
+    )
+
+
 def apply_work_control_action(state, session, task, action):
     action = action or {}
     action_type = action.get("type") or ""
@@ -3314,6 +3507,13 @@ def apply_work_control_action(state, session, task, action):
             same_surface_audit = resume.get("same_surface_audit") or {}
             if same_surface_audit and same_surface_audit.get("status") != "noted":
                 finish_blockers.append("required same-surface audit")
+            acceptance_blocker = acceptance_finish_blocker(
+                (task or {}).get("description") or session.get("goal") or "",
+                action,
+                session=session,
+            )
+            if acceptance_blocker:
+                finish_blockers.append(acceptance_blocker)
             if finish_blockers:
                 blocked_note = f"finish blocked: {', '.join(finish_blockers)}"
                 if task is not None:
@@ -3480,10 +3680,13 @@ def work_tool_output_progress(progress, tool_call_id, session_id=None, on_state_
     return emit
 
 
-def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_progress=None):
+def execute_work_tool_with_output(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+    kwargs = {}
     if output_progress:
-        return execute_work_tool(tool, parameters, allowed_read_roots, on_output=output_progress)
-    return execute_work_tool(tool, parameters, allowed_read_roots)
+        kwargs["on_output"] = output_progress
+    if model_context is not None:
+        kwargs["model_context"] = model_context
+    return execute_work_tool(tool, parameters, allowed_read_roots, **kwargs)
 
 
 def compact_work_tool_guard_action(action):
@@ -3629,26 +3832,40 @@ def _work_path_is_mew_source_path(path):
     return normalized.startswith("src/mew/") and normalized.endswith(".py")
 
 
-def _work_path_under_allowed_write_roots(path, allowed_write_roots=None):
-    normalized = str(path or "").replace("\\", "/").lstrip("./")
-    if not normalized:
+def _work_path_under_allowed_write_roots(path, allowed_write_roots=None, cwd=""):
+    if not str(path or "").strip():
         return False
-    roots = [
-        str(root or "").replace("\\", "/").lstrip("./").rstrip("/")
-        for root in (allowed_write_roots or [])
-        if str(root or "").strip()
-    ]
+    roots = [root for root in (allowed_write_roots or []) if str(root or "").strip()]
     if not roots:
         return False
+    base = Path(cwd or ".").expanduser()
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = base / candidate
+    candidate = candidate.resolve(strict=False)
     for root in roots:
-        if root in {".", "*"}:
+        root_text = str(root or "").strip()
+        if root_text in {".", "*"}:
             return True
-        if normalized == root or normalized.startswith(f"{root}/"):
+        root_path = Path(root_text).expanduser()
+        if not root_path.is_absolute():
+            root_path = base / root_path
+        root_path = root_path.resolve(strict=False)
+        try:
+            if candidate == root_path or candidate.relative_to(root_path):
+                return True
+        except ValueError:
+            continue
+        except OSError:
+            continue
+        if candidate == root_path:
             return True
     return False
 
 
-def _paired_write_batch_actions(actions, allowed_write_roots=None):
+def _paired_write_batch_actions(actions, allowed_write_roots=None, cwd=""):
     write_actions = [
         dict(action)
         for action in actions or []
@@ -3661,7 +3878,7 @@ def _paired_write_batch_actions(actions, allowed_write_roots=None):
     if sources and (not tests or len(tests) + len(sources) != len(write_actions)):
         return []
     if not sources and not all(
-        _work_path_under_allowed_write_roots(action.get("path"), allowed_write_roots)
+        _work_path_under_allowed_write_roots(action.get("path"), allowed_write_roots, cwd=cwd)
         for action in write_actions
     ):
         return []
@@ -3686,6 +3903,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         sub_actions = _paired_write_batch_actions(
             raw_sub_actions,
             allowed_write_roots=getattr(args, "allow_write", []) or [],
+            cwd=getattr(args, "cwd", "") or "",
         )
     else:
         sub_actions = [
@@ -3736,7 +3954,9 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
 
     tool_calls = []
     pending_approval_ids = []
+    recoverable_errors = []
     error = ""
+    batch_max_steps = getattr(args, "max_steps", 999999)
     for sub_action in sub_actions:
         with state_lock():
             state = load_state()
@@ -3796,6 +4016,7 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             allow_verify=bool(args.allow_verify) if write_batch else False,
             verify_command=args.verify_command or "" if write_batch else "",
             verify_timeout=args.verify_timeout,
+            default_cwd=getattr(args, "cwd", "") or "",
         )
         if write_batch:
             parameters["apply"] = False
@@ -3870,22 +4091,56 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
         try:
-            result = execute_work_tool_with_output(
-                action_type,
-                parameters,
-                args.allow_read or [],
-                work_tool_output_progress(progress, tool_call_id),
-            )
+            output_progress = work_tool_output_progress(progress, tool_call_id)
+            if action_type == "read_image":
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    args.allow_read or [],
+                    output_progress,
+                    model_context={
+                        "model_backend": getattr(args, "model_backend", "codex"),
+                        "model_auth": getattr(args, "model_auth", None),
+                        "model": getattr(args, "model", None),
+                        "base_url": getattr(args, "base_url", None),
+                        "timeout": getattr(args, "model_timeout", None),
+                    },
+                )
+            else:
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    args.allow_read or [],
+                    output_progress,
+                )
             error = work_tool_result_error(action_type, result)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, MewError) as exc:
             result = None
             error = str(exc)
+        recoverable_missing_observation_path = (
+            not write_batch
+            and _recoverable_missing_observation_path_error(action_type, parameters, error, args, index, batch_max_steps)
+        )
+        recoverable_missing_read_file = recoverable_missing_observation_path and action_type == "read_file"
+        recoverable_git_inspection_unavailable = (
+            not write_batch
+            and _recoverable_git_inspection_unavailable_error(action_type, error, result, index, batch_max_steps)
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
             if not tool_call:
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
+                recoverable_missing_observation_path = False
+                recoverable_missing_read_file = False
+                recoverable_git_inspection_unavailable = False
+            if recoverable_missing_observation_path:
+                tool_call["recoverable_missing_observation_path"] = True
+            if recoverable_missing_read_file:
+                tool_call["recoverable_missing_read_file"] = True
+            if recoverable_git_inspection_unavailable:
+                tool_call["recoverable_git_inspection_unavailable"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             record_active_work_todo_executor_lifecycle(
@@ -3911,6 +4166,32 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {tool_call.get('status')}")
         if error:
+            if recoverable_missing_observation_path and index < batch_max_steps:
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "path": parameters.get("path") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch missing observation target; continuing with partial observations")
+                error = ""
+                continue
+            if recoverable_git_inspection_unavailable and index < batch_max_steps:
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "cwd": parameters.get("cwd") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch git inspection unavailable; continuing with partial observations")
+                error = ""
+                continue
             break
 
     if error and write_batch and pending_approval_ids:
@@ -3950,8 +4231,12 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
         "tool_calls": tool_calls,
         "pending_approval_ids": pending_approval_ids,
         "pending_approval": bool(pending_approval_ids),
+        "recoverable_errors": recoverable_errors,
         "error": error,
-        "summary": f"ran {len(tool_calls)} batch tool(s)",
+        "summary": (
+            f"ran {len(tool_calls)} batch tool(s)"
+            + (f" with {len(recoverable_errors)} recoverable error(s)" if recoverable_errors else "")
+        ),
     }
 
 
@@ -3969,6 +4254,8 @@ def cmd_work(args):
         return cmd_work_reply_file(args)
     if getattr(args, "todo_list", False) or getattr(args, "todo_add", None) or getattr(args, "todo_update", None):
         return cmd_work_todo(args)
+    if getattr(args, "oneshot", False):
+        return cmd_work_oneshot(args)
     if getattr(args, "live", False) or getattr(args, "follow", False):
         args.ai = True
     if getattr(args, "ai", False):
@@ -4021,6 +4308,125 @@ def cmd_work(args):
         return 0
     print(format_workbench(data))
     return 0
+
+
+def _work_oneshot_instruction(args):
+    if getattr(args, "instruction", None) and getattr(args, "instruction_file", None):
+        raise MewError("--oneshot accepts only one of --instruction or --instruction-file")
+    if getattr(args, "instruction_file", None):
+        try:
+            return Path(args.instruction_file).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise MewError(f"cannot read --instruction-file: {exc}") from exc
+    return getattr(args, "instruction", None) or ""
+
+
+def _work_oneshot_report_path(args):
+    if not getattr(args, "report", None):
+        return None
+    return Path(args.report).expanduser().resolve(strict=False)
+
+
+def _work_oneshot_artifacts(args):
+    if not getattr(args, "artifacts", None):
+        return ""
+    return str(Path(args.artifacts).expanduser().resolve(strict=False))
+
+
+def _parse_json_object(text):
+    try:
+        value = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def cmd_work_oneshot(args):
+    try:
+        instruction = _work_oneshot_instruction(args)
+        positive_float_option(getattr(args, "max_wall_seconds", None), "--max-wall-seconds")
+    except MewError as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    if not instruction.strip():
+        print("mew: --oneshot requires --instruction or --instruction-file", file=sys.stderr)
+        return 1
+    if getattr(args, "task_id", None) is not None:
+        print("mew: --oneshot creates its own task; omit task_id", file=sys.stderr)
+        return 1
+
+    with state_lock():
+        state = load_state()
+        task = create_oneshot_work_task(
+            state,
+            title=getattr(args, "title", None),
+            instruction=instruction,
+            cwd=getattr(args, "cwd", None),
+        )
+        save_state(state)
+
+    work_args = SimpleNamespace(**vars(args))
+    work_args.task_id = task.get("id")
+    work_args.ai = True
+    work_args.live = False
+    work_args.follow = False
+    work_args.oneshot = False
+    work_args.json = True
+    work_args.continue_after_remember = True
+    if getattr(work_args, "max_steps", None) is None:
+        work_args.max_steps = 30
+    if work_args.max_steps == 0:
+        work_args.live = True
+    auto_verify_command = ""
+    if getattr(work_args, "allow_verify", False) and not getattr(work_args, "verify_command", ""):
+        auto_verify_command = detect_default_verify_command(
+            cwd=getattr(work_args, "cwd", None) or task.get("cwd"),
+            instruction=instruction,
+        )
+        if auto_verify_command:
+            work_args.verify_command = auto_verify_command
+
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        exit_code = cmd_work_ai(work_args)
+    work_stdout = stdout.getvalue()
+    work_report = _parse_json_object(work_stdout)
+
+    with state_lock():
+        state = load_state()
+        task = find_task(state, task.get("id")) or task
+        session = latest_work_session_for_task(state, task.get("id"))
+        resume = build_work_session_resume(session, task=task, state=state) if session else {}
+
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": task.get("id"),
+        "session_id": session.get("id") if session else None,
+        "workspace_cwd": task.get("cwd") or "",
+        "artifacts": _work_oneshot_artifacts(args),
+        "work_exit_code": exit_code,
+        "work_report": work_report,
+        "work_stdout": work_stdout if not work_report else "",
+        "auto_verify_command": auto_verify_command,
+        "resume": resume,
+        "verification": {
+            "command": getattr(work_args, "verify_command", None) or "",
+            "source": "auto_detected" if auto_verify_command else ("explicit" if getattr(args, "verify_command", None) else ""),
+            "reason": "external harness may run the final verifier",
+        },
+        "usage": "unavailable",
+    }
+    report_path = _work_oneshot_report_path(args)
+    if report_path:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if getattr(args, "json", False):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(work_stdout.rstrip())
+        if report_path:
+            print(f"report: {report_path}")
+    return exit_code
 
 
 def _work_todo_json_payload(session, todo=None):
@@ -4107,12 +4513,222 @@ def cmd_work_todo(args):
     return 0
 
 
-def detect_default_verify_command():
-    if Path("pyproject.toml").exists() and Path("tests").exists():
+VERIFY_COMMAND_EXECUTABLES = {
+    "bun",
+    "cargo",
+    "deno",
+    "go",
+    "make",
+    "node",
+    "npm",
+    "nox",
+    "pnpm",
+    "poetry",
+    "pytest",
+    "python",
+    "python3",
+    "tox",
+    "uv",
+    "yarn",
+}
+VERIFY_CONTEXT_STRONG_WORDS = ("verify", "verifier", "test", "tests", "testing", "check", "checks")
+VERIFY_CONTEXT_WEAK_WORDS = ("run", "running", "execute", "exec")
+VERIFY_CONTEXT_NEGATIONS = ("do not", "don't", "dont", "never", "avoid", "skip", "without")
+VERIFY_COMMAND_REJECT_WORDS = {
+    "add",
+    "build",
+    "deploy",
+    "fix",
+    "generate",
+    "install",
+    "lock",
+    "migrate",
+    "migration",
+    "publish",
+    "remove",
+    "release",
+    "scaffold",
+    "seed",
+    "setup",
+    "sync",
+    "update",
+    "upgrade",
+    "watch",
+    "write",
+}
+VERIFY_PACKAGE_MANAGER_EXECUTABLES = {"npm", "pnpm", "yarn", "bun"}
+VERIFY_PACKAGE_MANAGER_DIRECT_WORDS = {"test", "tests", "lint", "check", "verify", "e2e", "unit", "integration"}
+VERIFY_PACKAGE_MANAGER_VERIFY_WORDS = {"test", "tests", "lint", "check", "verify", "e2e", "unit", "integration", "ci"}
+VERIFY_CONTEXT_BOUNDARIES = ".!?\n;,"
+
+
+def _context_has_word(context, words):
+    return any(re.search(rf"\b{re.escape(word)}\b", context) for word in words)
+
+
+def _same_sentence_context(text, start, end):
+    before = text[max(0, start - 96) : start]
+    after = text[end : min(len(text), end + 96)]
+    boundary = max(before.rfind(marker) for marker in VERIFY_CONTEXT_BOUNDARIES)
+    if boundary >= 0:
+        before = before[boundary + 1 :]
+    after_boundary = min((after.find(marker) for marker in VERIFY_CONTEXT_BOUNDARIES if marker in after), default=-1)
+    if after_boundary >= 0:
+        after = after[:after_boundary]
+    return before.lower(), after.lower()
+
+
+def _verify_command_context_score(text, start, end, command):
+    before, after = _same_sentence_context(text, start, end)
+    near_before = before[-48:]
+    if any(marker in near_before for marker in VERIFY_CONTEXT_NEGATIONS):
+        return 0
+
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return 0
+    if any(_verify_command_rejected_arg(part) for part in parts):
+        return 0
+
+    if _context_has_word(before, VERIFY_CONTEXT_STRONG_WORDS):
+        return 4
+    if _context_has_word(before, VERIFY_CONTEXT_WEAK_WORDS):
+        return 2
+    if _context_has_word(after, VERIFY_CONTEXT_STRONG_WORDS):
+        return 1
+    return 0
+
+
+def _instruction_verify_command_candidates(instruction):
+    text = instruction or ""
+    candidates = []
+    seen = set()
+    for index, match in enumerate(re.finditer(r"`([^`\n]+)`", text)):
+        command = match.group(1).strip()
+        if not command or command in seen:
+            continue
+        seen.add(command)
+        score = _verify_command_context_score(text, match.start(), match.end(), command)
+        if score > 0:
+            candidates.append((score, index, command))
+    return [command for _score, _index, command in sorted(candidates, key=lambda item: (-item[0], item[1]))]
+
+
+def _python_inline_eval_arg(part):
+    if part == "-c" or part.startswith("--command"):
+        return True
+    return part.startswith("-") and not part.startswith("--") and "c" in part[1:]
+
+
+def _node_inline_eval_arg(part):
+    if part in {"-e", "-p"} or part.startswith("--eval") or part.startswith("--print"):
+        return True
+    return part.startswith("-") and not part.startswith("--") and any(flag in part[1:] for flag in ("e", "p"))
+
+
+def _verify_command_rejected_arg(part):
+    word = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", Path(part).name)
+    word = word.lower()
+    if word in VERIFY_COMMAND_REJECT_WORDS:
+        return True
+    pieces = [piece for piece in re.split(r"[^a-z0-9]+", word) if piece]
+    return any(piece in VERIFY_COMMAND_REJECT_WORDS for piece in pieces)
+
+
+def _package_manager_command_allowed(parts):
+    if not parts:
+        return True
+    executable = Path(parts[0]).name
+    if executable not in VERIFY_PACKAGE_MANAGER_EXECUTABLES:
+        return True
+    args = [part for part in parts[1:] if not part.startswith("-")]
+    if not args:
+        return False
+    if _verify_command_rejected_arg(args[0]):
+        return False
+    if args[0] in VERIFY_PACKAGE_MANAGER_DIRECT_WORDS:
+        return True
+    if args[0] == "run" and len(args) > 1:
+        script_words = {piece for piece in re.split(r"[^a-z0-9]+", Path(args[1]).name.lower()) if piece}
+        return bool(script_words & VERIFY_PACKAGE_MANAGER_VERIFY_WORDS) and not _verify_command_rejected_arg(args[1])
+    return False
+
+
+def _make_command_allowed(parts):
+    if not parts or Path(parts[0]).name != "make":
+        return True
+    targets = [part for part in parts[1:] if part and not part.startswith("-")]
+    if not targets:
+        return False
+    for target in targets:
+        if _verify_command_rejected_arg(target):
+            return False
+    target_words = {
+        piece
+        for target in targets
+        for piece in re.split(r"[^a-z0-9]+", Path(target).name.lower())
+        if piece
+    }
+    return bool(target_words & VERIFY_PACKAGE_MANAGER_VERIFY_WORDS)
+
+
+def _looks_like_verify_command(command):
+    command = (command or "").strip()
+    if not command:
+        return False
+    operator, _kind = first_unquoted_shell_operator(command)
+    if operator:
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    if _verify_command_rejected_arg(parts[0]):
+        return False
+    executable = Path(parts[0]).name
+    if executable in {"python", "python3"} and any(_python_inline_eval_arg(part) for part in parts[1:]):
+        return False
+    if executable == "node" and any(_node_inline_eval_arg(part) for part in parts[1:]):
+        return False
+    if not _package_manager_command_allowed(parts):
+        return False
+    if not _make_command_allowed(parts):
+        return False
+    if executable in VERIFY_COMMAND_EXECUTABLES:
+        return True
+    return parts[0].startswith("./") and len(parts) <= 4
+
+
+def detect_instruction_verify_command(instruction):
+    for command in _instruction_verify_command_candidates(instruction):
+        if _looks_like_verify_command(command):
+            return command
+    return ""
+
+
+def _path_for_verify_detection(cwd=None):
+    if cwd in (None, "", "."):
+        return Path.cwd()
+    path = Path(cwd).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path
+
+
+def detect_default_verify_command(cwd=None, instruction=None):
+    instruction_command = detect_instruction_verify_command(instruction)
+    if instruction_command:
+        return instruction_command
+
+    root = _path_for_verify_detection(cwd)
+    if (root / "pyproject.toml").exists() and (root / "tests").exists():
         return "uv run pytest -q"
-    if Path("pytest.ini").exists() or Path("tests").exists():
+    if (root / "pytest.ini").exists() or (root / "tests").exists():
         return "python -m pytest -q"
-    if Path("package.json").exists():
+    if (root / "package.json").exists():
         return "npm test"
     return ""
 
@@ -4139,6 +4755,20 @@ def positive_int_option(value, flag):
         raise MewError(f"{flag} must be an integer") from exc
     if option < 1:
         raise MewError(f"{flag} must be >= 1")
+    return option
+
+
+def positive_float_option(value, flag):
+    if value is None:
+        return None
+    try:
+        option = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MewError(f"{flag} must be a number") from exc
+    if not math.isfinite(option):
+        raise MewError(f"{flag} must be a finite number")
+    if option <= 0:
+        raise MewError(f"{flag} must be > 0")
     return option
 
 
@@ -4742,6 +5372,83 @@ def _refresh_step_tool_call_after_approval(step, approved_tool_call):
         step["pending_approval"] = bool(pending_ids)
 
 
+def _recoverable_approval_verification_failure(approval_data, index, max_steps):
+    tool_call = (approval_data or {}).get("tool_call") or {}
+    result = tool_call.get("result") or {}
+    return (
+        tool_call.get("status") == "failed"
+        and bool(result.get("rolled_back"))
+        and bool(result.get("verification"))
+        and index < max_steps
+    )
+
+
+def recoverable_work_model_error(error):
+    lowered = str(error or "").casefold()
+    if not lowered:
+        return False
+    if any(
+        re.search(pattern, lowered)
+        for pattern in (
+            r"\bhttp(?:/\d+(?:\.\d+)?)?(?:\s+status)?\s*5\d\d\b",
+            r"\bstatus(?:\s+code)?\s*5\d\d\b",
+            r"\bresponse(?:\s+status)?\s*5\d\d\b",
+            r"\b(?:backend|server|upstream|gateway)\D{0,32}\b5\d\d\b",
+            r"\b5\d\d\b\D{0,32}\b(?:backend|server|upstream|gateway|unavailable|bad gateway|gateway timeout)\b",
+        )
+    ):
+        return True
+    return any(
+        marker in lowered
+        for marker in (
+            "incompleteread",
+            "incomplete read",
+            "connection reset",
+            "connection aborted",
+            "temporarily unavailable",
+            "request timed out",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
+def _work_task_verify_instruction_text(task):
+    if not task:
+        return ""
+    fields = [
+        task.get("title") or "",
+        task.get("description") or "",
+        task.get("notes") or "",
+        task.get("command") or "",
+    ]
+    return "\n".join(field for field in fields if field)
+
+
+def _auto_detect_work_verify_command(args, options, session, task):
+    if not options.get("allow_verify") or options.get("verify_command"):
+        return ""
+    inferred = detect_default_verify_command(
+        cwd=options.get("cwd") or work_session_default_cwd(session, task=task),
+        instruction=_work_task_verify_instruction_text(task),
+    )
+    if not inferred:
+        return ""
+    options["verify_command"] = inferred
+    setattr(args, "verify_command", inferred)
+    if session:
+        with state_lock():
+            state = load_state()
+            stored_session = find_work_session(state, session.get("id"))
+            if stored_session:
+                defaults = stored_session.setdefault("default_options", {})
+                defaults["allow_verify"] = True
+                defaults["verify_command"] = inferred
+                defaults["verify_command_source"] = "auto_detected"
+                save_state(state)
+    return inferred
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -4755,6 +5462,7 @@ def cmd_work_ai(args):
             default=1,
             allow_zero=bool(getattr(args, "live", False) or getattr(args, "follow", False)),
         )
+        max_wall_seconds = positive_float_option(getattr(args, "max_wall_seconds", None), "--max-wall-seconds")
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
@@ -4815,6 +5523,9 @@ def cmd_work_ai(args):
         progress(f"{'created' if created else 'reused'} session #{session_id} task=#{task_id}")
 
     options = _work_control_options(args, session=session)
+    if not options.get("cwd"):
+        options["cwd"] = work_session_default_cwd(session, task=task)
+    auto_verify_command = _auto_detect_work_verify_command(args, options, session, task)
     effective_args = _work_effective_args(args, options)
     compact_cli_controls = bool(getattr(effective_args, "compact_live", False) or getattr(args, "follow", False))
     report = {
@@ -4825,6 +5536,11 @@ def cmd_work_ai(args):
         "stop_reason": "max_steps",
         "steps": [],
     }
+    run_started_at = time.monotonic()
+    if max_wall_seconds is not None:
+        report["max_wall_seconds"] = max_wall_seconds
+    if auto_verify_command:
+        report["auto_verify_command"] = auto_verify_command
     if max_steps == 0:
         report["stop_reason"] = "snapshot_refresh"
         if getattr(args, "live", False) or getattr(args, "follow", False):
@@ -4889,6 +5605,7 @@ def cmd_work_ai(args):
     except MewError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
+    effective_args.model_auth = model_auth
 
     live_cells_seen = len(build_work_session_cells(session, limit=None, include_startup_status=False))
     if getattr(args, "live", False) and not session.get("stop_requested_at") and not work_ai_has_tool_gates(options):
@@ -4904,6 +5621,39 @@ def cmd_work_ai(args):
         return 1
 
     for index in range(1, max_steps + 1):
+        turn_model_timeout = float(getattr(effective_args, "model_timeout", 0) or 0)
+        turn_timeout_ceiling = False
+        if max_wall_seconds is not None:
+            elapsed = time.monotonic() - run_started_at
+            remaining = max_wall_seconds - elapsed
+            model_timeout = float(getattr(effective_args, "model_timeout", 0) or 0)
+            model_call_count = 1 if (getattr(effective_args, "act_mode", "model") or "model") == "deterministic" else 2
+            available_model_timeout = max(
+                0.0,
+                (remaining - WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS) / model_call_count,
+            )
+            if remaining <= 0 or (
+                model_timeout > 0 and available_model_timeout < WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS
+            ):
+                report["stop_reason"] = "wall_timeout"
+                report["wall_timeout"] = {
+                    "elapsed_seconds": round(elapsed, 3),
+                    "remaining_seconds": round(max(0.0, remaining), 3),
+                    "model_timeout_seconds": model_timeout,
+                    "available_model_timeout_seconds": round(max(0.0, available_model_timeout), 3),
+                    "reserve_seconds": WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS,
+                    "reason": "not enough wall-clock budget remains for another model turn",
+                }
+                if progress:
+                    progress(f"step #{index}: wall-clock budget exhausted before next model turn")
+                break
+            if model_timeout > 0:
+                reduced_timeout = min(
+                    model_timeout,
+                    max(WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS, available_model_timeout),
+                )
+                turn_timeout_ceiling = reduced_timeout < model_timeout
+                turn_model_timeout = reduced_timeout
         step_started = time.monotonic()
         live_thinking_open = False
         live_model_delta_seen = False
@@ -5065,7 +5815,7 @@ def cmd_work_ai(args):
                 model=model,
                 base_url=base_url,
                 model_backend=model_backend,
-                timeout=effective_args.model_timeout,
+                timeout=turn_model_timeout,
                 allowed_read_roots=effective_args.allow_read or [],
                 allowed_write_roots=effective_args.allow_write or [],
                 allow_shell=effective_args.allow_shell,
@@ -5083,6 +5833,9 @@ def cmd_work_ai(args):
                 progress_model_deltas=not bool(getattr(effective_args, "compact_live", False)),
                 pre_model_metrics_sink=record_pre_model_metrics,
                 compact_live=bool(getattr(effective_args, "compact_live", False)),
+                run_step_index=index,
+                run_max_steps=max_steps,
+                timeout_ceiling=turn_timeout_ceiling,
             )
             flush_live_model_delta()
         except KeyboardInterrupt:
@@ -5140,12 +5893,36 @@ def cmd_work_ai(args):
                     "error": error,
                 }
             )
+            if (
+                index < max_steps
+                and getattr(effective_args, "continue_after_remember", False)
+                and recoverable_work_model_error(error)
+            ):
+                report["steps"][-1]["recoverable_model_error"] = True
+                report["steps"][-1]["continued_after_model_error"] = True
+                report["stop_reason"] = "max_steps"
+                if progress:
+                    progress(f"step #{index}: recoverable model error; continuing")
+                continue
             report["stop_reason"] = "model_error"
             if progress:
                 progress(f"step #{index}: model failed")
             break
 
         action = planned.get("action") or {"type": "wait", "reason": "missing action"}
+        action = convert_budget_pressure_finish_to_remember(
+            action,
+            session,
+            index,
+            max_steps,
+            continue_after_remember=bool(getattr(effective_args, "continue_after_remember", False)),
+        )
+        action = convert_repairable_wait_to_remember(
+            action,
+            index,
+            max_steps,
+            continue_after_remember=bool(getattr(effective_args, "continue_after_remember", False)),
+        )
         action_type = action.get("type")
         session_trace_patch = (
             planned.get("session_trace_patch") if isinstance(planned.get("session_trace_patch"), dict) else {}
@@ -5326,6 +6103,7 @@ def cmd_work_ai(args):
                         verify_timeout=effective_args.verify_timeout,
                         progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
                         json=False,
+                        defer_verify=bool(getattr(effective_args, "defer_verify", False)),
                         allow_unpaired_source_edit=False,
                     )
                     approval_code, approval_data = _apply_work_approval_batch(approve_args, pending_ids)
@@ -5447,6 +6225,22 @@ def cmd_work_ai(args):
                     ),
                 }
             )
+            if action_type == "remember" and getattr(effective_args, "continue_after_remember", False) and index < max_steps:
+                report["steps"][-1]["continued_after_remember"] = True
+                if progress:
+                    progress(f"step #{index}: remembered context; continuing")
+                continue
+            finished_note = str(control_effect.get("finished_note") or "")
+            if (
+                action_type == "finish"
+                and work_finish_blocker_allows_continue(finished_note)
+                and getattr(effective_args, "continue_after_remember", False)
+                and index < max_steps
+            ):
+                report["steps"][-1]["continued_after_finish_block"] = True
+                if progress:
+                    progress(f"step #{index}: finish blocked; continuing")
+                continue
             report["stop_reason"] = action_type or "control"
             if progress:
                 progress(f"step #{index}: stop={report['stop_reason']}")
@@ -5459,7 +6253,10 @@ def cmd_work_ai(args):
             allow_verify=effective_args.allow_verify,
             verify_command=effective_args.verify_command or "",
             verify_timeout=effective_args.verify_timeout,
+            default_cwd=getattr(effective_args, "cwd", "") or "",
         )
+        if action_type in WRITE_WORK_TOOLS and parameters.get("apply") and getattr(effective_args, "defer_verify", False):
+            parameters["defer_verify"] = True
         coerced_test_dry_run = _force_paired_test_steer_write_to_dry_run(
             pending_steer,
             action_type,
@@ -5769,21 +6566,37 @@ def cmd_work_ai(args):
             progress(f"step #{index}: tool #{tool_call_id} {action_type} start")
 
         try:
-            result = execute_work_tool_with_output(
-                action_type,
-                parameters,
-                effective_args.allow_read or [],
-                work_tool_output_progress(
-                    progress,
-                    tool_call_id,
-                    session_id=session_id if getattr(args, "live", False) else None,
-                    on_state_update=(
-                        (lambda: refresh_work_follow_snapshot(args, report, session_id, task_id))
-                        if getattr(args, "live", False)
-                        else None
-                    ),
+            output_progress = work_tool_output_progress(
+                progress,
+                tool_call_id,
+                session_id=session_id if getattr(args, "live", False) else None,
+                on_state_update=(
+                    (lambda: refresh_work_follow_snapshot(args, report, session_id, task_id))
+                    if getattr(args, "live", False)
+                    else None
                 ),
             )
+            if action_type == "read_image":
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    effective_args.allow_read or [],
+                    output_progress,
+                    model_context={
+                        "model_backend": model_backend,
+                        "model_auth": model_auth,
+                        "model": model,
+                        "base_url": base_url,
+                        "timeout": getattr(effective_args, "model_timeout", None),
+                    },
+                )
+            else:
+                result = execute_work_tool_with_output(
+                    action_type,
+                    parameters,
+                    effective_args.allow_read or [],
+                    output_progress,
+                )
             error = work_tool_result_error(action_type, result)
         except KeyboardInterrupt:
             interrupt = pause_work_session_after_user_interrupt(session_id, index)
@@ -5803,16 +6616,29 @@ def cmd_work_ai(args):
             if progress:
                 progress(f"step #{index}: interrupted by user")
             break
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, MewError) as exc:
             result = None
             error = str(exc)
 
+        recoverable_missing_observation_path = _recoverable_missing_observation_path_error(
+            action_type,
+            parameters,
+            error,
+            effective_args,
+            index,
+            max_steps,
+        )
         with state_lock():
             state = load_state()
             tool_call = finish_work_tool_call(state, session_id, tool_call_id, result=result, error=error)
             if not tool_call:
                 error = WORK_TOOL_RESULT_STALE_ERROR
                 tool_call = _missing_finished_work_tool_call(action_type, tool_call_id, error)
+                recoverable_missing_observation_path = False
+            if recoverable_missing_observation_path:
+                tool_call["recoverable_missing_observation_path"] = True
+                if action_type == "read_file":
+                    tool_call["recoverable_missing_read_file"] = True
             session = find_work_session(state, session_id)
             remember_successful_work_verification(session, action_type, result)
             if pending_steer and not steer_consumed:
@@ -5872,11 +6698,13 @@ def cmd_work_ai(args):
                     verify_timeout=effective_args.verify_timeout,
                     progress=bool(getattr(args, "progress", False) or getattr(args, "live", False)),
                     json=False,
-                    defer_verify=False,
+                    defer_verify=bool(getattr(effective_args, "defer_verify", False)),
                     allow_unpaired_source_edit=False,
                 )
                 approval_code, approval_data = _apply_work_approval(approve_args, tool_call.get("id"))
                 report["steps"][-1]["inline_approval"] = "auto_applied" if approval_code == 0 else "auto_failed"
+                if approval_code != 0 and _recoverable_approval_verification_failure(approval_data, index, max_steps):
+                    report["steps"][-1]["inline_approval_recoverable_verification_failure"] = True
                 if approval_data:
                     _refresh_step_tool_call_after_approval(report["steps"][-1], approval_data.get("approved_tool_call"))
                     applied_tool = approval_data.get("tool_call") or {}
@@ -5906,6 +6734,10 @@ def cmd_work_ai(args):
             if report["steps"][-1].get("inline_approval") == "auto_applied":
                 continue
             if report["steps"][-1].get("inline_approval") == "auto_failed":
+                if report["steps"][-1].get("inline_approval_recoverable_verification_failure"):
+                    if progress:
+                        progress(f"step #{index}: auto-approved verification failed; continuing with repair context")
+                    continue
                 report["stop_reason"] = "tool_failed"
                 break
             if live_approval_prompt_enabled(effective_args):
@@ -5965,6 +6797,46 @@ def cmd_work_ai(args):
                 progress(f"step #{index}: pending write approval")
             break
         if error:
+            recoverable_verification_failure = (
+                action_type in WRITE_WORK_TOOLS
+                and bool((result or {}).get("rolled_back"))
+                and bool((result or {}).get("verification"))
+                and index < max_steps
+            )
+            if recoverable_verification_failure:
+                report["steps"][-1]["recoverable_verification_failure"] = True
+                if progress:
+                    progress(f"step #{index}: verification failed; continuing with repair context")
+                continue
+            if _recoverable_run_tests_failure(action_type, error, result, index, max_steps):
+                report["steps"][-1]["recoverable_run_tests_failure"] = True
+                if progress:
+                    progress(f"step #{index}: run_tests failed; continuing with verifier feedback")
+                continue
+            if _recoverable_missing_observation_path_error(
+                action_type,
+                parameters,
+                error,
+                effective_args,
+                index,
+                max_steps,
+            ):
+                report["steps"][-1]["recoverable_missing_observation_path"] = True
+                if action_type == "read_file":
+                    report["steps"][-1]["recoverable_missing_read_file"] = True
+                if progress:
+                    progress(f"step #{index}: missing observation target; continuing with repair context")
+                continue
+            if _recoverable_stale_edit_file_error(action_type, parameters, error, effective_args, index, max_steps):
+                report["steps"][-1]["recoverable_stale_edit_file"] = True
+                if progress:
+                    progress(f"step #{index}: stale edit target; continuing with refresh context")
+                continue
+            if _recoverable_git_inspection_unavailable_error(action_type, error, result, index, max_steps):
+                report["steps"][-1]["recoverable_git_inspection_unavailable"] = True
+                if progress:
+                    progress(f"step #{index}: git inspection unavailable; continuing with filesystem context")
+                continue
             report["stop_reason"] = "tool_failed"
             break
 
@@ -5999,6 +6871,7 @@ def cmd_work_ai(args):
         "tool_failed",
         "no_active_session",
         "work_already_running",
+        "wall_timeout",
     ) else 1
 
 
@@ -6144,6 +7017,84 @@ def _latest_work_session_for_task(state, task_id):
     return latest
 
 
+def _recoverable_missing_observation_path_error(action_type, parameters, error, args, index, max_steps):
+    if action_type not in {"read_file", "inspect_dir"} or (max_steps is not None and index >= max_steps):
+        return False
+    if "path does not exist" not in str(error or ""):
+        return False
+    path = parameters.get("path") or ""
+    allowed_write = getattr(args, "allow_write", None) or []
+    if allowed_write:
+        try:
+            resolve_allowed_write_path(path, allowed_write, create=True)
+            return True
+        except ValueError:
+            pass
+
+    allowed_read = getattr(args, "allow_read", None) or []
+    if not allowed_read:
+        return False
+    try:
+        candidate = Path(path or ".").expanduser()
+        if not candidate.is_absolute():
+            cwd = parameters.get("cwd") or getattr(args, "cwd", "") or "."
+            candidate = Path(cwd).expanduser() / candidate
+        resolve_allowed_path(str(candidate.parent), allowed_read)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _recoverable_missing_read_file_error(action_type, parameters, error, args, index, max_steps):
+    return action_type == "read_file" and _recoverable_missing_observation_path_error(
+        action_type,
+        parameters,
+        error,
+        args,
+        index,
+        max_steps,
+    )
+
+
+def _recoverable_stale_edit_file_error(action_type, parameters, error, args, index, max_steps):
+    if action_type not in {"edit_file", "edit_file_hunks"} or (max_steps is not None and index >= max_steps):
+        return False
+    if "old text was not found" not in str(error or ""):
+        return False
+    allowed_write = getattr(args, "allow_write", None) or []
+    if not allowed_write:
+        return False
+    try:
+        resolve_allowed_write_path(parameters.get("path") or "", allowed_write, create=False)
+        return True
+    except ValueError:
+        return False
+
+
+def _recoverable_git_inspection_unavailable_error(action_type, error, result, index, max_steps):
+    if action_type not in GIT_WORK_TOOLS or (max_steps is not None and index >= max_steps):
+        return False
+    result = result or {}
+    normalized = "\n".join(
+        str(value or "")
+        for value in (
+            error,
+            result.get("stderr"),
+            result.get("stdout"),
+        )
+    ).lower()
+    return "not a git repository" in normalized
+
+
+def _recoverable_run_tests_failure(action_type, error, result, index, max_steps):
+    if action_type != "run_tests" or index >= max_steps:
+        return False
+    if "verification failed" not in str(error or "").lower():
+        return False
+    result = result or {}
+    return "exit_code" in result
+
+
 def _approval_parameters_from_call(call, args):
     parameters = dict(call.get("parameters") or {})
     for key in ("allowed_write_roots", "allow_shell", "allow_verify", "verify_command", "verify_cwd", "verify_timeout"):
@@ -6164,10 +7115,14 @@ def _deferred_approval_rollback_snapshot(source_call, parameters):
     if not parameters.get("apply") or not parameters.get("defer_verify"):
         return None
     try:
+        snapshot_parameters, _read_roots = workspace_relative_work_parameters(
+            source_call.get("tool"),
+            parameters,
+        )
         return snapshot_write_path(
-            parameters.get("path") or "",
-            parameters.get("allowed_write_roots") or [],
-            create=source_call.get("tool") == "write_file" and bool(parameters.get("create")),
+            snapshot_parameters.get("path") or "",
+            snapshot_parameters.get("allowed_write_roots") or [],
+            create=source_call.get("tool") == "write_file" and bool(snapshot_parameters.get("create")),
         )
     except (OSError, ValueError):
         return None
@@ -6477,7 +7432,7 @@ def _apply_work_approval(args, approve_tool_id):
             "interrupted": True,
             "repairs": repairs,
         }
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, MewError) as exc:
         result = None
         error = str(exc)
 
@@ -6673,7 +7628,7 @@ def _apply_work_approval_batch(args, approve_ids=None):
     for approve_id in ordered_ids:
         approve_args = SimpleNamespace(**vars(args))
         approve_args.approve_tool = approve_id
-        approve_args.defer_verify = approve_id in deferred_verify_ids
+        approve_args.defer_verify = bool(getattr(args, "defer_verify", False)) or approve_id in deferred_verify_ids
         code, data = _apply_work_approval(approve_args, approve_id)
         if data is not None:
             approved.append(data)
@@ -7209,7 +8164,14 @@ def cmd_work_show_session(args):
                 task = work_session_task(state, session)
         resume = build_work_session_resume(session, task=task, state=state)
         if resume and getattr(args, "allow_read", None):
-            attach_work_resume_world_state(resume, build_work_world_state(resume, args.allow_read))
+            attach_work_resume_world_state(
+                resume,
+                build_work_world_state(
+                    resume,
+                    args.allow_read,
+                    cwd=work_session_default_cwd(session, task=task),
+                ),
+            )
         snapshot_summary = work_session_snapshot_summary(session, state) if resume else {}
         if not resume and not getattr(args, "task_id", None):
             if args.json:
@@ -8930,7 +9892,16 @@ def interrupted_write_verify_cwd(call):
     result = (call or {}).get("result") or {}
     parameters = (call or {}).get("parameters") or {}
     intent = (call or {}).get("write_intent") or {}
-    return result.get("verify_cwd") or parameters.get("verify_cwd") or intent.get("verify_cwd") or "."
+    for value in (result.get("verify_cwd"), intent.get("verify_cwd"), parameters.get("verify_cwd")):
+        text = str(value or "").strip()
+        if text and text != ".":
+            return text
+    return "."
+
+
+def explicit_verify_cwd_arg(args):
+    text = str(getattr(args, "verify_cwd", None) or "").strip()
+    return text if text and text != "." else ""
 
 
 def work_recover_verification_blocker(args, session, source_call, *, safe_only=False):
@@ -9029,10 +10000,11 @@ def work_recover_apply_write_blocker(args, source_call, recovery_item, *, safe_o
             "write_world_state": write_state,
         }
     try:
+        recovery_parameters = _recovery_write_path_parameters(args, source_call, write_root)
         resolve_allowed_write_path(
-            write_root,
-            getattr(args, "allow_write", None) or [],
-            create=bool((source_call.get("parameters") or {}).get("create")),
+            recovery_parameters.get("path") or "",
+            recovery_parameters.get("allowed_write_roots") or [],
+            create=bool(recovery_parameters.get("create")),
         )
     except ValueError as exc:
         return {
@@ -9131,6 +10103,17 @@ def work_recover_completed_write_blocker(args, source_call, recovery_item, *, sa
     return None
 
 
+def _recovery_write_path_parameters(args, source_call, path):
+    parameters = dict((source_call or {}).get("parameters") or {})
+    parameters["path"] = path
+    parameters["allowed_write_roots"] = getattr(args, "allow_write", None) or []
+    normalized, _read_roots = workspace_relative_work_parameters(
+        (source_call or {}).get("tool"),
+        parameters,
+    )
+    return normalized
+
+
 def work_recovery_plan_item_for_call(state, session, source_call):
     if not source_call:
         return {}
@@ -9164,10 +10147,11 @@ def work_recover_dry_run_write_blocker(args, source_call):
             "path": write_root,
         }
     try:
+        recovery_parameters = _recovery_write_path_parameters(args, source_call, write_root)
         resolve_allowed_write_path(
-            write_root,
-            getattr(args, "allow_write", None) or [],
-            create=bool((source_call.get("parameters") or {}).get("create")),
+            recovery_parameters.get("path") or "",
+            recovery_parameters.get("allowed_write_roots") or [],
+            create=bool(recovery_parameters.get("create")),
         )
     except ValueError as exc:
         return {
@@ -9246,7 +10230,11 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
 
     world_state_before = {}
     if getattr(args, "allow_read", None):
-        world_state_before = build_work_world_state(resume_for_world, args.allow_read)
+        world_state_before = build_work_world_state(
+            resume_for_world,
+            args.allow_read,
+            cwd=work_session_default_cwd(session, task=work_session_task(state, session)),
+        )
 
     with state_lock():
         state = load_state()
@@ -9308,13 +10296,13 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
                 parameters["allowed_write_roots"] = list(getattr(args, "allow_write", None) or [])
                 parameters["allow_verify"] = bool(getattr(args, "allow_verify", False))
                 parameters["verify_command"] = getattr(args, "verify_command", None) or interrupted_write_verify_command(source_call)
-                parameters["verify_cwd"] = getattr(args, "verify_cwd", None) or interrupted_write_verify_cwd(source_call)
+                parameters["verify_cwd"] = explicit_verify_cwd_arg(args) or interrupted_write_verify_cwd(source_call)
             elif recovery_item.get("action") == "verify_completed_write":
                 recovery_tool = "run_tests"
                 parameters = {
                     "recovered_from_tool_call_id": source_call.get("id"),
                     "command": getattr(args, "verify_command", None) or interrupted_write_verify_command(source_call),
-                    "cwd": getattr(args, "verify_cwd", None) or interrupted_write_verify_cwd(source_call),
+                    "cwd": explicit_verify_cwd_arg(args) or interrupted_write_verify_cwd(source_call),
                     "allow_verify": True,
                     "timeout": getattr(args, "verify_timeout", None),
                 }
@@ -9546,13 +10534,14 @@ def _work_tool_task_cwd(task):
     return cwd if cwd != "." else ""
 
 
-def _work_tool_effective_cwd(args, task=None):
+def _work_tool_effective_cwd(args, task=None, session=None):
     cwd = getattr(args, "cwd", None)
     if cwd not in (None, "", "."):
         return cwd
-    if getattr(args, "tool", "") in (GIT_WORK_TOOLS | {"run_command", "run_tests"}):
-        return _work_tool_task_cwd(task) or cwd
-    return cwd
+    default_cwd = work_session_default_cwd(session, task=task)
+    if default_cwd:
+        return default_cwd
+    return _work_tool_task_cwd(task) or cwd
 
 
 def _work_tool_edits(args):
@@ -9569,8 +10558,21 @@ def _work_tool_edits(args):
 
 
 def _work_tool_parameters(args, session=None, gate_options=None, task=None):
-    path_tools = {"inspect_dir", "read_file", "search_text", "glob", "write_file", "edit_file", "edit_file_hunks"}
+    path_tools = {
+        "analyze_table",
+        "inspect_dir",
+        "read_file",
+        "read_image",
+        "search_text",
+        "glob",
+        "write_file",
+        "edit_file",
+        "edit_file_hunks",
+    }
     options = gate_options if gate_options is not None else _work_tool_gate_options(args, session)
+    effective_cwd = _work_tool_effective_cwd(args, task=task, session=session)
+    explicit_verify_cwd = getattr(args, "verify_cwd", None)
+    verify_cwd = explicit_verify_cwd if explicit_verify_cwd not in (None, "", ".") else effective_cwd
     parameters = {
         "path": args.path if getattr(args, "tool", "") in path_tools else None,
         "query": getattr(args, "query", None),
@@ -9586,19 +10588,23 @@ def _work_tool_parameters(args, session=None, gate_options=None, task=None):
         "create": getattr(args, "create", False),
         "replace_all": getattr(args, "replace_all", False),
         "apply": getattr(args, "apply", False),
-        "cwd": _work_tool_effective_cwd(args, task=task),
+        "cwd": effective_cwd,
         "timeout": getattr(args, "timeout", None),
         "allowed_write_roots": options.get("allow_write") or [],
         "allow_shell": options.get("allow_shell"),
         "allow_verify": options.get("allow_verify"),
         "verify_command": options.get("verify_command"),
-        "verify_cwd": getattr(args, "verify_cwd", None),
+        "verify_cwd": verify_cwd,
         "verify_timeout": getattr(args, "verify_timeout", None),
         "limit": getattr(args, "limit", None),
         "max_chars": getattr(args, "max_chars", None),
+        "max_rows": getattr(args, "max_rows", None),
+        "max_extrema": getattr(args, "max_extrema", None),
         "offset": getattr(args, "offset", None),
         "line_start": getattr(args, "line_start", None),
         "line_count": getattr(args, "line_count", None),
+        "detail": getattr(args, "detail", None),
+        "prompt": getattr(args, "prompt", None),
         "max_matches": getattr(args, "max_matches", None),
         "context_lines": getattr(args, "context_lines", None),
     }
@@ -9649,12 +10655,35 @@ def cmd_work_tool(args):
         progress(f"tool #{tool_call_id} {args.tool} start")
 
     try:
-        result = execute_work_tool_with_output(
-            args.tool,
-            parameters,
-            gate_options.get("allow_read") or [],
-            work_tool_output_progress(progress, tool_call_id),
-        )
+        output_progress = work_tool_output_progress(progress, tool_call_id)
+        if args.tool == "read_image":
+            try:
+                model_backend = normalize_model_backend(args.model_backend)
+                model = args.model or model_backend_default_model(model_backend)
+                base_url = args.base_url or model_backend_default_base_url(model_backend)
+                model_auth = load_model_auth(model_backend, args.auth)
+            except MewError as exc:
+                raise ValueError(str(exc)) from exc
+            result = execute_work_tool_with_output(
+                args.tool,
+                parameters,
+                gate_options.get("allow_read") or [],
+                output_progress,
+                model_context={
+                    "model_backend": model_backend,
+                    "model_auth": model_auth,
+                    "model": model,
+                    "base_url": base_url,
+                    "timeout": getattr(args, "model_timeout", None),
+                },
+            )
+        else:
+            result = execute_work_tool_with_output(
+                args.tool,
+                parameters,
+                gate_options.get("allow_read") or [],
+                output_progress,
+            )
         error = work_tool_result_error(args.tool, result)
     except KeyboardInterrupt:
         with state_lock():
@@ -14625,6 +15654,7 @@ def _parse_chat_work_ai_args(parts):
         "--model",
         "--base-url",
         "--model-timeout",
+        "--max-wall-seconds",
         "--max-steps",
         "--act-mode",
         "--work-guidance",
@@ -14641,6 +15671,7 @@ def _parse_chat_work_ai_args(parts):
         "model": None,
         "base_url": None,
         "model_timeout": 60.0,
+        "max_wall_seconds": None,
         "max_steps": None,
         "act_mode": None,
         "work_guidance": "",
@@ -14686,6 +15717,11 @@ def _parse_chat_work_ai_args(parts):
                     args["model_timeout"] = float(value)
                 except ValueError:
                     return None, f"mew: invalid --model-timeout: {value}"
+            elif name == "--max-wall-seconds":
+                try:
+                    args["max_wall_seconds"] = float(value)
+                except ValueError:
+                    return None, f"mew: invalid --max-wall-seconds: {value}"
             elif name == "--max-steps":
                 try:
                     args["max_steps"] = int(value)
@@ -14831,6 +15867,7 @@ def _split_continue_options_and_guidance(rest):
         "--model",
         "--base-url",
         "--model-timeout",
+        "--max-wall-seconds",
         "--max-steps",
         "--act-mode",
         "--work-guidance",
@@ -15519,7 +16556,15 @@ def chat_work_session(rest, chat_state=None):
                 session = _latest_work_session_for_task(state, task_id)
         resume = build_work_session_resume(session, task=work_session_task(state, session), state=state)
         if resume and allow_read:
-            attach_work_resume_world_state(resume, build_work_world_state(resume, allow_read))
+            task = work_session_task(state, session)
+            attach_work_resume_world_state(
+                resume,
+                build_work_world_state(
+                    resume,
+                    allow_read,
+                    cwd=work_session_default_cwd(session, task=task),
+                ),
+            )
         snapshot_summary = work_session_snapshot_summary(session, state) if resume else {}
         if not resume and not task_id:
             if auto_recovery is not None:

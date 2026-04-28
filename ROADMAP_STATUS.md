@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 This file is the compact operational roadmap dashboard. It is intentionally
 short enough to survive context compression and long-session reentry.
@@ -51,7 +51,15 @@ is tracked below.
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
-| 7. Senses: Inbound Signals | `in_progress` | Active milestone: convert existing signal gates/journaling/RSS foundation into useful audited inbound observations. |
+| 6.18 Implementation Failure Diagnosis Gate | `done` | Close gate passed via `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`; M7+ dogfood now routes failures through diagnosis before M6.14 repair. |
+| 6.19 Terminal-Bench Compatibility | `done` | Close gate passed via `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`; mew and Codex both run the bounded Harbor smoke with comparable artifacts. |
+| 6.20 Terminal-Bench Driven Implement-Lane Debugging | `done` | Fixed two-task terminal gate closed on current head: both selected tasks reached 5/5 with Harbor errors 0. |
+| 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
+| 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
+| 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Active milestone: broaden from curated subset to the frozen Codex target registry without Terminal-Bench-specific solvers. |
+| 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
+| 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
 | 10. Multi-Agent Residence | `not_started` | Multi-model shared residence remains future work. |
@@ -59,33 +67,428 @@ is tracked below.
 
 ## Active Milestone
 
-Active work: **M7 Senses: Inbound Signals**.
+Active work: **M6.24 Broad Terminal-Bench Parity Campaign**.
 
-Why M7 is active:
+Why M6.24 is active:
 
-- M6.17 closed the reviewer-gated resident meta-loop v0: mew can propose the
-  next task/lane or a safe next action without losing the active gate.
-- A resident that only rereads its own state is not meaningfully passive. The
-  next product gap is controlled inbound sensing: audited signals that let mew
-  notice the user's working world without becoming spam.
-- M7 already has foundation pieces, but the gate is not met until at least one
-  useful, provenance-backed unsolicited observation is produced from enabled
-  signal evidence.
+- User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
+  before continuing the senses roadmap.
+- M6.20 closed the first fixed terminal gate on current head:
+  `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
+  errors 0.
+- M6.21 froze the Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 target
+  registry as local JSON.
+- M6.22 closed the fixed multi-band subset run and showed that mew remains
+  below Codex target on two structural failure classes.
+- M6.23 closed failure-class coverage and proved one ranked generic repair:
+  grounded edit-scope evidence improved `overfull-hbox` from 2/5 to 3/5,
+  matching its frozen Codex target.
 
-Current M7 target:
+Closed M6.22 result:
 
-- keep inbound sources explicitly gated and budgeted
-- journal signal provenance, source, timestamp, and reason-for-use
-- start with local file/git signals, then one non-file-system source behind an
-  explicit gate
-- distinguish "noticed" from "acted" in passive turns
-- make every unsolicited observation explainable and disableable
+- curated subset manifest:
+  `docs/M6_22_CURATED_SUBSET_MANIFEST_2026-04-27.md`
+- local subset JSON:
+  `docs/data/terminal_bench_m6_22_curated_subset.json`
+- run ledger:
+  `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`
+- close audit:
+  `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`
+- selected tasks and Codex targets:
+  `filter-js-from-html` 0/5, `sanitize-git-repo` 1/5,
+  `gcode-to-text` 2/5, `overfull-hbox` 3/5, `extract-elf` 4/5,
+  `cancel-async-tasks` 5/5, and `fix-code-vulnerability` 5/5
+- aggregate Codex target: 20/35 successes, 57.14%
+- selected task runs:
+  `filter-js-from-html` completed 0/5 with 5 `VerifierTimeoutError`
+  exceptions in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`;
+  `sanitize-git-repo` completed 1/5 with Harbor errors 0 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`.
+  `gcode-to-text` completed 0/5 with 1 `AgentTimeoutError` in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json`.
+  `overfull-hbox` completed 1/5 with Harbor errors 0 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-overfull-hbox-5attempts-python-bootstrap-20260427-2315/result.json`.
+  `extract-elf` completed 5/5 with Harbor errors 0 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-extract-elf-5attempts-python-bootstrap-20260427-2334/result.json`.
+  Current full M6.22 total is 17/35, below the frozen Codex 20/35 target.
+- below-target classification:
+  `gcode-to-text` is classified as M6.18 `structural`, confidence medium,
+  `structural_reason = missing_visual_decode_artifact_grounding`, with
+  secondary `agent_wall_timeout_without_report`. `overfull-hbox` is classified
+  as M6.18 `structural`,
+  confidence medium-high,
+  `structural_reason = insufficient_acceptance_constraint_model`, with a
+  secondary `repeat_action_after_partial_repair` signal.
+- M6.22 repair rerun:
+  commit `29335c9` added acceptance checks and regressed `overfull-hbox` to
+  0/5 because repairable constraint blockers terminated as `wait`; commit
+  `2d0b5c4` converted those waits into continuity notes while budget remains
+  and reran `overfull-hbox` at 2/5. Remaining gap moves to M6.23.
+- M6.20 positive-control artifacts remain available for the two 100% tasks.
 
-Current M7 chain:
+Closed M6.23 result:
 
-`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
+- `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md` ranks the observed
+  curated-subset failure classes and selects the first repair.
+- close audit:
+  `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`
+- selected first repair:
+  `self_reported_acceptance_evidence_not_grounded_in_diff_validator` ->
+  grounded edit-scope acceptance validator, implemented by commit `47a3393`.
+- rerun artifact:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-23-overfull-hbox-5attempts-edit-scope-grounding-20260428-0032/result.json`
+- rerun result: `overfull-hbox` 3/5, mean 0.600, pass@5 1.000,
+  1 `AgentTimeoutError`; verdict improved vs M6.22's 2/5 repair rerun.
+- Deferred ranked classes:
+  `missing_visual_decode_artifact_grounding`,
+  `agent_wall_timeout_without_report`, `shell_quoting_multiline_command`, and
+  `verifier_timeout_no_edit`.
+- Already repaired class:
+  `repairable_constraint_blocker_terminal_wait` by commit `2d0b5c4`.
 
-Current M7 evidence:
+Current M6.24 chain:
+
+`M6.24 broad parity -> run Batch 1 with generic work path -> compare against frozen Codex target -> feed failures through M6.18/M6.23 repair economy`
+
+M6.24 Batch 1:
+
+- manifest: `docs/M6_24_BATCH_1_MANIFEST_2026-04-28.md`
+- local batch JSON: `docs/data/terminal_bench_m6_24_batch_1.json`
+- run ledger: `docs/M6_24_BATCH_1_RUNS_2026-04-28.md`
+- Batch 2 manifest: `docs/M6_24_BATCH_2_MANIFEST_2026-04-28.md`
+- Batch 2 local JSON: `docs/data/terminal_bench_m6_24_batch_2.json`
+- Batch 2 run ledger: `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`
+- selected tasks: `configure-git-webserver`, `db-wal-recovery`,
+  `raman-fitting`, `chess-best-move`, `kv-store-grpc`,
+  `build-cython-ext`, `code-from-image`, and `fix-git`
+- frozen Codex target: 25/40 successes, 62.5%
+- measured so far:
+  - `build-cython-ext`: latest 0/5 after the same-file batch-blocker
+    continuation repair, best observed 1/5, Codex target 5/5.
+  - `chess-best-move`: latest 5/5 after all-valid answer gating plus
+    acceptance-finish continuation, above Codex target 3/5; previous baseline
+    and answer-artifact prompt repair were both 0/5, and post-`read_image`
+    validation was 1/5.
+  - `code-from-image`: latest 5/5 after the generic `read_image` repair,
+    matched Codex target 5/5; previous baseline was 0/5.
+  - `configure-git-webserver`: 0/5, matched Codex target 0/5, no Harbor
+    errors.
+  - `db-wal-recovery`: 2/5, above Codex target 1/5, no Harbor errors.
+  - `fix-git`: 5/5, matched Codex target 5/5, no Harbor errors.
+  - `kv-store-grpc`: latest 5/5 after generic exact-schema repair, above Codex
+    target 4/5; previous baseline was 2/5.
+  - `raman-fitting`: latest 0/5 after generic `analyze_table` and numeric
+    artifact-quality finish gating, below Codex target 2/5; previous baseline
+    and numeric-plausibility repair were both 0/5.
+  - measured latest task total: 22/40 against frozen Codex target 25/40.
+  - best observed measured total: 23/40 if `build-cython-ext` uses its best
+    observed 1/5 rerun.
+- completed first repair:
+  `batch_missing_read_path_terminal_tool_failed`; commit `d519a3e` made
+  read-only batches continue after missing paths under allowed write roots.
+  Score stayed 0/5 but progressed trials moved further.
+- completed second repair:
+  `repeat_command_after_source_edit_blocked_by_total_repeat_guard`; commit
+  `26a2647` reset repeat counts at the latest completed workspace-changing
+  write. Score stayed 0/5 but the progressed trial reached 9/11 verifier tests
+  before timing out.
+- completed third repair:
+  `stale_exact_text_edit_terminal_tool_failed`; commit `404f36c` made stale
+  exact-text edit misses recoverable under allowed write roots while budget
+  remains. Score stayed 0/5 but stale edit misses no longer terminated the
+  loop.
+- completed fourth repair:
+  `git_status_not_repo_terminal_tool_failed`; commits `1ed31c7` and `fa82204`
+  made unavailable git status recoverable both as a top-level tool and inside
+  read-only batches. Commit `184ee1f` recorded the repair path. Score stayed
+  0/5, but the terminal git-status boundary did not recur in the rerun.
+- completed fifth repair:
+  `run_tests_failure_terminal_tool_failed`; direct `run_tests` failures should
+  become recoverable verifier observations while budget remains. The latest
+  rerun improved `build-cython-ext` from 0/5 to 1/5. Commit `f91209e`
+  implements the generic repair.
+- completed sixth repair:
+  `git_diff_not_repo_terminal_tool_failed`; read-only git inspection in
+  filesystem-only workspaces should be recoverable generally, not only for
+  `git_status`. Commit `dae6000` generalized the recovery for read-only
+  git-inspection tools. The targeted boundary did not recur in the next
+  non-timeout trials, but score regressed to 0/5.
+- completed seventh repair:
+  `run_tests_cd_prefix_shell_operator_terminal_tool_failed`; commit `3930af5`
+  normalizes only the safe `cd DIR && <verifier>` shape into `cwd=DIR` plus a
+  single verifier command, while preserving `run_tests` shell-chain rejection.
+  The next rerun produced 5/5 `AgentTimeoutError`, so this repair could not be
+  validated against `build-cython-ext`.
+- current route:
+  stop spending more `build-cython-ext`-only repair cycles until either
+  timeout partial-report observability is improved or another Batch 1 task
+  confirms the same shape. Run the next Batch 1 task to keep M6.24 broad.
+- completed Batch 1 control:
+  `fix-git` matched Codex at 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-fix-git-5attempts-20260428-0353/result.json`.
+  This suggests the `build-cython-ext` timeout wall is task-shape-specific, not
+  a universal Harbor/mew execution failure.
+- completed eighth repair:
+  `kv-store-grpc` scored 2/5 against Codex target 4/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-kv-store-grpc-5attempts-20260428-0359/result.json`.
+  The dominant failure is `schema_field_name_substitution_false_green`: failed
+  trials implemented `SetValRequest.val` even though the task specified request
+  field `value`, while response fields used `val`. The generic repair is exact
+  contract-name preservation in implementation prompts and self-verifiers.
+  Commit `098d1e9` implemented that prompt repair and reran the task at 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-kv-store-grpc-5attempts-schema-contract-20260428-0410/result.json`.
+- current route:
+  continue broad Batch 1 measurement with the next unmeasured manifest task.
+  Do not revisit `build-cython-ext` until timeout partial-report observability
+  is selected as the active repair or another task confirms the same
+  timeout-dominated shape.
+- completed low-target measurement:
+  `configure-git-webserver` matched Codex target 0/5 with no Harbor errors in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-configure-git-webserver-5attempts-20260428-0415/result.json`.
+  This is measurement coverage only, not a repair candidate.
+- completed low-band measurement:
+  `db-wal-recovery` exceeded Codex target 1/5 by scoring 2/5 with no Harbor
+  errors in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-db-wal-recovery-5attempts-20260428-0421/result.json`.
+  This is measurement coverage only, not a repair candidate.
+- completed ninth repair:
+  `raman-fitting` scored 0/5 against Codex target 2/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-raman-fitting-5attempts-20260428-0426/result.json`.
+  The dominant failure is `numeric_artifact_schema_only_false_green`: all
+  trials produced `/app/results.json`, but internal checks only proved JSON
+  shape or finite values while hidden tests rejected the fitted peak
+  parameters. The generic repair is numeric plausibility verification for
+  fitting/optimization/scientific scripting tasks before finish. Commit
+  `defd1c3` implemented that prompt repair and reran the task at 0/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-raman-fitting-5attempts-numeric-plausibility-20260428-0438/result.json`.
+  The repair changed behavior but did not improve score, so do not spend a
+  third consecutive `raman-fitting` prompt-polish cycle. Continue broad Batch 1
+  measurement; if another numeric/data task shows the same shape, prefer a
+  reusable artifact-quality verifier scaffold over another prompt sentence.
+- completed tenth repair:
+  `chess-best-move` scored 0/5 against Codex target 3/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-20260428-0452/result.json`.
+  The dominant failure is `answer_artifact_readback_false_green`: all trials
+  wrote `/app/move.txt` and read it back, but hidden verification expected both
+  `e2e4` and `g2g4` while observed outputs were incomplete or wrong. The
+  generic repair is semantic answer-from-artifact verification for images,
+  boards, puzzles, diagrams, screenshots, and data files, including
+  completeness proof when all winning/valid answers are requested. Commit
+  `db91b79` implemented that prompt repair and reran the task at 0/5 with one
+  `AgentTimeoutError` in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-answer-artifact-20260428-0508/result.json`.
+  The repair did not improve score, so do not spend a third consecutive
+  `chess-best-move` prompt-polish cycle. Continue to `code-from-image` to get
+  broader visual/artifact evidence before choosing a heavier generic repair.
+- completed eleventh measurement:
+  `code-from-image` scored 0/5 against Codex target 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-code-from-image-5attempts-20260428-0526/result.json`.
+  There were no Harbor errors, but every trial failed because `/app/output.txt`
+  was missing. The dominant failure is structural
+  `visual_artifact_observation_missing`: mew tried to render and manually
+  inspect `/app/code.png`, but without a native visual-artifact observation
+  tool it stopped by max-step, remember, wait, or ask-user instead of computing
+  the requested output. The next repair should be a generic image/visual
+  artifact observation tool in the normal work path, not a benchmark-specific
+  solver or another prompt-only polish cycle.
+- completed twelfth repair:
+  commit `5e963d3` added a generic `read_image` work tool backed by the Codex
+  Responses API image input format. It keeps auth/model details in the
+  execution context rather than persisted tool parameters and enforces normal
+  allowed read roots and sensitive-path checks. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-code-from-image-5attempts-read-image-20260428-0558/result.json`
+  improved `code-from-image` from 0/5 to 5/5 with Harbor errors 0 and runtime
+  2m 51s. This repairs `visual_artifact_observation_missing` for this task and
+  gives a reusable visual-artifact observation surface for screenshots,
+  diagrams, boards, plots, and code screenshots.
+- completed thirteenth cross-task validation:
+  rerunning `chess-best-move` after the generic `read_image` repair scored
+  1/5 with Harbor errors 0 and runtime 4m 28s in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-read-image-20260428-0603/result.json`.
+  The pass case read the board image, derived the FEN, enumerated both
+  mate-in-one moves, wrote `e2e4` and `g2g4`, and read the file back. The four
+  failures still wrote only `e2e4`, so the remaining structural reason is
+  `all_valid_answers_completeness_not_enforced`, not missing image access.
+  The next repair should improve generic answer-space completeness proof for
+  all-valid/all-winning answer tasks rather than adding a chess-specific
+  solver.
+- completed fourteenth repair:
+  commit `6db7116` added a generic all-valid answer completion gate. It
+  improved `chess-best-move` to 2/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-all-valid-gate-20260428-0613/result.json`,
+  but blocked finishes could still become terminal stops with incomplete
+  answer artifacts.
+- completed fifteenth repair:
+  commit `ce44a95` made acceptance finish blockers continue the work loop
+  while budget remains. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-chess-best-move-5attempts-finish-block-continue-20260428-0620/result.json`
+  improved `chess-best-move` to 5/5 with Harbor errors 0 and runtime 14m 9s,
+  exceeding the frozen Codex target 3/5. This repairs
+  `all_valid_answers_completeness_not_enforced` and
+  `acceptance_finish_block_terminal_stop` generically. Track the increased
+  runtime as a later implementation-lane ergonomics issue, not as a reason to
+  revert the correctness repair.
+- completed sixteenth measurement:
+  rerunning `build-cython-ext` with the existing generic
+  `mew work --oneshot --max-wall-seconds 780` path scored 0/5 with Harbor
+  errors 0 and runtime 10m 4s in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-max-wall-780-20260428-0637/result.json`.
+  This repaired the previous `AgentTimeoutError` opacity: every trial emitted
+  `mew-report.json`, `command-transcript.json`, `summary.json`, and verifier
+  output before stopping with `stop_reason = wall_timeout`. The remaining
+  primary structural reason is now
+  `multi_error_verifier_repair_not_closed_before_wall_timeout`, with secondary
+  `scattered_legacy_compatibility_sweep_incomplete` and
+  `dry_run_patch_not_converted_to_applied_patch_before_deadline`. Treat the
+  next repair as generic verifier-failure repair planning, not a
+  Cython-specific solver.
+- completed seventeenth repair:
+  commit `d1069ba` promoted verifier traceback/error output into
+  `work_session.resume.verifier_failure_repair_agenda`. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-verifier-agenda-20260428-0710/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 9m 34s. The score stayed
+  unchanged, but the failures are now more diagnosable: four trials hit
+  `wall_timeout` with visible verifier targets, and one trial stopped because
+  read-only batch observation treated a missing generated metadata directory
+  as terminal.
+- current route:
+  repair generic missing generated-directory observations in read-only batches,
+  then rerun `build-cython-ext`. If the missing-directory stop disappears and
+  score is still below target, move to same-family verifier sibling-set repair
+  rather than a benchmark-specific Cython solver.
+- completed eighteenth repair:
+  commit `85eade0` made missing generated-directory observations recoverable
+  for `inspect_dir` and `read_file`, top-level and inside read-only batches,
+  while budget remains. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-missing-dir-observation-20260428-0731/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 10m 4s. The previous
+  missing-directory terminal stop did not recur; all attempts reached
+  `wall_timeout`.
+- current route:
+  repair generic max-wall scheduling. The latest runs show mew stops before
+  another model turn as soon as remaining wall time is less than the configured
+  300s model timeout, leaving usable wall time idle. Reduce the per-turn model
+  timeout to fit the remaining wall budget instead of stopping early, then
+  rerun `build-cython-ext`.
+- completed nineteenth repair:
+  commit `84528a1` made max-wall scheduling reduce per-turn model timeout to
+  fit the remaining wall budget, while preserving normal write-ready and
+  deliberation timeout floors when the wall budget has room. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-wall-timeout-reduced-20260428-0755/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 14m 27s. The score stayed
+  unchanged, but attempts used more wall time and hidden verifier tails
+  improved to 8/11 or 9/11 pass patterns in most trials.
+- current route:
+  rerun `build-cython-ext` after committing the generic duplicate same-path
+  write-batch wait repair, then pivot unless the result exposes a small generic
+  repair. The sibling-search rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-sibling-search-20260428-0818/result.json`
+  improved from 0/5 to 1/5 with Harbor errors 0 and pass@5 1.000. Remaining
+  failures show mew often reaches README-smoke or near-repository-test-tail
+  success, but one run stopped on a repairable "collapse same-file hunks"
+  write-batch wait instead of continuing to a corrected batch.
+- completed twentieth repair:
+  commit `11f521f` converted the specific duplicate same-path write-batch
+  normalization wait into recoverable continuity, without converting broad
+  write-root blockers. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-same-file-batch-wait-20260428-0841/result.json`
+  scored 0/5 with Harbor errors 0 and runtime 13m 53s. The targeted same-file
+  wait did not recur, but all trials stopped through `wall_timeout` with only
+  a few seconds available for the last model call and hidden verifier tails
+  still concentrated around repository tests and NumPy alias compatibility.
+- current route:
+  stop spending `build-cython-ext`-only repair cycles unless a small generic
+  repair is obvious or another task confirms the same shape. Continue M6.24 by
+  selecting the next reusable Batch 1 target-deficit repair, likely a
+  data/numeric artifact-quality verifier scaffold for `raman-fitting` or the
+  next broad-parity candidate, not a benchmark-specific Cython closeout.
+- latest source/test validation:
+  `uv run pytest --no-testmon tests/test_work_session.py -k verifier_failure_repair_agenda -q`,
+  `uv run pytest --no-testmon tests/test_work_session.py -q`, and
+  `uv run ruff check src/mew/work_session.py tests/test_work_session.py`
+  passed for the verifier-agenda sibling-search repair. Codex-ultra review
+  session `019dd139-62f4-7872-9ad2-00d5c018d3e9` reported `STATUS: pass`
+  with no blocking issues.
+- latest source/test validation:
+  `uv run pytest --no-testmon tests/test_work_session.py -k "repairable_wait or work_model_batch_refuses_same_path" -q`,
+  `uv run pytest --no-testmon tests/test_work_session.py -q`, and
+  `uv run ruff check src/mew/commands.py tests/test_work_session.py` passed
+  for the duplicate same-path write-batch wait repair. Codex-ultra review
+  session `019dd14c-c236-7d63-9705-44595068365a` reported `STATUS: pass`
+  after narrowing the marker to the specific `collapse same-file` reason and
+  adding a negative write-root wait test.
+- latest proof validation:
+  the post-`11f521f` Harbor rerun completed with errors 0 but scored 0/5, so
+  the repair removed its targeted blocker without closing the Batch 1 deficit.
+- completed twenty-first repair:
+  generic numeric/data artifact support was added for the remaining Batch 1
+  deficit shape. The normal work path now has a read-only `analyze_table` tool
+  for deterministic full-file numeric profiling of CSV/TSV/whitespace tables,
+  including delimiter/header clues, column ranges, monotonicity, and local
+  extrema for x/y pairs. Finish gating for fitting, optimization, ranking,
+  scientific, and metric tasks now blocks schema-only, finite-number, and
+  single-fit residual evidence unless the acceptance check cites an independent
+  cross-check or alternative validation from a completed grounding tool.
+- current route:
+  the post-`8cec348` rerun of `raman-fitting` used `analyze_table` in the
+  completed trials and changed finish behavior, but still scored 0/5 with one
+  `AgentTimeoutError` in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-raman-fitting-5attempts-analyze-table-20260428-0926/result.json`.
+  Classify the new blocker as
+  `numeric_independent_validation_not_objective_grounded`: the loop now
+  grounds in the source table and cites independent checks, but still
+  validates the wrong objective/scale/model family. Stop `raman-fitting`-only
+  repair cycles unless a small generic objective-grounding check is obvious;
+  continue broad M6.24 measurement or build a reusable numeric objective
+  substrate from multiple numeric/data tasks.
+- completed Batch 2 selection:
+  Batch 2 covers unseen tasks `caffe-cifar-10`,
+  `extract-moves-from-video`, `dna-assembly`, `dna-insert`,
+  `financial-document-processor`, `build-pmars`, `git-leak-recovery`, and
+  `large-scale-text-editing`, with frozen Codex target 27/40. The next chain
+  is `M6.24 broad parity -> all 89 frozen registry tasks measured -> run Batch
+  2 task-by-task through normal mew work --oneshot`.
+- completed Batch 2 control:
+  `git-leak-recovery` matched Codex target 5/5 with no Harbor errors in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-git-leak-recovery-5attempts-20260428-0953/result.json`.
+  The first `build-pmars` run scored 3/5 against Codex target 5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-build-pmars-5attempts-20260428-0959/result.json`.
+  The blocker was harness permission, not core loop logic:
+  `container_system_install_path_not_explicitly_allowed`. Adding the generic
+  container-system write root `/usr/local/bin` improved `build-pmars` to 4/5,
+  and adding package-source read root `/etc/apt` plus `/usr/local/bin` produced
+  5/5 in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-build-pmars-5attempts-system-perms-20260428-1015/result.json`.
+  Future Batch 2 runs should use the explicit normal work path roots
+  `--allow-read . --allow-read /etc/apt --allow-write . --allow-write /usr/local/bin`.
+  `large-scale-text-editing` matched Codex target 5/5 with no Harbor errors in
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch2-large-scale-text-editing-5attempts-20260428-1026/result.json`.
+  Batch 2 measured latest total is 15/15 against frozen Codex target 15/15 for
+  measured tasks.
+- latest source/test validation:
+  `uv run pytest --no-testmon tests/test_data_tools.py tests/test_acceptance.py tests/test_work_session.py -q`
+  passed with 743 tests and 30 subtests; `uv run ruff check` on changed files
+  passed; `git diff --check` passed. Codex-ultra review session
+  `019dd16d-eae2-7253-b1fe-6dffab2cdf63` reported `STATUS: pass` after three
+  blocker rounds.
+
+Drift guard:
+
+- Do not create a Terminal-Bench-specific solver in mew core.
+- Repairs must improve generic `work_session` / implementation-lane behavior
+  for arbitrary workspace roots such as a benchmark task `/app`.
+- Harbor glue may adapt input/output capture, but benchmark execution should
+  call the normal work path with explicit cwd, read/write roots, verifier, and
+  bounded permissions.
+- Below-target M6.22 tasks must be classified through M6.18 before repair.
+
+M7 pending evidence preserved:
+
+- M6.18 close audit `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md` adds the
+  required diagnosis route for future M7 dogfood failures:
+  polish -> same-task retry, structural -> M6.14 repair, invalid spec -> task
+  correction, transient -> retry, ambiguous -> replay/proof collection.
 
 - Existing signal gates, journaling, and RSS/feed surfaces provide foundation,
   but the M7 close proof is not yet present.
@@ -144,6 +547,19 @@ Current M7 evidence:
   `./mew signals disable hn`. This proves the immediate end-to-end M7 path, but
   the real-day useful-observation gate remains open until the observation
   survives an intended passive proof window without spam.
+- Task `#685` added the first M7 no-spam guard. `record_signal_observation`
+  now suppresses duplicates in the current budget window before budget
+  consumption and before queueing `signal_observed`: same source/kind/summary
+  duplicates and same payload URL duplicates are blocked with
+  `duplicate_suppressed`, with payload URL suppression working across sources.
+  Mew session `#675` hit `task_goal_term_missing` once, then produced the core
+  source/test patch after explicit reviewer steer. Supervisor fixed a
+  codex-ultra finding that URL suppression was accidentally source-scoped.
+  Validation passed: `uv run python -m unittest tests.test_signals
+  tests.test_signal_fetch tests.test_commands`, `uv run ruff check
+  src/mew/signals.py tests/test_signals.py`, and `git diff --check`.
+  Codex-ultra review `019dcc4b-c380-77e3-acf5-26cd146e7935` failed initially;
+  re-review `019dcc4f-1032-7f22-9a6f-d4610bd92e9a` returned `STATUS: pass`.
 
 M6.17 close evidence:
 
@@ -1125,31 +1541,51 @@ M6.8.5 close result: **done**. The recorded audit is
 
 ## Next Milestone
 
-Current scheduled milestone: **M6.13 High-Effort Deliberation Lane**.
+Current scheduled milestone: **M6.22 Terminal-Bench Curated Subset Parity**.
 
-M6.13 starts now because the M6.8.5 deferral trigger has fired. The first slice
-should be additive and low-risk:
+M6.20 starts after M6.19 proves that Harbor / Terminal-Bench can execute mew
+and at least one reference agent on the same smoke subset. M6.20 should not
+begin from model opinion alone; it needs benchmark artifacts from M6.19.
 
-- introduce lane state/registry with `tiny` as the legacy default
-- prove old sessions and replay bundles normalize to tiny without migration
-- prove a mirror lane can record non-authoritative lane identity/bundles
-  without changing tiny-lane behavior
-- add lane-attempt telemetry fields that future M6.16/M6.17 work can use for
-  calibration economics, without claiming EV routing in M6.13 v0
-- add M6.13.2 side-project implementation dogfood telemetry before launching
-  the side-project dogfood lane, so the first external implementation attempts
-  produce structured M6.16 evidence instead of only reply/chat history
-  (**landed in M6.13.2 v0**)
+First M6.20 slice:
+
+- baseline report completed:
+  `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`
+- instruction-consuming `mew-smoke` entrypoint and host-side report capture are
+  implemented and validated; the previous `make-mips-interpreter` candidate is
+  retained as stretch evidence, not the close gate
+- next: run real implementation-lane attempts on the two active M6.20 gate
+  tasks, `terminal-bench/fix-code-vulnerability` and
+  `terminal-bench/cancel-async-tasks`
+- classify any failed mew task through M6.18
+- route only cited structural failures into M6.14 repair episodes
+- rerun the same subset and record whether the repair improved, regressed, or
+  did not affect the score
+- closed on 2026-04-27 JST by
+  `docs/M6_20_MEW_TERMINAL_GATE_RUNS_2026-04-27.md`: both fixed gate tasks
+  reached 5/5 successes with Harbor errors 0 on current head
 
 Planned future milestones:
 
-- **M6.16 Codex-Grade Implementation Lane**: use M6.13 lane-attempt telemetry
-  and the M6.13.2 side-project dogfood ledger to harden the authoritative
-  implementation lane. Broad refactoring belongs here only when a measured
-  bottleneck or recurring failure class is named with before/after proof.
-- **M6.17 Resident Meta Loop / Lane Chooser**: add a reviewer-gated resident
-  supervisor after implementation-lane reliability and lane boundaries are
-  proven.
+- **M6.21 Terminal-Bench Codex Target Registry**: done. The frozen target data
+  is `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
+- **M6.22 Terminal-Bench Curated Subset Parity**: active. The curated subset
+  manifest is now selected in `docs/M6_22_CURATED_SUBSET_MANIFEST_2026-04-27.md`
+  and `docs/data/terminal_bench_m6_22_curated_subset.json`: 7 tasks, 35 trials,
+  Codex target 20 successes. Next: run the five not-yet-run selected tasks
+  through the same generic `mew work --oneshot` Harbor command shape, then
+  combine them with the M6.20 positive-control artifacts.
+- **M6.23 Terminal-Bench Failure-Class Coverage**: classify below-target
+  benchmark failures into repair classes and rerun at least one ranked repair.
+- **M6.24 Broad Terminal-Bench Parity Campaign**: run all 89 registry tasks and
+  match or exceed Codex's 366/445 successes, 82.2% aggregate target.
+- **M6.25 Codex-Plus Resident Advantage**: preserve Terminal-Bench parity while
+  proving mew's persistence, memory, and repair loops make it preferable to
+  inhabit over a reactive terminal-agent CLI.
+- **M7 Senses: Inbound Signals**: resume after M6.19/M6.20 give the
+  implementation lane an external benchmark and failure-debug loop.
+- **M8 Identity: Cross-Project Self**: user-scope identity and cross-project
+  memory remain future work after M7.
 
 ## Post-Close Deferred Ledger
 
@@ -1223,6 +1659,8 @@ These caveats are preserved; they do not reopen the milestones by default.
 - Reopen M6.16 only if a fresh bounded implementation-lane cohort regresses
   below the recorded close gate, or if first-edit latency remains high on
   current-head samples after M6.17 has used it as lane-choice evidence.
+- Reopen M6.18 only if mew-first failure diagnosis stops emitting routeable
+  failure scopes or sends structural repairs to M6.14 without cited signals.
 - M6.14 remains the default home for future mew-first substrate repair
   episodes.
 
@@ -1230,29 +1668,164 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M7 -> audited inbound signal -> useful unsolicited observation without fabrication or spam`
+`M6.20 closed -> M6.21 registry done -> M6.22 curated subset parity`
 
 Acceptable near-term work:
 
-- inventory existing signal gates, journals, and feed/RSS surfaces
-- define the smallest M7 proof source and opt-in gate
-- record signal provenance with source, timestamp, budget, and reason-for-use
-- produce one reviewer-visible passive observation from real or deterministic
-  fixture signal evidence
-- expose why the observation was made and how the source can be disabled
+- define the M6.22 curated subset directly from
+  `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`
+  (done in `docs/data/terminal_bench_m6_22_curated_subset.json`)
+- keep `mew work --oneshot` as the implementation path and preserve the
+  no-Terminal-Bench-specific-solver constraint
+- run `filter-js-from-html`, `sanitize-git-repo`, `gcode-to-text`,
+  `overfull-hbox`, and `extract-elf`; reuse the M6.20 current-head artifacts
+  for `cancel-async-tasks` and `fix-code-vulnerability` as positive controls
+- classify below-target tasks through M6.18, then choose the next generic
+  implementation-lane repair from cited benchmark evidence
 
 Non-goals for the next session:
 
-- autonomous execution or auto-merge
+- adding a Terminal-Bench-specific solver path or benchmark-only core command
+- treating Terminal-Bench as a separate architecture instead of a measurement
+  harness for generic `mew work`
+- broad prompt tuning before instruction ingestion and failure classification
+  are proven
+- resuming M7 inbound signal work before M6.22 is addressed or explicitly
+  reprioritized
 - full concurrent executor
 - memory explore agentization
 - provider-specific prompt caching
-- broad refactors not tied to the first M7 inbound-signal proof
-- direct task/roadmap/memory mutation from inbound signals without reviewer approval
-- broad multi-source integrations before the first M7 proof source is selected
-- polish not mapped to the M7 gate
+- broad work-loop or work-session refactors without a recorded structural
+  signal
+- treating diagnosis output as automatic permission to perform structural
+  repair without reviewer-visible evidence
 
 ## Latest Validation
+
+Latest roadmap/status validation:
+
+- M6.20 fixed terminal gate is closed. Current-head mew runs matched the
+  frozen Codex target on both fixed tasks with Harbor errors 0:
+  `terminal-bench/cancel-async-tasks` 5/5
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-cancel-async-tasks-5attempts-boundary-verifier-20260427-2201/result.json`)
+  and `terminal-bench/fix-code-vulnerability` 5/5
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-work-oneshot-fix-code-vulnerability-5attempts-current-head-20260427-2207/result.json`).
+  Evidence and failure classification:
+  `docs/M6_20_MEW_TERMINAL_GATE_RUNS_2026-04-27.md`.
+- M6.22 curated subset manifest exists:
+  `docs/M6_22_CURATED_SUBSET_MANIFEST_2026-04-27.md` and
+  `docs/data/terminal_bench_m6_22_curated_subset.json`. Selected tasks:
+  `filter-js-from-html`, `sanitize-git-repo`, `gcode-to-text`,
+  `overfull-hbox`, `extract-elf`, `cancel-async-tasks`, and
+  `fix-code-vulnerability`. Aggregate Codex target: 20/35 successes.
+- First M6.22 runs are recorded in
+  `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`:
+  `filter-js-from-html` scored 0/5 with 5 `VerifierTimeoutError` exceptions
+  in 32m 24s
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-filter-js-from-html-5attempts-20260427-2207/result.json`).
+  `sanitize-git-repo` scored 1/5 with Harbor errors 0 in 4m 41s
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-sanitize-git-repo-5attempts-20260427-2245/result.json`).
+  `gcode-to-text` scored 0/5 with 1 `AgentTimeoutError` in 15m 41s
+  (`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-22-gcode-to-text-5attempts-20260427-2252/result.json`).
+  The combined counted result is 1/15, below the frozen Codex 3/15 target for
+  those three tasks. `gcode-to-text` is classified through M6.18 as structural
+  visual/geometric artifact-grounding failure; repair selection waits for the
+  remaining M6.22 tasks so the repair can target a cohort.
+- M6.21 target registry is complete. The source leaderboard is
+  `https://www.tbench.ai/leaderboard/terminal-bench/2.0/codex/0.121.0/gpt-5.5%40openai`.
+  Local JSON:
+  `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
+  Extracted aggregate: 89 tasks, 445 trials, 366 successes, 82.2% overall
+  resolution rate. M6.20 fixed-task gate targets:
+  `fix-code-vulnerability`, checksum
+  `13c4e35adbd7e55707f273aabd8f4108672f0fb790c96af543fbcbdcc977b119`,
+  5 trials, 5 successes, 100.0%; and `cancel-async-tasks`, checksum
+  `283c70ca90688dc09a969d24e3ed137ba0f00d23018df68771bdf86526b82047`,
+  5 trials, 5 successes, 100.0%.
+- M6.20 task `#694` repaired Harbor report capture after task `#693` proved
+  instruction ingestion but exposed missing host-side report metadata. Direct
+  supervisor implementation was used by user decision because this is
+  Terminal-Bench harness substrate, not the mew-first autonomy proof target.
+  New report:
+  `docs/M6_20_INSTRUCTION_RERUN_2026-04-27.md`. Validation passed:
+  `uv run pytest -q tests/test_terminal_bench_smoke.py tests/test_harbor_terminal_bench_agent.py --no-testmon`
+  (`9 passed`),
+  `uv run ruff check src/mew/terminal_bench_smoke.py tests/test_terminal_bench_smoke.py .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  `uv run mew-smoke --instruction 'diagnostic instruction' --report /tmp/mew-smoke-report.json --artifacts /tmp/mew-smoke-artifacts`,
+  `git diff --check`, and a bounded Harbor rerun:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-stdout-report-fallback/result.json`.
+  The rerun has `n_errors=0`, mean score `0.0`, and host-side
+  `mew-report.json` / `summary.json` with recovered report fields. The score
+  remains expectedly zero because `mew-smoke` is capture-only; next M6.20 value
+  is a real implementation-lane attempt or task-spec repair, not more smoke
+  wrapper plumbing.
+- M6.20 task `#693` ran the first instruction-consuming Harbor rerun:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-instruction-entrypoint/result.json`.
+  It had one trial, no Harbor exceptions, mean score `0.0`, and a command
+  transcript proving the full `make-mips-interpreter` instruction reached
+  `mew-smoke`. It also exposed that `mew-report.json` was not visible to the
+  host artifact directory, which task `#694` repaired.
+- M6.20 task `#692` added the installed `mew-smoke` entrypoint for
+  instruction-consuming Terminal-Bench smoke runs. It accepts `--instruction`,
+  `--report`, and `--artifacts`, records instruction/report JSON, registers the
+  console script in `pyproject.toml`, and updates
+  `docs/terminal-bench-harbor-smoke.md`. Focused validation passed:
+  `uv run pytest -q tests/test_terminal_bench_smoke.py tests/test_harbor_terminal_bench_agent.py --no-testmon`,
+  `uv run ruff check src/mew/terminal_bench_smoke.py tests/test_terminal_bench_smoke.py .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  `uv run mew-smoke --instruction 'diagnostic instruction' --report /tmp/mew-smoke-report.json --artifacts /tmp/mew-smoke-artifacts`,
+  and `git diff --check`.
+- M6.20 task `#691` created
+  `docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md` from the M6.19 mew and
+  Codex Harbor smoke artifacts. Verifier passed:
+  `test -f docs/M6_20_TERMINAL_BENCH_BASELINE_2026-04-27.md`, and manual
+  `git diff --check` passed.
+- M6.20 baseline facts: mew and Codex each ran one
+  `terminal-bench/make-mips-interpreter` smoke trial with `n_errors=0`, empty
+  `exception_stats`, and mean score `0.0`. The baseline route is not M6.14
+  repair yet; next step is an instruction-consuming mew rerun, then M6.18
+  failure classification if score remains zero.
+- M6.19 task `#687` added `.harbor/mew_terminal_bench_agent.py`,
+  `docs/terminal-bench-harbor-smoke.md`, and
+  `tests/test_harbor_terminal_bench_agent.py`.
+- Focused validation for `#687` passed:
+  `uv run pytest -q tests/test_harbor_terminal_bench_agent.py --no-testmon`,
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  and `git diff --check`.
+- Autonomy accounting: mew produced the wrapper/docs/tests and repaired the
+  await-time timeout fallback test; Codex applied a one-line supervisor lint
+  cleanup after mew marked the task done without running ruff. Count the slice
+  as product progress with a small reviewer cleanup, not a fully clean
+  mew-first close.
+- Historical M6.19 gap after `#687`: live Harbor execution and reference-agent
+  comparison were still missing at that point.
+- M6.19 task `#688` repaired Harbor factory/install compatibility. Focused
+  validation passed:
+  `uv run pytest -q tests/test_harbor_terminal_bench_agent.py --no-testmon`,
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`,
+  `git diff --check`, and a real Harbor tool-env
+  `AgentFactory.create_agent_from_import_path(...)` smoke.
+- M6.19 close audit:
+  `docs/M6_19_TERMINAL_BENCH_COMPATIBILITY_AUDIT_2026-04-27.md`.
+  The mew smoke result is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-smoke-help-fixed-return-code/result.json`
+  with `Exceptions=0`, transcript `exit_code=0`, and score `0.0`.
+  The Codex reference result is
+  `proof-artifacts/terminal-bench/harbor-smoke/codex-smoke-make-mips/result.json`
+  with `Exceptions=0`, score `0.0`, and Codex token metadata in Harbor
+  `agent_result`.
+- M7 task `#686` pending dry-run tools `#6644/#6645` were rejected without
+  applying because M7 is now pending behind Terminal-Bench milestones.
+- Earlier roadmap-only M6.19/M6.20 setup remains historical; current M6.19
+  validation includes the focused wrapper tests and ruff checks listed above.
+
+Latest M6.18 source/test validation:
+
+- Close audit: `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`.
+- Failure diagnosis slice:
+  `uv run pytest -q tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py --no-testmon`,
+  `uv run ruff check src/mew/mew_first_calibration.py src/mew/implementation_lane_baseline.py tests/test_mew_first_calibration.py tests/test_implementation_lane_baseline.py`,
+  `./mew metrics --mew-first --limit 10 --json`, and
+  `./mew metrics --implementation-lane --limit 10` passed.
 
 Latest M6.17 source/test validation:
 
