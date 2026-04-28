@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 selected after Batch 3 completed at 2/40 vs frozen Codex 24/40; run `sam-cell-seg` next. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 4 `sam-cell-seg` matched the 0/5 Codex control; continue with `train-fasttext`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -293,12 +293,17 @@ M6.24 resume condition:
   available unmeasured Codex success bands 0/5, 3/5, 4/5, and 5/5; the 1/5
   and 2/5 unmeasured bands are exhausted. Frozen Codex Batch 4 target:
   **25/40**.
+- M6.24 Batch 4 `sam-cell-seg` scored 0/5 against Codex target 0/5, errors
+  0, runtime 9m 26s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__02-16-06/result.json`.
+  This is a low-target control matching Codex, not a selected structural
+  repair signal.
 
 Next concrete action:
 
 - Run M6.24 Batch 4 task-by-task from
-  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, starting with
-  `sam-cell-seg`. If a new accepted structural blocker appears, append it to
+  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, continuing with
+  `train-fasttext`. If a new accepted structural blocker appears, append it to
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` and repair through M6.14 before
   continuing broad measurement.
 
