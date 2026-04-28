@@ -4087,6 +4087,19 @@ def run_work_batch_action(session_id, task_id, index, planned, action, args, pro
             if progress:
                 label = "broad-read-guard" if broad_read_guard else "repeat-guard"
                 progress(f"step #{index}: batch tool #{tool_call_id} {action_type} {label}")
+            if repeat_guard and _recoverable_repeat_guard_error(action_type, error, index, batch_max_steps):
+                recoverable_errors.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "tool": action_type,
+                        "path": parameters.get("path") or "",
+                        "error": error,
+                    }
+                )
+                if progress:
+                    progress(f"step #{index}: batch repeat guard; continuing with prior observation context")
+                error = ""
+                continue
             break
         if progress:
             progress(f"step #{index}: batch tool #{tool_call_id} {action_type} start")
@@ -5547,6 +5560,7 @@ def cmd_work_ai(args):
         options["cwd"] = work_session_default_cwd(session, task=task)
     auto_verify_command = _auto_detect_work_verify_command(args, options, session, task)
     effective_args = _work_effective_args(args, options)
+    effective_args.max_steps = max_steps
     compact_cli_controls = bool(getattr(effective_args, "compact_live", False) or getattr(args, "follow", False))
     report = {
         "session_id": session_id,
@@ -6554,7 +6568,6 @@ def cmd_work_ai(args):
                 "summary": error,
             }
             report["steps"].append(step)
-            report["stop_reason"] = "tool_failed"
             refresh_work_follow_snapshot(args, report, session_id, task_id)
             if getattr(args, "live", False):
                 with state_lock():
@@ -6575,6 +6588,12 @@ def cmd_work_ai(args):
             if progress:
                 label = "broad-read-guard" if broad_read_guard else "repeat-guard"
                 progress(f"step #{index}: tool #{tool_call_id} {action_type} {label}")
+            if repeat_guard and _recoverable_repeat_guard_error(action_type, error, index, max_steps):
+                step["recoverable_repeat_guard"] = True
+                if progress:
+                    progress(f"step #{index}: repeat guard; continuing with prior observation context")
+                continue
+            report["stop_reason"] = "tool_failed"
             break
         refresh_work_follow_snapshot(args, report, session_id, task_id)
         maybe_print_work_active_cell(args, session, task, index, "tool_call", tool_call_id)
@@ -7095,6 +7114,13 @@ def _recoverable_unsupported_observation_type_error(action_type, error, index, m
         return False
     normalized = str(error or "").lower()
     return "unsupported image type" in normalized and "supported=" in normalized
+
+
+def _recoverable_repeat_guard_error(action_type, error, index, max_steps):
+    if action_type not in (READ_ONLY_WORK_TOOLS | GIT_WORK_TOOLS) or (max_steps is not None and index >= max_steps):
+        return False
+    normalized = str(error or "").lower()
+    return "repeat-action guard blocked" in normalized
 
 
 def _recoverable_stale_edit_file_error(action_type, parameters, error, args, index, max_steps):

@@ -31983,6 +31983,171 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_json_recovers_read_only_repeat_guard_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {"summary": "read once", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "read twice", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "accidental repeated read", "action": {"type": "read_file", "path": "README.md"}},
+                    {"summary": "finish after guard context", "action": {"type": "finish", "task_done": True}},
+                ]
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--max-steps",
+                                        "4",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 4)
+                self.assertEqual(report["steps"][2]["status"], "failed")
+                self.assertTrue(report["steps"][2]["recoverable_repeat_guard"])
+                self.assertNotEqual(report.get("stop_reason"), "tool_failed")
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["tool_calls"][2]["status"], "failed")
+                self.assertIn("repeat-action guard blocked", session["tool_calls"][2]["error"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_batch_recovers_read_only_repeat_guard_with_budget_remaining(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                Path("other.md").write_text("other\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_outputs = [
+                    {
+                        "summary": "batch includes accidental repeated observation",
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "read_file", "path": "README.md"},
+                                {"type": "read_file", "path": "README.md"},
+                                {"type": "read_file", "path": "README.md"},
+                                {"type": "read_file", "path": "other.md"},
+                            ],
+                        },
+                    },
+                    {"summary": "finish after batch guard context", "action": {"type": "finish", "task_done": True}},
+                ]
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs) as call_model:
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--max-steps",
+                                        "2",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(call_model.call_count, 2)
+                self.assertEqual(report["steps"][0]["status"], "completed")
+                self.assertEqual(report["steps"][0]["recoverable_errors"][0]["tool"], "read_file")
+                self.assertIn("repeat-action guard blocked", report["steps"][0]["recoverable_errors"][0]["error"])
+                self.assertEqual(report["steps"][0]["tool_calls"][-1]["parameters"]["path"], "other.md")
+                self.assertNotEqual(report.get("stop_reason"), "tool_failed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_json_batch_repeat_guard_is_terminal_without_remaining_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("README.md").write_text("context\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+
+                model_output = {
+                    "summary": "single-step batch repeats same observation",
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "read_file", "path": "README.md"},
+                            {"type": "read_file", "path": "README.md"},
+                            {"type": "read_file", "path": "README.md"},
+                        ],
+                    },
+                }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--json",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--act-mode",
+                                        "deterministic",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["max_steps"], 1)
+                self.assertEqual(report["stop_reason"], "tool_failed")
+                self.assertEqual(report["steps"][0]["status"], "failed")
+                self.assertEqual(report["steps"][0].get("recoverable_errors"), [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_json_read_batch_continues_after_missing_directory_observation(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
