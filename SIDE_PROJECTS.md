@@ -193,20 +193,35 @@ Why it matters:
 
 Core risk: low if network access is optional.
 
-### P-07: mew-ghost
+### P-07: mew-wisp
 
-Goal: A lightweight companion that appears beside the editor or terminal.
+Goal: A terminal resident presence surface for mew.
+
+Status:
+- SP12 through SP18 landed under the historical `mew-ghost` codename and the
+  current `experiments/mew-ghost` implementation path.
+- The forward product name is `mew-wisp`: a CLI body/presence surface, not a
+  fixed pet character.
+- Next slice should retire HTML/browser output, keep state/JSON proof output,
+  and build the terminal-first wisp experience from fixtures before reconnecting
+  more deeply to live mew state.
 
 Scope:
-- Detect active app/window title with opt-in OS APIs.
-- Show a small visual presence.
-- Click to open `mew chat` or `mew code`.
+- Render a calm CLI presence beside editor or terminal work.
+- Keep the visible character swappable through later forms/skins.
+- Detect active app/window title only through opt-in OS APIs.
+- Surface dry-run `mew chat` or `mew code` intents without executing them by
+  default.
+- Reconnect to explicit live mew state only after the CLI experience is useful
+  from fixture snapshots.
 
 First dogfood slice:
-- Static local window prototype that does not require accessibility APIs.
+- CLI-first `mew-wisp` reset: remove HTML mode, keep state/JSON output, and
+  make the default human-facing render terminal-native.
 
 Why it matters:
-- Strong feeling of presence with less privacy risk than screen capture.
+- Strong feeling of resident presence with less privacy risk than screen
+  capture, while avoiding the ownership implications of calling the AI a pet.
 
 Core risk: low to medium.
 

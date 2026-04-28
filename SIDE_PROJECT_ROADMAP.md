@@ -226,29 +226,41 @@ Done when:
   non-goals, focused verifier, and first milestone
 - no implementation begins until the new roadmap/status entries are written
 
-## Second Project: mew-ghost
+## Second Project: mew-wisp
 
-`mew-ghost` is the second side project when the user explicitly wants a larger
-presence-oriented dogfood loop. It should stay isolated under
-`experiments/mew-ghost` and exercise macOS-adjacent product work without editing
-core mew.
+`mew-wisp` is the second side project when the user explicitly wants a larger
+presence-oriented dogfood loop. SP12 through SP18 landed under the historical
+`mew-ghost` codename and current `experiments/mew-ghost` implementation path.
+From SP19 onward, the product name is `mew-wisp`: a terminal presence surface,
+not a browser panel and not a fixed pet character.
+
+The wisp is the resident CLI body that can later render different forms,
+skins, or characters. Its name should survive if the displayed character
+changes.
 
 Target shape:
 
-- a small companion presence surface that can render beside editor/terminal work
+- a small terminal-first presence surface that can render beside editor or shell
+  work
+- a swappable display form layer, so the visible character can change without
+  renaming the product
 - macOS active app/window-title detection through opt-in OS APIs
 - graceful behavior when Accessibility permission is missing or the platform is
   not macOS
 - a click/command contract that opens or prints `mew chat` / `mew code` launch
   intents without invoking resident loops during tests
 - deterministic fixture tests for state mapping, macOS probe parsing, permission
-  fallback, launcher contract, and generated local UI output
+  fallback, launcher contract, and generated CLI/state output
 
 Non-goals for the first implementation arc:
 
 - no screen capture, keystroke logging, or hidden background monitoring
 - no live `.mew` state reads; use fixtures or explicit command output only
 - no core `src/mew/**` imports or core command promotion
+- no browser/HTML surface as the continuing product direction; SP19 should
+  retire the earlier HTML proof path and keep terminal/state output
+- no fixed pet identity; the wisp is a presence surface, while characters are
+  replaceable forms
 - no native app packaging until the fixture-tested shell and macOS probe
   contract are stable
 
@@ -368,3 +380,72 @@ Done when:
   hidden work
 - tests use injected runners/providers and do not spawn real `mew` subprocesses
 - README examples show terminal and HTML watch commands for real desk state
+
+### SP19: mew-wisp CLI-First Reset and HTML Removal
+
+Rename the side-project direction from `mew-ghost` to `mew-wisp` and remove the
+browser-oriented HTML proof path so the project converges on a terminal resident
+presence.
+
+Done when:
+
+- README and side-project docs describe `mew-wisp` as the canonical product
+  name, with `mew-ghost` kept only as historical codename/path context until a
+  code-path rename lands
+- `--format html`, HTML rendering helpers, HTML output tests, and HTML README
+  examples are removed or replaced with terminal/state equivalents
+- deterministic state/JSON output remains available for tests, dogfood reports,
+  and future mew adapter integration
+- the default human-facing render is terminal-first and does not require opening
+  a browser or output file
+- the first CLI wisp view can render from fixtures without live `.mew` reads,
+  core imports, background monitoring, or launcher execution
+- focused tests prove the CLI/state outputs and confirm no HTML mode remains
+- the local dogfood report records the rename decision and HTML removal as a
+  product convergence choice, not just cleanup
+
+### SP20: mew-wisp Watch TUI Experience
+
+Make the terminal wisp useful as a foreground resident view before adding more
+live mew coupling.
+
+Done when:
+
+- watch mode updates the same terminal surface instead of requiring a browser
+  refresh or dumping unreadable output
+- bounded watch tests prove repeated updates, interval handling, and interrupt
+  safety without real sleeps
+- the CLI view makes state, current focus, and next dry-run action visible at a
+  glance
+- output remains calm enough for daily use in a terminal pane
+- state/JSON output remains available separately for machine-readable proof
+
+### SP21: mew-wisp Form Layer
+
+Separate the terminal presence surface from the displayed character.
+
+Done when:
+
+- fixtures can select at least two forms, for example `default` and `compact`,
+  without changing the underlying state model
+- idle, coding, waiting, and blocked states map to form-specific expressions or
+  poses through a small declarative layer
+- tests prove that forms are interchangeable and do not change command
+  execution, live-read, or launcher safety behavior
+- README explains that the wisp is the surface/body and the character is a
+  replaceable form
+
+### SP22: mew-wisp Mew Adapter Reconnect
+
+Reconnect the CLI-first wisp to real mew state after the terminal experience is
+worth keeping on screen.
+
+Done when:
+
+- the same terminal view can render from fixture snapshots and explicit
+  repo-local `./mew desk --json` output through one adapter boundary
+- live mew reads remain opt-in and foreground-only
+- adapter failures produce structured, visible fallback states
+- tests use injected runners and fixture snapshots; a separate smoke proof may
+  run the real `./mew desk --json` command from the repo root
+- no internal mew state schema detail leaks into the form layer

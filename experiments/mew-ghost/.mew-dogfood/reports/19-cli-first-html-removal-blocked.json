@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "task_id": 19,
+  "session_id": 43,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Attempt SP19 mew-wisp CLI-first reset and HTML removal under the historical experiments/mew-ghost path.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "failed during rolled-back source-only patch: 5 failed, 23 passed"
+    }
+  ],
+  "reviewer_rejections": 1,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "sp19_html_removal_stale_hunks_and_batch_tool_shape_failure",
+  "repair_required": true,
+  "proof_artifacts": [
+    "mew task #19",
+    "mew work session #42",
+    "mew work session #43",
+    "GitHub issue #18: https://github.com/mkXultra/mew/issues/18"
+  ],
+  "commit": "",
+  "notes": "Mew-first SP19 did not land product edits. Session #42 first hit repo-local auth token_expired, then succeeded with /Users/mk/.codex/auth.json but proposed a source-only ghost.py patch that failed focused verification because tests still expected HTML. The patch was rejected. The follow-up repair stopped on unsupported batch semantics for edit_file_hunks/wait. Fresh session #43 reread the target, then failed stale edit hunks and stopped with batch write tool is not a paired write/edit: wait. Operator stopped per side-pj boundary after two focused attempts and more than 30 minutes without material implementation progress."
+}

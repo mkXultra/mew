@@ -29,14 +29,30 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP16 mew-ghost Watch Mode | `done` | Watch mode landed practical: foreground CLI JSONL records, bounded `--watch-count`, interruptible `--watch`, `--interval`, repeated HTML rewrites with freshness metadata, README usage, local report, and focused proof are in place. |
 | SP17 mew-ghost Desk Bridge | `done` | Desk bridge landed practical: static `--desk-json` fixture loading, desk pet-state presence mapping, status/counts/details/primary_action rendering, dry-run primary_action intent, watch reload proof, README usage, local report, and focused tests are in place. |
 | SP18 mew-ghost Live Desk Opt-In | `done` | Live desk opt-in landed practical: explicit `--live-desk`, no-shell repo-local desk command, timeout/fallback handling, fixture-only defaults, top-level real desk JSON normalization, README examples, local report, real live-desk proof, and focused tests are in place. |
+| SP19 mew-wisp CLI-First Reset and HTML Removal | `blocked` | First mew-first attempt stopped before product edits: sessions #42/#43 could reason about HTML removal but failed on source-only verifier failure, stale edit hunks, and batch tool-shape handling. Issue #18 tracks the implementation-lane blocker. |
+| SP20 mew-wisp Watch TUI Experience | `planned` | Build the foreground terminal resident view before adding more live mew coupling. |
+| SP21 mew-wisp Form Layer | `planned` | Separate the wisp surface from the displayed character so forms/skins can change later. |
+| SP22 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
 
-Active side-project focus: **SP18 mew-ghost Live Desk Opt-In is complete**.
+Active side-project focus: **SP19 mew-wisp CLI-First Reset and HTML Removal is blocked**.
 
 Current target:
 
-- keep `mew-ghost` isolated under `experiments/mew-ghost`
+- treat `mew-wisp` as the canonical product name for the second side-project
+  arc; `mew-ghost` remains historical context for SP12-SP18 and the current
+  implementation path until a rename slice lands
+- define the wisp as a terminal presence surface/body, not a fixed character;
+  the visible character should be replaceable by future forms/skins
+- build the CLI experience from fixtures first, then reconnect to explicit mew
+  state once the terminal resident view is worth keeping on screen
+- retire HTML/browser output from the forward product direction; keep
+  deterministic state/JSON output for tests, proofs, and future adapters
+- keep the current implementation isolated under `experiments/mew-ghost` until
+  SP19 either renames the path or records why the path should remain historical
+- SP19 task `#19` is blocked with no product edits landed; issue `#18` records
+  the stale-hunk and batch tool-shape failure after sessions `#42` and `#43`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -45,12 +61,12 @@ Current target:
 - SP16 watch mode is now present: `--watch-count` runs exact bounded
   foreground iterations, `--watch` runs until operator interrupt, `--interval`
   controls injected/testable sleeping, CLI watch emits one JSONL record per
-  iteration, and HTML watch rewrites the same output file with freshness
-  metadata each iteration
+  iteration, and the historical HTML watch proof is now a SP19 removal target
 - SP17 desk bridge is now present: static `--desk-json` fixture loading maps
   `sleeping`/`thinking`/`typing`/`alerting` into separate desk-derived presence,
-  renders desk status/counts/details/primary_action in CLI state and HTML, and
-  exposes desk `primary_action` as a non-executable dry-run command intent
+  renders desk status/counts/details/primary_action in CLI state and the
+  historical HTML surface, and exposes desk `primary_action` as a
+  non-executable dry-run command intent
 - SP18 live desk opt-in is now present: explicit `--live-desk` runs repo-local
   `./mew desk --json` without shell execution, maps nested and current
   top-level desk JSON through the same desk status/count/action surface, reruns
@@ -73,23 +89,23 @@ Current target:
 - route the originally repeated same-file write-batch ergonomics blocker as
   closed issue `#3` evidence; SP18 first stopped before product edits on this
   blocker, recorded in ledger row `19`
-- route the remaining large patch-shaping blockers as open issues `#14` and
-  `#15` evidence; SP18 retry after the `#3` fix still stopped before product
-  edits, recorded in ledger row `20`
+- route the large patch-shaping blockers as closed issues `#14` and `#15`
+  evidence; SP18 retry after the `#3` fix still stopped before product edits,
+  recorded in ledger row `20`
 - route the repeated stale failed-approval cleanup pattern as closed issue
   `#10` evidence for M6.16 implementation-lane hardening
 - route the report-schema closeout gap as closed issue `#11` evidence for
   M6.16 implementation-lane hardening; SP16 still needed operator report JSON
   normalization, recorded in ledger row `17`, and SP17 needed report-schema plus
   stale schema-version closeout follow-up, recorded in ledger row `18`
-- route the stale schema/version closeout gap as issue `#13` evidence for
+- route the stale schema/version closeout gap as closed issue `#13` evidence for
   M6.16 implementation-lane hardening; SP18 closed the stale schema/title
   surfaces in `mew-ghost`
-- route the SP18 top-level real desk JSON verifier gap as issue `#16` evidence;
-  SP18 repaired it before commit with injected-runner coverage and real
-  `--live-desk` proof
+- route the SP18 top-level real desk JSON verifier gap as closed issue `#16`
+  evidence; SP18 repaired it before commit with injected-runner coverage and
+  real `--live-desk` proof
 - route the final side-project `git_status`/`git_diff` closeout scope failure as
-  open issue `#17` evidence for implementation-lane hardening
+  closed issue `#17` evidence for implementation-lane hardening
 - route watch-mode verifier semantics as closed issue `#12` evidence; SP16
   operator review confirmed multiple CLI records and HTML rewrite behavior
 - preserve the current operating model for any future side-project cohort:
@@ -104,10 +120,19 @@ Current target:
 - Default ledger:
   `proof-artifacts/side_project_dogfood_ledger.jsonl`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
+  the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
+  fifteen `practical`, three `clean`, `success_rate=0.818`,
+  `structural_repairs_required=4`,
+  `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP18 completion on 2026-04-28: `rows_total=21`, three `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.857`,
   `structural_repairs_required=3`,
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`.
+- Product naming decision on 2026-04-28: the second side project should move
+  forward as `mew-wisp`, because `pet` makes the resident AI feel owned and
+  fixed while `wisp` names a terminal presence surface whose displayed form can
+  change later. `mew-ghost` remains historical context for SP12-SP18.
 - `./mew side-dogfood report --json` returned a valid telemetry report with
   twelve `mew-companion-log` rows on 2026-04-26: `rows_total=12`, one `failed`,
   eight `practical`, three `clean`, `success_rate=0.917`,
@@ -568,6 +593,14 @@ Current target:
 - SP16 is closed for the second `mew-ghost` cohort.
 - SP17 is closed for the second `mew-ghost` cohort.
 - SP18 is closed for the second `mew-ghost` cohort.
+- SP19 is blocked: task `#19` / sessions `#42` and `#43` did not land product
+  edits, and issue `#18` captures the coordinated HTML-removal patch-shape
+  failure.
+- SP20 is not started: the foreground watch TUI still needs fixture-first proof.
+- SP21 is not started: swappable forms/skins still need a small state-preserving
+  contract.
+- SP22 is not started: reconnecting the CLI-first wisp to live mew state should
+  wait until the terminal experience is worth keeping on screen.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -577,23 +610,31 @@ Current target:
 - Issue `#13` was resolved for `mew-ghost` by the SP18 schema/title closeout.
 - Issue `#16` was resolved before commit by adding top-level real desk JSON
   normalization coverage and proof.
-- Open `[side-pj]` issue `#17` captures the recurring final
-  `git_status`/`git_diff` closeout failure under side-project allow-read roots.
+- Issue `#17` was resolved after the SP18 closeout-scope finding was recorded
+  and closed upstream.
+- Open issue `#18` captures the SP19 mew-first failure to apply coordinated
+  HTML removal after stale hunks and unsupported batch tool-shape handling.
 
 ## Next Action
 
 Choose the next side-project move:
 
-1. close issues `#13` and `#16` after the SP18 commit/push lands
-2. keep issue `#17` open as implementation-lane closeout hardening input
-3. decide whether to add a new SP19 milestone for the next `mew-ghost` slice or
-   pause the side-project arc and feed SP12-SP18 evidence into core hardening
-4. before any new mew coding operation, run the repo-root sync rule from
+1. resolve or work around issue `#18` before continuing broad SP19
+2. if continuing before a core repair lands, split SP19 into a much smaller
+   mew-first slice that edits one source/test surface at a time and records that
+   split honestly in the ledger
+3. keep state/JSON output as the machine-readable proof path while removing
+   browser-oriented examples and tests
+4. preserve the old `mew-ghost` name only where it is historical evidence for
+   SP12-SP18 or the pre-rename implementation path
+5. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
 
 ## Non-Goals
 
-- do not implement outside `experiments/mew-ghost` for the `mew-ghost` arc
+- do not implement outside the isolated second side-project path for the
+  `mew-wisp` arc; until SP19 decides the path rename, that path is still
+  `experiments/mew-ghost`
 - do not treat Codex CLI implementation as mew-first autonomy credit
 - do treat Codex CLI operating mew as `operator`, not `implementer`
 - do not make GitHub issues for normal progress; create one `[side-pj]` issue
@@ -604,4 +645,8 @@ Choose the next side-project move:
   repair blocker or a later M6.16 measured hardening slice
 - do not read live `.mew` state, import `src/mew/**`, use screen capture,
   keystroke monitoring, TTS, network-heavy services, background monitoring, or
-  native packaging in the `mew-ghost` arc
+  native packaging in the `mew-wisp` arc
+- do not continue investing in browser/HTML output for `mew-wisp`; terminal
+  and state/JSON outputs are the intended surfaces
+- do not make the visible character a fixed identity; keep forms/skins
+  replaceable
