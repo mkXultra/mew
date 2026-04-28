@@ -741,15 +741,30 @@ def test_terminal_human_default_form_matches_existing_surface() -> None:
     assert 'terminal form: cat' not in implicit
     assert cat.startswith('terminal form: cat\ncat state:')
     assert 'mew-wisp SP19a terminal human view' in cat
+    assert '      ██        ██       ' in cat
+    assert '     ████      ████      ' in cat
+    assert '    ██  ████████  ██     ' in cat
+    assert '    ██            ██     ' in cat
+    assert '    ██   ██  ██   ██     ' in cat
+    assert '    ██      ██    ██  ██ ' in cat
+    assert '    ██            ██ █  █' in cat
+    assert '     ████████████  █   █' in cat
+    assert '        ██  ██      █  █' in cat
+    assert '        ██  ██    ████  ' in cat
+    assert '       ███  ███   *     ' in cat
+    assert '  code  ' not in cat
+    assert '   /\\_____/\\        ' not in cat
+    assert ' |  \\_____/  |__/   ' not in cat
 
 
-def test_cat_terminal_form_changes_expression_by_presence_state() -> None:
+def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:
     state, html = ghost.render_fixture(FIXTURE_PATH)
     expected_markers = {
-        'idle': '( -.- ) zZ',
-        'coding': '( o_o ) code',
-        'waiting': '( o.o ) ...',
-        'blocked': '( x_x ) !',
+        'idle': '       ███  ███  zZ     ',
+        'attentive': '       ███  ███   ?     ',
+        'coding': '       ███  ███   *     ',
+        'waiting': '       ███  ███  ...    ',
+        'blocked': '       ███  ███   !     ',
     }
     rendered_by_state: dict[str, str] = {}
 
@@ -760,10 +775,25 @@ def test_cat_terminal_form_changes_expression_by_presence_state() -> None:
 
         assert 'terminal form: cat' in rendered
         assert 'cat state: %s' % presence_state in rendered
+        assert '      ██        ██       ' in rendered
+        assert '     ████      ████      ' in rendered
+        assert '    ██  ████████  ██     ' in rendered
+        assert '    ██            ██     ' in rendered
+        assert '    ██   ██  ██   ██     ' in rendered
+        assert '    ██      ██    ██  ██ ' in rendered
+        assert '    ██            ██ █  █' in rendered
+        assert '     ████████████  █   █' in rendered
+        assert '        ██  ██      █  █' in rendered
+        assert '        ██  ██    ████  ' in rendered
+        assert '  code  ' not in rendered
+        assert '  /  ▌   ▌  \\___   ' not in rendered
         assert marker in rendered
         rendered_by_state[presence_state] = rendered
 
-    assert len({tuple(rendered.splitlines()[:5]) for rendered in rendered_by_state.values()}) == len(expected_markers)
+    sprite_lines_by_state = {state: rendered.splitlines()[2:13] for state, rendered in rendered_by_state.items()}
+    assert all(len(lines) == 11 for lines in sprite_lines_by_state.values())
+    assert len({tuple(lines[:-1]) for lines in sprite_lines_by_state.values()}) == 1
+    assert len({lines[-1] for lines in sprite_lines_by_state.values()}) == len(expected_markers)
 
 
 def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
@@ -810,6 +840,9 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     assert '--watch-count N' in readme
     assert '--format human' in readme
     assert '--form cat' in readme
+    assert 'coarse pixel cat converted from `cat.png`' in readme
+    assert 'square white face with thick stepped black outline' in readme
+    assert 'blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail' in readme
     assert 'KeyboardInterrupt' in readme
     assert 'rewrites the same local HTML file' in readme
 

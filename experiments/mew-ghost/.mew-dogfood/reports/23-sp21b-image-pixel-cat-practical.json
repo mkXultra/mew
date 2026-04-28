@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "task_id": 23,
+  "session_id": 52,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP21b second reviewer follow-up: --format human --form cat is revised from a stylized cyber/block icon into a literal coarse-grid conversion of repo-root cat.png: square white face with thick stepped black outline, blocky pointed ears, vertical rectangular eyes, tiny centered square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail. State variation is limited to final-row markers outside the common silhouette.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/23-sp21b-image-pixel-cat-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #23",
+    "mew work session #52",
+    "repo-root cat.png read_image tool #1037",
+    "focused pytest verification tool #1045",
+    "experiments/mew-ghost/.mew-dogfood/reports/23-sp21b-image-pixel-cat-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 1045,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "34 passed after applying the literal coarse-grid cat.png sprite, focused tests, and README wording."
+    }
+  ],
+  "implemented_contract": {
+    "reference_image_inspected": "cat.png was freshly re-inspected with the work-session read_image tool #1037 before this reviewer-follow-up edit. The observed reference traits were monochrome coarse pixel art, a mostly square white head/face with thick black stepped outline, pointed ears at the top corners, two vertical rectangular eyes, a tiny centered square nose, a slim standing body with narrow legs/feet, and a large stepped curled tail on the right.",
+    "cat_form_pixel_sprite": "--format human --form cat now prepends a terminal-friendly block-cell sprite that approximates those traits with a common coarse-grid silhouette rather than slash-heavy line art or invented cyber shapes.",
+    "cat_state_variation": "Idle, attentive, coding, waiting, and blocked presence states keep the same head/body/tail silhouette. Only the final row status marker changes, so the state marker does not alter the reference-like shape.",
+    "default_form_preserved": "The implicit human renderer and --form default remain the existing terminal human surface without cat-only headings.",
+    "state_json_preserved": "The state JSON renderer remains selected only by --format state and is not rewritten for terminal form presentation.",
+    "html_preserved": "The HTML renderer and html output/watch behavior remain out of scope for sprite changes.",
+    "watch_preserved": "Bounded human watch with --form cat continues to print one cat terminal surface per foreground iteration without JSONL record markers.",
+    "live_and_launcher_safety_preserved": "The slice does not add mew connection work and does not change live-active-window, live-desk, hidden/background/network safety fields, or launcher execution gates."
+  },
+  "test_contract": {
+    "focused_cat_silhouette_tests_added": true,
+    "readme_usage_test_updated": true,
+    "existing_state_jsonl_watch_test_preserved": true,
+    "existing_html_output_watch_test_preserved": true,
+    "covered_cases": [
+      "implicit human output equals --form default output",
+      "cat output is distinct from default and includes terminal form: cat metadata",
+      "cat output includes stepped pointed ears, square face/head outline, vertical rectangular eyes, tiny nose, slim body, two narrow legs/feet, and a stepped curled right tail",
+      "cat output no longer includes the prior slash-heavy line-art fragments or embedded code label",
+      "idle, attentive, coding, waiting, and blocked presence states share one common silhouette with only final-row markers differing",
+      "human --watch-count with --form cat prints two cat terminal surfaces for two iterations",
+      "human cat watch stdout omits JSON record_type and schema_version markers",
+      "README describes the cat.png coarse pixel conversion and keeps the --format human --form cat --watch-count usage command"
+    ]
+  },
+  "acceptance_notes": [
+    "The implementation is scoped under experiments/mew-ghost only.",
+    "The cat terminal form remains a presentation layer for --format human; it does not alter the underlying state payload.",
+    "No mew connection work is included in this slice.",
+    "This report is local side-dogfood evidence for the SP21b practical slice."
+  ],
+  "reviewer_rejections": 2,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "cat_sprite_visual_similarity_reviewer_followup",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "No broad mew connection, HTML, state JSON, live-read, or launcher behavior change was attempted; SP21b remains limited to the human cat terminal sprite polish slice.",
+  "created_at": "2026-04-28T15:40:53Z",
+  "updated_at": "2026-04-28T16:26:36Z"
+}

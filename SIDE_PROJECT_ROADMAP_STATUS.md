@@ -1,6 +1,6 @@
 # Mew Side Project Implementation Status
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 This file is the compact operational dashboard for side-project implementation
 dogfood. It is intentionally separate from `ROADMAP_STATUS.md`; the main
@@ -31,7 +31,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP18 mew-ghost Live Desk Opt-In | `done` | Live desk opt-in landed practical: explicit `--live-desk`, no-shell repo-local desk command, timeout/fallback handling, fixture-only defaults, top-level real desk JSON normalization, README examples, local report, real live-desk proof, and focused tests are in place. |
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `deferred/partial` | Broad HTML removal is deferred after issue #18 closed, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
-| SP21 mew-wisp Form Layer | `done` | SP21a task #22 landed practical: `--format human` supports `--form default` and `--form cat`, with state-varying ASCII cat poses and focused tests while preserving state/HTML/live/launcher behavior. |
+| SP21 mew-wisp Form Layer | `done` | SP21a task #22 added `--form default`/`--form cat`; SP21b task #23 used `read_image` on `cat.png` and replaced the weak ASCII cat with a block-cell pixel cat sprite while preserving state/HTML/live/launcher behavior. |
 | SP22 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
@@ -72,6 +72,14 @@ Current target:
   default` and `--form cat`, the cat form renders a state-varying ASCII cat for
   idle/coding/waiting/blocked-style presence, human watch with cat remains
   non-JSONL, and state/HTML/live/launcher behavior stayed unchanged
+- SP21b task `#23` landed practical: mew used `read_image` on repo-root
+  `cat.png` in sessions `#50`, `#51`, and `#52`; reviewer rejected the first
+  slash-heavy line-art pass and the later cyber/block icon pass, then mew
+  revised `--form cat` into a more literal `cat.png` coarse-grid sprite with
+  pointed ears, square face/head, vertical eyes, square nose, slim standing
+  body, two narrow legs/feet, and a large stepped curled right tail; ledger rows
+  `28` and `29` record the reviewer-followup practical results with rescue
+  edits `0`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -162,6 +170,13 @@ Current target:
   three `clean`, `success_rate=0.778`, `structural_repairs_required=6`,
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`. Ledger row
   `27` records the practical cat form layer with no rescue edits.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP21b on 2026-04-29: `rows_total=29`, six `failed`, twenty `practical`,
+  three `clean`, `success_rate=0.793`, `structural_repairs_required=6`,
+  `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`. Ledger rows
+  `28` and `29` record the image-based pixel cat sprite follow-ups with failure
+  classes `cat_sprite_line_art_reviewer_followup` and
+  `cat_sprite_visual_similarity_reviewer_followup`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,

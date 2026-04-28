@@ -85,7 +85,7 @@ Print two bounded foreground watch iterations as the terminal-first human surfac
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5
 ```
 
-Render the same bounded human watch as the cat terminal form, with state-varying ASCII cat pose/expression:
+Render the same bounded human watch as the cat terminal form, with a state-varying coarse pixel cat converted from `cat.png` (square white face with thick stepped black outline, blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail; state markers stay on the final row):
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5
