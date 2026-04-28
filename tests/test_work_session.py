@@ -8980,10 +8980,16 @@ class WorkSessionTests(unittest.TestCase):
                 repair_prompt,
             )
 
+        def assert_broad_rollback_guidance(repair_prompt):
+            self.assertIn("broad_rollback_slice_repair", repair_prompt)
+            self.assertIn("do not retry the full broad patch", repair_prompt)
+            self.assertIn("smaller complete source/test/docs slice", repair_prompt)
+
         assert_behavior_verifier_guidance(prompt)
         assert_behavior_verifier_guidance(fast_prompt)
         assert_rollback_repair_guidance(prompt)
         assert_rollback_repair_guidance(fast_prompt)
+        assert_broad_rollback_guidance(fast_prompt)
         tiny_context = build_write_ready_tiny_draft_model_context(context)
         tiny_prompt = build_work_write_ready_tiny_draft_prompt(tiny_context)
         self.assertEqual(tiny_context["current_run"]["remaining_steps_after_current"], 3)
@@ -8999,6 +9005,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn('"type": "batch|inspect_dir|read_file|read_image|search_text|glob', tiny_prompt)
         assert_behavior_verifier_guidance(tiny_prompt)
         assert_rollback_repair_guidance(tiny_prompt)
+        assert_broad_rollback_guidance(tiny_prompt)
         self.assertLess(len(tiny_prompt), len(fast_prompt))
 
     def test_tiny_write_ready_draft_context_carries_task_goal_terms(self):
@@ -25073,6 +25080,95 @@ class WorkSessionTests(unittest.TestCase):
             tiny_context["active_work_todo"]["source"]["plan_item"],
         )
 
+    def test_work_resume_surfaces_broad_rollback_slice_repair(self):
+        from mew.work_loop import build_work_deliberation_prompt
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 910,
+            "task_id": 911,
+            "status": "active",
+            "title": "Remove legacy HTML UI",
+            "goal": "Remove HTML output and update CLI/tests/docs.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 41,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/wisp/ui.py"},
+                    "result": {
+                        "path": "src/wisp/ui.py",
+                        "rolled_back": True,
+                        "verification": {
+                            "exit_code": 1,
+                            "stdout": "9 failed, 19 passed",
+                            "stderr": "test_html_removed failed\nREADME still mentions HTML",
+                        },
+                    },
+                },
+                {
+                    "id": 42,
+                    "tool": "edit_file_hunks",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_cli.py"},
+                    "result": {
+                        "path": "tests/test_cli.py",
+                        "rolled_back": True,
+                        "verification": {
+                            "exit_code": 1,
+                            "stdout": "1 failed, 27 passed",
+                            "stderr": "test_cli_contract failed",
+                        },
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 80,
+                    "tool_call_ids": [41],
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "edit_file", "path": "src/wisp/ui.py"},
+                            {"type": "edit_file", "path": "tests/test_cli.py"},
+                            {"type": "edit_file", "path": "README.md"},
+                        ],
+                    },
+                },
+                {
+                    "id": 81,
+                    "tool_call_ids": [42],
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "edit_file_hunks", "path": "tests/test_cli.py"},
+                            {"type": "edit_file_hunks", "path": "README.md"},
+                        ],
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        repair = resume["broad_rollback_slice_repair"]
+        self.assertEqual(repair["kind"], "broad_rollback_slice_repair")
+        self.assertEqual(repair["rolled_back_write_count"], 2)
+        self.assertEqual(repair["max_failed_test_count"], 9)
+        self.assertIn("src/wisp/ui.py", repair["involved_paths"])
+        self.assertIn("tests/test_cli.py", repair["involved_paths"])
+        self.assertIn("README.md", repair["involved_paths"])
+        self.assertIn("smaller complete slice", repair["suggested_next"])
+
+        text = format_work_session_resume(resume)
+        self.assertIn("broad_rollback_slice_repair:", text)
+        self.assertIn("broad_rollback_next:", text)
+        self.assertIn("smaller complete slice", text)
+
+        prompt = build_work_deliberation_prompt({"work_session": {"resume": resume}}, {"todo_id": "t1"})
+        self.assertIn("broad_rollback_slice_repair", prompt)
+        self.assertIn("smaller complete slice", prompt)
+
     def test_write_ready_tiny_draft_ignores_unreconstructable_failed_patch_repair(self):
         from mew.work_loop import build_write_ready_tiny_draft_model_context
         from mew.work_session import build_work_session_resume
@@ -33498,6 +33594,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("finish with a no-change summary", prompt)
         self.assertIn("prefer run_tests with that broader suggested verifier before finish", prompt)
         self.assertIn("If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user", prompt)
+        self.assertIn("If work_session.resume.broad_rollback_slice_repair is present", prompt)
+        self.assertIn("Choose one smaller complete slice", prompt)
         self.assertIn("A runnable smoke command with exit_code=0 is not enough to finish", prompt)
         self.assertIn("generated artifacts, saved files, stdout/stderr text, rendered frames", prompt)
         self.assertIn("inspect those artifact/output properties or run a small command that asserts them", prompt)

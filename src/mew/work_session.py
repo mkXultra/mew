@@ -3377,6 +3377,115 @@ def build_compact_retry_context(
     return context
 
 
+_ROLLBACK_FAILED_TEST_RE = re.compile(r"\b(\d+)\s+failed\b", re.IGNORECASE)
+
+
+def _rollback_verification_exit_code(call):
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+    for value in (
+        verification.get("exit_code"),
+        result.get("verification_exit_code"),
+        call.get("exit_code"),
+    ):
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _rollback_verification_text(call):
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    verification = result.get("verification") if isinstance(result.get("verification"), dict) else {}
+    parts = [
+        call.get("summary"),
+        call.get("error"),
+        verification.get("stdout"),
+        verification.get("stderr"),
+        result.get("verification_stdout"),
+        result.get("verification_stderr"),
+        result.get("stdout"),
+        result.get("stderr"),
+    ]
+    return "\n".join(str(part or "") for part in parts if str(part or "").strip())
+
+
+def _rollback_failed_test_count(call):
+    counts = []
+    for match in _ROLLBACK_FAILED_TEST_RE.finditer(_rollback_verification_text(call)):
+        try:
+            counts.append(int(match.group(1)))
+        except (TypeError, ValueError):
+            continue
+    return max(counts) if counts else 0
+
+
+def _rollback_write_paths(call, turns):
+    paths = [work_call_path(call)]
+    turn = _work_turn_for_tool_call(turns, call.get("id"))
+    for tool in _work_action_write_tools((turn or {}).get("action")):
+        paths.append(tool.get("path"))
+    return _coerce_working_memory_target_paths(paths)
+
+
+def build_broad_rollback_slice_repair(calls, turns, *, limit=5):
+    """Detect broad rollback loops and steer reentry toward a smaller complete slice."""
+    rolled_back = []
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if not result.get("rolled_back"):
+            continue
+        exit_code = _rollback_verification_exit_code(call)
+        if exit_code in (None, 0):
+            continue
+        paths = _rollback_write_paths(call, turns)
+        failed_tests = _rollback_failed_test_count(call)
+        rolled_back.append(
+            {
+                "tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "path": work_call_path(call) or "",
+                "paths": paths,
+                "verification_exit_code": exit_code,
+                "failed_test_count": failed_tests,
+                "failure_tail": clip_output(_rollback_verification_text(call), 500),
+            }
+        )
+    if not rolled_back:
+        return {}
+
+    recent = rolled_back[-max(1, int(limit or 1)) :]
+    involved_paths = []
+    for item in recent:
+        for path in item.get("paths") or []:
+            if path and path not in involved_paths:
+                involved_paths.append(path)
+    max_failed_tests = max((int(item.get("failed_test_count") or 0) for item in recent), default=0)
+    broad = len(recent) >= 2 or len(involved_paths) >= 3 or max_failed_tests >= 2
+    if not broad:
+        return {}
+    latest = recent[-1]
+    return {
+        "kind": "broad_rollback_slice_repair",
+        "rolled_back_write_count": len(recent),
+        "latest_tool_call_id": latest.get("tool_call_id"),
+        "latest_path": latest.get("path") or "",
+        "involved_paths": involved_paths[:8],
+        "max_failed_test_count": max_failed_tests,
+        "latest_failure_tail": latest.get("failure_tail") or "",
+        "suggested_next": (
+            "Do not retry the whole broad patch. Choose one smaller complete slice "
+            "that includes its source, local tests/docs/report evidence, and verifier; "
+            "record the remaining scope in working_memory before continuing."
+        ),
+    }
+
+
 def _work_call_repeat_target(call):
     result = call.get("result") or {}
     parameters = call.get("parameters") or {}
@@ -7701,6 +7810,10 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         failures,
         task=task,
     )
+    broad_rollback_slice_repair = build_broad_rollback_slice_repair(
+        calls,
+        turns,
+    )
     retry_context = build_compact_retry_context(
         calls,
         pending_approvals=pending_approvals,
@@ -7773,6 +7886,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "repair_anchor_observations": repair_anchor_observations,
         "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "failed_patch_repair": failed_patch_repair,
+        "broad_rollback_slice_repair": broad_rollback_slice_repair,
         "retry_context": retry_context,
         "pending_approvals": pending_approvals[-limit:],
         "pending_steer": session.get("pending_steer") or {},
@@ -7918,6 +8032,19 @@ def format_work_session_resume(resume):
             lines.append(f"failed_patch_repair_terms: {terms}")
         if failed_patch_repair.get("repair_instruction"):
             lines.append(f"failed_patch_repair_instruction: {failed_patch_repair.get('repair_instruction')}")
+    broad_rollback = resume.get("broad_rollback_slice_repair") or {}
+    if broad_rollback:
+        paths = ", ".join(broad_rollback.get("involved_paths") or [])
+        lines.append(
+            "broad_rollback_slice_repair: "
+            f"rolled_back_writes={broad_rollback.get('rolled_back_write_count') or 0} "
+            f"latest_tool=#{broad_rollback.get('latest_tool_call_id') or '-'} "
+            f"max_failed_tests={broad_rollback.get('max_failed_test_count') or 0}"
+        )
+        if paths:
+            lines.append(f"broad_rollback_paths: {paths}")
+        if broad_rollback.get("suggested_next"):
+            lines.append(f"broad_rollback_next: {broad_rollback.get('suggested_next')}")
     retry_context = resume.get("retry_context") or {}
     if retry_context:
         lines.append(
