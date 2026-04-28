@@ -33134,6 +33134,111 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(action["tools"][0]["dry_run"])
         self.assertTrue(action["tools"][1]["dry_run"])
 
+    def test_work_model_batch_collapses_mixed_same_path_hunk_edits(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {"type": "edit_file", "path": "tests/test_alpha.py", "old": "assert old", "new": "assert new"},
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "src/mew/alpha.py",
+                            "edits": [
+                                {"old": "VALUE = 'old'", "new": "VALUE = 'new'"},
+                                {"old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                            ],
+                        },
+                        {"type": "edit_file", "path": "src/mew/alpha.py", "old": "TAIL = 'old'", "new": "TAIL = 'new'"},
+                    ],
+                    "reason": "preview paired edits with mixed same-path hunks",
+                },
+            }
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(len(action["tools"]), 2)
+        self.assertEqual(action["tools"][1]["type"], "edit_file_hunks")
+        self.assertEqual(
+            action["tools"][1]["edits"],
+            [
+                {"old": "VALUE = 'old'", "new": "VALUE = 'new'"},
+                {"old": "HELPER = 'old'", "new": "HELPER = 'new'"},
+                {"old": "TAIL = 'old'", "new": "TAIL = 'new'"},
+            ],
+        )
+        self.assertTrue(action["tools"][1]["dry_run"])
+
+    def test_work_model_batch_allows_collapsed_single_allowed_root_write(self):
+        from mew.work_loop import normalize_work_model_action
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            os.chdir(outside)
+            try:
+                action = normalize_work_model_action(
+                    {
+                        "action": {
+                            "type": "batch",
+                            "tools": [
+                                {"type": "edit_file", "path": "ghost.py", "old": "sleeping", "new": "thinking"},
+                                {"type": "edit_file", "path": "ghost.py", "old": "hidden", "new": "visible"},
+                            ],
+                            "reason": "preview one file with multiple hunks",
+                        },
+                    },
+                    allowed_write_roots=[str(workspace)],
+                    default_cwd=str(workspace),
+                )
+
+                self.assertEqual(action["type"], "batch")
+                self.assertEqual(len(action["tools"]), 1)
+                self.assertEqual(action["tools"][0]["type"], "edit_file_hunks")
+                self.assertEqual(action["tools"][0]["path"], "ghost.py")
+                self.assertEqual(
+                    action["tools"][0]["edits"],
+                    [
+                        {"old": "sleeping", "new": "thinking"},
+                        {"old": "hidden", "new": "visible"},
+                    ],
+                )
+                self.assertTrue(action["tools"][0]["dry_run"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_model_batch_rejects_raw_singleton_write_batch(self):
+        from mew.work_loop import normalize_work_model_action
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            os.chdir(outside)
+            try:
+                action = normalize_work_model_action(
+                    {
+                        "action": {
+                            "type": "batch",
+                            "tools": [{"type": "write_file", "path": "ghost.py", "content": "hello\n"}],
+                        },
+                    },
+                    allowed_write_roots=[str(workspace)],
+                    default_cwd=str(workspace),
+                )
+
+                self.assertEqual(action["type"], "wait")
+                self.assertIn("write batch requires at least two write/edit tools", action["reason"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_rejection_frontier_forces_read_recovery_before_write_ready_redraft(self):
         from mew.work_loop import _work_rejection_frontier_recovery_action
 
@@ -33630,6 +33735,44 @@ class WorkSessionTests(unittest.TestCase):
 
                 self.assertEqual([action["path"] for action in actions], ["README.md", "notes/todo.md"])
                 self.assertTrue(all(action["dry_run"] for action in actions))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_command_write_batch_collapses_mixed_same_path_hunk_edits_under_cwd_root(self):
+        from mew.commands import _paired_write_batch_actions
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside"
+            workspace.mkdir()
+            outside.mkdir()
+            os.chdir(outside)
+            try:
+                actions = _paired_write_batch_actions(
+                    [
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "ghost.py",
+                            "edits": [{"old": "state = 'sleeping'", "new": "state = 'thinking'"}],
+                        },
+                        {"type": "edit_file", "path": "ghost.py", "old": "visible = False", "new": "visible = True"},
+                    ],
+                    allowed_write_roots=[str(workspace)],
+                    cwd=str(workspace),
+                )
+
+                self.assertEqual(len(actions), 1)
+                self.assertEqual(actions[0]["type"], "edit_file_hunks")
+                self.assertEqual(actions[0]["path"], "ghost.py")
+                self.assertEqual(
+                    actions[0]["edits"],
+                    [
+                        {"old": "state = 'sleeping'", "new": "state = 'thinking'"},
+                        {"old": "visible = False", "new": "visible = True"},
+                    ],
+                )
+                self.assertTrue(actions[0]["dry_run"])
             finally:
                 os.chdir(old_cwd)
 

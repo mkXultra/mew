@@ -314,6 +314,7 @@ from .work_session import (
 )
 from .work_loop import (
     _is_calibration_measured_patch_draft_task,
+    normalize_paired_write_batch_tools,
     plan_work_model_turn,
     work_tool_parameters_from_action,
 )
@@ -3866,34 +3867,18 @@ def _work_path_under_allowed_write_roots(path, allowed_write_roots=None, cwd="")
 
 
 def _paired_write_batch_actions(actions, allowed_write_roots=None, cwd=""):
-    write_actions = [
-        dict(action)
-        for action in actions or []
-        if (action.get("type") or action.get("tool")) in BATCH_WRITE_WORK_TOOLS
-    ]
-    if len(write_actions) < 2 or len(write_actions) != len(actions or []):
+    if not actions:
         return []
-    tests = [action for action in write_actions if _work_path_is_tests_path(action.get("path"))]
-    sources = [action for action in write_actions if _work_path_is_mew_source_path(action.get("path"))]
-    if sources and (not tests or len(tests) + len(sources) != len(write_actions)):
+    write_action_count = sum(
+        1 for action in actions if (action.get("type") or action.get("tool")) in BATCH_WRITE_WORK_TOOLS
+    )
+    if write_action_count != len(actions):
         return []
-    if not sources and not all(
-        _work_path_under_allowed_write_roots(action.get("path"), allowed_write_roots, cwd=cwd)
-        for action in write_actions
-    ):
-        return []
-    source_path = sources[0].get("path") if sources else ""
-    ordered = []
-    ordered_actions = [*tests, *sources] if sources else write_actions
-    for raw_action in ordered_actions:
-        action = dict(raw_action)
-        action["apply"] = False
-        action["dry_run"] = True
-        if source_path and raw_action in tests:
-            action["defer_verify_on_approval"] = True
-            action["paired_test_source_path"] = source_path
-        ordered.append(action)
-    return ordered
+    return normalize_paired_write_batch_tools(
+        actions,
+        allowed_write_roots=allowed_write_roots,
+        cwd=cwd,
+    )
 
 
 def run_work_batch_action(session_id, task_id, index, planned, action, args, progress, turn_id=None):
