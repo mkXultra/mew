@@ -40,10 +40,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP27 mew-wisp Readable Live Speech | `done` | One-shot tasks #45/#47 landed practical: ASCII speech bubbles now include breathing-room spacer rows, live-desk renders say live desk with status/pet context, and fixture/demo renders stay honest as local terminal or fixture-sourced speech. |
 | SP28 mew-wisp Stateful Resident Cues | `done` | One-shot task #48/session #79 landed clean: the cat form now adds deterministic state-aware resident marker cues such as `paws on keys`, while preserving the pixel silhouette, centered/narrow/watch/live behavior, and focused verifier. |
 | SP29 mew-wisp Live Work Speech Freshness | `practical/blocked` | Task #49/session #80 made live speech prefer live desk detail text over fixture ghost copy, but real smoke still shows stale active-session focus because `./mew desk --json` exposes old sessions; issue #31 records the upstream freshness blocker. |
+| SP30 mew-wisp Live HUD Coherence | `done` | Task #51/session #82 landed practical after task #50 rolled back: default live HUD focus now uses live desk detail/status/action instead of fixture ghost focus/message, while fixture-terminal output stays deterministic. |
 
 ## Active Focus
 
-Active side-project focus: **SP29 mew-wisp Live Work Speech Freshness landed the side-project patch; current-agent-loop speech freshness is blocked by issue #31**.
+Active side-project focus: **SP30 mew-wisp Live HUD Coherence is complete; next satisfaction gap is compact live detail verbosity**.
 
 Current target:
 
@@ -240,6 +241,14 @@ Current target:
   stale SP23a work-session focus because `./mew desk --json` currently exposes
   old active sessions such as task `#37`; issue `#31` records that upstream
   desk freshness blocker. Rescue edits remain `0`.
+- SP30 task `#50` first stopped with no accepted diff after a broader live HUD
+  helper attempt hit verifier failures and rolled back. SP30 retry task `#51`
+  landed practical from one-shot session `#82`: default live human/cat HUD focus
+  now prefers live desk detail/status/action, so live speech and HUD focus point
+  at the same live desk/work context instead of mixing live speech with fixture
+  ghost focus/message. The focused verifier passed (`46 passed`), `git diff
+  --check` passed, live/fixture terminal smoke outputs were inspected, and
+  rescue edits remain `0`.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`

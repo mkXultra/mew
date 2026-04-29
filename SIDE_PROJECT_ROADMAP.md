@@ -574,3 +574,21 @@ Done when:
   recorded as a separate implementation-lane issue
 - no live adapter deepening, hidden monitoring, launcher execution, shell
   execution, broad refactors, or core imports are introduced
+
+### SP30: mew-wisp Live HUD Coherence
+
+Make the resident HUD agree with the live speech source in default live terminal
+mode.
+
+Done when:
+
+- default live human/cat terminal output does not show fixture ghost
+  focus/message in the HUD focus row when live desk detail/status/action is
+  available
+- fixture-terminal output keeps the deterministic fixture HUD
+- watch layout, state output, HTML output, and existing live speech behavior
+  remain covered by focused tests
+- a real terminal smoke confirms live HUD focus and live speech point at the
+  same live desk/work context
+- no core imports, hidden monitoring, launcher execution, shell execution,
+  broad refactors, or deeper live adapter coupling are introduced

@@ -213,6 +213,15 @@ def test_live_desk_status_normalizes_current_top_level_live_shape_with_injected_
     assert status['primary_action']['dry_run'] is True
     assert status['primary_action']['executable'] is False
 
+    state = ghost.build_ghost_state(ghost.load_fixture(FIXTURE_PATH), desk_status=status)
+    terminal = ghost.render_terminal_human(state)
+    focus_lines = [line for line in terminal.splitlines() if 'focus:' in line]
+
+    assert len(focus_lines) == 1
+    assert 'desk-pet-0 - resting on current branch' in focus_lines[0]
+    assert 'Writing the SP12 scaffold' not in focus_lines[0]
+    assert 'action:   Resume live desk' in terminal
+
 
 def test_live_desk_status_reports_structured_fallbacks_without_real_subprocesses(tmp_path: Path) -> None:
     mew_path = tmp_path / 'mew'

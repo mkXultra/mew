@@ -1128,9 +1128,26 @@ def render_terminal_human(
         padding = max(0, (terminal_width - panel_width) // 2)
         return [' ' * padding + line for line in panel_lines]
 
+    panel_focus_value = '%s - %s' % (ghost['focus'], ghost['message'])
+    if desk.get('live_mew_reads'):
+        live_focus_value = ''
+        for detail in desk_details[:1]:
+            if not isinstance(detail, Mapping):
+                continue
+            detail_name = str(detail.get('name') or 'desk-pet')
+            detail_text = str(detail.get('detail') or detail.get('message') or detail.get('status') or '').strip()
+            live_focus_value = detail_name if not detail_text else '%s - %s' % (detail_name, detail_text)
+            break
+        if not live_focus_value and desk.get('status'):
+            live_focus_value = 'live desk status: %s' % desk.get('status')
+        if not live_focus_value and desk_primary is not None:
+            live_focus_value = 'action: %s' % primary_label
+        if live_focus_value:
+            panel_focus_value = live_focus_value
+
     panel_rows: list[tuple[str, object]] = [
         ('resident', 'mew-wisp | mood: %s | state: %s' % (ghost['mood'], presence_state)),
-        ('focus', '%s - %s' % (ghost['focus'], ghost['message'])),
+        ('focus', panel_focus_value),
         (
             'signal',
             '%s | snapshots: %s | desk: %s'
