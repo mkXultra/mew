@@ -153,8 +153,20 @@ M6.24 resume condition:
   recorded in
   `docs/DESIGN_2026-04-29_M6_24_HARD_TASK_CONTRACT_CAPSULE.md`: hard-task
   `working_memory.implementation_contract` plus a pre-finish source grounding
-  blocker. Next action is the same-shape rerun, preferably
-  `make-doom-for-mips` or `make-mips-interpreter`, not new broad measurement.
+  blocker. The same-shape rerun is recorded in
+  `docs/M6_24_HARD_TASK_CONTRACT_RERUN_2026-04-29.md`: `make-doom-for-mips`
+  stayed 0/5, but the behavior improved from surrogate/stub completions to
+  source-built ELF and VM-loader/runtime repair attempts with no false complete
+  state. codex-ultra review in
+  `docs/REVIEW_2026-04-29_M6_24_HARD_CONTRACT_RERUN_NEXT.md` selects the next
+  primary blocker as hard-runtime verifier strategy, with package permissions
+  and task budget as secondary amplifiers. That v0 repair is recorded in
+  `docs/DESIGN_2026-04-29_M6_24_HARD_RUNTIME_VERIFIER_STRATEGY.md`: failed
+  VM/emulator/interpreter verifier output now becomes a resume-visible
+  `runtime_contract_gap` with PC/opcode/artifact evidence and
+  readelf/nm/objdump/addr2line mapping guidance. Next action is to rerun
+  `make-doom-for-mips` same shape again. Do not resume new broad measurement
+  yet.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.

@@ -4440,6 +4440,53 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("/usr/local/lib/python3.13/site-packages/pkg/invariants.py:137", text)
         self.assertIn("verifier_failure_latest_dry_run: #2 pkg/invariants.py", text)
 
+    def test_work_session_resume_builds_runtime_contract_gap_for_vm_failure(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Build source artifact for custom VM",
+            "goal": "Build the provided source into an ELF and run it with vm.js.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "node vm.js", "cwd": "/app"},
+                    "result": {
+                        "command": "node vm.js",
+                        "cwd": "/app",
+                        "exit_code": 1,
+                        "stdout": "frame artifact:\nmissing /tmp/frame.bmp\n",
+                        "stderr": "Execution error at PC=0x47be38: Unknown SPECIAL3 function: 0x3b\n",
+                    },
+                    "error": "run_command failed with exit_code=1",
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        agenda = resume["verifier_failure_repair_agenda"]
+        runtime_gap = agenda["runtime_contract_gap"]
+
+        self.assertEqual(runtime_gap["kind"], "unsupported_opcode_instruction_set")
+        self.assertEqual(runtime_gap["signature"]["pc"], "0x47be38")
+        self.assertEqual(runtime_gap["signature"]["special_function"], "0x3b")
+        self.assertEqual(runtime_gap["signature"]["expected_artifacts"], ["/tmp/frame.bmp"])
+        self.assertEqual(runtime_gap["recommended_tools"], ["readelf", "nm", "objdump", "addr2line"])
+        self.assertIn("map the failed runtime signature", agenda["suggested_next"])
+
+        text = format_work_session_resume(resume)
+        self.assertIn("verifier_failure_runtime_gap: unsupported_opcode_instruction_set", text)
+        self.assertIn("pc=0x47be38", text)
+        self.assertIn("special_function=0x3b", text)
+        self.assertIn("expected_artifacts=/tmp/frame.bmp", text)
+        self.assertIn("verifier_failure_runtime_tools: readelf, nm, objdump, addr2line", text)
+
     def test_work_session_resume_clears_verifier_failure_agenda_after_later_green_command(self):
         from mew.work_session import build_work_session_resume
 
