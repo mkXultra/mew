@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "task_id": 39,
+  "session_id": 68,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP24a proved the CLI-first mew-wisp human cat surface can render explicit live desk adapter output through the existing opt-in injected desk_provider path, without adding hidden live reads, shell execution, core imports, or launcher execution.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 6,
+  "files_changed": [
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/sp24a-live-desk-human-cat.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/39-sp24a-live-desk-human-cat-practical.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "41 passed in 0.03s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 3,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "live_desk_provider_proof_repaired_after_source_literal_mismatch",
+  "repair_required": false,
+  "proof_artifacts": [
+    "tool_call:1517 added the injected live-desk human cat test as a dry-run patch",
+    "tool_call:1518 wrote the local SP24a proof note as a dry-run patch",
+    "tool_call:1524 added the missing primary_action command fixture field",
+    "tool_call:1530 repaired the test contract to assert rendered status/action evidence instead of an unrendered provider source literal",
+    "tool_call:1531 exposed a work-session git_diff closeout read-root failure after tests passed"
+  ],
+  "commit": "",
+  "notes": "Codex did not write product code. The product change is a mew-authored focused test proving that the human cat terminal surface can render injected live desk status/action evidence from an explicit provider, with diagnostics gated behind --details and no dependency on --desk-json fixture names. The operator corrected only local proof/report artifacts after verification. The attempt also exposed implementation-lane polish evidence: mew applied tool #1530 despite a dry-run-only steering request, and the final work-session git_diff closeout failed because the repo root was outside declared read roots."
+}

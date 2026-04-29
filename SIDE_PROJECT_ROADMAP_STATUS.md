@@ -34,11 +34,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Visual Polish | `done` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e/SP22f replaced raw diagnostics and stale ghost copy with resident-facing mew-wisp copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
 | SP23 mew-wisp Speech Bubble | `done` | SP23a landed practical in task #38/session #67: human terminal output now renders an ASCII mew-wisp speech bubble between the cat/default form and resident HUD, with focused tests and zero product-code rescue edits. Issues #25/#26/#27 remain implementation-lane hardening evidence. |
-| SP24 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the speech-bubble terminal experience is useful. |
+| SP24 mew-wisp Mew Adapter Reconnect | `in_progress` | SP24a landed practical: the CLI-first human cat surface now has focused proof for rendering explicit live desk adapter output through the existing opt-in injected `desk_provider` path without hidden live reads, shell execution, core imports, or launcher execution. |
 
 ## Active Focus
 
-Active side-project focus: **SP24 mew-wisp Mew Adapter Reconnect is next**.
+Active side-project focus: **SP24 mew-wisp Mew Adapter Reconnect is in progress**.
 
 Current target:
 
@@ -167,6 +167,15 @@ Current target:
   behavior, and passed the focused verifier (`40 passed`). Ledger row `44`
   records the practical result with rescue edits `0`; issue `#27` records the
   verifier-rollback polish finding exposed during the attempt
+- SP24a task `#39` landed practical from session `#68`: mew-authored focused
+  test coverage proves `--format human --form cat` can render explicit
+  live-desk-shaped provider status/action evidence through the existing opt-in
+  injected `desk_provider` path, keeps freshness/details/active-window/launcher
+  diagnostics gated behind `--details`, avoids static `--desk-json` proof, and
+  preserves the focused verifier (`41 passed`). Ledger row `45` records the
+  practical result with rescue edits `0`; issue `#28` records the dry-run/target
+  steering miss, and reopened issue `#17` records the closeout `git_diff`
+  read-root recurrence as implementation-lane polish evidence
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`

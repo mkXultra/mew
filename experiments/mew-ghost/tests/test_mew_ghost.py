@@ -1071,6 +1071,94 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert ' |  \\_____/  |__/   ' not in cat
 
 
+def test_terminal_human_cat_renders_injected_live_desk_provider(capsys) -> None:
+    calls: list[str] = []
+
+    def provider() -> dict[str, object]:
+        calls.append('desk')
+        return {
+            'enabled': True,
+            'source': 'live-desk',
+            'fixture_name': 'sp24-injected-live-desk',
+            'generated_at': '2026-04-29T08:00:00Z',
+            'status': 'sp24-live-ready',
+            'counts': {'pets_total': 1, 'pet_states': {'coding': 1}},
+            'details': [
+                {
+                    'id': 'mew-wisp',
+                    'name': 'mew-wisp',
+                    'pet': 'mew-wisp',
+                    'state': 'coding',
+                    'status': 'sp24-live-ready',
+                    'summary': 'SP24 live desk status visible in human cat details.',
+                }
+            ],
+            'primary_action': {
+                'id': 'sp24-live-desk-reconnect',
+                'label': 'SP24 live desk reconnect',
+                'command': ['mew', 'code', '--task', '39'],
+                'title': 'SP24 live desk reconnect',
+                'name': 'SP24 live desk reconnect',
+                'description': 'SP24 live desk reconnect action from injected provider.',
+                'source': 'live-desk',
+                'dry_run': True,
+                'side_effects': 'none',
+                'executable': False,
+            },
+            'live_mew_reads': True,
+            'command': ['mew', 'desk', '--json'],
+            'fallback': None,
+        }
+
+    minimal_exit = ghost.run_watch(
+        FIXTURE_PATH,
+        desk_provider=provider,
+        format_name='human',
+        terminal_form='cat',
+        watch_count=1,
+        interval_seconds=0,
+        clock=lambda: '2026-04-29T08:00:00Z',
+    )
+    minimal = capsys.readouterr().out
+
+    detailed_exit = ghost.run_watch(
+        FIXTURE_PATH,
+        desk_provider=provider,
+        format_name='human',
+        terminal_form='cat',
+        terminal_details=True,
+        watch_count=1,
+        interval_seconds=0,
+        clock=lambda: '2026-04-29T08:00:01Z',
+    )
+    detailed = capsys.readouterr().out
+
+    assert minimal_exit == 0
+    assert detailed_exit == 0
+    assert calls == ['desk', 'desk']
+    assert 'mew-wisp resident cat' in minimal
+    assert 'resident state: coding' in minimal
+    assert 'mew-wisp resident HUD' in minimal
+    assert _cat_speech_bubble_lines(minimal)
+    assert _cat_speech_bubble_lines(detailed) == _cat_speech_bubble_lines(minimal)
+    assert 'mew-wisp resident HUD' not in '\n'.join(_cat_speech_bubble_lines(minimal))
+    assert 'SP24 live desk reconnect' in ' '.join(_resident_panel_values(minimal, 'action'))
+    assert 'desk details:' not in minimal
+    assert 'active window:' not in minimal
+    assert 'launcher intents:' not in minimal
+    assert 'details:' in detailed
+    assert 'freshness:' in detailed
+    assert 'desk details:' in detailed
+    assert 'active window:' in detailed
+    assert 'launcher intents:' in detailed
+    assert 'sp24-live-ready' in detailed
+    assert 'SP24 live desk reconnect' in detailed
+    assert 'desk-primary-action: mew code --task 39 (dry-run)' in detailed
+    assert DESK_FIXTURE_PATH.name not in minimal
+    assert DESK_FIXTURE_PATH.name not in detailed
+    assert '--desk-json' not in detailed
+
+
 def test_terminal_human_resident_panel_centers_with_forced_width(monkeypatch) -> None:
     monkeypatch.setenv(ghost.CAT_TERMINAL_WIDTH_ENV, '100')
     state, html = ghost.render_fixture(FIXTURE_PATH)
