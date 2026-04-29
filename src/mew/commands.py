@@ -243,6 +243,7 @@ from .work_session import (
     append_work_tool_running_output,
     attach_work_resume_world_state,
     build_work_active_memory,
+    build_stale_runtime_artifact_risk,
     build_work_session_resume,
     close_work_session,
     compact_work_tool_summary,
@@ -4611,10 +4612,40 @@ def _write_work_oneshot_final_report(report_path, report):
         _write_json_file_atomic(report_path, report)
 
 
-def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume):
+def _work_oneshot_tool_calls_from_report(work_report):
+    if not isinstance(work_report, dict):
+        return []
+    calls = []
+    for step in work_report.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        call = step.get("tool_call")
+        if isinstance(call, dict):
+            calls.append(call)
+    return calls
+
+
+def _work_oneshot_runtime_artifact_risk_from_report(task, work_report):
+    calls = _work_oneshot_tool_calls_from_report(work_report)
+    if not calls:
+        return {}
+    task = task if isinstance(task, dict) else {}
+    return build_stale_runtime_artifact_risk(
+        task,
+        calls,
+        session={
+            "title": task.get("title") or "",
+            "goal": task.get("description") or task.get("notes") or "",
+        },
+    )
+
+
+def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None, work_report=None):
     if not getattr(args, "defer_verify", False):
         return {}
     risk = (resume or {}).get("stale_runtime_artifact_risk") or {}
+    if not risk:
+        risk = _work_oneshot_runtime_artifact_risk_from_report(task, work_report)
     artifacts = []
     for item in risk.get("artifacts") or []:
         if not isinstance(item, dict):
@@ -4721,7 +4752,12 @@ def cmd_work_oneshot(args):
         task = find_task(state, task.get("id")) or task
         session = latest_work_session_for_task(state, task.get("id"))
         resume = build_work_session_resume(session, task=task, state=state) if session else {}
-    post_run_cleanup = _work_oneshot_cleanup_deferred_runtime_artifacts(work_args, resume)
+    post_run_cleanup = _work_oneshot_cleanup_deferred_runtime_artifacts(
+        work_args,
+        resume,
+        task=task,
+        work_report=work_report,
+    )
     if post_run_cleanup:
         resume = dict(resume)
         resume["post_run_cleanup"] = post_run_cleanup

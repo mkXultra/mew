@@ -4649,6 +4649,56 @@ class WorkSessionTests(unittest.TestCase):
         finally:
             frame_path.unlink(missing_ok=True)
 
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_uses_report_steps(self):
+        with tempfile.NamedTemporaryFile(dir="/tmp", delete=False, prefix="mew-frame-", suffix=".bmp") as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+        try:
+            task = {
+                "title": "Build a MIPS interpreter",
+                "description": (
+                    "Implement vm.js so `node vm.js` runs the MIPS file. "
+                    "Running this file should result in saving the frames as they are rendered."
+                ),
+            }
+            work_report = {
+                "steps": [
+                    {
+                        "tool_call": {
+                            "id": 17,
+                            "tool": "run_command",
+                            "status": "completed",
+                            "parameters": {"command": "python3 inspect_frame.py", "cwd": "/app"},
+                            "result": {
+                                "command": "python3 inspect_frame.py",
+                                "cwd": "/app",
+                                "exit_code": 0,
+                                "stdout": (
+                                    f"{frame_path}: exists size=1024054 stat_size=1024054\n"
+                                    "frame artifact checks passed\n"
+                                ),
+                            },
+                        }
+                    }
+                ]
+            }
+            args = SimpleNamespace(defer_verify=True)
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task=task,
+                work_report=work_report,
+            )
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"][0]["artifact"], str(frame_path))
+            self.assertEqual(cleanup["artifacts"][0]["source_tool_call_id"], 17)
+            self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
+            self.assertFalse(frame_path.exists())
+        finally:
+            frame_path.unlink(missing_ok=True)
+
     def test_work_session_resume_surfaces_final_verifier_state_transfer_gap(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 

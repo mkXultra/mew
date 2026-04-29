@@ -97,6 +97,33 @@ The repair is deliberately outside Terminal-Bench:
 This protects external verifier freshness even when the model has no final turn
 left after a successful runtime self-check.
 
+## v0.3 Report-Step Cleanup Fallback
+
+The v0.2 same-shape speed rerun in
+`docs/M6_24_DEFER_VERIFY_CLEANUP_SPEED_RERUN_2026-04-29.md` showed the next
+handoff miss. mew finished normally after exact `node vm.js` succeeded and
+after inspecting valid `/tmp/frame.bmp` plus `/tmp/frame_000001.bmp`, but the
+final resume had no `stale_runtime_artifact_risk`, so `post_run_cleanup` was
+empty and the external verifier again observed a stale frame too early.
+
+The cleanup path now falls back to the final one-shot `work_report`:
+
+- collect completed `tool_call` entries from `work_report.steps`;
+- build the same generic stale-runtime-artifact risk from task text and tool
+  output;
+- remove only `/tmp/...` artifacts found by that risk detector when
+  `--defer-verify` is active.
+
+The marker set also recognizes common report shapes from runtime frame
+inspection:
+
+- `saved /tmp/`
+- `exists size=`
+
+This keeps the authority model unchanged: the implementation lane may verify
+and inspect runtime artifacts, but one-shot handoff cleans fresh-verifier
+artifacts even if the resume bundle missed the risk.
+
 ## Validation
 
 Focused validation:
@@ -139,6 +166,20 @@ Observed:
 
 - `4 passed, 49 deselected`
 - `6 passed, 769 deselected`
+- `ruff`: all checks passed
+
+Additional v0.3 validation:
+
+```sh
+uv run pytest tests/test_acceptance.py -k 'stale_runtime_artifact or runtime_command_pass_without_artifact' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'stale_runtime_artifact or final_verifier_state_transfer or oneshot_cleanup' --no-testmon -q
+uv run ruff check src/mew/acceptance.py src/mew/work_session.py src/mew/commands.py tests/test_acceptance.py tests/test_work_session.py
+```
+
+Observed:
+
+- `4 passed, 49 deselected`
+- `7 passed, 769 deselected`
 - `ruff`: all checks passed
 
 ## Same-Shape Rerun Gate
