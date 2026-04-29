@@ -3552,6 +3552,31 @@ def _rollback_write_paths(call, turns):
     return _coerce_working_memory_target_paths(paths)
 
 
+_PRESENTATION_SLICE_MARKERS = (
+    "bubble",
+    "layout",
+    "line",
+    "lines",
+    "overflow",
+    "readable",
+    "readability",
+    "row",
+    "speech",
+    "text",
+    "visible",
+    "wrap",
+    "wrapping",
+)
+
+
+def _broad_rollback_slice_focus(items):
+    text = "\n".join(str(item.get("failure_tail") or "") for item in items if isinstance(item, dict))
+    lowered = text.casefold()
+    if any(marker in lowered for marker in _PRESENTATION_SLICE_MARKERS):
+        return "presentation_readability"
+    return ""
+
+
 def build_broad_rollback_slice_repair(calls, turns, *, limit=5):
     """Detect broad rollback loops and steer reentry toward a smaller complete slice."""
     rolled_back = []
@@ -3591,6 +3616,18 @@ def build_broad_rollback_slice_repair(calls, turns, *, limit=5):
     if not broad:
         return {}
     latest = recent[-1]
+    slice_focus = _broad_rollback_slice_focus(recent)
+    suggested_next = (
+        "Do not retry the whole broad patch. Choose one smaller complete slice "
+        "that includes its source, local tests/docs/report evidence, and verifier; "
+        "record the remaining scope in working_memory before continuing."
+    )
+    if slice_focus == "presentation_readability":
+        suggested_next += (
+            " The verifier output points at visible text, wrapping, bubble, row, layout, "
+            "or readability behavior, so split a presentation/readability slice first "
+            "before reconnecting broader live/state behavior."
+        )
     return {
         "kind": "broad_rollback_slice_repair",
         "rolled_back_write_count": len(recent),
@@ -3599,11 +3636,8 @@ def build_broad_rollback_slice_repair(calls, turns, *, limit=5):
         "involved_paths": involved_paths[:8],
         "max_failed_test_count": max_failed_tests,
         "latest_failure_tail": latest.get("failure_tail") or "",
-        "suggested_next": (
-            "Do not retry the whole broad patch. Choose one smaller complete slice "
-            "that includes its source, local tests/docs/report evidence, and verifier; "
-            "record the remaining scope in working_memory before continuing."
-        ),
+        "slice_focus": slice_focus,
+        "suggested_next": suggested_next,
     }
 
 
