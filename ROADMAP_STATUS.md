@@ -128,7 +128,9 @@ M6.24 resume condition:
 
 - Controller docs:
   `docs/M6_24_DECISION_LEDGER.md` and
-  `docs/M6_24_GAP_BASELINE_2026-04-29.md`.
+  `docs/M6_24_GAP_BASELINE_2026-04-29.md`. Improvement-phase work must also
+  follow `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` and record gap state in
+  `proof-artifacts/m6_24_gap_ledger.jsonl`.
 - Current controller mode: `improvement_phase`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
@@ -139,6 +141,16 @@ M6.24 resume condition:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair it through M6.14, record
   focused validation, and rerun the same failed task shape before resuming
   broad measurement.
+- During `improvement_phase`, the next action must be one of: classify a
+  measured failure into the gap ledger, add instrumentation for a selected gap,
+  repair one selected gap class, rerun the same shape after repair, or update
+  the decision ledger to resume measurement with evidence. New broad benchmark
+  measurement is drift until the controller says otherwise.
+- Current selected gap class:
+  `hard_task_implementation_strategy_contract_retention`, recorded in
+  `docs/M6_24_GAP_CLASS_PLAN_2026-04-29.md` and
+  `proof-artifacts/m6_24_gap_ledger.jsonl`. Next action is reference-backed
+  implementation-lane design/repair, not new broad measurement.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.

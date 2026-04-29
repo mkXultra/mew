@@ -17,7 +17,10 @@ Workflow:
    - relevant files/tests for the milestone being assessed
    - latest test or dogfood results if already available
    - active milestone controller docs when present. For M6.24, inspect
-     `docs/M6_24_DECISION_LEDGER.md` and the latest
+     `docs/M6_24_DECISION_LEDGER.md`,
+     `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`,
+     the latest `docs/M6_24_GAP_CLASS_PLAN_*`,
+     `proof-artifacts/m6_24_gap_ledger.jsonl`, and the latest
      `docs/M6_24_GAP_BASELINE_*` before writing the next action.
    - if side-project dogfood is active: `SIDE_PROJECT_ROADMAP_STATUS.md`,
      `mew side-dogfood report --json`, and open GitHub issues with the
@@ -65,9 +68,10 @@ Focus rule:
   a true exception: a core mew blocker, a reproducible M6.14 repair candidate,
   or a required M6.16 evidence collection issue.
 - If M6.24 controller mode is `improvement_phase`, keep the next action on
-  gap classification, generic repair selection, repair implementation, or
-  same-shape rerun. Do not write "run the next pending benchmark task" as the
-  next action until the decision ledger says measurement may resume.
+  gap classification, missing-instrumentation speed rerun, generic repair
+  selection, repair implementation, or same-shape rerun. Do not write "run the
+  next pending benchmark task" as the next action until the decision ledger says
+  measurement may resume.
 
 Side-project issue queue command:
 
