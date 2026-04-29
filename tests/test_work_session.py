@@ -22282,6 +22282,26 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_startup_working_memory_seeds_hard_task_implementation_contract(self):
+        from mew.work_session import startup_working_memory
+
+        task = {
+            "id": 7,
+            "title": "Implement MIPS VM",
+            "description": (
+                "I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, "
+                "the corresponding source code. Please implement vm.js so I can run `node vm.js`."
+            ),
+        }
+
+        memory = startup_working_memory(task)
+
+        contract = memory["implementation_contract"]
+        self.assertIn("/app/doomgeneric_mips", [item["path"] for item in contract["source_inventory"]])
+        self.assertIn("doomgeneric/", [item["path"] for item in contract["source_inventory"]])
+        self.assertTrue(contract["open_contract_gaps"])
+        self.assertIn("stubs", contract["prohibited_surrogates"][0])
+
     def test_work_session_stop_request_is_consumed_before_model_step(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -33776,6 +33796,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("carry forward a compact transcript in working_memory", prompt)
         self.assertIn("exact external ground-truth command", prompt)
         self.assertIn("surrogate libraries, approximations, or nearby tools are not enough", prompt)
+        self.assertIn("working_memory.implementation_contract", prompt)
+        self.assertIn("cite completed read/search/command evidence that grounds each provided source", prompt)
         self.assertIn("If prior command output says the exact command is NOT_FOUND", prompt)
         self.assertIn("do not install or use a surrogate package/library/API as a substitute", prompt)
         self.assertIn("return wait/remember with that exact blocker", prompt)

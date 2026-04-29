@@ -3,6 +3,7 @@ from mew.acceptance import (
     coerce_acceptance_checks,
     exact_command_example_requirements,
     extract_acceptance_constraints,
+    implementation_contract_source_requirements,
     is_numeric_artifact_task,
     is_query_only_hidden_model_task,
 )
@@ -43,6 +44,117 @@ def test_acceptance_finish_blocker_accepts_complete_verified_checks():
 
     assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}) == ""
     assert coerce_acceptance_checks(checks) == checks
+
+
+def test_implementation_contract_source_requirements_extract_provided_source_refs():
+    text = (
+        "I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, "
+        "the corresponding source code. Please implement vm.js so I can run `node vm.js`."
+    )
+
+    requirements = implementation_contract_source_requirements(text)
+
+    assert [item["path"] for item in requirements] == ["/app/doomgeneric_mips", "doomgeneric/"]
+
+
+def test_acceptance_finish_blocker_rejects_hard_task_without_provided_source_evidence():
+    text = (
+        "I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, "
+        "the corresponding source code. Please implement a MIPS interpreter called vm.js "
+        "so that I can run `node vm.js`."
+    )
+    checks = [
+        {
+            "constraint": "node vm.js runs",
+            "status": "verified",
+            "evidence": "Tool #3 ran node vm.js and produced a frame.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 1,
+                "tool": "write_file",
+                "status": "completed",
+                "parameters": {"path": "vm.js", "content": "console.log('DoomGeneric initialized')"},
+            },
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": "node vm.js"},
+                "result": {"command": "node vm.js", "exit_code": 0, "stdout": "DoomGeneric initialized\n"},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "implementation contract source evidence ungrounded" in blocker
+    assert "/app/doomgeneric_mips" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_hard_task_with_provided_source_evidence():
+    text = (
+        "I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, "
+        "the corresponding source code. Please implement a MIPS interpreter called vm.js "
+        "so that I can run `node vm.js`."
+    )
+    checks = [
+        {
+            "constraint": "provided binary inspected",
+            "status": "verified",
+            "evidence": "Tool #1 inspected /app/doomgeneric_mips.",
+        },
+        {
+            "constraint": "provided source inspected",
+            "status": "verified",
+            "evidence": "Tool #2 listed doomgeneric/ source files.",
+        },
+        {
+            "constraint": "node vm.js runs",
+            "status": "verified",
+            "evidence": "Tool #3 ran node vm.js.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 1,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "file /app/doomgeneric_mips"},
+                "result": {"command": "file /app/doomgeneric_mips", "exit_code": 0},
+            },
+            {
+                "id": 2,
+                "tool": "glob",
+                "status": "completed",
+                "parameters": {"pattern": "doomgeneric/**"},
+                "result": {"text": "doomgeneric/doomgeneric_img.c\ndoomgeneric/i_system.c"},
+            },
+            {
+                "id": 3,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": "node vm.js"},
+                "result": {"command": "node vm.js", "exit_code": 0},
+            },
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
 
 
 def test_acceptance_finish_blocker_rejects_edit_scope_write_history_after_write():

@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import shlex
 
-from .acceptance import coerce_acceptance_checks
+from .acceptance import coerce_acceptance_checks, implementation_contract_source_requirements
 from .cli_command import mew_command, mew_executable
 from .data_tools import analyze_table
 from .read_tools import (
@@ -1631,7 +1631,37 @@ def startup_working_memory(task):
     target_paths = task_scope_target_paths(task)
     if target_paths:
         memory["target_paths"] = target_paths
+    implementation_contract = _implementation_contract_from_task(goal)
+    if implementation_contract:
+        memory["implementation_contract"] = implementation_contract
     return memory
+
+
+def _implementation_contract_from_task(goal):
+    source_requirements = implementation_contract_source_requirements(goal)
+    if not source_requirements:
+        return {}
+    source_inventory = [
+        {
+            "path": item.get("path") or "",
+            "reason": clip_output(str(item.get("sentence") or "").strip(), 220),
+            "status": "needs_grounding",
+        }
+        for item in source_requirements
+        if item.get("path")
+    ][:6]
+    if not source_inventory:
+        return {}
+    return {
+        "objective": clip_output(str(goal or "").strip(), 300),
+        "source_inventory": source_inventory,
+        "prohibited_surrogates": [
+            "Do not replace provided source, binaries, tools, or external behavior with stubs, dummy outputs, or nearby surrogate implementations."
+        ],
+        "open_contract_gaps": [
+            f"cite source/provided-artifact grounding for {item['path']}" for item in source_inventory[:6]
+        ],
+    }
 
 
 def safe_work_write_roots(roots):
@@ -4406,6 +4436,48 @@ def _turn_action_target_paths(turn):
     return paths
 
 
+def _coerce_implementation_contract(raw):
+    if not isinstance(raw, dict):
+        return {}
+    source_inventory = []
+    for item in raw.get("source_inventory") or raw.get("sources") or []:
+        if isinstance(item, str):
+            path = _working_memory_target_path_text(item)
+            reason = ""
+            status = ""
+        elif isinstance(item, dict):
+            path = _working_memory_target_path_text(item.get("path") or item.get("source") or item.get("artifact"))
+            reason = clip_output(str(item.get("reason") or item.get("evidence") or "").strip(), 220)
+            status = clip_output(str(item.get("status") or "").strip(), 80)
+        else:
+            continue
+        if not path or any(existing.get("path") == path for existing in source_inventory):
+            continue
+        entry = {"path": path}
+        if reason:
+            entry["reason"] = reason
+        if status:
+            entry["status"] = status
+        source_inventory.append(entry)
+        if len(source_inventory) >= 6:
+            break
+    contract = {
+        "objective": clip_output(str(raw.get("objective") or raw.get("goal") or "").strip(), 300),
+        "source_inventory": source_inventory,
+        "prohibited_surrogates": [
+            clip_output(str(item or "").strip(), 220)
+            for item in raw.get("prohibited_surrogates") or raw.get("disallowed_substitutions") or []
+            if str(item or "").strip()
+        ][:6],
+        "open_contract_gaps": [
+            clip_output(str(item or "").strip(), 220)
+            for item in raw.get("open_contract_gaps") or raw.get("gaps") or []
+            if str(item or "").strip()
+        ][:6],
+    }
+    return {key: value for key, value in contract.items() if value}
+
+
 def _normalize_working_memory(raw, turn=None, verification_state=None, source="model"):
     if not isinstance(raw, dict):
         return {}
@@ -4429,6 +4501,9 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
             600,
         ),
         "target_paths": _coerce_working_memory_target_paths(raw.get("target_paths") or raw.get("paths") or []),
+        "implementation_contract": _coerce_implementation_contract(
+            raw.get("implementation_contract") or raw.get("contract") or {}
+        ),
         "acceptance_constraints": [
             clip_output(str(item or "").strip(), 260)
             for item in acceptance_constraint_items
@@ -4452,6 +4527,7 @@ def _normalize_working_memory(raw, turn=None, verification_state=None, source="m
             "open_questions",
             "last_verified_state",
             "target_paths",
+            "implementation_contract",
             "acceptance_constraints",
             "acceptance_checks",
         )
@@ -4992,6 +5068,19 @@ def _annotate_working_memory_with_latest_tool(memory, turn, calls):
     return memory
 
 
+def _attach_task_implementation_contract(memory, task):
+    if not memory or memory.get("implementation_contract"):
+        return memory
+    task = task or {}
+    goal = str(task.get("description") or task.get("title") or "").strip()
+    contract = _implementation_contract_from_task(goal)
+    if not contract:
+        return memory
+    memory = dict(memory)
+    memory["implementation_contract"] = contract
+    return memory
+
+
 def build_working_memory(turns, calls, task=None):
     turns = list(turns or [])
     calls = list(calls or [])
@@ -5011,7 +5100,8 @@ def build_working_memory(turns, calls, task=None):
                     memory["stale_after_model_turn_id"] = turn.get("id")
                     memory["latest_model_turn_id"] = turns[-1].get("id")
                     memory["stale_turns"] = reversed_index
-                return _annotate_working_memory_with_latest_tool(memory, turn, calls)
+                memory = _annotate_working_memory_with_latest_tool(memory, turn, calls)
+                return _attach_task_implementation_contract(memory, task)
 
     latest_turn = turns[-1] if turns else {}
     if not latest_turn and not verification_state:
@@ -5028,7 +5118,8 @@ def build_working_memory(turns, calls, task=None):
         "open_questions": [action.get("question")] if action.get("type") == "ask_user" and action.get("question") else [],
     }
     memory = _normalize_working_memory(raw, turn=latest_turn or None, verification_state=verification_state, source="fallback")
-    return _annotate_working_memory_with_latest_tool(memory, latest_turn or None, calls)
+    memory = _annotate_working_memory_with_latest_tool(memory, latest_turn or None, calls)
+    return _attach_task_implementation_contract(memory, task)
 
 
 def _suppress_resolved_approval_memory(memory, calls, pending_approvals):
@@ -8538,6 +8629,29 @@ def format_work_session_resume(resume):
             lines.extend(f"- {item}" for item in plan_items)
         if memory.get("target_paths"):
             lines.append(f"target_paths: {', '.join(str(path) for path in memory.get('target_paths') or [])}")
+        contract = memory.get("implementation_contract") or {}
+        if contract:
+            lines.append("implementation_contract:")
+            if contract.get("objective"):
+                lines.append(f"- objective: {contract.get('objective')}")
+            source_inventory = contract.get("source_inventory") or []
+            if source_inventory:
+                lines.append("- source_inventory:")
+                for item in source_inventory:
+                    if isinstance(item, dict):
+                        status = f" [{item.get('status')}]" if item.get("status") else ""
+                        reason = f" reason={item.get('reason')}" if item.get("reason") else ""
+                        lines.append(f"  -{status} {item.get('path') or ''}{reason}")
+                    else:
+                        lines.append(f"  - {item}")
+            prohibited = contract.get("prohibited_surrogates") or []
+            if prohibited:
+                lines.append("- prohibited_surrogates:")
+                lines.extend(f"  - {item}" for item in prohibited)
+            gaps = contract.get("open_contract_gaps") or []
+            if gaps:
+                lines.append("- open_contract_gaps:")
+                lines.extend(f"  - {item}" for item in gaps)
         constraints = memory.get("acceptance_constraints") or []
         if constraints:
             lines.append("acceptance_constraints:")
