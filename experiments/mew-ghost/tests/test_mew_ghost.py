@@ -509,6 +509,10 @@ def test_cli_default_human_cat_uses_live_desk_with_injected_runner(capsys, tmp_p
     mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
     original_repo_root = ghost.REPO_ROOT
     calls: list[list[str]] = []
+    long_live_detail = (
+        'SP24b CLI live desk status with a full task instruction paragraph that should stay out '
+        'of the default resident terminal surface while preserving the current work signal'
+    )
 
     def forbidden_launcher(*_args: object, **_kwargs: object) -> None:
         raise AssertionError('launcher runner must not be called for live desk proof')
@@ -520,7 +524,7 @@ def test_cli_default_human_cat_uses_live_desk_with_injected_runner(capsys, tmp_p
             'fixture_name': 'sp24b-cli-live-desk',
             'desk': {
                 'status': 'sp24b-cli-live-ready',
-                'pets': [{'name': 'mew-wisp', 'pet_state': 'coding', 'detail': 'SP24b CLI live desk status'}],
+                'pets': [{'name': 'mew-wisp', 'pet_state': 'coding', 'detail': long_live_detail}],
                 'primary_action': {
                     'id': 'sp24b-cli-live-action',
                     'label': 'SP24b CLI live desk action',
@@ -552,7 +556,14 @@ def test_cli_default_human_cat_uses_live_desk_with_injected_runner(capsys, tmp_p
     assert 'mew-wisp resident cat' in minimal
     assert 'resident state: coding' in minimal
     assert 'resident marker: * | paws on keys' in minimal
-    assert _cat_speech_bubble_lines(minimal)
+    minimal_bubble = ' '.join(' '.join(_cat_speech_bubble_lines(minimal)).split())
+    minimal_focus = ' '.join(' '.join(_resident_panel_values(minimal, 'focus')).split())
+    assert minimal_bubble
+    for compact_word in ('SP24b', 'CLI', 'live', 'desk', 'status...'):
+        assert compact_word in minimal_bubble
+        assert compact_word in minimal_focus
+    assert 'with a full task instruction paragraph' not in minimal
+    assert 'default resident terminal surface' not in minimal
     assert 'SP24b CLI live desk action' in ' '.join(_resident_panel_values(minimal, 'action'))
     assert 'desk details:' not in minimal
     assert 'active window:' not in minimal

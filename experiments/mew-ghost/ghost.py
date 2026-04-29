@@ -975,6 +975,22 @@ def render_terminal_human(
     else:
         raise ValueError('unsupported terminal form: %s' % terminal_form)
 
+    def _compact_live_context(value: object, *, max_words: int = 5, max_chars: int = 72) -> str:
+        raw = str(value).replace(chr(10), ' ')
+        text = ''.join(
+            character if 32 <= ord(character) < 127 else '?'
+            for character in raw
+        ).strip()
+        if not text:
+            return ''
+        words = text.split()
+        compact = ' '.join(words[:max_words])
+        if len(words) > max_words:
+            compact += '...'
+        if len(compact) > max_chars:
+            compact = compact[: max_chars - 3].rstrip() + '...'
+        return compact
+
     def _speech_bubble_lines() -> list[str]:
         terminal_width = _terminal_width()
         left_padding = max(0, (terminal_width - CAT_TERMINAL_PIXEL_WIDTH) // 2)
@@ -994,7 +1010,7 @@ def render_terminal_human(
                 detail_name = str(detail.get('name') or 'desk-pet')
                 detail_state = str(detail.get('pet_state') or detail.get('presence_state') or 'unknown')
                 detail_bits.append('%s %s' % (detail_name, detail_state))
-                detail_text = str(detail.get('detail') or detail.get('message') or detail.get('status') or '').strip()
+                detail_text = _compact_live_context(detail.get('detail') or detail.get('message') or detail.get('status') or '')
                 if detail_text:
                     live_context_bits.append('%s: %s' % (detail_name, detail_text))
             live_context = '; '.join(live_context_bits)
@@ -1135,7 +1151,7 @@ def render_terminal_human(
             if not isinstance(detail, Mapping):
                 continue
             detail_name = str(detail.get('name') or 'desk-pet')
-            detail_text = str(detail.get('detail') or detail.get('message') or detail.get('status') or '').strip()
+            detail_text = _compact_live_context(detail.get('detail') or detail.get('message') or detail.get('status') or '')
             live_focus_value = detail_name if not detail_text else '%s - %s' % (detail_name, detail_text)
             break
         if not live_focus_value and desk.get('status'):

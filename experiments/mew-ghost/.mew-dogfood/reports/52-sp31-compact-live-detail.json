@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "task_id": 52,
+  "session_id": 83,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP31 compacted long live desk detail before rendering default live terminal speech and HUD focus, preserving useful current-work signal without flooding the resident surface with full task instructions.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP.md",
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/52-sp31-compact-live-detail.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "46 passed in 8.96s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 1 --interval 0",
+      "result": "live speech and HUD focus compacted long live desk detail to a concise current-work phrase"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --fixture-terminal --watch-count 1 --interval 0",
+      "result": "fixture-terminal output kept deterministic local fixture speech and HUD copy"
+    },
+    {
+      "command": "./mew desk --json",
+      "result": "confirmed upstream desk freshness fields are present after issue #31 closure"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 3,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "compact_live_detail_success_after_test_assertion_retries",
+  "repair_required": false,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-compact-live-detail-oneshot-report.json",
+    "focused verifier passed: 46 tests",
+    "live and fixture terminal smoke outputs inspected",
+    "issue #31 already closed after upstream desk freshness repair"
+  ],
+  "commit": "",
+  "notes": "Mew authored the source/test patch. The task had three rolled-back verifier failures while refining test assertions around wrapped speech-bubble text, then succeeded without supervisor product-code rescue. During closeout, the macOS Objective-C fork warning recurred after issue #23 had been closed, so issue #23 should be reopened/commented as implementation-lane evidence."
+}

@@ -39,12 +39,13 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP26 mew-wisp Default Live Human Mode | `done` | Human/cat terminal output now uses foreground repo-local live desk reads by default, with `--fixture-terminal` preserving deterministic fixture display; state/HTML `--live-desk`, no hidden monitoring, no launcher execution, focused tests, and smoke proof are in place. |
 | SP27 mew-wisp Readable Live Speech | `done` | One-shot tasks #45/#47 landed practical: ASCII speech bubbles now include breathing-room spacer rows, live-desk renders say live desk with status/pet context, and fixture/demo renders stay honest as local terminal or fixture-sourced speech. |
 | SP28 mew-wisp Stateful Resident Cues | `done` | One-shot task #48/session #79 landed clean: the cat form now adds deterministic state-aware resident marker cues such as `paws on keys`, while preserving the pixel silhouette, centered/narrow/watch/live behavior, and focused verifier. |
-| SP29 mew-wisp Live Work Speech Freshness | `practical/blocked` | Task #49/session #80 made live speech prefer live desk detail text over fixture ghost copy, but real smoke still shows stale active-session focus because `./mew desk --json` exposes old sessions; issue #31 records the upstream freshness blocker. |
+| SP29 mew-wisp Live Work Speech Freshness | `done` | Task #49/session #80 made live speech prefer live desk detail text over fixture ghost copy. Issue #31 was fixed upstream: `./mew desk --json` now exposes freshness/is_stale/is_current_signal so stale resumable sessions are not presented as current live work. |
 | SP30 mew-wisp Live HUD Coherence | `done` | Task #51/session #82 landed practical after task #50 rolled back: default live HUD focus now uses live desk detail/status/action instead of fixture ghost focus/message, while fixture-terminal output stays deterministic. |
+| SP31 mew-wisp Compact Live Detail | `done` | Task #52/session #83 compacted long live desk detail for speech and HUD focus, preserving useful live work signal without flooding the resident terminal surface; fixture-terminal output remains deterministic. |
 
 ## Active Focus
 
-Active side-project focus: **SP30 mew-wisp Live HUD Coherence is complete; next satisfaction gap is compact live detail verbosity**.
+Active side-project focus: **SP31 mew-wisp Compact Live Detail is complete; the mew-wisp terminal resident surface is now at a satisfactory MVP polish line**.
 
 Current target:
 
@@ -249,6 +250,15 @@ Current target:
   ghost focus/message. The focused verifier passed (`46 passed`), `git diff
   --check` passed, live/fixture terminal smoke outputs were inspected, and
   rescue edits remain `0`.
+- SP31 task `#52` landed practical from one-shot session `#83`: live speech and
+  HUD focus now compact long desk detail before rendering, so the resident
+  surface keeps a concise current-work signal such as `Working on: Improve
+  mew-wisp default...` instead of filling the bubble and panel with a full task
+  instruction paragraph. The focused verifier passed (`46 passed`), `git diff
+  --check` passed, live/fixture terminal smoke outputs were inspected, and
+  rescue edits remain `0`. During closeout, the macOS Objective-C fork warning
+  recurred after issue `#23` had been closed, so issue `#23` should be treated
+  as reopened implementation-lane evidence.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`

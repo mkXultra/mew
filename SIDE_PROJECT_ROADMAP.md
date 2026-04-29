@@ -592,3 +592,20 @@ Done when:
   same live desk/work context
 - no core imports, hidden monitoring, launcher execution, shell execution,
   broad refactors, or deeper live adapter coupling are introduced
+
+### SP31: mew-wisp Compact Live Detail
+
+Keep live terminal speech and HUD focus resident-sized even when the foreground
+desk detail contains a long task instruction paragraph.
+
+Done when:
+
+- default live human/cat terminal output preserves the useful live desk/work
+  signal without flooding the speech bubble or HUD focus row with full task
+  instructions
+- fixture-terminal output keeps deterministic fixture speech and HUD copy
+- focused tests prove long live desk detail is compacted in both speech and HUD
+  focus while the action line remains intact
+- real live and fixture terminal smoke outputs are inspected
+- no core imports, hidden monitoring, launcher execution, shell execution,
+  broad refactors, or deeper live adapter coupling are introduced
