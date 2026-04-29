@@ -176,8 +176,23 @@ M6.24 resume condition:
   `docs/DESIGN_2026-04-29_M6_24_RUNTIME_ARTIFACT_FRESHNESS.md`: finish is now
   blocked when a fresh-runtime task self-verifies a generated `/tmp/...`
   artifact without later cleanup, and resume exposes `stale_runtime_artifact_risk`.
-  Next action is to rerun `make-doom-for-mips` same shape again. Do not resume
-  new broad measurement yet.
+  The same-shape rerun is recorded in
+  `docs/M6_24_RUNTIME_FRESHNESS_RERUN_2026-04-29.md`: score stayed 0/5, but
+  the stale `/tmp/frame.bmp` short-circuit disappeared. All external verifiers
+  now waited for a fresh frame and failed because no final `/tmp/frame.bmp`
+  existed. The next selected blocker is
+  `hard_runtime_final_verifier_state_transfer`: mew must preserve useful
+  VM/build evidence and convert it into a final deliverable state that a fresh
+  external verifier can reproduce. Before adding another hard-task repair,
+  record `hard_task profile v0` so M6.24 hard-task policies have one
+  implementation-profile boundary. That profile is now recorded in
+  `docs/DESIGN_2026-04-29_M6_24_HARD_TASK_PROFILE_V0.md`: hard coding tasks
+  stay in `implementation/tiny`, with no new authoritative lane in M6.24. Next
+  action is to implement the smallest generic final-verifier state-transfer
+  repair, then run a 1-trial same-shape speed rerun for `make-doom-for-mips`.
+  Do not spend `-k 5 -n 5` unless the speed rerun shows material improvement,
+  contradictory variance, or the controller is ready for close/resume proof.
+  Do not resume new broad measurement yet.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
