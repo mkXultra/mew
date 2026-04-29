@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "task_id": 42,
+  "session_id": 73,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP26 makes user-facing mew-wisp human/cat terminal output use foreground repo-local live desk reads by default, while --fixture-terminal preserves deterministic fixture display and state/html keep explicit --live-desk behavior.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 6,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP.md",
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/42-sp26-default-live-human-mode-practical.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "46 passed in 9.54s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --fixture-terminal --watch-count 1 --interval 0 --output /tmp/mew-wisp-sp26-fixture-terminal.txt",
+      "result": "fixture-terminal cat render wrote deterministic output with desk disabled"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 1 --interval 0 --output /tmp/mew-wisp-sp26-default-live.txt",
+      "result": "default cat render used live-desk status/action from repo-local mew"
+    }
+  ],
+  "reviewer_rejections": 2,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "fixture_flag_contract_reviewer_followup_and_readme_usage_repair",
+  "repair_required": false,
+  "proof_artifacts": [
+    "tool_call:1630 rejected source dry-run with desk-internal fixture flag",
+    "tool_call:1631 rejected paired test dry-run",
+    "tool_call:1639 source patch approved",
+    "tool_call:1640 tests approved",
+    "tool_call:1654 verifier failure preserved README usage mismatch",
+    "tool_call:1662 README usage test repair approved",
+    "tool_call:1663 full git diff inspection",
+    "tool_call:1669 git diff --stat isolation proof",
+    "/tmp/mew-wisp-sp26-fixture-terminal.txt",
+    "/tmp/mew-wisp-sp26-default-live.txt"
+  ],
+  "commit": "",
+  "notes": "Codex did not write product code. Reviewer rejected the first mew patch because the fixture flag read as a desk-internal switch, then accepted the revised --fixture-terminal contract. A verifier failure exposed a README usage expectation gap; mew repaired the test expectation and the focused verifier passed. Operator-only closeout updated status/roadmap records and wrote this report."
+}

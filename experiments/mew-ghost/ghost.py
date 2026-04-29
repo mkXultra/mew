@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 '''Standalone SP18 mew-ghost foreground watch-mode shell.
 
-The module is deliberately local and fixture-driven by default. It can perform
-an explicit opt-in macOS active app/window probe through osascript, render
-deterministic local HTML, expose dry-run command intents, and opt into
-repo-local live desk JSON only with --live-desk. Watch mode is a foreground loop
-with bounded `--watch-count` support or operator-controlled interrupt; it uses
-no screen capture, hidden monitoring, network access, background live .mew
-reads, or core mew imports.
+The module is deliberately local and deterministic for machine-readable output.
+It can perform an explicit opt-in macOS active app/window probe through
+osascript, render deterministic local HTML, expose dry-run command intents, and
+use repo-local live desk JSON for the foreground human terminal surface by
+default. Watch mode is a foreground loop with bounded `--watch-count` support
+or operator-controlled interrupt; it uses no screen capture, hidden monitoring,
+network access, background live .mew reads, or core mew imports.
 '''
 
 from __future__ import annotations
@@ -1335,6 +1335,7 @@ def main(
     parser.add_argument('--fixture', default=str(DEFAULT_FIXTURE), help='local JSON fixture to render')
     parser.add_argument('--desk-json', help='static mew desk JSON-style fixture to bridge into ghost state')
     parser.add_argument('--live-desk', action='store_true', help='explicitly opt into repo-local live desk JSON state')
+    parser.add_argument('--fixture-terminal', action='store_true', help='render the deterministic fixture terminal instead of the default repo-local live desk terminal')
     parser.add_argument('--output', help='write rendered output to this path')
     parser.add_argument('--format', choices=('html', 'state', 'human'), default='html')
     parser.add_argument('--form', choices=TERMINAL_FORMS, default='default', help='terminal form for --format human')
@@ -1353,13 +1354,20 @@ def main(
         parser.error('--interval must be non-negative')
     if args.live_desk and args.desk_json:
         parser.error('--live-desk cannot be combined with --desk-json')
+    if args.fixture_terminal and args.format != 'human':
+        parser.error('--fixture-terminal only applies to --format human')
+    if args.fixture_terminal and args.live_desk:
+        parser.error('--fixture-terminal cannot be combined with --live-desk')
 
     provider = None
     if args.live_active_window:
         provider = live_probe_provider or make_macos_osascript_probe_provider()
 
+    use_live_desk = args.live_desk or (
+        args.format == 'human' and not args.fixture_terminal and not args.desk_json
+    )
     desk_provider = None
-    if args.live_desk:
+    if use_live_desk:
         desk_provider = live_desk_provider or (lambda: fetch_live_desk_status(runner=live_desk_runner or subprocess.run))
 
     if args.watch or args.watch_count is not None:

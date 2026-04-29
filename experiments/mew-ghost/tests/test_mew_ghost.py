@@ -382,7 +382,7 @@ def test_cli_renders_desk_json_state_and_html(tmp_path: Path) -> None:
     assert 'typing' in html
 
 
-def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> None:
+def test_cli_fixture_terminal_renders_deterministic_human_for_desk_fixture(capsys, tmp_path: Path) -> None:
     human_output = tmp_path / 'desk-human.txt'
 
     assert ghost.main(['--fixture', str(FIXTURE_PATH), '--desk-json', str(DESK_FIXTURE_PATH), '--format', 'human', '--output', str(human_output)]) == 0
@@ -434,7 +434,7 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
     assert '<!doctype html>' not in details
     assert '"schema_version"' not in details
 
-    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--format', 'human']) == 0
+    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--format', 'human', '--fixture-terminal']) == 0
     stdout = capsys.readouterr().out
 
     stdout_panel = _resident_panel_lines(stdout)
@@ -493,7 +493,7 @@ def test_cli_live_desk_opt_in_uses_injected_runner_without_spawning(capsys, tmp_
     assert state['launch_intents'][-1]['execution']['executed'] is False
 
 
-def test_cli_live_desk_human_cat_reaches_main_with_injected_runner(capsys, tmp_path: Path) -> None:
+def test_cli_default_human_cat_uses_live_desk_with_injected_runner(capsys, tmp_path: Path) -> None:
     repo_root = tmp_path / 'repo'
     repo_root.mkdir()
     mew_path = repo_root / 'mew'
@@ -524,14 +524,14 @@ def test_cli_live_desk_human_cat_reaches_main_with_injected_runner(capsys, tmp_p
     ghost.REPO_ROOT = repo_root
     try:
         assert ghost.main(
-            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--live-desk'],
+            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat'],
             live_desk_runner=runner,
             launcher_runner=forbidden_launcher,
         ) == 0
         minimal = capsys.readouterr().out
 
         assert ghost.main(
-            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--live-desk', '--details'],
+            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--details'],
             live_desk_runner=runner,
             launcher_runner=forbidden_launcher,
         ) == 0
@@ -1588,6 +1588,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --fixture-terminal --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --details',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
@@ -1628,6 +1629,7 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert '--interval' in source
     assert '--desk-json' in source
     assert '--live-desk' in source
+    assert '--fixture-terminal' in source
     assert "choices=('html', 'state', 'human')" in source
     assert 'render_terminal_human' in source
     assert "SCHEMA_VERSION = 'mew-ghost.sp18.v1'" in source

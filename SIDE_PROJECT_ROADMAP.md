@@ -255,7 +255,10 @@ Target shape:
 Non-goals for the first implementation arc:
 
 - no screen capture, keystroke logging, or hidden background monitoring
-- no live `.mew` state reads; use fixtures or explicit command output only
+- no hidden live `.mew` state reads; keep machine-readable state/HTML on
+  fixtures or explicit command output, while the user-facing human terminal path
+  may use foreground repo-local live desk reads once covered by focused tests
+  and an explicit fixture-terminal fallback
 - no core `src/mew/**` imports or core command promotion
 - no browser/HTML surface as the continuing product direction; SP19 should
   retire the earlier HTML proof path and keep terminal/state output
@@ -504,4 +507,21 @@ Done when:
 - focused tests prove rerender controls are emitted for watched human output and
   are absent from JSONL/output-file modes
 - no background monitoring, shell execution, launcher execution, hidden reads,
+  or core imports are introduced
+
+### SP26: mew-wisp Default Live Human Mode
+
+Make the user-facing terminal resident connect to foreground repo-local mew
+desk state by default, while keeping deterministic fixture display available
+for tests and repeatable proof.
+
+Done when:
+
+- `--format human` and `--format human --form cat` use repo-local live desk
+  state by default without requiring `--live-desk`
+- an explicit fixture terminal flag preserves deterministic fixture display
+- machine-readable state/HTML output keeps explicit `--live-desk` behavior
+- focused tests cover default-live human/cat behavior, fixture fallback, README
+  usage, and source isolation
+- no background monitoring, launcher execution, hidden reads, shell execution,
   or core imports are introduced

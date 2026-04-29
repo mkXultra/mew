@@ -1,8 +1,8 @@
-# mew-ghost SP18 live desk opt-in
+# mew-wisp SP26 default live human terminal
 
-`mew-ghost` is an isolated side project for a permission-safe macOS presence shell. SP18 keeps the fixture-driven and dry-run defaults, preserves `--live-active-window` as the only live active-window opt-in, keeps `--desk-json` fixture-only, and adds explicit `--live-desk` for repo-local live desk JSON. Direct launcher execution remains available only behind the explicit `--execute-launchers` CLI opt-in, and desk `primary_action` is always surfaced as a dry-run intent.
+`mew-ghost` is the historical implementation path for the isolated `mew-wisp` side project. SP26 makes the normal user-facing human terminal/cat path prefer foreground repo-local live desk state by default, while `--fixture-terminal` keeps deterministic fixture display available for tests, docs, and smoke proof. Machine-readable `state`/`html` surfaces keep their explicit `--live-desk` opt-in, `--desk-json` remains fixture-only, direct launcher execution stays behind `--execute-launchers`, and desk `primary_action` is always surfaced as a dry-run intent.
 
-The shell does not import core mew code, read live `.mew` state unless `--live-desk` is provided, run a desk command unless explicitly requested, capture the screen, monitor hidden activity, use the network, or package a native app.
+The shell does not import core mew code, read live `.mew` state for machine-readable `state`/`html` renders unless `--live-desk` is provided, run a hidden desk command, capture the screen, monitor hidden activity, use the network, or package a native app. Default human/cat live reads are foreground repo-local `./mew desk --json` reads and can be replaced with deterministic fixture display by passing `--fixture-terminal`.
 
 ## What this slice provides
 
@@ -15,7 +15,7 @@ The shell does not import core mew code, read live `.mew` state unless `--live-d
 
 `--desk-json PATH` loads a static desk view-model fixture. It never invokes a live desk command and never reads live `.mew` state. Watch mode reloads the desk fixture on every iteration so local dogfood can rewrite the JSON file and observe refreshed desk status without a background daemon.
 
-`--live-desk` is the separate live opt-in. It runs repo-local `./mew desk --json` as an argument list with no shell, uses a short timeout, normalizes successful output through the same status/count/detail/primary_action surface, and converts missing command, nonzero exit, timeout, malformed JSON, or non-object JSON into structured fallback desk states. Default renders and `--desk-json` renders remain deterministic and non-live.
+`--live-desk` is the separate live opt-in for machine-readable `state` and `html` output. It runs repo-local `./mew desk --json` as an argument list with no shell, uses a short timeout, normalizes successful output through the same status/count/detail/primary_action surface, and converts missing command, nonzero exit, timeout, malformed JSON, or non-object JSON into structured fallback desk states. Human terminal and cat renders use that same foreground repo-local live read by default; pass `--fixture-terminal` to keep deterministic fixture display. Default `state`/`html` renders and `--desk-json` renders remain deterministic and non-live.
 
 Desk pet states are mapped into ghost presence metadata without replacing the active-window classification path:
 
@@ -34,12 +34,16 @@ Single renders still build one local state/HTML document and then stop. Watch mo
 - `--watch` without `--watch-count` runs in the foreground until `KeyboardInterrupt`.
 - `--interval SECONDS` controls the sleep between iterations.
 - Tests can inject the sleeper, clock, probe provider, and launcher runner.
-- Every iteration reloads the ghost fixture and optional desk fixture or opted-in live desk status, rebuilds state, and reruns the selected probe path.
+- Every iteration reloads the ghost fixture and optional desk fixture, explicit
+  state/html live desk status, or default human terminal live desk status,
+  rebuilds state, and reruns the selected probe path.
 - With `--format state`, stdout remains newline-delimited JSONL watch records.
 - With `--format human` and no `--output`, stdout prints the terminal-first human surface for each iteration instead of JSONL watch records.
 - With `--format html --output PATH`, each iteration rewrites the same local HTML file with freshness metadata for that iteration.
 
-Watch mode does not create a daemon, background monitor, hidden capture loop, or network connection. Live desk reads occur only during foreground `--live-desk` renders.
+Watch mode does not create a daemon, background monitor, hidden capture loop, or
+network connection. Live desk reads occur only during foreground human terminal
+renders or explicit foreground `--live-desk` state/html renders.
 
 ## Presence states
 
@@ -79,13 +83,19 @@ Print three bounded foreground watch records as newline-delimited JSON:
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5
 ```
 
-Print two bounded foreground watch iterations as the compact mew-wisp terminal HUD, without JSONL records or diagnostic details:
+Print two bounded foreground watch iterations as the compact mew-wisp terminal HUD. Normal human terminal output reads repo-local live desk state by default, stays in the foreground, and does not emit JSONL records or diagnostic details:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5
 ```
 
-Render the same bounded compact human watch as the cat terminal form, with a literal 22x24 block-cell coarse pixel cat converted from `cat.png` (derived by thresholding the repo-root reference mask; each black cell renders as `██`, each white cell as two spaces). The sprite keeps the square white face with thick stepped black outline, blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail; presence state markers render on a separate line outside the 22x24 silhouette. Freshness, desk counts/details, active-window reason, and launcher intents stay hidden unless `--details` is requested:
+Keep the same human terminal surface on deterministic fixture display for tests, docs, and smoke proof:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --fixture-terminal --watch-count 2 --interval 0.5
+```
+
+Render the bounded compact human watch as the cat terminal form, with a literal 22x24 block-cell coarse pixel cat converted from `cat.png` (derived by thresholding the repo-root reference mask; each black cell renders as `██`, each white cell as two spaces). The sprite keeps the square white face with thick stepped black outline, blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail; presence state markers render on a separate line outside the 22x24 silhouette. Freshness, desk counts/details, active-window reason, and launcher intents stay hidden unless `--details` is requested:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5
@@ -121,7 +131,7 @@ Render the static desk fixture as terminal-first human text for an operator cons
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json
 ```
 
-Explicitly opt into live repo-local desk JSON for one terminal state render:
+Explicitly opt into live repo-local desk JSON for one machine-readable state render:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk

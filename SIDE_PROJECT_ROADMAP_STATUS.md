@@ -36,10 +36,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP23 mew-wisp Speech Bubble | `done` | SP23a landed practical in task #38/session #67: human terminal output now renders an ASCII mew-wisp speech bubble between the cat/default form and resident HUD, with focused tests and zero product-code rescue edits. Issues #25/#26/#27 remain implementation-lane hardening evidence. |
 | SP24 mew-wisp Mew Adapter Reconnect | `done` | SP24a/SP24b landed practical: the CLI-first human cat surface renders fixture snapshots, injected live desk provider output, and explicit repo-local `--live-desk` output through one opt-in adapter boundary, with visible fallback states and sanitized human details. |
 | SP25 mew-wisp Human Watch Rerender | `done` | Human watch stdout now emits ANSI home/clear controls before each no-output human render, so `--watch`/`--watch-count` repaints the cat/HUD surface in place while state/HTML/output-file behavior remains unchanged. |
+| SP26 mew-wisp Default Live Human Mode | `done` | Human/cat terminal output now uses foreground repo-local live desk reads by default, with `--fixture-terminal` preserving deterministic fixture display; state/HTML `--live-desk`, no hidden monitoring, no launcher execution, focused tests, and smoke proof are in place. |
 
 ## Active Focus
 
-Active side-project focus: **SP25 mew-wisp Human Watch Rerender is complete**.
+Active side-project focus: **SP26 mew-wisp Default Live Human Mode is complete**.
 
 Current target:
 
@@ -198,6 +199,15 @@ Current target:
   passed (`46 passed`), and a terminal smoke confirmed two human cat frames each
   begin with rerender controls. Ledger row `47` records the practical result
   with rescue edits `0`
+- SP26 task `#42` landed practical from session `#73`: mew-authored source and
+  tests make normal `--format human` and `--format human --form cat` use
+  foreground repo-local live desk reads by default, while `--fixture-terminal`
+  preserves deterministic fixture display. State/HTML output keeps explicit
+  `--live-desk` behavior, launcher execution remains opt-in, and no core imports
+  or hidden monitoring were introduced. The focused verifier passed (`46
+  passed`), `git diff --check` passed, and smoke outputs proved both
+  fixture-terminal and default-live cat renders. Ledger row `48` records the
+  practical result with rescue edits `0`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -218,9 +228,10 @@ Current target:
   during watch only when opted in, and converts failures into structured desk
   states
 - live macOS probing remains explicit through `--live-active-window`
-- existing default and `--desk-json` behavior still should not read live `.mew`
-  state or import `src/mew/**`; live desk reads are limited to explicit
-  `--live-desk`
+- machine-readable default and `--desk-json` behavior still should not read live
+  `.mew` state or import `src/mew/**`; user-facing human terminal output may
+  use foreground repo-local live desk reads by default, while state/HTML live
+  reads remain limited to explicit `--live-desk`
 - preserve the bounded deterministic presence loop without background
   monitoring or hidden capture
 - preserve structured fallback for missing `osascript`, non-macOS platforms,
@@ -900,6 +911,9 @@ Current target:
   human-details, and real repo-local smoke proof.
 - SP25 is closed: watched human terminal output now repaints in place instead of
   visually appending repeated cat/HUD surfaces.
+- SP26 is closed: user-facing human/cat terminal output now connects to
+  foreground repo-local live desk state by default, while `--fixture-terminal`
+  keeps deterministic fixture display available.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -920,13 +934,13 @@ Current target:
 Choose the next side-project move:
 
 1. define the next side-project milestone before starting more mew-wisp work;
-   SP24 currently closes the planned side-project roadmap
+   SP26 currently closes the planned side-project roadmap
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for
    SP12-SP18 or the pre-rename implementation path
-4. keep broad live-state coupling deferred; SP24 should reconnect through one
-   small adapter boundary rather than turning mew-wisp into a hidden monitor
+4. keep broad live-state coupling deferred; SP26 should remain a foreground
+   terminal read path rather than turning mew-wisp into a hidden monitor
 5. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
 
