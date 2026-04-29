@@ -96,3 +96,23 @@ Expected improvement signal:
 
 If the rerun does not improve the selected gap, keep M6.24 in improvement mode
 and either strengthen the contract capsule or reclassify the gap.
+
+## Rerun Result
+
+Recorded in:
+
+`docs/M6_24_HARD_TASK_CONTRACT_RERUN_2026-04-29.md`
+
+The same-shape `make-doom-for-mips` rerun remained 0/5, but the selected gap
+class improved qualitatively: reports preserved the contract capsule, no trial
+finished with a false complete state, and several trials reached real
+source-built ELF / VM-loader repair work instead of surrogate stubs.
+
+Remaining follow-up is still inside M6.24 improvement phase:
+
+- primary: hard-runtime verifier strategy for VM/emulator/interpreter failure
+  signatures
+- secondary: hard-task budget/reasoning is too small for this shape
+- secondary: ephemeral container package/toolchain permissions are not explicit
+  enough
+- rerun `make-doom-for-mips` after the hard-runtime strategy repair

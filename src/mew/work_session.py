@@ -3657,6 +3657,19 @@ _VERIFIER_SYMBOL_PATTERNS = (
     re.compile(r"No module named ['\"]([^'\"]+)['\"]"),
     re.compile(r"NameError: name ['\"]([^'\"]+)['\"]"),
 )
+_RUNTIME_PC_RE = re.compile(r"\bPC=?(0x[0-9a-fA-F]+)\b")
+_RUNTIME_UNKNOWN_OPCODE_RE = re.compile(r"\bUnknown opcode:\s*(0x[0-9a-fA-F]+)", re.IGNORECASE)
+_RUNTIME_UNKNOWN_SPECIAL_RE = re.compile(
+    r"\bUnknown\s+(?:SPECIAL\d*|function)\s+function:\s*(0x[0-9a-fA-F]+)",
+    re.IGNORECASE,
+)
+_RUNTIME_EXPECTED_ARTIFACT_RE = re.compile(r"(/tmp/[^\s'\"`,;)]+)")
+_RUNTIME_FAILURE_LINE_RE = re.compile(
+    r"(Execution error|Unknown opcode|Unknown SPECIAL|unsupported opcode|illegal instruction|"
+    r"Program terminated at PC=0x0|Timeout waiting for|missing /tmp/|No such file or directory: '/tmp/|"
+    r"unsupported syscall|unknown syscall|syscall)",
+    re.IGNORECASE,
+)
 _VERIFIER_MISSING_ATTRIBUTE_RE = re.compile(
     r"module ['\"]([^'\"]+)['\"] has no attribute ['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
@@ -3778,6 +3791,81 @@ def _extract_verifier_sibling_search_queries(text, limit=8):
     return queries
 
 
+def _extract_runtime_failure_lines(text, limit=6):
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or not _RUNTIME_FAILURE_LINE_RE.search(line):
+            continue
+        clipped = clip_inline_text(line, 240)
+        if clipped not in lines:
+            lines.append(clipped)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _first_regex_group(pattern, text):
+    match = pattern.search(str(text or ""))
+    return str(match.group(1)) if match else ""
+
+
+def _runtime_expected_artifacts(text, limit=6):
+    artifacts = []
+    for match in _RUNTIME_EXPECTED_ARTIFACT_RE.finditer(str(text or "")):
+        artifact = str(match.group(1) or "").rstrip(".,:")
+        if artifact and artifact not in artifacts:
+            artifacts.append(artifact)
+        if len(artifacts) >= limit:
+            break
+    return artifacts
+
+
+def _runtime_failure_kind(text):
+    lowered = str(text or "").casefold()
+    if any(marker in lowered for marker in ("unknown opcode", "unknown special", "unsupported opcode", "illegal instruction")):
+        return "unsupported_opcode_instruction_set"
+    if any(marker in lowered for marker in ("unsupported syscall", "unknown syscall", "syscall")):
+        return "syscall_runtime"
+    if "pc=0x0" in lowered or "program terminated at pc=0x0" in lowered:
+        return "loader_entry"
+    if any(marker in lowered for marker in ("timeout waiting for", "missing /tmp/", "no such file or directory: '/tmp/")):
+        return "expected_artifact"
+    if "execution error at pc=" in lowered:
+        return "loader_entry"
+    return ""
+
+
+def build_runtime_verifier_contract_gap(call):
+    text = _verifier_failure_text(call)
+    kind = _runtime_failure_kind(text)
+    if not kind:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    signature = {
+        "pc": _first_regex_group(_RUNTIME_PC_RE, text),
+        "opcode": _first_regex_group(_RUNTIME_UNKNOWN_OPCODE_RE, text),
+        "special_function": _first_regex_group(_RUNTIME_UNKNOWN_SPECIAL_RE, text),
+        "expected_artifacts": _runtime_expected_artifacts(text),
+    }
+    signature = {key: value for key, value in signature.items() if value}
+    return {
+        "kind": kind,
+        "command": result.get("command") or (call.get("parameters") or {}).get("command") or "",
+        "cwd": result.get("cwd") or (call.get("parameters") or {}).get("cwd") or "",
+        "exit_code": result.get("exit_code"),
+        "signature": signature,
+        "failure_lines": _extract_runtime_failure_lines(text),
+        "recommended_tools": ["readelf", "nm", "objdump", "addr2line"],
+        "suggested_next": (
+            "map the failed runtime signature to the harness and artifact before rebuilding: "
+            "inspect runtime source, then use readelf/nm/objdump/addr2line on the built artifact "
+            "to decide whether the next repair is loader entry, ABI/register setup, opcode support, "
+            "syscall runtime, or expected artifact generation"
+        ),
+    }
+
+
 def _latest_changed_dry_run_write(calls, *, after_tool_call_id=None):
     try:
         after_id = int(after_tool_call_id) if after_tool_call_id is not None else None
@@ -3810,9 +3898,16 @@ def build_verifier_failure_repair_agenda(calls):
     source_locations = _extract_verifier_source_locations(text)
     symbols = _extract_verifier_symbols(text)
     sibling_search_queries = _extract_verifier_sibling_search_queries(text)
-    if not any((error_lines, source_locations, symbols)):
+    runtime_gap = build_runtime_verifier_contract_gap(call)
+    if not any((error_lines, source_locations, symbols, runtime_gap)):
         return {}
     dry_run_call = _latest_changed_dry_run_write(calls, after_tool_call_id=call.get("id"))
+    suggested_next = (
+        "turn this verifier output into one small applied edit batch before broader exploration; "
+        "if multiple same-family errors are visible, repair the visible sibling set together"
+    )
+    if runtime_gap:
+        suggested_next = runtime_gap.get("suggested_next") or suggested_next
     agenda = {
         "kind": "verifier_failure_repair_agenda",
         "source_tool_call_id": call.get("id"),
@@ -3824,15 +3919,14 @@ def build_verifier_failure_repair_agenda(calls):
         "source_locations": source_locations,
         "symbols": symbols,
         "sibling_search_queries": sibling_search_queries,
-        "suggested_next": (
-            "turn this verifier output into one small applied edit batch before broader exploration; "
-            "if multiple same-family errors are visible, repair the visible sibling set together"
-        ),
+        "suggested_next": suggested_next,
         "installed_artifact_policy": (
             "if a traceback points into an installed/generated artifact but the workspace contains matching source, "
             "edit the matching workspace source under the allowed write root and reinstall/reverify"
         ),
     }
+    if runtime_gap:
+        agenda["runtime_contract_gap"] = runtime_gap
     if dry_run_call:
         agenda["latest_changed_dry_run_write"] = {
             "tool_call_id": dry_run_call.get("id"),
@@ -8239,6 +8333,21 @@ def format_work_session_resume(resume):
             lines.append("verifier_failure_errors:")
             for line in verifier_agenda.get("error_lines") or []:
                 lines.append(f"  {line}")
+        runtime_gap = verifier_agenda.get("runtime_contract_gap") or {}
+        if runtime_gap:
+            lines.append(f"verifier_failure_runtime_gap: {runtime_gap.get('kind')}")
+            signature = runtime_gap.get("signature") or {}
+            signature_parts = []
+            for key in ("pc", "opcode", "special_function"):
+                if signature.get(key):
+                    signature_parts.append(f"{key}={signature.get(key)}")
+            artifacts = signature.get("expected_artifacts") or []
+            if artifacts:
+                signature_parts.append("expected_artifacts=" + ", ".join(str(item) for item in artifacts))
+            if signature_parts:
+                lines.append("verifier_failure_runtime_signature: " + " ".join(signature_parts))
+            if runtime_gap.get("recommended_tools"):
+                lines.append("verifier_failure_runtime_tools: " + ", ".join(runtime_gap.get("recommended_tools") or []))
         if verifier_agenda.get("suggested_next"):
             lines.append(f"verifier_failure_next: {verifier_agenda.get('suggested_next')}")
         dry_run_write = verifier_agenda.get("latest_changed_dry_run_write") or {}

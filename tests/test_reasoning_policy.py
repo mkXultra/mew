@@ -44,6 +44,26 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertEqual(policy["work_type"], "complex_implementation")
         self.assertIn("interpreter", policy["matched_terms"])
 
+    def test_selects_high_for_hard_source_toolchain_task_without_interpreter_word(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Build doomgeneric_mips",
+                "kind": "coding",
+                "description": (
+                    "I provided source code for Doom and a special doomgeneric_img.c. "
+                    "Build the MIPS ELF so the provided vm.js can run it and write /tmp/frame.bmp."
+                ),
+            },
+            capabilities={"allowed_write_roots": ["."], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "complex_implementation")
+        self.assertIn("mips", policy["matched_terms"])
+        self.assertIn("elf", policy["matched_terms"])
+        self.assertIn("provided source", policy["matched_terms"])
+
     def test_selects_high_for_long_implementation_spec(self):
         policy = select_work_reasoning_policy(
             {

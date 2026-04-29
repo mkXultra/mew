@@ -1,4 +1,5 @@
 import os
+import re
 from contextlib import contextmanager
 
 
@@ -47,19 +48,27 @@ HIGH_RISK_KEEP_DIRTY_MARKERS = (
 COMPLEX_IMPLEMENTATION_TERMS = (
     "compiler",
     "concurrent",
+    "cross-compile",
+    "cross compile",
     "distributed",
     "emulator",
+    "elf",
     "interpreter",
     "linker",
     "loader",
+    "mips",
     "multi-file",
     "multi file",
     "parser",
+    "provided source",
     "runtime",
     "scheduler",
+    "source code",
     "state machine",
     "terminal-bench",
+    "toolchain",
     "virtual machine",
+    "vm.js",
 )
 COMPLEX_IMPLEMENTATION_TEXT_CHARS = 1200
 
@@ -105,9 +114,16 @@ def _matching_complex_implementation_terms(text):
     lowered = str(text or "").casefold()
     matches = []
     for term in COMPLEX_IMPLEMENTATION_TERMS:
-        if term in lowered and term not in matches:
+        if _complex_term_matches(lowered, term) and term not in matches:
             matches.append(term)
     return matches
+
+
+def _complex_term_matches(lowered_text, term):
+    normalized = str(term or "").casefold()
+    if normalized in {"elf", "mips"}:
+        return re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", lowered_text) is not None
+    return normalized in lowered_text
 
 
 def task_policy_description(task):
