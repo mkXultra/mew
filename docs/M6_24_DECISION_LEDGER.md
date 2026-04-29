@@ -102,16 +102,17 @@ direction.
 | 2026-04-30 | Implement v0.4 model-inference generated-oracle provenance guard. | `docs/M6_24_MODEL_INFERENCE_CONTRACT_IMPLEMENTATION_2026-04-29.md`: model-output evidence now rejects ephemeral `/tmp/...oracle/reference/golden...` source paths and source-generation commands as independent evidence, while preserving task-provided `/tests/...reference...` sources. Focused acceptance/work-session tests and ruff passed. | Run one-trial same-shape speed proof for `gpt2-codegolf`; do not run `headless-terminal` or resume broad measurement first. | speed_rerun_pending |
 | 2026-04-30 | v0.4 same-shape speed rerun materially improved behavior but score stayed `0/1`. | `docs/M6_24_MODEL_INFERENCE_GENERATED_ORACLE_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-generated-oracle-gpt2-codegolf-1attempt-20260430-0131/result.json`: one trial, no runner errors, reward 0.0. The previous generated-oracle proof and blocked-finish stutter did not recur. mew stayed in real implementation/debugging and the hidden output moved from repeated `Damien` to a near license continuation: `WITHOUTY OF ANY KIND...`. | Escalate to a five-trial same-shape proof for `gpt2-codegolf`; do not resume broad measurement first. | proof_5_pending |
 | 2026-04-30 | v0.4 five-trial proof reached the frozen Codex target. | `docs/M6_24_GPT2_CODEGOLF_PROOF_5_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-generated-oracle-gpt2-codegolf-5attempts-20260430-0204/result.json`: `gpt2-codegolf` scored `5/5` with runner errors 0, matching the frozen Codex target `5/5`. The original 0/5 Batch 6 gap for this task shape is closed. Residual signal: multiple passing trials ended via `ask_user`/`wall_timeout`, so finish ergonomics remains future calibration evidence, not a score blocker here. | Close the selected generated-oracle repair, then re-evaluate aggregate/current gap before broad measurement resumes. | repair_closed_threshold_recheck_required |
+| 2026-04-30 | Select next gap class: `system_service_state_permission_contract`. | Threshold recheck after the `gpt2-codegolf` proof still leaves the adjusted aggregate gap above 20pp: original 92/210 improves to roughly 97/210 after replacing the Batch 6 `gpt2-codegolf` 0/5 with the proof 5/5, while the frozen Codex target remains 156/210. Current Batch 6 also remains above threshold because `git-multibranch` is still `1/4 completed` plus one setup error against Codex target 5/5. Failed transcripts show two completed trials waited after inventory because required `/git`, `/srv`, `/etc`, `/run`, and account/service state were outside native write roots, even though `allow_shell` was enabled and the task explicitly required system services. | Implement `docs/DESIGN_2026-04-30_M6_24_SYSTEM_SERVICE_STATE_CONTRACT.md`: clarify the generic work-loop policy for shell-authorized system service setup tasks, then run a one-trial same-shape speed proof for `git-multibranch`. | active |
 
 ## Current Mode
 
 `improvement_phase`
 
-The selected `runtime_external_artifact_path_and_cleanup_contract` repair has a
+The selected `compact_model_inference_contract_failure` repair has a
 same-shape five-trial proof at the frozen Codex target, so that repair is
-closed. The aggregate and current Batch 6 gaps remain above the M6.24
+closed. The adjusted aggregate and current Batch 6 gaps remain above the M6.24
 improvement threshold, so broad measurement must stay paused.
 
 Current selected next action:
 
-`M6.24 -> threshold recheck after selected repair close -> select next generic gap class if aggregate gap remains >20pp`
+`M6.24 -> system_service_state_permission_contract -> implementation_profile/no_lane_change -> bounded prompt-policy repair -> git-multibranch speed_1 same-shape rerun`
