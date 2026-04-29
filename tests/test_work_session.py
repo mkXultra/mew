@@ -22343,17 +22343,18 @@ class WorkSessionTests(unittest.TestCase):
             return {"summary": "late", "action": {"type": "finish"}}
 
         started = time.monotonic()
-        with patch("mew.work_loop._agent_call_model_json_with_retries", side_effect=slow_model):
-            with self.assertRaisesRegex(ModelBackendError, "request timed out"):
-                call_model_json_with_retries(
-                    "codex",
-                    {"path": "auth.json"},
-                    "prompt",
-                    "gpt-5.4",
-                    "https://example.invalid",
-                    0.05,
-                    log_prefix="work_think codex session=1",
-                )
+        with patch("mew.work_loop._work_model_timeout_context_name", return_value="fork"):
+            with patch("mew.work_loop._agent_call_model_json_with_retries", side_effect=slow_model):
+                with self.assertRaisesRegex(ModelBackendError, "request timed out"):
+                    call_model_json_with_retries(
+                        "codex",
+                        {"path": "auth.json"},
+                        "prompt",
+                        "gpt-5.4",
+                        "https://example.invalid",
+                        0.05,
+                        log_prefix="work_think codex session=1",
+                    )
 
         self.assertLess(time.monotonic() - started, 0.2)
 
@@ -22412,6 +22413,59 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(result["summary"], "fallback ok")
         self.assertEqual(call_model.call_count, 1)
+
+    def test_work_loop_model_calls_use_spawn_timeout_guard_on_macos(self):
+        from mew.work_loop import call_model_json_with_retries
+
+        class FakeRecvConn:
+            def poll(self, timeout):
+                return True
+
+            def recv(self):
+                return {"status": "ok", "result": {"summary": "child ok", "action": {"type": "finish"}}}
+
+            def close(self):
+                return None
+
+        class FakeSendConn:
+            def close(self):
+                return None
+
+        class FakeProcess:
+            def start(self):
+                return None
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                return None
+
+            def terminate(self):
+                return None
+
+        class FakeContext:
+            def Pipe(self, duplex=False):
+                return FakeRecvConn(), FakeSendConn()
+
+            def Process(self, target=None, args=(), daemon=False):
+                return FakeProcess()
+
+        with patch("mew.work_loop.sys.platform", "darwin"):
+            with patch("mew.work_loop.multiprocessing.get_context", return_value=FakeContext()) as get_context:
+                result = call_model_json_with_retries(
+                    "codex",
+                    {"path": "auth.json"},
+                    "prompt",
+                    "gpt-5.4",
+                    "https://example.invalid",
+                    45,
+                    log_prefix="work_think codex session=1",
+                )
+
+        self.assertEqual(result["summary"], "child ok")
+        self.assertEqual(get_context.call_args_list[0].args, ("spawn",))
+        self.assertEqual(get_context.call_args_list[-1].args, ("spawn",))
 
     def test_compact_model_turns_for_prompt_collapses_redundant_planning_churn(self):
         from mew.work_session import compact_model_turns_for_prompt

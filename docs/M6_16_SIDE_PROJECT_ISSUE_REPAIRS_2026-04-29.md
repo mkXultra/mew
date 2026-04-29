@@ -19,6 +19,7 @@ hardening input before returning to M6.24.
 | #29 | Broad rollback repair now detects UI/readability failure tails and steers the next attempt to a smaller presentation/readability slice before reconnecting broader live/state behavior. |
 | #30 | Stateful user-facing output tasks now require semantic contrast proof before finish: a positive injected/current-state assertion plus a negative fixture/demo/static/fallback assertion. This generalizes the side-project failure instead of adding a `mew-wisp`-specific rule. |
 | #31 | Desk/resident status now marks stale work sessions with `freshness`, `is_stale`, and `is_current_signal` on both actions and details, and no longer calls stale-only work `Working on`. This lets terminal residents avoid presenting resumable old sessions as current live speech without importing core internals. |
+| #23 reopened | The earlier #23 fix covered command subprocesses but not the model timeout guard. On macOS, guarded model calls now use `multiprocessing` `spawn` instead of `fork`, keeping the timeout isolation while avoiding unsafe Objective-C fork-after-threads closeout warnings. Non-macOS keeps the cheaper `fork` path. |
 
 ## Reference Basis
 
@@ -66,5 +67,11 @@ uv run pytest tests/test_brief.py -k 'active_work_session_age or stale_active_wo
 3 passed, 59 deselected
 
 uv run ruff check src/mew/desk.py tests/test_desk.py
+All checks passed
+
+uv run pytest tests/test_work_session.py -k 'model_calls_use_spawn_timeout_guard_on_macos or model_calls_enforce_hard_timeout_without_retries or model_calls_fall_back_after_child_crash' --no-testmon -q
+3 passed, 784 deselected
+
+uv run ruff check src/mew/work_loop.py tests/test_work_session.py
 All checks passed
 ```
