@@ -33,7 +33,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Visual Polish | `done` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e/SP22f replaced raw diagnostics and stale ghost copy with resident-facing mew-wisp copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
-| SP23 mew-wisp Speech Bubble | `in_progress` | SP23a first attempt reached a green focused verifier but timed out during closeout and left no product diff; issue #25 records the implementation-lane problem before a fresh retry. |
+| SP23 mew-wisp Speech Bubble | `in_progress` | SP23a has two failed mew-first attempts: session #64 timed out after a green verifier with no diff, and session #65 left only stale pending approvals; issue #25 records the implementation-lane problem before another fresh retry. |
 | SP24 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the speech-bubble terminal experience is useful. |
 
 ## Active Focus
@@ -150,6 +150,12 @@ Current target:
   rescue edits `0`, issue `#25` records the green-verifier/no-durable-artifact
   closeout problem, and issue `#23` was updated with another macOS Objective-C
   fork warning recurrence
+- SP23a task `#36` retry stopped after session `#65` reached focused verifier
+  green (`40 passed`) but timed out into `awaiting_approval`; the recovery
+  `approve-all` control then replayed stale pending hunks and left the worktree
+  clean with no product diff, so ledger row `42` records the failed attempt
+  with rescue edits `0` and issue `#25` was updated with the recovery-path
+  evidence
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -225,10 +231,10 @@ Current target:
   open issue `#24` evidence for implementation-lane hardening; the operator
   corrected only the local report to the canonical `mew-wisp` side-project name
   before ledger append
-- route task #35/session #64 verifier-green closeout timeout with no durable
-  product diff as open issue `#25` evidence for implementation-lane hardening;
-  the operator recorded a failed local report and will retry SP23a from a fresh
-  task
+- route task #35/session #64 and task #36/session #65 verifier-green speech
+  bubble attempts with no durable product diff as open issue `#25` evidence for
+  implementation-lane hardening; the second attempt showed the pending approval
+  recovery path can replay stale hunks and still leave no materialized patch
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -331,6 +337,13 @@ Current target:
   `codex_product_code_rescue_edits=0`. Ledger row `41` records the failed
   speech-bubble closeout timeout with failure class
   `speech_bubble_closeout_timeout_after_verifier_pass_left_no_diff`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  the second SP23a attempt on 2026-04-29: `rows_total=42`, ten `failed`,
+  twenty-nine `practical`, three `clean`, `success_rate=0.762`,
+  `structural_repairs_required=10`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `42` records the failed
+  pending-approval recovery with failure class
+  `speech_bubble_pending_approval_stale_hunks_after_verifier_pass`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,
@@ -838,8 +851,8 @@ Current target:
 
 Choose the next side-project move:
 
-1. retry SP23a speech bubble from a fresh mew-first task after the session #64
-   closeout timeout left no durable product diff
+1. retry SP23a speech bubble from a fresh mew-first task after sessions #64 and
+   #65 both reached green verifier states without durable product diff
 2. keep state/JSON output as the machine-readable proof path while adding only
    text-based human terminal speech
 3. preserve the old `mew-ghost` name only where it is historical evidence for

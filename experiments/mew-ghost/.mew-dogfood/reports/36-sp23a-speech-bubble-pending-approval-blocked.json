@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "task_id": 36,
+  "session_id": 65,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP23a speech bubble retry reached a green focused verifier inside mew, but the session timed out and the pending approval recovery path replayed stale hunks without leaving a durable product diff.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "40 passed in session #65 before closeout timeout"
+    },
+    {
+      "command": "./mew work 36 --approve-all --allow-write ... --allow-verify --verify-command 'UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py'",
+      "result": "failed while replaying pending tool #1426 because an old hunk was not found; earlier approved tools were rolled back"
+    },
+    {
+      "command": "git status --short && git diff --stat",
+      "result": "clean and empty after approve-all failure; no product diff persisted"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "40 passed on the unchanged baseline after approve-all failure"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 4,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "speech_bubble_pending_approval_stale_hunks_after_verifier_pass",
+  "repair_required": true,
+  "proof_artifacts": [
+    "session #65 remained active in awaiting_approval after model_error request timed out",
+    "tool #1441 focused verifier returned 40 passed before timeout",
+    "approve-all attempted pending tools #1420 and #1421, then failed on stale tool #1426 with old text not found",
+    "post-approve-all git status was clean and no product diff or report persisted"
+  ],
+  "commit": "",
+  "notes": "Codex did not write product code. This is a recurrence and refinement of issue #25: the verifier-green patch existed only inside mew's pending approval queue, and the recovery control could not materialize the latest verified state."
+}
