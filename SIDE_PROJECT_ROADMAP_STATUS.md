@@ -39,10 +39,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP26 mew-wisp Default Live Human Mode | `done` | Human/cat terminal output now uses foreground repo-local live desk reads by default, with `--fixture-terminal` preserving deterministic fixture display; state/HTML `--live-desk`, no hidden monitoring, no launcher execution, focused tests, and smoke proof are in place. |
 | SP27 mew-wisp Readable Live Speech | `done` | One-shot tasks #45/#47 landed practical: ASCII speech bubbles now include breathing-room spacer rows, live-desk renders say live desk with status/pet context, and fixture/demo renders stay honest as local terminal or fixture-sourced speech. |
 | SP28 mew-wisp Stateful Resident Cues | `done` | One-shot task #48/session #79 landed clean: the cat form now adds deterministic state-aware resident marker cues such as `paws on keys`, while preserving the pixel silhouette, centered/narrow/watch/live behavior, and focused verifier. |
+| SP29 mew-wisp Live Work Speech Freshness | `practical/blocked` | Task #49/session #80 made live speech prefer live desk detail text over fixture ghost copy, but real smoke still shows stale active-session focus because `./mew desk --json` exposes old sessions; issue #31 records the upstream freshness blocker. |
 
 ## Active Focus
 
-Active side-project focus: **SP28 mew-wisp Stateful Resident Cues is complete; next focus is live work-aware speech freshness**.
+Active side-project focus: **SP29 mew-wisp Live Work Speech Freshness landed the side-project patch; current-agent-loop speech freshness is blocked by issue #31**.
 
 Current target:
 
@@ -232,6 +233,13 @@ Current target:
   and the local report records the task as clean with rescue edits `0`. This
   does not yet solve live agent-loop speech freshness; that is the next bounded
   repair/polish slice.
+- SP29 task `#49` landed practical from one-shot session `#80`: mew updated
+  live terminal speech to prefer live desk detail/message/status text instead
+  of carrying the fixture ghost focus/message wholesale. The focused verifier
+  passed (`46 passed`) and `git diff --check` passed. Real smoke still showed
+  stale SP23a work-session focus because `./mew desk --json` currently exposes
+  old active sessions such as task `#37`; issue `#31` records that upstream
+  desk freshness blocker. Rescue edits remain `0`.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`

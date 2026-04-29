@@ -1183,8 +1183,8 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert '1 desk pet' in live_bubble_text
     assert 'status coding' in live_bubble_text
     assert 'wisp' in live_bubble_text
-    assert 'watching task 47' not in live_bubble_text
-    assert all(word in live_bubble_text for word in live_state['ghost']['focus'].split())
+    assert 'watching task 47' in live_bubble_text
+    assert not all(word in live_bubble_text for word in live_state['ghost']['focus'].split())
     assert all(word in normalized_bubble_text for word in message_words)
     assert all(ord(character) < 128 for line in implicit_bubble for character in line)
     assert all(len(line.rstrip()) <= ghost.DEFAULT_TERMINAL_WIDTH for line in implicit_bubble if line.strip())

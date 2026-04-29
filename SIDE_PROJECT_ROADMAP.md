@@ -558,3 +558,19 @@ Done when:
 - focused tests cover the per-state cue table and existing layout invariants
 - no live adapter coupling, background monitoring, launcher execution, shell
   execution, or core imports are introduced
+
+### SP29: mew-wisp Live Work-Aware Speech Freshness
+
+Make live terminal speech prefer the freshest foreground desk/work signal that
+the adapter exposes, without adding hidden state reads or core coupling.
+
+Done when:
+
+- live desk speech prefers live desk detail/message/status text over fixture
+  ghost focus/message copy
+- fixture-terminal output remains deterministic and visibly fixture/local
+- tests prove live-detail speech and fixture/local speech stay distinct
+- real smoke output is inspected and any upstream desk freshness limitation is
+  recorded as a separate implementation-lane issue
+- no live adapter deepening, hidden monitoring, launcher execution, shell
+  execution, broad refactors, or core imports are introduced

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "task_id": 49,
+  "session_id": 80,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP29 made live terminal speech prefer live desk detail/message/status text over stale fixture ghost focus/message copy. Real smoke then showed the remaining freshness limit is upstream: ./mew desk --json currently reports old active sessions and stale focus, so Wisp cannot honestly show the current agent-loop speech until desk exposes fresher work state.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP.md",
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/49-sp29-live-work-speech-freshness.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "46 passed in 9.59s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 1 --interval 0",
+      "result": "speech uses live desk detail text, but the real desk detail is stale SP23a work-session focus from task #37"
+    },
+    {
+      "command": "./mew desk --json",
+      "result": "real desk payload reports stale active sessions such as Resume task #37 with stale_for_seconds over 21000"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "live_desk_stale_active_session_limits_current_wisp_speech",
+  "repair_required": true,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-live-work-speech-freshness-oneshot-report.json",
+    "https://github.com/mkXultra/mew/issues/31",
+    "focused verifier passed: 46 tests",
+    "real smoke showed live desk stale active session focus"
+  ],
+  "commit": "",
+  "notes": "Mew authored the side-project source/test patch with rescue edits 0. Operator accepted the incremental patch but opened issue #31 because the user-facing expectation that Wisp speech changes during the active agent loop depends on core desk freshness, not more side-project fixture logic."
+}

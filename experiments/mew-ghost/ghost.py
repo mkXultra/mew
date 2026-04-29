@@ -987,20 +987,26 @@ def render_terminal_human(
                 pets_label = 'desk pets present'
             desk_status = str(desk.get('status') or presence_state)
             detail_bits = []
+            live_context_bits = []
             for detail in desk_details[:2]:
                 if not isinstance(detail, Mapping):
                     continue
                 detail_name = str(detail.get('name') or 'desk-pet')
                 detail_state = str(detail.get('pet_state') or detail.get('presence_state') or 'unknown')
                 detail_bits.append('%s %s' % (detail_name, detail_state))
+                detail_text = str(detail.get('detail') or detail.get('message') or detail.get('status') or '').strip()
+                if detail_text:
+                    live_context_bits.append('%s: %s' % (detail_name, detail_text))
+            live_context = '; '.join(live_context_bits)
+            if not live_context:
+                live_context = '%s - %s' % (ghost['focus'], ghost['message'])
             detail_label = '; ' + ', '.join(detail_bits) if detail_bits else ''
-            speech = 'mew-wisp live desk %s: %s, status %s%s; %s - %s' % (
+            speech = 'mew-wisp live desk %s: %s, status %s%s; %s' % (
                 presence_state,
                 pets_label,
                 desk_status,
                 detail_label,
-                ghost['focus'],
-                ghost['message'],
+                live_context,
             )
         elif desk.get('enabled'):
             desk_source = str(desk.get('source') or 'desk fixture')
