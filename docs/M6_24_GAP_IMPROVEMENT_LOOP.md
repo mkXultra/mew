@@ -15,6 +15,8 @@ Authoritative inputs:
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 - `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` for accepted structural repairs
+- `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md` for lane,
+  authority, helper-lane, and calibration-fit decisions
 
 Do not resume new broad Terminal-Bench measurement until this controller or the
 decision ledger records why measurement is higher value than repairing the
@@ -35,7 +37,12 @@ For every candidate gap, run this decision chain:
    measurement-missing -> add the missing measurement, then speed-rerun
    ambiguous           -> add classifier/logging, then same-shape rerun
 
-3. Did the same-shape rerun improve the selected gap class?
+3. If the fix changes task policy, lane behavior, helper lanes, verifier
+   authority, or repair loop shape, did it pass the Architecture Fit Gate?
+   no  -> stop and write the lane/profile/helper decision first
+   yes -> continue
+
+4. Did the same-shape rerun improve the selected gap class?
    yes -> record delta, then choose the next highest-leverage gap or resume
           broad measurement if the decision ledger says the threshold is met
    no  -> record unchanged/regressed, then either revise the repair route or
@@ -46,7 +53,7 @@ The selected gap class must be written before implementation starts. If the
 current resident cannot write this chain in one line, do not implement:
 
 ```text
-M6.24 -> selected gap class -> required next action -> same-shape rerun condition
+M6.24 -> selected gap class -> architecture fit -> required next action -> same-shape rerun condition
 ```
 
 ## Classification Rules
@@ -68,9 +75,58 @@ work-session body cannot reliably preserve one of these contracts:
 - tool policy / permission boundary
 - approval and rejection semantics
 - resume / recovery state
+- lane authority, helper-lane routing, or calibration boundary
 
 Use `ambiguous` when a failure might be structural but the evidence is too thin.
 Add logs or a classifier first; do not start rearchitecture from weak evidence.
+
+## Architecture Fit Gate
+
+Run this gate before implementing any structural repair that changes task
+policy, lane behavior, helper-lane behavior, verifier authority, or repair loop
+shape. This is mandatory for hard-task fixes because "hard" is a difficulty
+signal, not automatically a new lane.
+
+Read `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md` and write the
+architecture fit decision in the design note, decision ledger, or gap ledger
+before code changes start.
+
+Answer these questions:
+
+```text
+1. Is this still the same authoritative output?
+   coding patch / verifier / reviewer-approved code -> implementation/tiny
+
+2. Are the artifact, authority, loop, success metric, and calibration unit
+   different enough to justify a new lane?
+   no -> keep the existing lane and implement a policy/profile/guard
+   yes -> propose a new lane with explicit authority, non-goals, and proof
+
+3. Is a helper lane enough?
+   deliberation / memory / verifier may advise or provide evidence, but may not
+   become the write-capable authoritative lane in M6.24.
+
+4. Does the repair hide implementation-lane weakness?
+   yes -> reject or convert it into implementation-lane hardening
+
+5. Does the proposal violate current non-goals?
+   no multiple authoritative lanes for one task, no write-capable deliberation,
+   no concurrent lane races.
+```
+
+Default rule for M6.24 coding gaps:
+
+```text
+ordinary coding gap       -> implementation/tiny lane
+hard coding gap           -> implementation/tiny lane with a hard-task profile
+hard semantic blocker     -> optional deliberation helper, then return to tiny
+different task kind       -> later lane milestone, not an M6.24 repair shortcut
+```
+
+If the gate chooses "new lane", do not implement it as an M6.24 gap repair
+unless `ROADMAP.md` and `ROADMAP_STATUS.md` explicitly name that lane work as
+the active repair. Otherwise record it as a future resident-architecture task
+and continue with the smallest implementation-lane repair.
 
 ## Reference-Backed Rearchitecture Procedure
 
@@ -83,13 +139,16 @@ Only enter this procedure after a gap is classified as structural.
 3. Inspect existing reference summaries, especially:
    - `docs/ADOPT_FROM_REFERENCES.md`
    - `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`
+   - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
    - relevant `docs/REVIEW_*` or `docs/DESIGN_*` files for the gap class
-4. If needed, ask `acm run` with `codex-ultra` to audit the reference source
+4. Run the Architecture Fit Gate. For coding tasks, the default repair shape is
+   an implementation/tiny profile or guard, not a new authoritative lane.
+5. If needed, ask `acm run` with `codex-ultra` to audit the reference source
    for the specific gap class. Use `claude-ultra` for difficult architecture
    review, not for open-ended brainstorming.
-5. Translate the concept into mew's resident work-session architecture.
-6. Implement the smallest generic substrate change.
-7. Rerun the same failed shape and record before/after evidence.
+6. Translate the concept into mew's resident work-session architecture.
+7. Implement the smallest generic substrate change.
+8. Rerun the same failed shape and record before/after evidence.
 
 Do not add Terminal-Bench-specific solvers. The repair must improve the generic
 arbitrary-workspace `mew work` path.
@@ -131,6 +190,9 @@ Recommended fields:
   "gap_reason": "short stable reason",
   "evidence": ["path/to/result.json", "path/to/job.log", "path/to/doc.md"],
   "repair_route": "instrument_then_rerun|local_fix|m6_14_repair|reference_backed_rearchitecture|defer",
+  "architecture_decision": "no_lane_change|implementation_profile|helper_lane|new_lane|unknown",
+  "authoritative_lane": "tiny|implementation|research|routine|planning|unknown",
+  "helper_lanes": ["deliberation"],
   "same_shape_key": "stable rerun shape",
   "same_shape_rerun_required": true,
   "status": "open|repairing|rerun_pending|improved|unchanged|regressed|deferred",
@@ -151,6 +213,7 @@ work. The next task must be one of:
 
 - classify a measured failure into the gap ledger
 - add missing instrumentation for a selected gap
+- run the Architecture Fit Gate for a selected structural repair
 - repair exactly one selected gap class
 - rerun the same shape after repair
 - update the decision ledger to resume measurement with evidence

@@ -20,6 +20,19 @@ The next useful substrate behavior is not another broad run. It is to preserve
 runtime failure signatures in reentry so the model maps the artifact and
 runtime source before another rebuild.
 
+## Architecture Fit
+
+Decision: `implementation_profile`.
+
+This repair is hard-task behavior inside the authoritative implementation/tiny
+lane. The changed loop is still the coding loop: preserve verifier evidence,
+inspect runtime/source artifacts, patch, and rerun the same verifier shape.
+
+No new lane is justified here because the output authority remains a code/task
+change plus runtime verifier proof. The repair adds a stronger implementation
+profile for VM/emulator/interpreter failures; it does not make deliberation,
+memory, or verifier helper lanes write-capable.
+
 ## v0 Repair
 
 Implemented in:

@@ -21,6 +21,19 @@ left `/tmp/frame.bmp` in place. The external verifier waits until that path
 exists, waits one second, then terminates the fresh VM process. Since the stale
 frame existed before the verifier started, stdout was captured too early.
 
+## Architecture Fit
+
+Decision: `implementation_profile`.
+
+This repair stays in the authoritative implementation/tiny lane. It strengthens
+the finish policy for generated runtime artifacts and external verifier
+alignment, while preserving the same coding authority: produce the task change,
+run or preserve verifier evidence, and block false completion.
+
+No new lane is introduced because artifact freshness is a verifier/finish
+contract inside the implementation lane. A future verifier helper lane may
+audit these proofs, but the write-capable owner remains implementation/tiny.
+
 ## v0 Repair
 
 Implemented in:

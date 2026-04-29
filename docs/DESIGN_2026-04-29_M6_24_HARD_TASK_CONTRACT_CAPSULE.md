@@ -38,6 +38,20 @@ Mew-compatible translation:
 - preserve it through resume formatting and model working memory
 - block `task_done=true` when cited source grounding is missing
 
+## Architecture Fit
+
+Decision: `implementation_profile`.
+
+This repair stays inside the authoritative implementation/tiny lane. It changes
+how hard coding tasks preserve contract state and finish evidence, but it does
+not change the authoritative output: a reviewer-approved code/task patch plus
+verifier evidence.
+
+No new lane is introduced because the artifact, authority, success metric, and
+write responsibility remain implementation-lane responsibilities. Deliberation
+may advise a future hard semantic blocker, but this v0 repair is
+implementation-lane hardening rather than a helper-lane escape.
+
 ## v0 Implementation
 
 `src/mew/acceptance.py` now extracts source requirements from sentences that
