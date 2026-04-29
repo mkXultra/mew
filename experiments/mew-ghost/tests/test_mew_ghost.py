@@ -542,6 +542,7 @@ def test_cli_default_human_cat_uses_live_desk_with_injected_runner(capsys, tmp_p
     assert calls == [[str(mew_path), 'desk', '--json'], [str(mew_path), 'desk', '--json']]
     assert 'mew-wisp resident cat' in minimal
     assert 'resident state: coding' in minimal
+    assert 'resident marker: * | paws on keys' in minimal
     assert _cat_speech_bubble_lines(minimal)
     assert 'SP24b CLI live desk action' in ' '.join(_resident_panel_values(minimal, 'action'))
     assert 'desk details:' not in minimal
@@ -1471,7 +1472,7 @@ def test_cat_terminal_form_centers_sprite_and_marker_with_forced_width(monkeypat
     assert lines[cat_state_index] == padding + _expected_cat_caption('resident state: coding')
     assert all(line.startswith(padding) for line in _cat_sprite_lines(cat))
     assert all(len(line) == len(padding) + len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
-    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == padding + _expected_cat_caption('resident marker: *')
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == padding + _expected_cat_caption('resident marker: * | paws on keys')
     assert _cat_sprite_similarity(cat) == 1.0
 
 
@@ -1486,7 +1487,7 @@ def test_cat_terminal_form_narrow_width_adds_no_padding_and_preserves_sprite(mon
     assert lines[cat_state_index - 1] == _expected_cat_caption('mew-wisp resident cat')
     assert lines[cat_state_index] == _expected_cat_caption('resident state: coding')
     assert all(len(line) == len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
-    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == _expected_cat_caption('resident marker: *')
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == _expected_cat_caption('resident marker: * | paws on keys')
     assert _cat_sprite_similarity(cat) == 1.0
 
 
@@ -1520,7 +1521,7 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
     panel_header = _resident_panel_lines(output)[0]
     _assert_resident_panel_padding(output, 96)
     assert output.count(padding + _expected_cat_caption('resident state: coding')) == 2
-    assert output.count(padding + _expected_cat_caption('resident marker: *')) == 2
+    assert output.count(padding + _expected_cat_caption('resident marker: * | paws on keys')) == 2
     assert 'cat state:' not in output
     assert 'state marker:' not in output
     assert output.count(padding + _rendered_reference_row(CAT_REFERENCE_MASK[0])) == 2
@@ -1531,11 +1532,11 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
 def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:
     state, html = ghost.render_fixture(FIXTURE_PATH)
     expected_markers = {
-        'idle': 'resident marker: zZ',
-        'attentive': 'resident marker: ?',
-        'coding': 'resident marker: *',
-        'waiting': 'resident marker: ...',
-        'blocked': 'resident marker: !',
+        'idle': 'resident marker: zZ | dreaming softly',
+        'attentive': 'resident marker: ? | ears forward',
+        'coding': 'resident marker: * | paws on keys',
+        'waiting': 'resident marker: ... | tail swishes',
+        'blocked': 'resident marker: ! | signal flare',
     }
     masks_by_state: dict[str, tuple[str, ...]] = {}
 

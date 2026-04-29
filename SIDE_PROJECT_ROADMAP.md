@@ -525,3 +525,36 @@ Done when:
   usage, and source isolation
 - no background monitoring, launcher execution, hidden reads, shell execution,
   or core imports are introduced
+
+### SP27: mew-wisp Readable Live Speech
+
+Make the terminal speech bubble readable and honest about whether it is showing
+fixture/local-terminal data or foreground live desk data.
+
+Done when:
+
+- the ASCII speech bubble has enough blank spacing to read naturally in a
+  terminal pane
+- fixture/demo output does not claim to be live mew state
+- live human/cat output says it is live desk output and includes desk status or
+  pet context when available
+- focused tests prove fixture/local speech and live-desk speech stay distinct
+- no background monitoring, launcher execution, shell execution, hidden reads,
+  or core imports are introduced
+
+### SP28: mew-wisp Stateful Resident Cues
+
+Make the cat terminal form feel a little more alive across states while staying
+deterministic and small.
+
+Done when:
+
+- the cat form exposes state-specific resident cues for idle, attentive,
+  coding, waiting, and blocked states
+- the cues are visible outside the cat silhouette so the reference mask stays
+  stable
+- centered, narrow-width, watch, live, fixture, and state/HTML behavior remain
+  unchanged outside the intended human cat presentation
+- focused tests cover the per-state cue table and existing layout invariants
+- no live adapter coupling, background monitoring, launcher execution, shell
+  execution, or core imports are introduced

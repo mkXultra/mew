@@ -85,6 +85,13 @@ CAT_TERMINAL_STATE_MARKERS = {
     'waiting': '...',
     'blocked': '!',
 }
+CAT_TERMINAL_STATE_CUES = {
+    'idle': 'dreaming softly',
+    'attentive': 'ears forward',
+    'coding': 'paws on keys',
+    'waiting': 'tail swishes',
+    'blocked': 'signal flare',
+}
 CAT_TERMINAL_PIXEL_WIDTH = len(CAT_TERMINAL_SPRITE_MASK[0]) * 2
 CAT_TERMINAL_WIDTH_ENV = 'MEW_GHOST_TERMINAL_WIDTH'
 DEFAULT_TERMINAL_WIDTH = 80
@@ -120,7 +127,10 @@ def _cat_terminal_sprite(presence_state: str) -> tuple[str, ...]:
         _cat_terminal_caption('mew-wisp resident cat'),
         _cat_terminal_caption('resident state: %s' % presence_state),
         *sprite_lines,
-        _cat_terminal_caption('resident marker: %s' % CAT_TERMINAL_STATE_MARKERS[presence_state]),
+        _cat_terminal_caption(
+            'resident marker: %s | %s'
+            % (CAT_TERMINAL_STATE_MARKERS[presence_state], CAT_TERMINAL_STATE_CUES[presence_state])
+        ),
     )
 
 

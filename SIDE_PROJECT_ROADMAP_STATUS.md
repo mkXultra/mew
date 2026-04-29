@@ -38,10 +38,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP25 mew-wisp Human Watch Rerender | `done` | Human watch stdout now emits ANSI home/clear controls before each no-output human render, so `--watch`/`--watch-count` repaints the cat/HUD surface in place while state/HTML/output-file behavior remains unchanged. |
 | SP26 mew-wisp Default Live Human Mode | `done` | Human/cat terminal output now uses foreground repo-local live desk reads by default, with `--fixture-terminal` preserving deterministic fixture display; state/HTML `--live-desk`, no hidden monitoring, no launcher execution, focused tests, and smoke proof are in place. |
 | SP27 mew-wisp Readable Live Speech | `done` | One-shot tasks #45/#47 landed practical: ASCII speech bubbles now include breathing-room spacer rows, live-desk renders say live desk with status/pet context, and fixture/demo renders stay honest as local terminal or fixture-sourced speech. |
+| SP28 mew-wisp Stateful Resident Cues | `done` | One-shot task #48/session #79 landed clean: the cat form now adds deterministic state-aware resident marker cues such as `paws on keys`, while preserving the pixel silhouette, centered/narrow/watch/live behavior, and focused verifier. |
 
 ## Active Focus
 
-Active side-project focus: **SP27 mew-wisp Readable Live Speech is complete**.
+Active side-project focus: **SP28 mew-wisp Stateful Resident Cues is complete; next focus is live work-aware speech freshness**.
 
 Current target:
 
@@ -224,6 +225,13 @@ Current target:
   verifier passed (`46 passed`), `git diff --check` passed, smoke outputs proved
   fixture/live wording separation, and ledger row `50` records the successful
   semantic repair with rescue edits `0`.
+- SP28 task `#48` landed clean from one-shot session `#79`: mew selected a
+  small stateful resident cue polish and added deterministic cat-form cue text
+  to the resident marker line for idle, attentive, coding, waiting, and blocked
+  states. The focused verifier passed (`46 passed`), `git diff --check` passed,
+  and the local report records the task as clean with rescue edits `0`. This
+  does not yet solve live agent-loop speech freshness; that is the next bounded
+  repair/polish slice.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
