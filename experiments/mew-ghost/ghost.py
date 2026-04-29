@@ -953,15 +953,15 @@ def render_terminal_human(
         raise ValueError('unsupported terminal form: %s' % terminal_form)
 
     compact_lines = [
-        'mew-wisp compact terminal HUD',
-        'hud: %s | mood: %s | state: %s' % (ghost['name'], ghost['mood'], presence_state),
+        'mew-wisp compact resident HUD',
+        'resident: mew-wisp | mood: %s | state: %s' % (ghost['mood'], presence_state),
         'focus: %s - %s' % (ghost['focus'], ghost['message']),
-        'signal: %s | snapshots: %s | desk status: %s'
+        'signal: %s | snapshots: %s | desk: %s'
         % (presence['contract'], presence['refresh_count'], desk.get('status', 'disabled')),
-        'next: %s' % primary_label,
+        'action: %s' % primary_label,
     ]
     if terminal_form == 'default':
-        compact_lines.insert(2, 'state marker: %s' % state_marker)
+        compact_lines.insert(2, 'marker: %s' % state_marker)
     lines.extend(compact_lines)
 
     if terminal_details:

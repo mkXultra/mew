@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": 29,
+  "session_id": 58,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP22a attempted the first themed resident terminal surface, but stopped before product edits landed after a verifier rollback and model timeout.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 10,
+  "files_changed": [],
+  "tests_run": [],
+  "reviewer_rejections": 1,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "theme_patch_timeout_after_verifier_rollback",
+  "repair_required": true,
+  "proof_artifacts": [
+    "mew task #29",
+    "mew work session #58",
+    "https://github.com/mkXultra/mew/issues/21"
+  ],
+  "commit": "",
+  "notes": "Mew over-read before the first edit. After operator steering, it proposed a source/test theme patch, but auto verification failed and the batch rolled back. It then read the failing test area but hit model_error/request timed out before producing a repair patch. The worktree was clean afterward; no Codex product-code rescue edits were made. Issue #21 records this implementation-lane recovery problem. Product work continued with smaller task #30/session #59.",
+  "created_at": "2026-04-29T03:13:43Z",
+  "updated_at": "2026-04-29T03:13:43Z"
+}

@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "task_id": 30,
+  "session_id": 59,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP22b is a fresh smaller visual-polish retry after task #29/session #58 was blocked by issue #21. It keeps work under experiments/mew-ghost only and narrows normal --format human output so the visible product identity is mew-wisp instead of mew-ghost. The compact HUD now presents a resident surface hierarchy, keeps diagnostics behind --details, preserves --form default/cat behavior including centered cat sprite and cat-form state marker placement, and avoids new theme flags, ANSI dependencies, and mew connection work.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 8,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/30-sp22b-mew-wisp-visible-identity-hud-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #30",
+    "mew work session #59",
+    "applied renderer edit tool #1228",
+    "applied focused test edit and pytest verification tool #1229",
+    "experiments/mew-ghost/.mew-dogfood/reports/30-sp22b-mew-wisp-visible-identity-hud-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 1229,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "38 passed after applying the SP22b resident-HUD source and focused test repair."
+    }
+  ],
+  "implemented_contract": {
+    "fresh_retry_scope": "SP22b was implemented as a smaller retry under experiments/mew-ghost only after the previous visual-polish task was blocked by issue #21.",
+    "visible_identity": "Normal --format human output now uses a visible mew-wisp product identity in the compact HUD instead of exposing mew-ghost as the resident identity.",
+    "resident_hud_hierarchy": "The compact header is 'mew-wisp compact resident HUD' and the leading metadata line is 'resident: mew-wisp | mood: ... | state: ...'. Focus, signal, desk status, and primary action remain compact operator-facing lines.",
+    "diagnostics_stay_behind_details": "Freshness, desk primary/details, active-window diagnostics, and launcher intents remain hidden from normal human output and visible only with --details.",
+    "default_and_cat_forms_preserved": "The default form keeps the inline marker line using the resident-HUD label, while the cat form keeps the centered cat sprite, cat state line, and existing 'state marker: ...' placement outside the silhouette.",
+    "watch_output_preserved": "Human watch output continues to print compact human surfaces for each iteration rather than JSONL records, with assertions updated for the resident HUD and action label.",
+    "state_json_html_live_launcher_preserved": "The focused test suite still covers state JSON, HTML output, live-read opt-in gates, and launcher safety behavior.",
+    "scope_limited": "No theme flag, ANSI dependency, mew connection work, core src/mew import, or cat.png change was introduced."
+  },
+  "test_contract": {
+    "visible_identity_test_added": true,
+    "hud_hierarchy_test_added": true,
+    "watch_output_test_added": true,
+    "details_output_test_added": true,
+    "preservation_suite_run": true,
+    "covered_cases": [
+      "desk fixture human output starts with the resident HUD and does not expose the old hud: mew-ghost line",
+      "normal human output hides freshness, desk details, active-window diagnostics, launcher intents, HTML, and state JSON",
+      "--details human output includes the diagnostic sections while keeping the resident HUD title",
+      "bounded and interrupt-style human watch output repeats the resident HUD and action line without JSONL watch metadata",
+      "default and cat forms keep their existing behavior while using the new visible HUD identity",
+      "cat state marker placement and cat sprite similarity checks remain covered"
+    ]
+  },
+  "acceptance_notes": [
+    "All intended product/test/report changes are scoped under experiments/mew-ghost.",
+    "README was not broadened in this repair slice; the user-facing behavior change is covered by focused renderer tests and this local report.",
+    "The failed earlier repair was caused by residual old HUD-title assertions; mew repaired those assertions and passed the focused verifier without Codex product-code rescue edits."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "residual_old_hud_test_assertions_repaired",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "Final git diff/status inspection is still needed after this report write to confirm the exact worktree scope remains experiments/mew-ghost only and cat.png/core files are untouched.",
+  "created_at": "2026-04-29T03:31:07Z",
+  "updated_at": "2026-04-29T03:31:07Z"
+}

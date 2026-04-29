@@ -388,11 +388,15 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
 
     human = human_output.read_text(encoding='utf-8')
 
-    assert human.startswith('mew-wisp compact terminal HUD\n')
-    assert 'hud: mew-ghost | mood: curious | state: coding' in human
+    assert human.startswith('mew-wisp compact resident HUD\n')
+    assert 'resident: mew-wisp | mood: curious | state: coding' in human
+    assert 'marker: *' in human
     assert 'focus:' in human
     assert 'signal:' in human
-    assert 'next: Resume SP17 desk bridge' in human
+    assert 'desk:' in human
+    assert 'action: Resume SP17 desk bridge' in human
+    assert 'hud: mew-ghost' not in human
+    assert 'next:' not in human
     assert 'freshness:' not in human
     assert 'desk primary:' not in human
     assert 'desk details:' not in human
@@ -401,10 +405,29 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
     assert '<!doctype html>' not in human
     assert '"schema_version"' not in human
 
+    details_output = tmp_path / 'desk-human-details.txt'
+    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--desk-json', str(DESK_FIXTURE_PATH), '--format', 'human', '--details', '--output', str(details_output)]) == 0
+
+    details = details_output.read_text(encoding='utf-8')
+
+    assert details.startswith('mew-wisp compact resident HUD\n')
+    assert 'details:\n' in details
+    assert 'freshness:' in details
+    assert 'desk:' in details
+    assert 'desk primary:' in details
+    assert 'desk details:' in details
+    assert 'active window:' in details
+    assert 'launcher intents:' in details
+    assert '<!doctype html>' not in details
+    assert '"schema_version"' not in details
+
     assert ghost.main(['--fixture', str(FIXTURE_PATH), '--format', 'human']) == 0
     stdout = capsys.readouterr().out
 
-    assert stdout.startswith('mew-wisp compact terminal HUD\n')
+    assert stdout.startswith('mew-wisp compact resident HUD\n')
+    assert 'resident: mew-wisp' in stdout
+    assert 'hud: mew-ghost' not in stdout
+    assert 'next:' not in stdout
     assert 'launcher intents:' not in stdout
 
 
@@ -650,10 +673,13 @@ def test_human_watch_count_prints_terminal_surface_instead_of_jsonl(capsys) -> N
     output = capsys.readouterr().out
 
     assert sleeps == [0.0]
-    assert output.count('mew-wisp compact terminal HUD') == 2
+    assert output.count('mew-wisp compact resident HUD') == 2
+    assert output.count('resident: mew-wisp') == 2
     assert output.count('focus:') == 2
     assert output.count('signal:') == 2
-    assert output.count('next:') == 2
+    assert output.count('action:') == 2
+    assert 'hud: mew-ghost' not in output
+    assert 'next:' not in output
     assert 'freshness:' not in output
     assert 'desk details:' not in output
     assert 'active window:' not in output
@@ -704,9 +730,13 @@ def test_human_watch_without_count_prints_surface_until_keyboard_interrupt(capsy
     output = capsys.readouterr().out
 
     assert sleeps == [0.5, 0.5]
-    assert output.count('mew-wisp compact terminal HUD') == 2
+    assert output.count('mew-wisp compact resident HUD') == 2
+    assert output.count('resident: mew-wisp') == 2
     assert output.count('focus:') == 2
     assert output.count('signal:') == 2
+    assert output.count('action:') == 2
+    assert 'hud: mew-ghost' not in output
+    assert 'next:' not in output
     assert 'freshness:' not in output
     assert 'watch iteration' not in output
     assert 'record_type' not in output
@@ -822,7 +852,10 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     details = ghost._render_payload(state, html, 'human', terminal_form='cat', terminal_details=True)
 
     assert implicit == explicit
-    assert implicit.startswith('mew-wisp compact terminal HUD')
+    assert implicit.startswith('mew-wisp compact resident HUD')
+    assert 'resident: mew-wisp' in implicit
+    assert 'hud: mew-ghost' not in implicit
+    assert 'next:' not in implicit
     assert 'terminal form: cat' not in implicit
     assert 'freshness:' not in implicit
     assert 'desk details:' not in implicit
@@ -830,10 +863,12 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert 'launcher intents:' not in implicit
     assert cat.splitlines()[0] == 'terminal form: cat'
     assert cat.splitlines()[1].lstrip().startswith('cat state:')
-    assert 'mew-wisp compact terminal HUD' in cat
+    assert 'mew-wisp compact resident HUD' in cat
+    assert 'resident: mew-wisp' in cat
     assert 'focus:' in cat
     assert 'signal:' in cat
-    assert 'next:' in cat
+    assert 'action:' in cat
+    assert 'next:' not in cat
     assert 'freshness:' not in cat
     assert 'desk details:' not in cat
     assert 'active window:' not in cat
@@ -844,7 +879,7 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert 'active window:' in details
     assert 'launcher intents:' in details
     assert _cat_sprite_similarity(cat) >= 0.90
-    assert implicit.count('state marker: *') == 1
+    assert implicit.count('marker: *') == 1
     assert cat.count('state marker: *') == 1
     assert 'state marker: *' in cat
     assert 'state marker: *' not in '\n'.join(_cat_sprite_lines(cat))
@@ -917,7 +952,7 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
     assert output.count('terminal form: cat') == 2
     assert output.count(padding + 'cat state: coding') == 2
     assert output.count(padding + _rendered_reference_row(CAT_REFERENCE_MASK[0])) == 2
-    assert output.count('mew-wisp compact terminal HUD') == 2
+    assert output.count('mew-wisp compact resident HUD') == 2
 
 
 def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:
@@ -957,7 +992,7 @@ def test_human_details_flag_prints_diagnostic_sections(capsys) -> None:
     output = capsys.readouterr().out
 
     assert output.startswith('terminal form: cat')
-    assert 'mew-wisp compact terminal HUD' in output
+    assert 'mew-wisp compact resident HUD' in output
     assert 'details:' in output
     assert 'freshness:' in output
     assert 'desk details:' in output
@@ -981,10 +1016,13 @@ def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
     assert sleeps == [0.0]
     assert output.count('terminal form: cat') == 2
     assert output.count('cat state:') == 2
-    assert output.count('mew-wisp compact terminal HUD') == 2
+    assert output.count('mew-wisp compact resident HUD') == 2
+    assert output.count('resident: mew-wisp') == 2
     assert output.count('focus:') == 2
     assert output.count('signal:') == 2
-    assert output.count('next:') == 2
+    assert output.count('action:') == 2
+    assert 'hud: mew-ghost' not in output
+    assert 'next:' not in output
     assert 'freshness:' not in output
     assert 'desk details:' not in output
     assert 'active window:' not in output
