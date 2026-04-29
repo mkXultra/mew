@@ -32,7 +32,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `deferred/partial` | Broad HTML removal is deferred after issue #18 closed, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
-| SP22 mew-wisp Visual Polish | `in_progress` | SP22a exposed issue #21 before landing product edits. SP22b landed a smaller visible-identity/HUD polish: normal human output now presents `mew-wisp` as the resident identity and uses a compact resident HUD while preserving cat centering, details gating, state/HTML/watch/live/launcher behavior, and no rescue edits. |
+| SP22 mew-wisp Visual Polish | `in_progress` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel while preserving cat centering, details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
 | SP23 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
@@ -115,6 +115,14 @@ Current target:
   action line to `action`, keeps diagnostics behind `--details`, and preserves
   centered cat output, watch output, state/HTML/live/launcher behavior, and
   rescue edits `0`; ledger row `36` records the practical result
+- SP22c task `#31` landed practical from session `#60`: normal human output now
+  renders a fixed-width ASCII `mew-wisp resident HUD` panel with aligned labels
+  and wrapped long focus/signal values under both default and cat forms, while
+  preserving the 22x24 cat mask, cat centering, state marker semantics,
+  `--details` diagnostics gating, watch output, state/HTML/live/launcher
+  behavior, and product-code rescue edits `0`; ledger row `37` records the
+  practical result, and issue `#22` records the recurring report-schema
+  closeout gap
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -179,6 +187,9 @@ Current target:
 - route task #29/session #58 verifier-rollback timeout as open issue `#21`
   evidence for implementation-lane hardening; task #30 reduced scope and
   repaired residual test assertions without Codex product-code rescue edits
+- route task #31/session #60 report-schema closeout recurrence as open issue
+  `#22` evidence for implementation-lane hardening; product tests passed and
+  the operator rewrote only the local report JSON into the canonical schema
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -245,6 +256,14 @@ Current target:
   `codex_product_code_rescue_edits=0`. Ledger row `35` records the SP22a
   timeout after verifier rollback behind issue `#21`; row `36` records the
   visible-identity/resident-HUD polish retry.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP22c on 2026-04-29: `rows_total=37`, eight `failed`, twenty-six
+  `practical`, three `clean`, `success_rate=0.784`,
+  `structural_repairs_required=8`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `37` records the resident
+  HUD panel polish with failure class
+  `report_schema_closeout_gap_after_panel_polish`; issue `#22` records the
+  recurring non-appendable report closeout gap.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,

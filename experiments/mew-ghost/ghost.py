@@ -952,17 +952,82 @@ def render_terminal_human(
     else:
         raise ValueError('unsupported terminal form: %s' % terminal_form)
 
-    compact_lines = [
-        'mew-wisp compact resident HUD',
-        'resident: mew-wisp | mood: %s | state: %s' % (ghost['mood'], presence_state),
-        'focus: %s - %s' % (ghost['focus'], ghost['message']),
-        'signal: %s | snapshots: %s | desk: %s'
-        % (presence['contract'], presence['refresh_count'], desk.get('status', 'disabled')),
-        'action: %s' % primary_label,
+    panel_content_width = 68
+    panel_border_width = panel_content_width + 2
+    panel_label_width = 9
+    panel_title = ' mew-wisp resident HUD '
+
+    def _panel_safe_text(value: object) -> str:
+        raw = str(value).replace(chr(10), ' ')
+        return ''.join(
+            character if 32 <= ord(character) < 127 else '?'
+            for character in raw
+        ).strip()
+
+    def _panel_wrapped_values(value: object, value_width: int) -> list[str]:
+        text = _panel_safe_text(value)
+        if not text:
+            return ['']
+        wrapped: list[str] = []
+        current = ''
+        for word in text.split():
+            while len(word) > value_width:
+                if current:
+                    wrapped.append(current)
+                    current = ''
+                wrapped.append(word[:value_width])
+                word = word[value_width:]
+            if not word:
+                continue
+            candidate = word if not current else current + ' ' + word
+            if len(candidate) <= value_width:
+                current = candidate
+            else:
+                wrapped.append(current)
+                current = word
+        if current:
+            wrapped.append(current)
+        return wrapped or ['']
+
+    def _panel_title_border() -> str:
+        remaining_width = panel_border_width - len(panel_title)
+        left_width = remaining_width // 2
+        right_width = remaining_width - left_width
+        return '+' + '-' * left_width + panel_title + '-' * right_width + '+'
+
+    def _panel_plain_border() -> str:
+        return '+' + '-' * panel_border_width + '+'
+
+    def _panel_row(label: str, value: object) -> list[str]:
+        label_prefix = '%-*s ' % (panel_label_width, label + ':')
+        continuation_prefix = ' ' * len(label_prefix)
+        value_width = panel_content_width - len(label_prefix)
+        rows: list[str] = []
+        for index, segment in enumerate(_panel_wrapped_values(value, value_width)):
+            prefix = label_prefix if index == 0 else continuation_prefix
+            rows.append('| ' + (prefix + segment).ljust(panel_content_width) + ' |')
+        return rows
+
+    def _resident_panel_lines(panel_rows: list[tuple[str, object]]) -> list[str]:
+        panel_lines = [_panel_title_border()]
+        for label, value in panel_rows:
+            panel_lines.extend(_panel_row(label, value))
+        panel_lines.append(_panel_plain_border())
+        return panel_lines
+
+    panel_rows: list[tuple[str, object]] = [
+        ('resident', 'mew-wisp | mood: %s | state: %s' % (ghost['mood'], presence_state)),
+        ('focus', '%s - %s' % (ghost['focus'], ghost['message'])),
+        (
+            'signal',
+            '%s | snapshots: %s | desk: %s'
+            % (presence['contract'], presence['refresh_count'], desk.get('status', 'disabled')),
+        ),
+        ('action', primary_label),
     ]
     if terminal_form == 'default':
-        compact_lines.insert(2, 'marker: %s' % state_marker)
-    lines.extend(compact_lines)
+        panel_rows.insert(1, ('marker', state_marker))
+    lines.extend(_resident_panel_lines(panel_rows))
 
     if terminal_details:
         lines.extend(

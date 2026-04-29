@@ -388,13 +388,15 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
 
     human = human_output.read_text(encoding='utf-8')
 
-    assert human.startswith('mew-wisp compact resident HUD\n')
-    assert 'resident: mew-wisp | mood: curious | state: coding' in human
-    assert 'marker: *' in human
+    human_panel = _resident_panel_lines(human)
+    assert human.startswith(human_panel[0] + '\n')
+    assert 'mew-wisp resident HUD' in human_panel[0]
+    assert _resident_panel_values(human, 'resident') == ['mew-wisp | mood: curious | state: coding']
+    assert _resident_panel_values(human, 'marker') == ['*']
     assert 'focus:' in human
     assert 'signal:' in human
     assert 'desk:' in human
-    assert 'action: Resume SP17 desk bridge' in human
+    assert _resident_panel_values(human, 'action') == ['Resume SP17 desk bridge']
     assert 'hud: mew-ghost' not in human
     assert 'next:' not in human
     assert 'freshness:' not in human
@@ -410,7 +412,9 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
 
     details = details_output.read_text(encoding='utf-8')
 
-    assert details.startswith('mew-wisp compact resident HUD\n')
+    details_panel = _resident_panel_lines(details)
+    assert details.startswith(details_panel[0] + '\n')
+    assert 'mew-wisp resident HUD' in details_panel[0]
     assert 'details:\n' in details
     assert 'freshness:' in details
     assert 'desk:' in details
@@ -424,7 +428,9 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
     assert ghost.main(['--fixture', str(FIXTURE_PATH), '--format', 'human']) == 0
     stdout = capsys.readouterr().out
 
-    assert stdout.startswith('mew-wisp compact resident HUD\n')
+    stdout_panel = _resident_panel_lines(stdout)
+    assert stdout.startswith(stdout_panel[0] + '\n')
+    assert 'mew-wisp resident HUD' in stdout_panel[0]
     assert 'resident: mew-wisp' in stdout
     assert 'hud: mew-ghost' not in stdout
     assert 'next:' not in stdout
@@ -673,7 +679,7 @@ def test_human_watch_count_prints_terminal_surface_instead_of_jsonl(capsys) -> N
     output = capsys.readouterr().out
 
     assert sleeps == [0.0]
-    assert output.count('mew-wisp compact resident HUD') == 2
+    assert output.count('mew-wisp resident HUD') == 2
     assert output.count('resident: mew-wisp') == 2
     assert output.count('focus:') == 2
     assert output.count('signal:') == 2
@@ -730,7 +736,7 @@ def test_human_watch_without_count_prints_surface_until_keyboard_interrupt(capsy
     output = capsys.readouterr().out
 
     assert sleeps == [0.5, 0.5]
-    assert output.count('mew-wisp compact resident HUD') == 2
+    assert output.count('mew-wisp resident HUD') == 2
     assert output.count('resident: mew-wisp') == 2
     assert output.count('focus:') == 2
     assert output.count('signal:') == 2
@@ -843,6 +849,44 @@ def _rendered_reference_row(mask_row: str) -> str:
     return ''.join('██' if cell == '#' else '  ' for cell in mask_row)
 
 
+def _resident_panel_lines(rendered: str) -> list[str]:
+    lines = rendered.splitlines()
+    start = next(
+        index for index, line in enumerate(lines)
+        if line.startswith('+') and 'mew-wisp resident HUD' in line
+    )
+    end = next(
+        index for index in range(start + 1, len(lines))
+        if lines[index].startswith('+') and set(lines[index][1:-1]) == {'-'}
+    )
+    return lines[start:end + 1]
+
+
+def _resident_panel_values(rendered: str, label: str) -> list[str]:
+    label_prefix = '| ' + (label + ':').ljust(9) + ' '
+    continuation_prefix = '| ' + ' ' * 10
+    values: list[str] = []
+    collecting = False
+    for line in _resident_panel_lines(rendered)[1:-1]:
+        if line.startswith(label_prefix):
+            values.append(line[len(label_prefix):-2].rstrip())
+            collecting = True
+            continue
+        if collecting and line.startswith(continuation_prefix):
+            values.append(line[len(continuation_prefix):-2].rstrip())
+            continue
+        if collecting:
+            break
+    return values
+
+
+def _resident_panel_value_column(rendered: str, label: str) -> int:
+    label_prefix = '| ' + (label + ':').ljust(9) + ' '
+    row = next(line for line in _resident_panel_lines(rendered) if line.startswith(label_prefix))
+    value = _resident_panel_values(rendered, label)[0]
+    return row.index(value)
+
+
 def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None:
     state, html = ghost.render_fixture(FIXTURE_PATH)
 
@@ -852,8 +896,17 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     details = ghost._render_payload(state, html, 'human', terminal_form='cat', terminal_details=True)
 
     assert implicit == explicit
-    assert implicit.startswith('mew-wisp compact resident HUD')
+    implicit_panel = _resident_panel_lines(implicit)
+    cat_panel = _resident_panel_lines(cat)
+    details_panel = _resident_panel_lines(details)
+    assert implicit.startswith(implicit_panel[0])
+    assert 'mew-wisp resident HUD' in implicit_panel[0]
+    assert 'mew-wisp resident HUD' in cat_panel[0]
+    assert 'mew-wisp resident HUD' in details_panel[0]
+    assert len({len(line) for line in implicit_panel}) == 1
+    assert {_resident_panel_value_column(implicit, label) for label in ('resident', 'marker', 'focus', 'signal', 'action')} == {12}
     assert 'resident: mew-wisp' in implicit
+    assert _resident_panel_values(implicit, 'marker') == ['*']
     assert 'hud: mew-ghost' not in implicit
     assert 'next:' not in implicit
     assert 'terminal form: cat' not in implicit
@@ -863,7 +916,6 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert 'launcher intents:' not in implicit
     assert cat.splitlines()[0] == 'terminal form: cat'
     assert cat.splitlines()[1].lstrip().startswith('cat state:')
-    assert 'mew-wisp compact resident HUD' in cat
     assert 'resident: mew-wisp' in cat
     assert 'focus:' in cat
     assert 'signal:' in cat
@@ -879,16 +931,25 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert 'active window:' in details
     assert 'launcher intents:' in details
     assert _cat_sprite_similarity(cat) >= 0.90
-    assert implicit.count('marker: *') == 1
+    assert _resident_panel_values(implicit, 'marker') == ['*']
     assert cat.count('state marker: *') == 1
     assert 'state marker: *' in cat
     assert 'state marker: *' not in '\n'.join(_cat_sprite_lines(cat))
-    cat_focus_line = next(line for line in cat.splitlines() if line.startswith('focus: '))
-    implicit_focus_line = next(line for line in implicit.splitlines() if line.startswith('focus: '))
-    assert cat_focus_line == 'focus: %s - %s' % (state['ghost']['focus'], state['ghost']['message'])
+    cat_focus_line = ' '.join(_resident_panel_values(cat, 'focus'))
+    implicit_focus_line = ' '.join(_resident_panel_values(implicit, 'focus'))
+    assert cat_focus_line == '%s - %s' % (state['ghost']['focus'], state['ghost']['message'])
     assert implicit_focus_line == cat_focus_line
     assert all(ord(character) < 128 for character in cat_focus_line)
     assert chr(8212) not in cat_focus_line
+
+    long_state = json.loads(json.dumps(state))
+    long_state['ghost']['focus'] = 'SP22c'
+    long_state['ghost']['message'] = 'x' * 140
+    long_focus = ghost._render_payload(long_state, html, 'human')
+    long_panel = _resident_panel_lines(long_focus)
+    assert len({len(line) for line in long_panel}) == 1
+    assert len(_resident_panel_values(long_focus, 'focus')) > 1
+    assert all(len(line) == len(long_panel[0]) for line in long_panel)
     assert '  code  ' not in cat
     assert '   /\\_____/\\        ' not in cat
     assert ' |  \\_____/  |__/   ' not in cat
@@ -952,7 +1013,7 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
     assert output.count('terminal form: cat') == 2
     assert output.count(padding + 'cat state: coding') == 2
     assert output.count(padding + _rendered_reference_row(CAT_REFERENCE_MASK[0])) == 2
-    assert output.count('mew-wisp compact resident HUD') == 2
+    assert output.count('mew-wisp resident HUD') == 2
 
 
 def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:
@@ -992,7 +1053,7 @@ def test_human_details_flag_prints_diagnostic_sections(capsys) -> None:
     output = capsys.readouterr().out
 
     assert output.startswith('terminal form: cat')
-    assert 'mew-wisp compact resident HUD' in output
+    assert 'mew-wisp resident HUD' in output
     assert 'details:' in output
     assert 'freshness:' in output
     assert 'desk details:' in output
@@ -1016,7 +1077,7 @@ def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
     assert sleeps == [0.0]
     assert output.count('terminal form: cat') == 2
     assert output.count('cat state:') == 2
-    assert output.count('mew-wisp compact resident HUD') == 2
+    assert output.count('mew-wisp resident HUD') == 2
     assert output.count('resident: mew-wisp') == 2
     assert output.count('focus:') == 2
     assert output.count('signal:') == 2
