@@ -3536,6 +3536,7 @@ def work_finish_blocker_allows_continue(finished_note):
             "edit-scope acceptance evidence",
             "all-valid answer completeness evidence",
             "numeric artifact quality evidence",
+            "query-only hidden-model",
         )
     )
 

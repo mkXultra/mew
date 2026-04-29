@@ -7732,6 +7732,164 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_run_command_executes_shell_chains_with_shell_gate(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                write_script = "from pathlib import Path; Path('chain.txt').write_text('chain ok')"
+                read_script = "from pathlib import Path; print(Path('chain.txt').read_text())"
+                command = (
+                    f"{shlex.quote(sys.executable)} -c {shlex.quote(write_script)} && "
+                    f"{shlex.quote(sys.executable)} -c {shlex.quote(read_script)}"
+                )
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                command,
+                                "--allow-shell",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertEqual(data["tool_call"]["status"], "completed")
+                self.assertEqual(result["exit_code"], 0)
+                self.assertEqual(result["execution_mode"], "shell")
+                self.assertEqual(result["argv"][1], "-lc")
+                self.assertIn("chain ok", result["stdout"])
+
+                redirect_script = 'print("redirect ok")'
+                redirect_command = f"{shlex.quote(sys.executable)} -c {shlex.quote(redirect_script)} > redirected.txt"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                redirect_command,
+                                "--allow-shell",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                redirect_data = json.loads(stdout.getvalue())
+                redirect_result = redirect_data["tool_call"]["result"]
+                self.assertEqual(redirect_data["tool_call"]["status"], "completed")
+                self.assertEqual(redirect_result["exit_code"], 0)
+                self.assertEqual(redirect_result["execution_mode"], "shell")
+                self.assertEqual(Path("redirected.txt").read_text().strip(), "redirect ok")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_run_command_rejects_resident_mew_loop_inside_shell_chain(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                commands = [
+                    f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')} > out.txt && mew run",
+                    "(mew run) && true",
+                    "{ mew run; } && true",
+                    "true && bash -lc 'mew run'",
+                    "true && bash -lc \"m'ew' run\"",
+                    "true && /bin/sh -c \"m'ew' run\"",
+                    "bash -lc 'm\\ew run'",
+                    "true && bash -lc 'm\\ew run'",
+                    "/bin/sh -c 'm\\ew run'",
+                    "bash -lc '$(printf mew) run'",
+                ]
+                for command in commands:
+                    with self.subTest(command=command):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--tool",
+                                        "run_command",
+                                        "--command",
+                                        command,
+                                        "--allow-shell",
+                                    ]
+                                ),
+                                1,
+                            )
+                        self.assertIn("run_command must not invoke resident mew loops", stdout.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_cli_rejects_resident_command_inside_guarded_shell_environment(self):
+        with patch.dict(os.environ, {"MEW_WORK_COMMAND_GUARD": "1"}):
+            with redirect_stderr(StringIO()) as stderr:
+                self.assertEqual(main(["run"]), 126)
+        self.assertIn("resident commands are disabled inside run_command", stderr.getvalue())
+
+    def test_work_session_run_command_salvages_multiline_shell_wrapper_quotes(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = "bash -lc 'python3 - <<\"PY\"\nprint(\"literal single quote: '\")\nPY'"
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "run_command",
+                                "--command",
+                                command,
+                                "--allow-shell",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertEqual(result["exit_code"], 0)
+                self.assertEqual(result["argv"][0], "bash")
+                self.assertEqual(result["argv"][1], "-lc")
+                self.assertIn("literal single quote: '", result["stdout"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_session_rejects_run_command_resident_mew_loop(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -33633,7 +33791,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("suggested_verify_command.command", prompt)
         self.assertIn("prefer a module-level command unless you have confirmed the exact class and method name", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
-        self.assertIn("run_command is parsed with shlex and executed without a shell", prompt)
+        self.assertIn("run_command executes top-level shell operators", prompt)
         self.assertIn("Do not use run_command to invoke resident mew loops", prompt)
         self.assertIn("printed Next CLI controls", prompt)
         self.assertIn("Before finishing an implementation task that touched user-facing surfaces", prompt)
@@ -33918,6 +34076,41 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(action["type"], "wait")
         self.assertIn("write batch cannot mix non-write tools (wait)", action["reason"])
         self.assertIn("separate turn", action["reason"])
+
+    def test_work_model_batch_treats_edit_file_edits_as_hunks(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file",
+                            "path": "experiments/mew-ghost/ghost.py",
+                            "old": "return old\n",
+                            "new": "return new\n",
+                        },
+                        {
+                            "type": "edit_file",
+                            "path": "experiments/mew-ghost/tests/test_mew_ghost.py",
+                            "edits": [
+                                {"old": "assert old\n", "new": "assert new\n"},
+                                {"old": "assert second_old\n", "new": "assert second_new\n"},
+                            ],
+                        },
+                    ],
+                    "reason": "multi-hunk test update with source edit",
+                },
+            },
+            allowed_write_roots=["experiments/mew-ghost"],
+            default_cwd=".",
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(action["tools"][0]["type"], "edit_file")
+        self.assertEqual(action["tools"][1]["type"], "edit_file_hunks")
+        self.assertEqual(len(action["tools"][1]["edits"]), 2)
 
     def test_work_model_batch_collapses_same_path_write_edits(self):
         from mew.work_loop import normalize_work_model_action

@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "source_registry": "docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json",
+  "purpose": "M6.24 broad Terminal-Bench parity campaign batch 6",
+  "selection_rule": "Next unseen registry slice after M6.20/M6.22/M6.24 batches 1-5. Remaining unmeasured tasks are all frozen Codex 5/5 tasks, so this batch uses the next alphabetical unmeasured high-target slice with varied task shapes.",
+  "codex_target_successes": 40,
+  "codex_target_trials": 40,
+  "tasks": [
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "3ee298ac4e31a90a460afa5fc10d34fdca7c1e591ccda5fc2c5faee2963991f2",
+      "taskName": "feal-linear-cryptanalysis"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "faa983dd79f63daa168b41c753bddb0621822820ba6f16661a9767b815e436e8",
+      "taskName": "fix-ocaml-gc"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "b569c7f37491065e1c14c8074024ffa47cad6f9c4e797213af81ef8617bccb9c",
+      "taskName": "git-multibranch"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "c3dfea370953fe9b6cb53d368f1f242af2833cf1af623849bdaee8fe026b1cf1",
+      "taskName": "gpt2-codegolf"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "0f08b1ccc560ac08b8420b4a493a3b4c5354e2ace9f0cbe63a44e861e46c780d",
+      "taskName": "headless-terminal"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "b96307ee0e1a454b667fb19da4b08116252525a2897250a9d7f8825fa0b86088",
+      "taskName": "hf-model-inference"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "7d9e8c734dc7ccaa01db7fe48f36a6a49d6827d6fd47fe043cb5f4fe3b0a3fd0",
+      "taskName": "largest-eigenval"
+    },
+    {
+      "avgResolutionRate": 1,
+      "nTrials": 5,
+      "resolutionRatePct": 100.0,
+      "successCount": 5,
+      "taskChecksum": "3a08e63e0643ea5914eedeecb08cb93a1f0a10b9dc7d19d1f570004af84531c8",
+      "taskName": "llm-inference-batching-scheduler"
+    }
+  ]
+}

@@ -37,11 +37,14 @@ When deciding what to do next, apply this order:
 2. The long-session charter or plan saved before the session started.
 3. `mew-product-evaluator` active milestone / Done-when decision, backed by
    `ROADMAP.md` and `ROADMAP_STATUS.md`.
-4. Durable project decisions in mew memory and project docs such as
+4. Active milestone controller/ledger docs, when present. For M6.24, read
+   `docs/M6_24_DECISION_LEDGER.md` and the latest `docs/M6_24_GAP_BASELINE_*`
+   before treating a pending benchmark task as the next action.
+5. Durable project decisions in mew memory and project docs such as
    `docs/ADOPT_FROM_REFERENCES.md`.
-5. Current active task/session state and the latest context checkpoint.
-6. Open side-project problem issues, if side-project dogfood is active.
-7. `mew focus`, latest friction, and recent model recommendations.
+6. Current active task/session state and the latest context checkpoint.
+7. Open side-project problem issues, if side-project dogfood is active.
+8. `mew focus`, latest friction, and recent model recommendations.
 
 Do not let a fresh active task, latest checkpoint, or external model comment override the session charter unless the user explicitly changed direction.
 Do not let `mew focus` or an attractive recent suggestion override the active
@@ -79,6 +82,15 @@ git status --short
 ./mew context --load --json
 sed -n '1,120p' ROADMAP.md
 sed -n '1,140p' ROADMAP_STATUS.md
+```
+
+If M6.24 is active, also inspect the controller decision before selecting the
+next benchmark or repair task:
+
+```bash
+sed -n '1,220p' docs/M6_24_DECISION_LEDGER.md
+ls docs/M6_24_GAP_BASELINE_*.md
+sed -n '1,220p' docs/M6_24_GAP_BASELINE_2026-04-29.md
 ```
 
 If side-project implementation dogfood is active, also inspect the local status
@@ -156,6 +168,10 @@ Before starting or continuing a self-improve task, compare it against the sessio
 - If a checkpoint or external model opinion conflicts with the active milestone
   next action in `ROADMAP_STATUS.md`, prefer `ROADMAP_STATUS.md` unless the
   user explicitly changed direction.
+- If M6.24 controller mode is `improvement_phase`, do not run the next pending
+  broad benchmark task just because a batch manifest lists it. Select only a
+  gap-class classification, generic repair, or same-shape rerun task until the
+  decision ledger says measurement may resume.
 - If you have already spent three cycles on blocker reduction or nearby polish
   for the same active criterion, do not start a fourth. Recommend running the
   gate proof or rewriting the criterion/measurement.

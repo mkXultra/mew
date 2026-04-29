@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 This file is the compact operational roadmap dashboard. It is intentionally
 short enough to survive context compression and long-session reentry.
@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Selected M6.24 structural blockers SR-001, SR-002, SR-003, and later append-only repairs such as SR-007/SR-008 are repaired; the previous close gate remains historical and future repairs reopen/append here. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-017 side-project write-batch normalizer repair is recorded; M6.24 can resume broad measurement. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Resumed after selected M6.14 repairs; continue broad measurement and route any new accepted structural blockers back through M6.14. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Batch 6 `fix-ocaml-gc` reached 4/5 with no structural blocker; continue with `git-multibranch`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -73,9 +73,32 @@ Why M6.24 is active now:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
+- User decision on 2026-04-29: M6.24 is a measurement / improvement loop, not
+  a pure "measure all tasks first" campaign. If the batch gap to Codex exceeds
+  the threshold, pause broad measurement, repair a generic gap class, rerun the
+  same failed shape, then continue measuring.
 - User decision on 2026-04-28: if M6.24 exposes an accepted structural
   problem, stop broad measurement, set M6.24 to `pending`, and repair the
   substrate through M6.14 before returning to the same failing shape.
+- M6.24 Batch 3 `polyglot-rust-c` exposed SR-010:
+  exact backticked command examples in the task text were not treated as
+  finish-gating acceptance evidence. Trials self-finished after nearby checks
+  that changed cwd or used Python wrappers instead of proving the advertised
+  command shapes from task cwd. It is now repaired.
+- M6.24 Batch 3 `model-extraction-relu-logits` exposed SR-011:
+  query-only hidden-model tasks could finish after visible fixture checks such
+  as `forward.A1` or local visible-weight cosine checks without synthetic or
+  holdout validation. It is now repaired.
+- M6.24 Batch 3 `install-windows-3.11` exposed SR-012:
+  the local Harbor wrapper imposed an inner 900 second timeout and used
+  container-local report paths even though the task timeout is 3600 seconds.
+  It is now repaired.
+- M6.24 Batch 3 `mcmc-sampling-stan` pre-repair attempt exposed SR-013:
+  `run_command` still treated top-level shell operators as argv tokens, so
+  `mkdir -p ... && HOME=... Rscript -e ...` failed as `mkdir: invalid option
+  -- 'e'`. It is now repaired by shell execution for top-level
+  `run_command` operators, non-shell `run_tests` preservation, and
+  resident-loop guardrails.
 - M6.20 closed the first fixed terminal gate on current head:
   `cancel-async-tasks` 5/5 and `fix-code-vulnerability` 5/5, both with Harbor
   errors 0.
@@ -103,6 +126,15 @@ Why M6.24 is active now:
 
 M6.24 resume condition:
 
+- Controller docs:
+  `docs/M6_24_DECISION_LEDGER.md` and
+  `docs/M6_24_GAP_BASELINE_2026-04-29.md`.
+- Current controller mode: `improvement_phase`.
+- M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
+  **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
+  Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
+  `> 20 pp` improvement threshold. Do not continue broad measurement just
+  because Batch 6 still lists `gpt2-codegolf` as pending.
 - If a new accepted structural blocker appears, pause M6.24, append it to
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair it through M6.14, record
   focused validation, and rerun the same failed task shape before resuming
@@ -142,6 +174,16 @@ M6.24 resume condition:
   reached 1/1 with errors 0 after extracting 96 frames into eight contact
   sheets and writing `/app/solution.txt`.
 - Closed M6.14 follow-on episode:
+  SR-004 shell-wrapper literal parse gap is `repaired`. M6.24 Batch 3
+  `build-pov-ray` scored 2/5 against Codex target 5/5, with two failed trials
+  stopping on `No closing quotation` before practical multiline
+  `bash -lc 'python3 - <<"PY" ... PY'` scripts could execute. `split_command_env`
+  now falls back for recognized `bash`/`sh`/`zsh` `-c`/`-lc`/`-cl` wrappers when
+  normal shlex parsing fails, passing `[shell, flag, script]` under
+  `shell=False`. Same-shape proof
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-33-30/result.json`
+  reached 1/1 with no `No closing quotation` recurrence.
+- Closed M6.14 follow-on episode:
   SR-007 coordinated multi-file patch shape failure from GitHub issue #18 is
   `repaired`. Mixed write/wait batches now normalize to an actionable
   top-level blocker, and the executor no longer runs a synthetic `wait`
@@ -166,6 +208,35 @@ M6.24 resume condition:
   steered away from retrying the whole coordinated patch and toward one smaller
   complete source/test/docs slice while carrying remaining scope in
   `working_memory`.
+- Closed M6.14 follow-on episode:
+  SR-010 exact command example finish gap is `repaired`. The finish gate now
+  extracts exact backticked command examples from task text and blocks
+  `task_done=true` unless acceptance evidence cites a completed
+  `run_command`/`run_tests` whose command text runs the advertised shell shape
+  with a concrete placeholder value and without cwd/output-location mutation.
+  Same-shape
+  `polyglot-rust-c` proof
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__21-23-44/result.json`
+  stopped with `ask_user` after observing that the exact Rust command creates
+  `/app/main`, not `/app/polyglot/main`, instead of false-finishing.
+- Closed M6.14 follow-on episode:
+  SR-011 query-only hidden-model visible fixture false green is `repaired`.
+  The finish gate now blocks generated source that reads visible hidden-weight
+  internals or fixture source for black-box/query-only `forward` oracle tasks,
+  and requires synthetic/randomized/holdout/generalization evidence before
+  `task_done=true`. Same-shape
+  `model-extraction-relu-logits` proof
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__23-29-21/result.json`
+  reached 1/1 after first blocking visible-fixture-only finish and then
+  requiring randomized synthetic validation.
+- Closed M6.14 follow-on episode:
+  SR-012 Harbor wrapper inner timeout cap and unmapped partial report is
+  `repaired`. `.harbor/mew_terminal_bench_agent.py` now defaults
+  `timeout_seconds=None`, captures explicit wrapper timeouts as normal command
+  transcripts with `exit_code=124`, and Batch manifests pass
+  `container_repo_root=/mew`. The wrapper timeout proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr012-wrapper-timeout-no-error-20260429-0017/result.json`
+  recorded `n_errors=0` with a host-visible timeout transcript.
 - M6.24 Batch 2 `dna-insert` was measured after SR-003 and before the #18
   repair pivot: 1/5, errors 0, runtime 10m 34s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__19-03-50/result.json`.
@@ -179,14 +250,229 @@ M6.24 resume condition:
   against Codex target 5/5 and selected SR-008 for immediate repair. After the
   repair proof, the remaining 0/5 is a task-solving gap rather than the direct
   Python pytest-file false-green substrate bug.
+- M6.24 Batch 3 `build-pov-ray` scored 2/5 against Codex target 5/5, errors 0,
+  runtime 11m 58s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-16-05/result.json`.
+  It selected and repaired SR-004. One additional failed trial finished despite
+  a hidden source/archive completeness miss (`file_id.diz` and related files
+  absent), which remains implementation-lane evidence rather than a selected
+  core repair.
+- M6.24 Batch 3 `polyglot-rust-c` scored 0/5 against Codex target 4/5, errors
+  0, runtime 11m 23s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-45-24/result.json`.
+  It selected and repaired SR-010. Same-shape proof stopped without
+  false-finishing when the exact advertised Rust command wrote `/app/main`.
+- M6.24 Batch 3 `model-extraction-relu-logits` scored 0/5 against Codex target
+  4/5, errors 0, runtime 15m 7s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__22-02-51/result.json`.
+  It selected and repaired SR-011. Same-shape proof reached 1/1 with hidden
+  verifier pass after requiring randomized synthetic validation.
+- M6.24 Batch 3 `install-windows-3.11` uses Harbor canonical task name
+  `install-windows-3-11`. It scored 0/5 against Codex target 0/5, but all five
+  trials were wrapper `RuntimeError: Command timed out after 900 seconds`
+  errors. It selected and repaired SR-012. This remains a 0/5 task result but
+  should no longer produce wrapper errors on future long-task runs.
+- M6.24 Batch 3 `make-doom-for-mips` scored 0/5 against Codex target 1/5,
+  errors 0, runtime 12m 52s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__00-29-51/result.json`.
+  This is recorded as task-solving / surrogate-build evidence, not an accepted
+  structural blocker yet.
+- M6.24 Batch 3 `mcmc-sampling-stan` pre-repair attempt
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__00-45-34`
+  was interrupted after SR-013 was accepted and is not counted as a score.
+  Same-shape substrate proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr013-run-command-shell-chain-20260428T161435Z/result.json`
+  passed with `execution_mode=shell`, `exit_code=0`, environment propagation,
+  shell redirection, and nested resident-loop rejection.
+- M6.24 Batch 3 repaired-head `mcmc-sampling-stan` rerun scored 0/5 against
+  Codex target 2/5, with 5 `AgentTimeoutError`s and runtime 32m 32s:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__01-19-36/result.json`.
+  The SR-013 shell-chain failure did not recur; verifier failures centered on
+  missing `rstan`, missing output files after timeout, or fallback analysis
+  instead of `rstan::sampling`. Treat this as task-solving / long dependency
+  strategy evidence, not a new accepted structural blocker.
+- M6.24 Batch 3 `video-processing` scored 0/5 against Codex target 3/5,
+  errors 0, runtime 11m 16s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__01-56-57/result.json`.
+  The work loop analyzed videos and wrote scripts without runner errors, but
+  hidden `test_video.mp4` frame ranges failed. Treat this as task-solving /
+  hidden-video generalization evidence, not a new accepted M6.14 structural
+  blocker.
+- M6.24 Batch 3 is now fully measured: latest full task-run total **2/40**
+  against frozen Codex target **24/40**.
+- M6.24 Batch 4 is selected in
+  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md` and
+  `docs/data/terminal_bench_m6_24_batch_4.json`. It covers remaining
+  available unmeasured Codex success bands 0/5, 3/5, 4/5, and 5/5; the 1/5
+  and 2/5 unmeasured bands are exhausted. Frozen Codex Batch 4 target:
+  **25/40**.
+- M6.24 Batch 4 `sam-cell-seg` scored 0/5 against Codex target 0/5, errors
+  0, runtime 9m 26s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__02-16-06/result.json`.
+  This is a low-target control matching Codex, not a selected structural
+  repair signal.
+- M6.24 Batch 4 `train-fasttext` partial attempt completed 3/5 requested
+  trials before cancellation: 0/3 completed rewards, errors 0 among completed
+  trials, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__02-27-54/result.json`.
+  Two remaining trials entered Docker/Harbor teardown or verifier hangs with
+  `Docker compose down failed` / `tried to kill container, but did not receive
+  an exit event`. Because the frozen Codex target is 0/5 and the completed
+  trials already matched 0/3, record this as partial runner/benchmark-harness
+  debt and do not select a core M6.14 repair from it.
+- M6.24 Batch 4 `make-mips-interpreter` scored 0/5 against Codex target 3/5,
+  with 1 `AgentTimeoutError`, runtime 32m 17s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__03-53-16/result.json`.
+  Several trials created `/tmp/frame.bmp` close enough to pass frame checks but
+  missed the exact Doom initialization stdout string. Treat this as
+  task-solving / surrogate execution fidelity evidence, not an accepted M6.14
+  structural blocker.
+- M6.24 Batch 4 `torch-pipeline-parallelism` scored 0/5 against Codex target
+  3/5, errors 0, runtime 13m 19s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__04-42-38/result.json`.
+  A prior pre-cleanup artifact at
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__04-27-57/result.json`
+  is diagnostic only because Docker verifier disk exhaustion contaminated it.
+  The counted post-cleanup run still had repeated Torch/CUDA verifier
+  `No space left on device` failures, plus one functional gradient-parity
+  mismatch. Treat this as verifier-resource debt mixed with task-solving
+  evidence, not an accepted M6.14 structural blocker.
+- M6.24 Batch 4 `protein-assembly` scored 0/5 against Codex target 4/5,
+  errors 3 `AgentTimeoutError`, runtime 31m 56s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__04-59-28/result.json`.
+  It selected SR-014: the Harbor wrapper delegated timeout to the outer runner,
+  while `mew work --oneshot` received no inner `--max-wall-seconds` budget.
+  Three trials therefore reached outer agent timeout with only partial reports
+  and running model turns. SR-014 is repaired by Harbor wrapper wall-budget
+  placeholders plus explicit M6.24 run-shape timeout propagation. Bounded proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr014-protein-wall-budget/2026-04-29__05-38-06/result.json`
+  reran the same task shape with `timeout_seconds=120` and reached
+  `n_errors=0`; mew self-stopped with a final `wall_timeout` report before the
+  outer Harbor timeout.
+- M6.24 Batch 4 `adaptive-rejection-sampler` scored 1/5 against Codex target
+  5/5, errors 3 `AgentTimeoutError`, runtime 17m 45s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__05-46-31/result.json`.
+  It selected SR-015: the run shape passed wrapper `timeout_seconds=1800` and
+  mew `--max-wall-seconds 1740`, but Harbor's own agent execution timeout was
+  still 900 seconds. SR-015 is repaired by adding
+  `--agent-timeout-multiplier 2` to the Batch 4 manifest. Same-shape proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr015-adaptive-agent-timeout-align/2026-04-29__06-06-11/result.json`
+  reran one trial with Harbor agent timeout aligned and reached `n_errors=0`
+  with a normal verifier result instead of outer `AgentTimeoutError`.
+- M6.24 Batch 4 `cobol-modernization` scored 5/5 against Codex target 5/5,
+  errors 0, runtime 4m 25s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-18-16/result.json`.
+  Treat this as clean parity evidence and continue broad measurement.
+- M6.24 Batch 4 `constraints-scheduling` scored 5/5 against Codex target 5/5,
+  errors 0, runtime 6m 55s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-24-38/result.json`.
+  Batch 4 full measured total is **11/35** against frozen Codex target
+  **25/35**, excluding the partial `train-fasttext` control run. The clean
+  later passes show the SR-015 timeout alignment is good enough to continue
+  measurement.
+- M6.24 Batch 5 is selected in
+  `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md` and
+  `docs/data/terminal_bench_m6_24_batch_5.json`. It covers the next unseen
+  frozen Codex 5/5 registry slice: `bn-fit-modify`, `circuit-fibsqrt`,
+  `compile-compcert`, `count-dataset-tokens`, `crack-7z-hash`,
+  `custom-memory-heap-crash`, `distribution-search`, and
+  `feal-differential-cryptanalysis`.
+- M6.24 Batch 5 `bn-fit-modify` scored 5/5 against Codex target 5/5, errors
+  0, runtime 6m 38s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-36-31/result.json`.
+  Treat this as clean parity evidence.
+- M6.24 Batch 5 `circuit-fibsqrt` scored 5/5 against Codex target 5/5, errors
+  0, runtime 11m 38s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-44-55/result.json`.
+  Treat this as clean parity evidence.
+- M6.24 Batch 5 `compile-compcert` scored 0/5 against Codex target 5/5, errors
+  0, runtime 4m 2s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-58-06/result.json`.
+  All trials stopped as `wait` before material work because the task/verifier
+  requires `/tmp/CompCert`, while the Batch 5 command shape did not allow
+  `/tmp`.
+- This selected and repaired SR-016: Batch 5 now treats `/tmp` as generic
+  container scratch/build space via `--allow-read /tmp --allow-write /tmp`.
+  Same-shape proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr016-compile-compcert-tmp-permission/2026-04-29__07-03-03/result.json`
+  reached 10 work steps touching `/tmp/CompCert` and ended as `wall_timeout`,
+  not immediate permission wait. The remaining `compile-compcert` gap is
+  task-solving / long-build strategy.
+- Closed M6.14 follow-on episode:
+  SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
+  now treats an `edit_file` action carrying an `edits` list and no scalar
+  `old`/`new` as `edit_file_hunks` before write-batch classification. The
+  focused regression covers the side-project failure shape where a source edit
+  plus multi-hunk test edit was incorrectly downgraded into a read/write mixed
+  batch. Targeted pytest and ruff passed.
+- M6.24 Batch 5 `count-dataset-tokens` scored 4/5 against Codex target 5/5,
+  errors 0, runtime 5m 40s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__07-42-06/result.json`.
+  The single failed trial wrote `79566` while the verifier expected `79586`;
+  treat this as task-solving / numeric-counting precision evidence, not an
+  accepted M6.14 structural blocker.
+- M6.24 Batch 5 `crack-7z-hash` scored 3/5 against Codex target 5/5, errors
+  0, runtime 28m 45s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__07-50-00/result.json`.
+  The two failed trials ended without `/app/solution.txt` after candidate
+  password extraction attempts failed; treat this as task-solving /
+  password-cracking strategy evidence, not an accepted M6.14 structural
+  blocker.
+- M6.24 Batch 5 `custom-memory-heap-crash` scored 4/5 against Codex target
+  5/5, errors 0, runtime 12m 22s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__08-21-18/result.json`.
+  The single failed trial left the release build crashing and hit gdb ptrace /
+  register observation friction; treat this as low-level debugging /
+  task-solving evidence and watch-list signal, not an accepted M6.14 blocker.
+- M6.24 Batch 5 `distribution-search` scored 5/5 against Codex target 5/5,
+  errors 0, runtime 4m 23s by individual trial timestamps, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__08-35-41/result.json`.
+  The top-level result has `finished_at: null` because the interruption/control
+  boundary happened after all individual trial result files were written; every
+  individual trial has reward 1.0 and `exception_info: null`.
+- M6.24 Batch 5 `feal-differential-cryptanalysis` scored 5/5 against Codex
+  target 5/5, errors 0, runtime 9m 52s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__08-51-16/result.json`.
+  Treat this as clean parity evidence.
+- M6.24 Batch 5 is complete: **31/40** against frozen Codex target **40/40**,
+  with Harbor errors 0 across all eight counted task runs. It produced one
+  accepted structural repair, SR-016 `/tmp` scratch permission; the remaining
+  below-target rows are task-solving evidence.
+- M6.24 Batch 6 is selected in
+  `docs/M6_24_BATCH_6_MANIFEST_2026-04-29.md` and
+  `docs/data/terminal_bench_m6_24_batch_6.json`. It covers the next unseen
+  frozen Codex 5/5 registry slice: `feal-linear-cryptanalysis`,
+  `fix-ocaml-gc`, `git-multibranch`, `gpt2-codegolf`, `headless-terminal`,
+  `hf-model-inference`, `largest-eigenval`, and
+  `llm-inference-batching-scheduler`.
+- M6.24 Batch 6 `feal-linear-cryptanalysis` scored 5/5 against Codex target
+  5/5, errors 0, runtime 4m 12s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__09-07-19/result.json`.
+  Treat this as clean parity evidence.
+- M6.24 Batch 6 `fix-ocaml-gc` scored 4/5 against Codex target 5/5, errors
+  0, runtime 51m 57s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__10-05-42/result.json`.
+  A prior artifact at
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__09-13-22/result.json`
+  was manually interrupted too early during long verifier execution and is not
+  counted. Treat the counted 4/5 result as task-solving / runtime repair
+  evidence, not an accepted M6.14 structural blocker.
+- M6.24 Batch 6 `git-multibranch` produced 1/4 completed reward trials
+  against Codex target 5/5, plus 1 setup error, runtime 26m 47s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__10-59-27/result.json`.
+  Completed trials scored 1 pass / 3 fail; `git-multibranch__o4HqSBy` failed
+  before mew work during the agent setup install command with
+  `NonZeroAgentExitCodeError` exit 100. Treat this as task-solving plus
+  runner/setup debt, not an accepted M6.14 structural blocker unless the same
+  install/setup shape repeats.
 
 Next concrete action:
 
-- Run M6.24 Batch 3 task by task from
-  `docs/M6_24_BATCH_3_MANIFEST_2026-04-28.md` and
-  `docs/data/terminal_bench_m6_24_batch_3.json`. If a new failure is accepted
-  as structural rather than ordinary task miss, append it to
-  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` before repairing.
+- Do not run the next broad-measurement task yet. First classify the measured
+  Batch 1-6 failures into gap classes, choose one generic improvement target,
+  name the failed task shape to rerun after repair, and record that selection
+  in `docs/M6_24_DECISION_LEDGER.md`. After the repair and same-shape rerun are
+  recorded, resume broad measurement with Batch 6.
 
 Closed M6.22 result:
 
@@ -1716,8 +2002,9 @@ Planned future milestones:
   combine them with the M6.20 positive-control artifacts.
 - **M6.23 Terminal-Bench Failure-Class Coverage**: classify below-target
   benchmark failures into repair classes and rerun at least one ranked repair.
-- **M6.24 Broad Terminal-Bench Parity Campaign**: run all 89 registry tasks and
-  match or exceed Codex's 366/445 successes, 82.2% aggregate target.
+- **M6.24 Broad Terminal-Bench Parity Campaign**: run measurement /
+  improvement loops over the 89 registry tasks and close the gap to Codex's
+  366/445 successes, 82.2% aggregate target.
 - **M6.25 Codex-Plus Resident Advantage**: preserve Terminal-Bench parity while
   proving mew's persistence, memory, and repair loops make it preferable to
   inhabit over a reactive terminal-agent CLI.

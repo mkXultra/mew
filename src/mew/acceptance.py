@@ -37,7 +37,7 @@ ACCEPTANCE_CONSTRAINT_KEYWORDS = (
 
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
-_TOOL_ID_RE = re.compile(r"\btool\s*#?\s*(\d+)\b", re.IGNORECASE)
+_TOOL_ID_RE = re.compile(r"\btool(?:\s+call)?\s*#?\s*(\d+)\b", re.IGNORECASE)
 
 _WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 _GROUNDING_TOOLS = {
@@ -159,6 +159,85 @@ _NUMERIC_INDEPENDENCE_MARKERS = (
     "validator",
 )
 
+_QUERY_ONLY_HIDDEN_MODEL_MARKERS = (
+    "a1",
+    "hidden layer",
+    "matrix",
+    "neural network",
+    "relu",
+)
+_QUERY_ONLY_UNKNOWN_MARKERS = (
+    "black box",
+    "black-box",
+    "do not know",
+    "don't know",
+    "hidden",
+    "unknown",
+)
+_QUERY_ONLY_FORWARD_RE = re.compile(r"\bforward\b(?:\s*\(|\s+function\b)?", re.IGNORECASE)
+_QUERY_ONLY_ACCESS_RE = re.compile(
+    r"\b(?:access|call|calling|evaluate|evaluating|oracle|query|queries|querying)\b",
+    re.IGNORECASE,
+)
+_QUERY_ONLY_FORBIDDEN_SOURCE_PATTERNS = (
+    re.compile(r"\bfrom\s+forward\s+import\s+[^;\n]*(?:\bA1\b|\bA2\b|\bb1\b|\bb2\b)", re.IGNORECASE),
+    re.compile(r"\bopen\s*\([^)]*['\"][^'\"]*forward\.py['\"]"),
+    re.compile(r"\b(?:Path|pathlib\s*\.\s*Path)\s*\([^)]*['\"][^'\"]*forward\.py['\"][^)]*\)\s*\.\s*read_(?:text|bytes)\s*\("),
+    re.compile(r"\binspect\s*\.\s*getsource\s*\("),
+)
+_QUERY_ONLY_FORWARD_IMPORT_ALIAS_RE = re.compile(
+    r"^\s*import\s+forward(?:\s+as\s+([A-Za-z_]\w*))?",
+    re.IGNORECASE | re.MULTILINE,
+)
+_QUERY_ONLY_FORWARD_DYNAMIC_IMPORT_ALIAS_RE = re.compile(
+    r"\b([A-Za-z_]\w*)\s*=\s*(?:importlib\s*\.\s*import_module|__import__)\s*\(\s*['\"]forward['\"]\s*\)",
+    re.IGNORECASE,
+)
+_QUERY_ONLY_INLINE_DYNAMIC_IMPORT_SECRET_RE = re.compile(
+    r"(?:"
+    r"(?:importlib\s*\.\s*import_module|__import__)\s*\(\s*['\"]forward['\"]\s*\)\s*\.\s*(?:A1|A2|b1|b2)\b"
+    r"|"
+    r"\b(?:getattr|hasattr)\s*\(\s*(?:importlib\s*\.\s*import_module|__import__)\s*\(\s*['\"]forward['\"]\s*\)\s*,\s*['\"](?:A1|A2|b1|b2)['\"]"
+    r")",
+    re.IGNORECASE,
+)
+_QUERY_ONLY_FORWARD_STAR_IMPORT_RE = re.compile(
+    r"^\s*from\s+forward\s+import\s+\*",
+    re.IGNORECASE | re.MULTILINE,
+)
+_QUERY_ONLY_SECRET_RE = re.compile(r"\b(?:A1|A2|b1|b2)\b")
+_QUERY_ONLY_GENERALIZATION_MARKERS = (
+    "different seed",
+    "generaliz",
+    "holdout",
+    "randomized",
+    "synthetic",
+)
+_QUERY_ONLY_GENERALIZATION_SUCCESS_MARKERS = (
+    "all matched",
+    "hidden pass",
+    "holdout pass",
+    "pass true",
+    "passed",
+    "synthetic pass",
+)
+_QUERY_ONLY_ALL_MATCHED_TRUE_RE = re.compile(r"\ball[_\s-]*matched\b\s*[:=]?\s*(?:true|1|yes)\b", re.IGNORECASE)
+_QUERY_ONLY_GENERALIZATION_FAILURE_MARKERS = (
+    "did not pass",
+    "fail",
+    "failed",
+    "failure",
+    "false",
+    "mismatch",
+    "not matched",
+    "not run",
+    "not-run",
+    "not tested",
+    "not executed",
+    "skip",
+    "skipped",
+)
+
 _EXTERNAL_TOOL_REQUIREMENT_MARKERS = (
     "command",
     "executable",
@@ -175,6 +254,15 @@ _OUTPUT_OF_TOOL_RE = re.compile(
 _WORDISH_COMMAND_RE = re.compile(r"^[A-Za-z][\w.+-]*$")
 _FLAG_RE = re.compile(r"(?<!\S)-[A-Za-z][\w-]*")
 _GROUND_TRUTH_RE = re.compile(r"\bground[-\s]+truth\b", re.IGNORECASE)
+_COMMAND_EXAMPLE_CONTEXT_RE = re.compile(
+    r"\b(?:can\s+run|could\s+run|run|runs|execute|executed|invoke|invoked)\b",
+    re.IGNORECASE,
+)
+_COMMAND_EXAMPLE_PLACEHOLDERS = {"arg", "args", "input", "n", "path", "value"}
+_COMMAND_EXAMPLE_OUTPUT_FLAG_TOOLS = {"cc", "clang", "clang++", "gcc", "g++", "rustc"}
+_COMMAND_EXAMPLE_SETUP_MUTATION_RE = re.compile(
+    r"(?:^|[;&|('\"]\s*)(?:cat|chmod|cp|install|ln|mkdir|mv|rm|touch)\b"
+)
 
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:
@@ -350,6 +438,108 @@ def _external_command_text_contains_term(command_text: str, term: object) -> boo
     return bool(re.search(pattern, command_text))
 
 
+def _looks_like_command_example(value: str, context: str) -> bool:
+    if not _COMMAND_EXAMPLE_CONTEXT_RE.search(context):
+        return False
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        tokens = value.split()
+    if not tokens:
+        return False
+    first = tokens[0]
+    if first.startswith(("-", "{", "$")):
+        return False
+    if not re.match(r"^(?:[\w.+/-]+|/[\w.+/-]+)$", first):
+        return False
+    return any(token in {"&&", "||"} or token.startswith(("-", "/", ".")) for token in tokens[1:])
+
+
+def exact_command_example_requirements(text: object, *, limit: int = 4) -> list[dict[str, str]]:
+    source = str(text or "")
+    requirements: list[dict[str, str]] = []
+    for match in _BACKTICK_TEXT_RE.finditer(source):
+        value = _clean_constraint_text(match.group(1), limit=240)
+        if not value:
+            continue
+        context = source[max(0, match.start() - 80) : min(len(source), match.end() + 80)]
+        if not _looks_like_command_example(value, context):
+            continue
+        if any(item["command"] == value for item in requirements):
+            continue
+        requirements.append({"command": value, "sentence": _clean_constraint_text(context, limit=260)})
+        if len(requirements) >= limit:
+            break
+    return requirements
+
+
+def _command_example_regex(command: str) -> re.Pattern[str] | None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    if not tokens:
+        return None
+    pieces: list[str] = []
+    for token in tokens:
+        normalized = token.casefold()
+        if normalized in _COMMAND_EXAMPLE_PLACEHOLDERS:
+            pieces.append(r"\S+")
+            continue
+        pieces.append(re.escape(normalized))
+    if not pieces:
+        return None
+    # Match the advertised shell command shape with concrete placeholder values.
+    # Verifier loops are useful smoke tests, but they are not evidence that the
+    # exact user-facing invocation works.
+    return re.compile(r"(?<![\w./+-])" + r"\s+".join(pieces) + r"(?![\w./+-])")
+
+
+def _command_example_call_matches(call: object, command: str) -> bool:
+    result = call.get("result") if isinstance(call, dict) else None
+    if not isinstance(result, dict) or result.get("exit_code") != 0:
+        return False
+    command_text = _tool_call_external_command_text(call)
+    pattern = _command_example_regex(command)
+    if not command_text or pattern is None:
+        return False
+    if re.search(r"\bcwd\s*=", command_text) or re.search(r"\bos\.chdir\s*\(", command_text):
+        return False
+    match = pattern.search(command_text)
+    if not match:
+        return False
+    prefix = command_text[: match.start()]
+    if re.search(r"[;&|]", prefix):
+        return False
+    # Command examples are user-facing invocation contracts. A preceding cd
+    # wrapper can change where compiler defaults or relative outputs land, so
+    # it is not evidence that the exact advertised invocation works.
+    if re.search(r"(?:^|[;&|('\"]\s*)(?:cd|pushd)\s+\S+", prefix):
+        return False
+    if _COMMAND_EXAMPLE_SETUP_MUTATION_RE.search(prefix):
+        return False
+    try:
+        command_tokens = shlex.split(command)
+    except ValueError:
+        command_tokens = command.split()
+    first = command_tokens[0].casefold() if command_tokens else ""
+    matched_text = command_text[match.start() : match.end()]
+    if first in _COMMAND_EXAMPLE_OUTPUT_FLAG_TOOLS and "-o" not in command_tokens:
+        if re.search(r"(?<![\w-])(?:-o|--out-dir)(?![\w-])", matched_text):
+            return False
+    return True
+
+
+def _has_exact_command_example_evidence(evidence: object, session: object, command: str) -> bool:
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if _command_example_call_matches(call, command):
+            return True
+    return False
+
+
 def _evidence_tool_ids(text: object) -> list[int]:
     ids: list[int] = []
     for match in _TOOL_ID_RE.finditer(str(text or "")):
@@ -506,6 +696,175 @@ def _has_numeric_artifact_quality_evidence(evidence: object, session: object) ->
     return False
 
 
+def is_query_only_hidden_model_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not (_QUERY_ONLY_FORWARD_RE.search(lowered) and _QUERY_ONLY_ACCESS_RE.search(lowered)):
+        return False
+    if not any(marker in lowered for marker in _QUERY_ONLY_UNKNOWN_MARKERS):
+        return False
+    return any(marker in lowered for marker in _QUERY_ONLY_HIDDEN_MODEL_MARKERS)
+
+
+def _write_source_fragments(call: dict) -> list[tuple[str, str]]:
+    parameters = call.get("parameters")
+    if not isinstance(parameters, dict):
+        return []
+    path = str(parameters.get("path") or "")
+    fragments: list[tuple[str, str]] = []
+    for key in ("content", "new", "replacement"):
+        value = parameters.get(key)
+        if isinstance(value, str) and value:
+            fragments.append((path, value))
+    edits = parameters.get("edits")
+    if isinstance(edits, list):
+        for index, edit in enumerate(edits):
+            if not isinstance(edit, dict):
+                continue
+            value = edit.get("new") or edit.get("replacement")
+            if isinstance(value, str) and value:
+                fragments.append((path, value))
+    return fragments
+
+
+def _forward_module_aliases(content: str) -> list[str]:
+    aliases: list[str] = []
+    for match in _QUERY_ONLY_FORWARD_IMPORT_ALIAS_RE.finditer(content):
+        alias = match.group(1) or "forward"
+        if alias not in aliases:
+            aliases.append(alias)
+    for match in _QUERY_ONLY_FORWARD_DYNAMIC_IMPORT_ALIAS_RE.finditer(content):
+        alias = match.group(1)
+        if alias not in aliases:
+            aliases.append(alias)
+    return aliases
+
+
+def _query_only_source_forbidden_match(content: str) -> str:
+    for pattern in _QUERY_ONLY_FORBIDDEN_SOURCE_PATTERNS:
+        match = pattern.search(content)
+        if match:
+            return match.group(0)
+    if _QUERY_ONLY_FORWARD_STAR_IMPORT_RE.search(content) and _QUERY_ONLY_SECRET_RE.search(content):
+        return "from forward import * with direct hidden weight name"
+    match = _QUERY_ONLY_INLINE_DYNAMIC_IMPORT_SECRET_RE.search(content)
+    if match:
+        return match.group(0)
+    for alias in _forward_module_aliases(content):
+        attr_pattern = re.compile(rf"\b{re.escape(alias)}\s*\.\s*(?:A1|A2|b1|b2)\b")
+        match = attr_pattern.search(content)
+        if match:
+            return match.group(0)
+        dict_pattern = re.compile(
+            rf"\b{re.escape(alias)}\s*\.\s*__dict__\s*\[\s*['\"](?:A1|A2|b1|b2)['\"]\s*\]"
+        )
+        match = dict_pattern.search(content)
+        if match:
+            return match.group(0)
+        vars_pattern = re.compile(
+            rf"\bvars\s*\(\s*{re.escape(alias)}\s*\)\s*\[\s*['\"](?:A1|A2|b1|b2)['\"]\s*\]"
+        )
+        match = vars_pattern.search(content)
+        if match:
+            return match.group(0)
+        dynamic_pattern = re.compile(
+            rf"\b(?:getattr|hasattr)\s*\(\s*{re.escape(alias)}\s*,\s*['\"](?:A1|A2|b1|b2)['\"]"
+        )
+        match = dynamic_pattern.search(content)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _completed_write_source_violations(session: object) -> list[str]:
+    violations: list[str] = []
+    for call in _completed_tool_calls(session):
+        if call.get("tool") not in _WRITE_TOOLS:
+            continue
+        for path, content in _write_source_fragments(call):
+            if not path.endswith(".py") or not content:
+                continue
+            match_text = _query_only_source_forbidden_match(content)
+            if match_text:
+                violations.append(f"tool #{call.get('id')} {path}: {match_text}")
+    return violations
+
+
+def _has_query_only_generalization_marker(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _QUERY_ONLY_GENERALIZATION_MARKERS)
+
+
+def _has_query_only_generalization_success(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _QUERY_ONLY_GENERALIZATION_SUCCESS_MARKERS) or bool(
+        _QUERY_ONLY_ALL_MATCHED_TRUE_RE.search(str(text or ""))
+    )
+
+
+def _has_failed_generalization_clause(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _QUERY_ONLY_GENERALIZATION_FAILURE_MARKERS)
+
+
+def _has_passing_query_only_generalization_clause(text: object) -> bool:
+    clauses = re.split(r"[\n\r;]+|(?<=[.!?])\s+", str(text or ""))
+    for clause in clauses:
+        if not _has_query_only_generalization_marker(clause):
+            continue
+        if not _has_query_only_generalization_success(clause):
+            continue
+        if _has_failed_generalization_clause(clause):
+            continue
+        return True
+    return False
+
+
+def _has_query_only_generalization_evidence(evidence: object, session: object) -> bool:
+    if not _has_passing_query_only_generalization_clause(evidence):
+        return False
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in _GROUNDING_TOOLS:
+            continue
+        tool_text = _tool_call_text(call)
+        if _has_passing_query_only_generalization_clause(tool_text):
+            return True
+    return False
+
+
+def _query_only_hidden_model_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if not is_query_only_hidden_model_task(task_description):
+        return ""
+    source_violations = _completed_write_source_violations(session)
+    if source_violations:
+        return (
+            "query-only hidden-model source violation: tasks that expose only forward(x) "
+            "query access must not finish with generated source that reads visible model "
+            f"internals ({'; '.join(source_violations[:3])})"
+        )
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return (
+            "query-only hidden-model generalization evidence missing: black-box model "
+            "extraction tasks must cite synthetic, randomized, or holdout validation before task_done=true"
+        )
+    if any(_has_query_only_generalization_evidence(check.get("evidence"), session) for check in verified_checks):
+        return ""
+    return (
+        "query-only hidden-model generalization evidence ungrounded: visible fixture checks "
+        "against exposed local weights are not enough; cite a completed tool with synthetic, "
+        "randomized, or holdout validation that passed"
+    )
+
+
 def _command_requirement_terms(command: str, backtick_values: list[str]) -> list[str]:
     terms: list[str] = []
     if command:
@@ -624,6 +983,35 @@ def _external_tool_ground_truth_blocker(
     return ""
 
 
+def _exact_command_example_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    requirements = exact_command_example_requirements(task_description)
+    if not requirements:
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    for requirement in requirements:
+        command = str(requirement.get("command") or "")
+        if not verified_checks:
+            return (
+                "exact command example evidence missing: tasks that state a command can be run "
+                "must cite that exact command shape before task_done=true"
+            )
+        if not any(_has_exact_command_example_evidence(check.get("evidence"), session, command) for check in verified_checks):
+            return (
+                "exact command example evidence ungrounded: command-example constraints must "
+                "cite a completed run_command or run_tests tool that runs the advertised command "
+                "shape without a preceding cwd-changing cd wrapper"
+            )
+    return ""
+
+
 def _numeric_artifact_quality_blocker(
     task_description: object,
     checks: list[dict[str, str]],
@@ -665,6 +1053,12 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     external_tool_blocker = _external_tool_ground_truth_blocker(task_description, checks, session)
     if external_tool_blocker:
         return external_tool_blocker
+    exact_command_blocker = _exact_command_example_blocker(task_description, checks, session)
+    if exact_command_blocker:
+        return exact_command_blocker
+    query_only_blocker = _query_only_hidden_model_blocker(task_description, checks, session)
+    if query_only_blocker:
+        return query_only_blocker
     numeric_artifact_blocker = _numeric_artifact_quality_blocker(task_description, checks, session)
     if numeric_artifact_blocker:
         return numeric_artifact_blocker

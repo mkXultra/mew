@@ -98,11 +98,19 @@ Status vocabulary:
 | SR-001 | repaired | M6.22 / M6.24 | `agent_wall_timeout_without_report` / timeout partial observability | `gcode-to-text` had timeout without useful report; `financial-document-processor` and `dna-assembly` later hit long domain/document repair timeouts | Add generic partial progress / timeout observability so long work loops emit actionable reports before command or wall timeout | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` streaming executor notes | rerun `financial-document-processor` or `dna-assembly` same failed shape | Repaired by atomic partial `mew work --oneshot --report` writes plus Harbor `container_repo_root` mapping; same-shape timeout left a host-visible actionable report. |
 | SR-002 | repaired | M6.22 / M6.24 | finish/verifier grounding false green | `overfull-hbox` self-reported acceptance despite verifier rejection; `dna-assembly` used surrogate primer Tm checks instead of exact named ground-truth tool | Strengthen finish gate/task contract so named external ground-truth tools or acceptance constraints must be executed exactly, or finish must be blocked | `docs/M6_23_FAILURE_CLASS_COVERAGE_2026-04-28.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/review/verify and todo patterns | rerun `dna-assembly`; optionally rerun an acceptance-grounding task | Repaired by exact external-tool finish gate plus exact-tool-unavailable blocker guidance; smaller proof stopped with `task_done=false` after the required command was missing. |
 | SR-003 | repaired | M6.22 / M6.24 | artifact observation substrate gap | `gcode-to-text` visual/geometric grounding gap; `code-from-image` fixed by `read_image`; `financial-document-processor` exposed PDF/document observation gap; `extract-moves-from-video` generated contact sheets then timed out across 5/5 trials while sequentially inspecting visual artifacts | Add bounded generic multi-artifact observation: ordered `read_images`, resume-visible observation transcripts, and large chronological chunk guidance | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md` | rerun `extract-moves-from-video` same failed shape | Repaired by generic `read_images` with 16-image / aggregate-byte caps, `recent_read_images_observations`, and large chronological chunk guidance; same-shape proof `mew-m6-14-sr003-extract-moves-from-video-1attempt-read-images-largechunks-20260428-1843` reached 1/1 with errors 0. |
-| SR-004 | candidate | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure | Add safer multiline command guidance or command-shape helper, likely heredoc/script-first policy | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | rerun a task that exercises multiline verification | Lower priority than timeout/grounding unless it blocks a selected repair. |
+| SR-004 | repaired | M6.22 / M6.24 | `shell_quoting_multiline_command` | `sanitize-git-repo` shell command quote issue; `dna-assembly` multiline `python3 -c` syntax failure; `build-pov-ray` failed 2/5 trials with `No closing quotation` after `bash -lc 'python3 - <<...` scripts containing embedded single quotes | Add shell-wrapper literal fallback for `bash/sh/zsh -c/-lc/-cl <script>` when normal `shlex.split` fails, preserving argv execution while avoiding false parser failures on practical multiline shell wrappers | `docs/M6_22_CURATED_SUBSET_RUNS_2026-04-27.md`, `docs/M6_24_BATCH_2_RUNS_2026-04-28.md`, `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes | direct regression plus one-trial `build-pov-ray` same-shape rerun | Repaired by toolbox fallback plus focused regression; same-shape `build-pov-ray` rerun reached 1/1 with no `No closing quotation` recurrence. |
 | SR-005 | candidate | M6.24 | `numeric_independent_validation_not_objective_grounded` | `raman-fitting` used table grounding but validated the wrong objective/scale/model family | Add objective-grounding checks for numeric/scientific tasks if another numeric/data task confirms the same shape | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` | rerun `raman-fitting` or another numeric/data task | Do not spend more prompt-polish cycles without selecting this as M6.14 repair. |
 | SR-007 | repaired | side-project issue #18 | coordinated multi-file patch shape failure | `[side-pj] mew-wisp SP19 stalls on coordinated HTML removal patch shape`: source-only HTML removal rolled back because tests/README were not updated; follow-up repairs hit stale hunks and unsupported batch shape containing `edit_file_hunks` plus `wait` | Strengthen write-batch normalization/execution so blockers are top-level waits, not pseudo-tools inside a write batch; preserve the exact blocker instead of surfacing `batch write tool is not ... wait` | issue #18, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for mixed `edit_file_hunks` + `wait` batch | Repaired by normalizer and executor guards: mixed write/wait batches now become an actionable top-level blocker, and command execution blocks before any pseudo-tool execution. Focused regression passed. |
 | SR-008 | repaired | M6.24 Batch 3 | direct Python pytest-file false green | `break-filter-js-from-html` scored 0/5 while several trials claimed `python /app/test_outputs.py` passed; direct Python execution only defined pytest tests and exited 0, while Harbor pytest verifier failed | Normalize `run_tests` commands that directly execute pytest-style `test_*.py` files through Python into `python -m pytest -q <file>` so no-op verifiers fail loudly | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `break-filter-js-from-html` same failed shape | Repaired by executor normalization plus focused regression; same-shape rerun no longer false-greened and preserved `python -m pytest -q /app/test_outputs.py` failure evidence. |
 | SR-009 | repaired | side-project issue #18 reopen | broad rollback loop keeps retrying whole coordinated patch | Reopened issue #18 after SR-007: SP19 still could not land broad HTML removal; coordinated source/test/report attempts rolled back with 9 failed / 19 passed, then 1 failed / 27 passed, then regressed to 8 failed / 20 passed before timeout | Surface `broad_rollback_slice_repair` in work-session resume/prompt/deliberation so repeated verifier rollbacks or broad failed-test output steer the next turn to one smaller complete source/test/docs slice instead of retrying the whole patch | issue #18 reopen, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`, `docs/ADOPT_FROM_REFERENCES.md` patch/review/apply-loop notes | direct regression for two rolled-back verifier failures spanning source/test/docs | Repaired by resume diagnostic and prompt guidance; focused regression verifies the diagnostic, formatter, and deliberation context. |
+| SR-010 | repaired | M6.24 Batch 3 | exact command example finish gap | `polyglot-rust-c` scored 0/5 against Codex target 4/5; trials self-finished after nearby verifier commands that changed cwd or used Python wrappers instead of proving the exact backticked command examples from the task text | Add exact-command-example finish grounding: when a task says a backticked command can be run, `task_done=true` requires completed `run_command`/`run_tests` evidence for that advertised command shape without a preceding cwd-changing `cd` wrapper | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `polyglot-rust-c` same failed shape | Repaired by acceptance finish gate and prompt update; same-shape proof stopped with `ask_user` after detecting the exact Rust command writes `/app/main`, not `/app/polyglot/main`, so it did not false-finish. |
+| SR-011 | repaired | M6.24 Batch 3 | query-only hidden-model visible fixture false green | `model-extraction-relu-logits` scored 0/5 against Codex target 4/5; trials self-finished after reading/checking visible `forward.A1` fixture internals or validating only the visible fixture, while Harbor's hidden generated model failed | Add query-only hidden-model finish grounding: block generated source that reads visible hidden weights/source and require synthetic/randomized/holdout generalization evidence before `task_done=true` | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` verifier-grounding notes | rerun `model-extraction-relu-logits` same failed shape | Repaired by acceptance finish gate, prompt update, focused regressions, and same-shape proof reaching 1/1 after first blocking visible-fixture-only finish and then requiring synthetic validation. |
+| SR-012 | repaired | M6.24 Batch 3 | Harbor wrapper inner timeout cap and unmapped partial report | `install-windows-3.11` / Harbor `install-windows-3-11` scored 0/5 with 5 wrapper `RuntimeError: Command timed out after 900 seconds` exceptions despite task `agent.timeout_sec=3600`; the run also used container-local report paths so partial reports were not preserved on the host | Remove the wrapper's default inner timeout cap, let Harbor task timeout govern by default, capture explicit wrapper timeout exceptions as normal command transcripts, and require `container_repo_root=/mew` in benchmark run manifests | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | wrapper timeout no-error proof plus future long-task reruns | Repaired by `.harbor/mew_terminal_bench_agent.py` default `timeout_seconds=None`, timeout exception capture with `exit_code=124`, manifest `container_repo_root=/mew`, focused tests, and a light Harbor proof with `n_errors=0`. |
+| SR-013 | repaired | M6.24 Batch 3 | run_command shell-operator execution mismatch | `mcmc-sampling-stan` pre-repair reports showed `mkdir -p ... && HOME=... Rscript -e ...` executed as a single argv command, producing `mkdir: invalid option -- 'e'` instead of a shell chain | Execute `run_command` through a bash-compatible shell only when top-level shell operators are present, keep `run_tests` non-shell, and add resident-loop guards for accidental nested `mew run` / `mew work` shell invocations | `docs/M6_24_BATCH_3_RUNS_2026-04-28.md`, `docs/ADOPT_FROM_REFERENCES.md` tool policy notes, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` executor safety notes | direct shell-chain proof plus rerun `mcmc-sampling-stan` after repair | Repaired by `use_shell` execution mode for `run_command`, prompt update, focused tests, runtime `MEW_WORK_COMMAND_GUARD`, and codex-ultra review with no blocking findings. |
+| SR-014 | repaired | M6.24 Batch 4 | terminal-bench agent timeout self-budget not propagated | `protein-assembly` scored 0/5 with 3 `AgentTimeoutError`s. Timed-out trials left host-visible partial mew reports with running model turns around the outer 1800s timeout because the Harbor wrapper delegated timeout to the outer runner without passing an inner `--max-wall-seconds` budget to `mew work --oneshot` | Add Harbor wrapper wall-budget placeholders derived from explicit `timeout_seconds`, then run terminal-bench mew commands with both wrapper timeout and inner `--max-wall-seconds` so long tasks self-stop with final `wall_timeout` reports before the outer timeout | `docs/M6_24_BATCH_4_RUNS_2026-04-29.md`, `docs/ADOPT_FROM_REFERENCES.md` timeout/tool executor notes | focused wrapper tests plus a bounded `protein-assembly` same-shape proof with no `AgentTimeoutError` | Repaired by `.harbor/mew_terminal_bench_agent.py` `{max_wall_seconds_option}` / `{mew_max_wall_seconds}` placeholders, focused tests, and a bounded `protein-assembly` proof with `n_errors=0` and final `wall_timeout` report. |
+| SR-015 | repaired | M6.24 Batch 4 | Harbor agent timeout not aligned with wrapper timeout | `adaptive-rejection-sampler` used wrapper `timeout_seconds=1800` and mew `--max-wall-seconds 1740`, but Harbor's agent execution timeout remained 900s; 3/5 trials died as `AgentTimeoutError` before mew could self-stop | Add `--agent-timeout-multiplier 2` to the Batch 4 Harbor run shape whenever using wrapper `timeout_seconds=1800` and `{max_wall_seconds_option}` | `docs/M6_24_BATCH_4_RUNS_2026-04-29.md`, `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md`, Harbor run help for `--agent-timeout-multiplier` | one-trial `adaptive-rejection-sampler` same-shape proof with agent timeout multiplier and no Harbor errors | Repaired by updating the Batch 4 manifest run shape; proof reached `n_errors=0` with normal verifier result instead of outer `AgentTimeoutError`. |
+| SR-016 | repaired | M6.24 Batch 5 | terminal-bench scratch path permission too narrow | `compile-compcert` scored 0/5 with Harbor errors 0 because all trials stopped as `wait` before doing material work: `/tmp/CompCert` was required by the task/verifier but outside allowed read/write roots | Treat `/tmp` as generic container scratch/build space for Terminal-Bench broad runs by adding `--allow-read /tmp --allow-write /tmp` to the manifest command shape | `docs/M6_24_BATCH_5_RUNS_2026-04-29.md`, `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md` | one-trial `compile-compcert` same-shape proof with `/tmp` access and no immediate permission wait | Repaired by updating the Batch 5 manifest run shape. Proof advanced through `/tmp/CompCert` bootstrap/build steps and ended as `wall_timeout`, not permission wait; remaining failure is task-solving/long-build strategy. |
+| SR-017 | repaired | side-project issue #20 | `edit_file` multi-hunk alias normalized to read inside write batch | Side-project task `#27` / session `#56` returned a write batch where the test file used `type: edit_file` with an `edits` list. The normalizer downgraded that sub-action to `read_file`, so the write batch became `write batch cannot mix read-only tools` and repeated after retry. | Treat `edit_file` actions with an `edits` list and no scalar `old`/`new` as `edit_file_hunks` before batch write/read classification | issue #20, side-project session `#56`, `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md` patch/apply notes | direct normalizer regression for mixed source edit plus `edit_file`/`edits` test hunks | Repaired by `normalize_work_model_action` alias normalization plus focused regression `test_work_model_batch_treats_edit_file_edits_as_hunks`; targeted pytest and ruff passed. |
 
 ## SR-001 Progress
 
@@ -225,6 +233,32 @@ Status vocabulary:
   call, performed an independent visual audit, and wrote the required
   `/app/solution.txt` before the 30-step budget expired.
 
+## SR-004 Progress
+
+- 2026-04-28: M6.24 Batch 3 `build-pov-ray` scored 2/5 against a frozen Codex
+  target of 5/5. Two failed trials stopped at step 4 with `No closing
+  quotation` before the broader mirror-search script could run. The model had
+  produced a practical multiline `bash -lc 'python3 - <<"PY" ... PY'` wrapper,
+  but the embedded Python regex/string single quotes made `shlex.split`
+  reject the entire command before execution.
+- Generic repair:
+  `split_command_env` now falls back only for recognized shell wrappers
+  (`bash`, `sh`, or `zsh` with `-c`, `-lc`, or `-cl`) when normal shlex parsing
+  fails. It strips one outer quote pair from the script and passes
+  `[shell, flag, script]` directly to subprocess with `shell=False`, preserving
+  the existing argv execution model while removing the false parser blocker.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py::WorkSessionTests::test_work_session_run_command_salvages_multiline_shell_wrapper_quotes tests/test_work_session.py::WorkSessionTests::test_work_session_runs_command_behind_shell_gate -q`.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/toolbox.py tests/test_work_session.py`
+  and `git diff --check`.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__20-33-30/result.json`
+  reran `build-pov-ray` for one trial after the repair and reached 1/1 with
+  errors 0. Transcript inspection found no `No closing quotation` failure, and
+  the work session finished after 19 steps with the installed
+  `/usr/local/bin/povray` rendering `/app/deps/illum1.pov`.
+
 ## SR-007 Progress
 
 - 2026-04-28: issue #18 showed that a side-project coordinated patch could
@@ -298,6 +332,293 @@ Status vocabulary:
   before the model continued with explicit verifier feedback. This satisfies
   SR-008: the executor no longer treats direct Python execution of pytest-style
   test files as a passing verifier.
+
+## SR-010 Progress
+
+- 2026-04-28: M6.24 Batch 3 `polyglot-rust-c` baseline scored 0/5 against
+  Codex target 4/5. Multiple trials finished after nearby verifier commands
+  such as `cd /app/polyglot; rustc ...` or Python subprocess wrappers instead
+  of proving the exact backticked command examples in the task text from the
+  task cwd.
+- Generic repair:
+  `acceptance_finish_blocker` now extracts backticked command examples when
+  the surrounding task text says the user can run or execute them. For
+  `task_done=true`, each advertised command shape must be grounded by a
+  completed `run_command` or `run_tests` tool whose command text contains the
+  advertised shell command shape with a concrete placeholder value. Verifier
+  loops are useful smoke tests but do not satisfy the finish gate. The matcher
+  rejects cwd-changing wrappers, output-location overrides, failed command
+  results, semicolon substitutions for `&&`, and setup mutations inserted
+  between advertised command terms. Evidence now accepts both `tool #N` and
+  `Tool call N` references.
+- Prompt repair:
+  the work THINK prompt now tells the model to verify exact backticked command
+  examples from task cwd and not to insert a `cd` wrapper or verify only a
+  nearby invocation whose compiler/output defaults differ.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py -k 'acceptance or work_think_prompt_includes_work_guidance' -q`.
+  The selected run covered 34 tests after the review-driven hardening for
+  `-o` / `--out-dir` output overrides, cwd-changing wrappers, failed command
+  results, semicolon substitutions, setup mutations, surrogate verifier loops,
+  both advertised command examples, and legitimate Python/cat command examples.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/acceptance.py src/mew/work_loop.py tests/test_acceptance.py`
+  and `git diff --check`.
+- Broader validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py -q`
+  passed with 794 tests, 30 subtests, and one multiprocessing deprecation
+  warning.
+- Review:
+  `codex-ultra` session `019dd414-73fe-7840-9b6c-a72a52d4ef40` returned
+  `no blocking findings` after the final strict command-shape revision.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__21-23-44/result.json`
+  reran `polyglot-rust-c` for one trial and scored 0/1 with errors 0. The
+  preserved report stopped with `stop_reason=ask_user`: it ran the exact Rust
+  command shape from `/app`, observed that `rustc /app/polyglot/main.rs`
+  creates `/app/main` rather than `/app/polyglot/main`, and did not mark the
+  task done. This satisfies SR-010: the prior exact-command-example false
+  finish is removed. The remaining score gap is task-solving strategy debt.
+
+## SR-011 Progress
+
+- 2026-04-28: M6.24 Batch 3 `model-extraction-relu-logits` baseline scored
+  0/5 against a frozen Codex target of 4/5. Several trials self-finished after
+  direct or indirect visible fixture checks such as `forward.A1`, `target.A1`,
+  or local cosine checks against `/app/forward.py`, while Harbor's hidden
+  verifier generated a different model and failed all five trials.
+- Generic repair:
+  `acceptance_finish_blocker` now detects query-only hidden-model extraction
+  tasks when the prompt exposes a `forward` oracle and says hidden weights or
+  shape are unknown. For `task_done=true`, generated Python source must not
+  read visible hidden-weight internals or the fixture source, and acceptance
+  evidence must cite completed synthetic, randomized, holdout, or
+  generalization validation that passed. Visible fixture checks against exposed
+  local weights are no longer enough.
+- Source-violation hardening covers:
+  named hidden-weight imports from `forward`, `forward` module aliases and
+  dynamic import aliases followed by `.A1` / `.__dict__['A1']` /
+  `vars(alias)['A1']` / `getattr(alias, 'A1')`, star import plus bare hidden
+  names, `open('forward.py')`, `Path('forward.py').read_*`, and
+  `inspect.getsource`.
+- Evidence hardening covers:
+  edit-file and edit-hunk generated source, failed/skipped/not-run holdout
+  clauses, and `all_matched=0` false positives. `all_matched=True` /
+  `all_matched=1` and natural `all matched` success remain valid when paired
+  with a synthetic/randomized/holdout/generalization clause.
+- Prompt repair:
+  the work THINK prompt now tells the model not to read/copy visible fixture
+  internals for black-box/query-only model extraction, and to cite
+  synthetic/randomized/holdout validation before finishing.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py -q` passed with 46
+  tests.
+- Broader nearby validation passed:
+  `uv run pytest --no-testmon tests/test_acceptance.py tests/test_work_session.py -q`
+  passed with 809 tests, 30 subtests.
+- Lint/diff validation passed:
+  `uv run ruff check src/mew/acceptance.py src/mew/commands.py src/mew/work_loop.py tests/test_acceptance.py`
+  and `git diff --check`.
+- Review:
+  `codex-ultra` session `019dd447-218b-78c0-826b-87dc82650133` returned
+  `No blocking findings` after multiple review rounds.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-28__23-29-21/result.json`
+  reran `model-extraction-relu-logits` for one trial and scored 1/1 with
+  errors 0. The preserved report first blocked finish with
+  `query-only hidden-model generalization evidence ungrounded`, then ran
+  randomized synthetic validation before final finish. Harbor's hidden
+  verifier passed. This satisfies SR-011.
+
+## SR-012 Progress
+
+- 2026-04-29: M6.24 Batch 3 `install-windows-3.11` was runnable only under
+  the current Harbor canonical name `install-windows-3-11`. The full 5-trial
+  run scored 0/5 with 5 Harbor errors. Each error was the wrapper-level
+  `RuntimeError: Command timed out after 900 seconds`, even though the task's
+  declared agent timeout is 3600 seconds.
+- Generic repair:
+  `.harbor/mew_terminal_bench_agent.py` now defaults `timeout_seconds` to
+  `None`, so Harbor's task-level `agent.timeout_sec` remains authoritative.
+  The explicit `timeout_seconds=...` kwarg is still supported, including string
+  values from Harbor `--ak`. The default delegation path is covered by focused
+  tests; the live proof below covers explicit wrapper-timeout conversion.
+- Timeout observability repair:
+  explicit wrapper timeout exceptions are captured as normal command results
+  with `exit_code=124`, `timed_out=true`, and a command transcript / summary
+  instead of escaping as Harbor exceptions.
+- Artifact mapping repair:
+  Terminal-Bench run manifests now include `--ak container_repo_root=/mew`, so
+  `{report_path}` and `{artifact_dir}` resolve to host-visible paths inside the
+  benchmark container.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_harbor_terminal_bench_agent.py -q`
+  passed with 13 tests.
+- Lint passed:
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`.
+- Review:
+  `codex-ultra` session `019dd4ae-e10c-72e0-8463-10224441cbb3` returned
+  `No blocking findings` after the timeout-predicate hardening.
+- Same-shape timeout-capture proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr012-install-windows-wrapper-timeout-20260429-0010/.../command-transcript.json`
+  shows the Windows task with explicit `timeout_seconds=5`, host-visible
+  partial `mew-report.json`, `exit_code=124`, and `timed_out=true`. The Windows
+  verifier was intentionally stopped because the proof target was wrapper
+  timeout capture, not QEMU task scoring.
+- No-error wrapper proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr012-wrapper-timeout-no-error-20260429-0017/result.json`
+  ran a light task with explicit `timeout_seconds=1` and recorded `n_errors=0`,
+  reward 0.0, and a host-visible timeout transcript. This satisfies SR-012:
+  wrapper timeout no longer becomes a Harbor exception or drops the report
+  artifact.
+
+## SR-013 Progress
+
+- 2026-04-29: M6.24 Batch 3 `mcmc-sampling-stan` pre-repair attempt
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__00-45-34`
+  exposed that `run_command` still executed top-level shell operators as argv
+  tokens. Several partial `mew-report.json` files contained failures like
+  `mkdir: invalid option -- 'e'` for commands shaped as
+  `mkdir -p /app/Rlib /app/tmp && HOME=/app TMPDIR=/app/tmp R_LIBS_USER=/app/Rlib Rscript -e ...`.
+- Generic repair:
+  `run_command` now detects top-level shell operators and executes those
+  commands through a bash-compatible `-lc` shell. Simple argv commands still
+  use the existing argv path. `run_tests` remains non-shell and continues to
+  reject shell operators.
+- Safety repair:
+  the resident-loop guard now scans shell execution surfaces for accidental
+  nested `mew run`, `mew work`, `python -m mew run`, and quote/backslash
+  obfuscations, and shell-mode child processes receive
+  `MEW_WORK_COMMAND_GUARD=1`. The CLI exits 126 for resident commands under
+  that guard, giving a runtime backstop if a nested mew command reaches
+  process execution.
+- Prompt repair:
+  the work THINK prompt now says `run_command` can execute top-level shell
+  operators through a bash-compatible shell when shell access is granted, while
+  `run_tests` stays single-argv.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'cli_rejects_resident_command_inside_guarded_shell_environment or reject_resident_mew_loop_command_recognizes_wrappers or rejects_resident_mew_loop_inside_shell_chain or run_command_executes_shell_chains or work_think_prompt_includes_work_guidance' -q`
+  passed with 4 selected tests and 10 subtests.
+- Broader nearby validation passed:
+  `uv run pytest --no-testmon tests/test_work_session.py -k 'run_command or shell_control or shell_wrapper or resident_mew_loop' -q`
+  passed with 9 selected tests and 10 subtests, and
+  `uv run pytest --no-testmon tests/test_acceptance.py::test_acceptance_finish_blocker_rejects_subshell_cd_for_command_example -q`
+  passed.
+- Lint passed:
+  `uv run ruff check src/mew/cli.py src/mew/toolbox.py src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py`.
+- Review:
+  `codex-ultra` session `019dd4cd-62a4-7b62-add2-d8eb8e8c66e6` initially
+  found resident-loop guard bypasses and a stale prompt assertion, then
+  returned `No blocking findings` after the guard and tests were hardened.
+- Same-shape substrate proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr013-run-command-shell-chain-20260428T161435Z/result.json`
+  executed the same practical shape `mkdir -p ... && HOME=... TMPDIR=... R_LIBS_USER=... python3 -c ... && cat ... > ...`
+  with `execution_mode=shell`, `exit_code=0`, preserved the shell child guard
+  in the environment, and rejected `true && bash -lc "m'ew' run"`.
+- Repaired-head task rerun:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__01-19-36/result.json`
+  scored 0/5 with 5 `AgentTimeoutError`s. The original shell-chain executor
+  failure did not recur; reports reached RStan dependency install / fallback
+  analysis, and verifier output failed on missing `rstan` or non-`rstan`
+  sampling. This keeps SR-013 repaired and records the remaining gap as
+  task-solving / long dependency strategy evidence.
+
+## SR-014 Progress
+
+- 2026-04-29: M6.24 Batch 4 `protein-assembly` scored 0/5 against Codex target
+  4/5 with 3 `AgentTimeoutError`s:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__04-59-28/result.json`.
+  The three timed-out trials preserved partial `mew-report.json` files but did
+  not write final reports. Their effort state showed running model turns near
+  the outer Harbor agent timeout (`wall_elapsed_seconds` about 1774-1798s).
+- Diagnosis:
+  SR-001 fixed timeout observability after external timeout, and SR-012 removed
+  the wrapper's accidental default inner timeout cap. The missing piece is
+  self-budget propagation: when the wrapper is given an explicit
+  `timeout_seconds`, the command template needs a derived
+  `--max-wall-seconds` budget so `mew work --oneshot` can stop itself and
+  report `wall_timeout` before Harbor kills the agent.
+- Generic repair target:
+  add `{max_wall_seconds_option}` / `{mew_max_wall_seconds}` placeholders to
+  `.harbor/mew_terminal_bench_agent.py`, derived from explicit
+  `timeout_seconds` with a cleanup reserve. Update Terminal-Bench run shapes to
+  pass an explicit wrapper timeout and include the inner wall-budget option.
+- Generic repair:
+  `.harbor/mew_terminal_bench_agent.py` now derives
+  `mew_max_wall_seconds` from explicit `timeout_seconds` using a bounded
+  cleanup reserve, exposes `{max_wall_seconds_option}` and
+  `{mew_max_wall_seconds}` command-template placeholders, and records the
+  derived wall budget in `command-transcript.json`.
+- Focused validation passed:
+  `uv run pytest --no-testmon tests/test_harbor_terminal_bench_agent.py -q`
+  passed with 16 tests.
+- Lint/diff validation passed:
+  `uv run ruff check .harbor/mew_terminal_bench_agent.py tests/test_harbor_terminal_bench_agent.py`
+  and `git diff --check`.
+- Same-shape bounded proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr014-protein-wall-budget/2026-04-29__05-38-06/result.json`
+  reran `protein-assembly` for one trial with explicit
+  `timeout_seconds=120` and the new `{max_wall_seconds_option}` in the normal
+  mew command template. Harbor recorded `n_errors=0`; the transcript recorded
+  `timeout_seconds=120`, `mew_max_wall_seconds=108`, `timed_out=false`, and
+  the final `mew-report.json` had `work_report.stop_reason=wall_timeout`
+  rather than `partial_report` or `AgentTimeoutError`. This satisfies SR-014:
+  the outer timeout is no longer the first component to terminate long work.
+
+## SR-015 Progress
+
+- 2026-04-29: M6.24 Batch 4 `adaptive-rejection-sampler` scored 1/5 against
+  Codex target 5/5 with 3 `AgentTimeoutError`s:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__05-46-31/result.json`.
+  The failing trials used wrapper `timeout_seconds=1800` and mew
+  `--max-wall-seconds 1740`, but Harbor's agent execution timeout remained
+  900s. This means SR-014's inner wall budget was present but still larger than
+  Harbor's unchanged outer agent timeout.
+- Diagnosis:
+  Terminal-Bench run shape has three timeout layers: Harbor agent execution,
+  wrapper command timeout, and mew inner wall timeout. SR-014 aligned the
+  wrapper and mew layers, but Batch 4 also needs the Harbor agent layer to be
+  at least as large as the wrapper timeout. Otherwise Harbor cancels the agent
+  coroutine before the wrapper can collect a command transcript or mew can
+  self-stop.
+- Generic repair:
+  `docs/M6_24_BATCH_4_MANIFEST_2026-04-29.md` now includes
+  `--agent-timeout-multiplier 2` alongside wrapper `timeout_seconds=1800` and
+  `{max_wall_seconds_option}`. This gives Harbor an 1800s agent execution
+  budget for default-900s tasks, while mew receives a 1740s inner wall budget
+  and keeps a cleanup reserve.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr015-adaptive-agent-timeout-align/2026-04-29__06-06-11/result.json`
+  reran `adaptive-rejection-sampler` for one trial with
+  `--agent-timeout-multiplier 2`, wrapper `timeout_seconds=1800`, and mew
+  `--max-wall-seconds 1740`. Harbor recorded `n_errors=0`; the command
+  transcript recorded `timeout_seconds=1800`, `mew_max_wall_seconds=1740`, and
+  the trial reached a normal verifier reward of 0.0 instead of outer
+  `AgentTimeoutError`. This keeps the remaining gap classified as task-solving
+  unless a later task exposes a new structural timeout pattern.
+
+## SR-016 Progress
+
+- 2026-04-29: M6.24 Batch 5 `compile-compcert` scored 0/5 against Codex target
+  5/5 with Harbor errors 0:
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__06-58-06/result.json`.
+  All trials stopped before useful work because the task/verifier requires
+  `/tmp/CompCert`, but the Batch 5 command shape allowed only `.`, `/etc/apt`,
+  and `/usr/local/bin`.
+- Diagnosis:
+  `/tmp` is normal container scratch/build space for Terminal-Bench tasks and
+  is not a task-specific solver path. Disallowing it turns legitimate build
+  tasks into immediate permission waits, hiding the real implementation gap.
+- Generic repair:
+  `docs/M6_24_BATCH_5_MANIFEST_2026-04-29.md` now adds
+  `--allow-read /tmp --allow-write /tmp` to the generic mew command template.
+- Same-shape proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-14-sr016-compile-compcert-tmp-permission/2026-04-29__07-03-03/result.json`
+  reran one `compile-compcert` trial with `/tmp` allowed. Harbor recorded
+  `n_errors=0`; the work report executed 10 steps touching `/tmp/CompCert` and
+  `/tmp/compcert-tools-bookworm`, then ended as `wall_timeout`. This proves the
+  permission wait was repaired; the remaining failure is task-solving /
+  long-build strategy, not scratch-root denial.
 
 ## Repaired / Superseded Rows
 

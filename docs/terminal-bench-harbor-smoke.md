@@ -17,6 +17,7 @@ PYTHONPATH=.harbor harbor run \
   --jobs-dir proof-artifacts/terminal-bench/harbor-smoke \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command="python -m pip install -e /mew" \
+  --ak container_repo_root="/mew" \
   --ak command_template="mew-smoke --instruction {instruction_shell} --report {report_path} --artifacts {artifact_dir}" \
   --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"}]"
 ```
@@ -41,6 +42,7 @@ PYTHONPATH=.harbor harbor run \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command="python -m pip install -e /mew" \
   --ak command_cwd="/app" \
+  --ak container_repo_root="/mew" \
   --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-write . --allow-shell --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json" \
   --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"},{\"type\":\"bind\",\"source\":\"/Users/mk/.codex/auth.json\",\"target\":\"/codex-auth/auth.json\"}]"
 ```
@@ -57,6 +59,12 @@ The agent class lives at `.harbor/mew_terminal_bench_agent.py` and follows Harbo
 - can run an optional `install_command` with optional `install_env` before the task command;
 - can run the task command from optional `command_cwd` and exposes
   `{command_cwd}` / `{command_cwd_shell}` template placeholders;
+- can map host artifact placeholders to a container-visible repo mount with
+  `container_repo_root=/mew`, so running partial reports survive command
+  timeouts;
+- does not impose an inner command timeout by default; Harbor's task
+  `agent.timeout_sec` remains the authoritative wall clock unless
+  `timeout_seconds=...` is passed explicitly;
 - keeps `populate_context_post_run(context)` synchronous and writes through metadata-compatible context handling;
 - executes the configured command through a BaseInstalledAgent-compatible `exec_as_agent` helper seam.
 

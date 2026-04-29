@@ -1,4 +1,5 @@
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -7,6 +8,9 @@ from pathlib import Path
 
 from .tasks import clip_output
 from .timeutil import now_iso
+
+
+_SHELL_WRAPPER_RE = re.compile(r"^(?P<env>(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)?(?P<shell>\S+)\s+(?P<flag>-[lc]{1,2})\s+(?P<script>.*)\Z", re.DOTALL)
 
 
 def resolve_tool_cwd(cwd=None):
@@ -19,8 +23,48 @@ def resolve_tool_cwd(cwd=None):
     return resolved
 
 
+def _split_shell_wrapper_literal(command):
+    text = str(command or "").strip()
+    match = _SHELL_WRAPPER_RE.match(text)
+    if not match:
+        return None
+    shell = match.group("shell")
+    executable = Path(shell).name
+    if executable not in {"bash", "sh", "zsh"}:
+        return None
+    flag = match.group("flag")
+    if flag not in {"-c", "-lc", "-cl"}:
+        return None
+    script = (match.group("script") or "").strip()
+    if len(script) >= 2 and script[0] == script[-1] and script[0] in {"'", '"'}:
+        script = script[1:-1]
+    if not script:
+        return None
+    env_overrides = {}
+    env_text = (match.group("env") or "").strip()
+    if env_text:
+        try:
+            env_parts = shlex.split(env_text)
+        except ValueError:
+            return None
+        for part in env_parts:
+            if "=" not in part:
+                return None
+            key, value = part.split("=", 1)
+            if not key.replace("_", "").isalnum() or key[:1].isdigit():
+                return None
+            env_overrides[key] = value
+    return [shell, flag, script], env_overrides
+
+
 def split_command_env(command):
-    parts = shlex.split(command or "")
+    try:
+        parts = shlex.split(command or "")
+    except ValueError:
+        shell_wrapper = _split_shell_wrapper_literal(command)
+        if shell_wrapper is None:
+            raise
+        return shell_wrapper
     env_overrides = {}
     while parts:
         head = parts[0]
@@ -185,15 +229,36 @@ def _tail_output(text, max_chars=2000, max_lines=20):
     return text
 
 
-def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_process_group=False):
-    argv, env_overrides = split_command_env(command)
-    if not argv:
+def _default_shell_argv(command):
+    shell = os.environ.get("SHELL") or ""
+    candidates = [shell, "/bin/bash", "/bin/sh"]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        executable = Path(candidate).name
+        if executable not in {"bash", "sh", "zsh"}:
+            continue
+        if Path(candidate).is_absolute() and not Path(candidate).exists():
+            continue
+        return [candidate, "-lc", command]
+    return ["sh", "-lc", command]
+
+
+def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_process_group=False, use_shell=False):
+    if use_shell:
+        argv = _default_shell_argv(command or "")
+        env_overrides = {}
+    else:
+        argv, env_overrides = split_command_env(command)
+    if not argv or (use_shell and not str(command or "").strip()):
         raise ValueError("command is empty")
 
     resolved_cwd = resolve_tool_cwd(cwd)
     started_at = now_iso()
+    execution_mode = "shell" if use_shell else "argv"
     try:
-        env = {**os.environ, **env_overrides, **(extra_env or {})}
+        shell_guard_env = {"MEW_WORK_COMMAND_GUARD": "1"} if use_shell else {}
+        env = {**os.environ, **env_overrides, **shell_guard_env, **(extra_env or {})}
         if kill_process_group:
             process = subprocess.Popen(
                 argv,
@@ -218,6 +283,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
                 return {
                     "command": command,
                     "argv": argv,
+                    "execution_mode": execution_mode,
                     "cwd": str(resolved_cwd),
                     "started_at": started_at,
                     "finished_at": now_iso(),
@@ -229,6 +295,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
             return {
                 "command": command,
                 "argv": argv,
+                "execution_mode": execution_mode,
                 "cwd": str(resolved_cwd),
                 "started_at": started_at,
                 "finished_at": now_iso(),
@@ -251,6 +318,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
         return {
             "command": command,
             "argv": argv,
+            "execution_mode": execution_mode,
             "cwd": str(resolved_cwd),
             "started_at": started_at,
             "finished_at": now_iso(),
@@ -264,6 +332,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
         return {
             "command": command,
             "argv": argv,
+            "execution_mode": execution_mode,
             "cwd": str(resolved_cwd),
             "started_at": started_at,
             "finished_at": now_iso(),
@@ -277,6 +346,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
         return {
             "command": command,
             "argv": argv,
+            "execution_mode": execution_mode,
             "cwd": str(resolved_cwd),
             "started_at": started_at,
             "finished_at": now_iso(),
@@ -287,14 +357,20 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
         }
 
 
-def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None, on_output=None):
-    argv, env_overrides = split_command_env(command)
-    if not argv:
+def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None, on_output=None, use_shell=False):
+    if use_shell:
+        argv = _default_shell_argv(command or "")
+        env_overrides = {}
+    else:
+        argv, env_overrides = split_command_env(command)
+    if not argv or (use_shell and not str(command or "").strip()):
         raise ValueError("command is empty")
 
     resolved_cwd = resolve_tool_cwd(cwd)
     started_at = now_iso()
-    env = {**os.environ, **env_overrides, **(extra_env or {})}
+    execution_mode = "shell" if use_shell else "argv"
+    shell_guard_env = {"MEW_WORK_COMMAND_GUARD": "1"} if use_shell else {}
+    env = {**os.environ, **env_overrides, **shell_guard_env, **(extra_env or {})}
     try:
         process = subprocess.Popen(
             argv,
@@ -314,6 +390,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
         return {
             "command": command,
             "argv": argv,
+            "execution_mode": execution_mode,
             "cwd": str(resolved_cwd),
             "started_at": started_at,
             "finished_at": now_iso(),
@@ -385,6 +462,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
     return {
         "command": command,
         "argv": argv,
+        "execution_mode": execution_mode,
         "cwd": str(resolved_cwd),
         "started_at": started_at,
         "finished_at": now_iso(),
