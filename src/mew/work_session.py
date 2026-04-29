@@ -3764,22 +3764,52 @@ def _runtime_artifact_call_text(call):
     return "\n".join(str(part) for part in parts if part)
 
 
-def _runtime_fresh_run_artifacts_from_text(text, limit=6):
+def _runtime_fresh_run_context(text):
     text = str(text or "")
     lowered = text.casefold()
-    if "/tmp/" not in lowered:
-        return []
     if not any(marker in lowered for marker in _RUNTIME_FRESH_RUN_MARKERS):
-        return []
+        return False
     if not any(marker in lowered for marker in _RUNTIME_ARTIFACT_GENERATION_MARKERS):
-        return []
+        return False
+    return True
+
+
+def _runtime_tmp_artifacts_in_text(text, limit=6):
     artifacts = []
-    for match in _RUNTIME_EXPECTED_ARTIFACT_RE.finditer(text):
+    for match in _RUNTIME_EXPECTED_ARTIFACT_RE.finditer(str(text or "")):
         artifact = str(match.group(1) or "").rstrip("`'\".,;:)")
         if artifact and artifact not in artifacts:
             artifacts.append(artifact)
         if len(artifacts) >= limit:
             break
+    return artifacts
+
+
+def _runtime_fresh_run_artifacts_from_text(text, limit=6):
+    text = str(text or "")
+    if "/tmp/" not in text.casefold():
+        return []
+    if not _runtime_fresh_run_context(text):
+        return []
+    return _runtime_tmp_artifacts_in_text(text, limit=limit)
+
+
+def _runtime_fresh_run_artifacts_from_session_context(task_text, calls, limit=6):
+    if not _runtime_fresh_run_context(task_text):
+        return []
+    artifacts = _runtime_fresh_run_artifacts_from_text(task_text, limit=limit)
+    for call in calls or []:
+        if not isinstance(call, dict) or str(call.get("status") or "").casefold() != "completed":
+            continue
+        text = _runtime_artifact_call_text(call)
+        lowered = text.casefold()
+        if not any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS):
+            continue
+        for artifact in _runtime_tmp_artifacts_in_text(text, limit=limit):
+            if artifact and artifact not in artifacts:
+                artifacts.append(artifact)
+            if len(artifacts) >= limit:
+                return artifacts
     return artifacts
 
 
@@ -3823,7 +3853,7 @@ def build_stale_runtime_artifact_risk(task, calls, session=None):
         )
         if value
     )
-    artifacts = _runtime_fresh_run_artifacts_from_text(task_text)
+    artifacts = _runtime_fresh_run_artifacts_from_session_context(task_text, calls)
     if not artifacts:
         return {}
     latest_created = {}
@@ -3890,7 +3920,7 @@ def build_final_verifier_state_transfer(task, calls, session=None):
         )
         if value
     )
-    artifacts = _runtime_fresh_run_artifacts_from_text(task_text)
+    artifacts = _runtime_fresh_run_artifacts_from_session_context(task_text, calls)
     if not artifacts:
         return {}
     latest_success = {}

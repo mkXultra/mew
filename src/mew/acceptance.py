@@ -471,20 +471,58 @@ def _tool_call_external_command_text(call: object) -> str:
     return _normalized_command_text("\n".join(chunks))
 
 
-def _runtime_fresh_run_artifacts(task_description: object) -> list[str]:
-    text = str(task_description or "")
+def _runtime_fresh_run_context(text: object) -> bool:
+    text = str(text or "")
     lowered = text.casefold()
-    if "/tmp/" not in lowered:
-        return []
     if not any(marker in lowered for marker in _RUNTIME_FRESH_RUN_MARKERS):
-        return []
+        return False
     if not any(marker in lowered for marker in _RUNTIME_ARTIFACT_GENERATION_MARKERS):
-        return []
+        return False
+    return True
+
+
+def _runtime_tmp_artifacts_in_text(text: object, limit: int = 6) -> list[str]:
     artifacts: list[str] = []
-    for match in _RUNTIME_TMP_ARTIFACT_RE.finditer(text):
+    for match in _RUNTIME_TMP_ARTIFACT_RE.finditer(str(text or "")):
         artifact = str(match.group(1) or "").rstrip("`'\".,;:)")
         if artifact and artifact not in artifacts:
             artifacts.append(artifact)
+        if len(artifacts) >= limit:
+            break
+    return artifacts
+
+
+def _runtime_fresh_run_artifacts(task_description: object) -> list[str]:
+    text = str(task_description or "")
+    if "/tmp/" not in text.casefold():
+        return []
+    if not _runtime_fresh_run_context(text):
+        return []
+    return _runtime_tmp_artifacts_in_text(text)
+
+
+def _runtime_fresh_run_artifacts_for_finish(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> list[str]:
+    task_text = str(task_description or "")
+    if not _runtime_fresh_run_context(task_text):
+        return []
+    artifacts = _runtime_fresh_run_artifacts(task_text)
+    for check in checks:
+        for artifact in _runtime_tmp_artifacts_in_text(f"{check.get('constraint') or ''}\n{check.get('evidence') or ''}"):
+            if artifact not in artifacts:
+                artifacts.append(artifact)
+    if isinstance(session, dict):
+        for call in _completed_tool_calls(session):
+            text = _tool_call_text(call)
+            lowered = text.casefold()
+            if not any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS):
+                continue
+            for artifact in _runtime_tmp_artifacts_in_text(text):
+                if artifact not in artifacts:
+                    artifacts.append(artifact)
     return artifacts[:6]
 
 
@@ -544,7 +582,7 @@ def _runtime_artifact_freshness_blocker(
     checks: list[dict[str, str]],
     session: object,
 ) -> str:
-    artifacts = _runtime_fresh_run_artifacts(task_description)
+    artifacts = _runtime_fresh_run_artifacts_for_finish(task_description, checks, session)
     if not artifacts or not isinstance(session, dict):
         return ""
     verified_checks = [
@@ -581,7 +619,7 @@ def _runtime_artifact_final_state_blocker(
     checks: list[dict[str, str]],
     session: object,
 ) -> str:
-    artifacts = _runtime_fresh_run_artifacts(task_description)
+    artifacts = _runtime_fresh_run_artifacts_for_finish(task_description, checks, session)
     if not artifacts or not isinstance(session, dict):
         return ""
     verified_checks = [
