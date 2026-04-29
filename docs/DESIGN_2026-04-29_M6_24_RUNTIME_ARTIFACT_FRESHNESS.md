@@ -60,6 +60,20 @@ This is generic arbitrary-workspace behavior. It applies to frames, screenshots,
 runtime logs, sockets, pid files, and similar generated verifier artifacts. It
 does not encode Doom or Terminal-Bench-specific logic.
 
+## v0.1 Discovered Artifact Repair
+
+The `make-mips-interpreter` speed rerun in
+`docs/M6_24_HARD_PROFILE_MAKE_MIPS_SPEED_RERUN_2026-04-29.md` exposed a narrower
+miss: the task text described generated frames but did not name `/tmp/frame.bmp`.
+mew discovered `/tmp/frame.bmp` from source and self-check output, left it in
+place, and the external verifier terminated the fresh `node vm.js` process too
+early because the stale frame already existed.
+
+The guard now also infers runtime `/tmp/...` artifacts from verified checks and
+completed tool output when the task text has the fresh runtime / generated
+artifact shape. This keeps the rule generic while covering tasks where the
+artifact path is discovered from source rather than stated by the user.
+
 ## Validation
 
 Focused validation:
@@ -74,6 +88,20 @@ Observed:
 
 - `3 passed, 48 deselected`
 - `4 passed, 767 deselected`
+- `ruff`: all checks passed
+
+Additional v0.1 validation:
+
+```sh
+uv run pytest tests/test_acceptance.py -k 'stale_runtime_artifact or runtime_command_pass_without_artifact' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'stale_runtime_artifact or final_verifier_state_transfer' --no-testmon -q
+uv run ruff check src/mew/acceptance.py src/mew/work_session.py tests/test_acceptance.py tests/test_work_session.py
+```
+
+Observed:
+
+- `4 passed, 49 deselected`
+- `4 passed, 769 deselected`
 - `ruff`: all checks passed
 
 ## Same-Shape Rerun Gate

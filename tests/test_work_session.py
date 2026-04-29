@@ -4522,6 +4522,44 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("stale_runtime_artifact_risk: stale_runtime_artifact_risk", text)
         self.assertIn("stale_runtime_artifact: /tmp/frame.bmp from tool=#7", text)
 
+    def test_work_session_resume_surfaces_discovered_stale_runtime_artifact_risk(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Build a MIPS interpreter",
+            "goal": (
+                "Implement vm.js so `node vm.js` runs the provided MIPS ELF. "
+                "Running this file should result in saving frames as they are rendered."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 30,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "rm -f /tmp/frame.bmp && node vm.js && python3 check_frame.py", "cwd": "/app"},
+                    "result": {
+                        "command": "rm -f /tmp/frame.bmp && node vm.js && python3 check_frame.py",
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "path=/tmp/frame.bmp\nmagic=b'BM'\nframe bmp validation ok\n",
+                        "stderr": "saved first frame /tmp/frame.bmp after 30670791 instructions\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["stale_runtime_artifact_risk"]["kind"], "stale_runtime_artifact_risk")
+        self.assertEqual(resume["stale_runtime_artifact_risk"]["artifacts"][0]["artifact"], "/tmp/frame.bmp")
+        text = format_work_session_resume(resume)
+        self.assertIn("stale_runtime_artifact: /tmp/frame.bmp from tool=#30", text)
+
     def test_work_session_resume_clears_stale_runtime_artifact_risk_after_cleanup(self):
         from mew.work_session import build_work_session_resume
 

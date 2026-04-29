@@ -201,9 +201,19 @@ M6.24 resume condition:
   0/1, but `final_verifier_state_transfer` surfaced, the agent did not finish
   after command success without artifact proof, and the task advanced to a
   concrete runtime blocker `W_GetNumForName: STCFN33 not found`. Do not
-  escalate this to `-k 5 -n 5`; choose the next highest-leverage gap instead.
-  Do not resume new broad measurement yet unless the decision ledger explicitly
-  changes controller mode.
+  escalate this to `-k 5 -n 5`. The next speed sample on
+  `make-mips-interpreter` is recorded in
+  `docs/M6_24_HARD_PROFILE_MAKE_MIPS_SPEED_RERUN_2026-04-29.md`: score stayed
+  0/1, but mew implemented `vm.js`, exact `node vm.js` booted Doom, and the
+  external verifier passed frame existence plus image similarity. It failed
+  only stdout because mew left a discovered `/tmp/frame.bmp` from
+  self-verification, causing the fresh verifier process to be terminated before
+  the expected `I_InitGraphics` line. The v0.1 generic repair extends runtime
+  artifact freshness detection to `/tmp/...` artifacts discovered from verified
+  checks and tool output, not only paths named in the task text. Next action:
+  run a 1-trial same-shape speed-rerun for `make-mips-interpreter`; do not
+  resume new broad measurement or escalate to `-k 5 -n 5` unless the speed
+  proof passes or materially improves.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.

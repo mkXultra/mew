@@ -77,6 +77,41 @@ def test_acceptance_finish_blocker_rejects_stale_runtime_artifact_before_fresh_v
     assert "/tmp/frame.bmp" in blocker
 
 
+def test_acceptance_finish_blocker_rejects_discovered_stale_runtime_artifact_before_fresh_verifier():
+    text = (
+        "Implement a MIPS interpreter called vm.js so I can run `node vm.js`. "
+        "Running this file should result in saving the frames as they are rendered."
+    )
+    checks = [
+        {
+            "constraint": "first frame was saved",
+            "status": "verified",
+            "evidence": "Tool #30 ran `rm -f /tmp/frame.bmp && node vm.js` and validated /tmp/frame.bmp.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 30,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp && node vm.js && python3 check_frame.py"},
+                "result": {
+                    "command": "rm -f /tmp/frame.bmp && node vm.js && python3 check_frame.py",
+                    "exit_code": 0,
+                    "stdout": "path=/tmp/frame.bmp\nmagic=b'BM'\nframe bmp validation ok\n",
+                    "stderr": "saved first frame /tmp/frame.bmp after 30670791 instructions\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime artifact freshness unchecked" in blocker
+    assert "/tmp/frame.bmp" in blocker
+
+
 def test_acceptance_finish_blocker_allows_stale_runtime_artifact_after_cleanup():
     text = "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run."
     checks = [
