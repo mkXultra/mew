@@ -388,18 +388,24 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
 
     human = human_output.read_text(encoding='utf-8')
 
-    assert human.startswith('mew-wisp SP19a terminal human view\n')
-    assert 'presence: coding' in human
-    assert 'desk primary: Resume SP17 desk bridge -> mew code --task 17' in human
-    assert 'typing -> coding' in human
+    assert human.startswith('mew-wisp compact terminal HUD\n')
+    assert 'hud: mew-ghost | mood: curious | state: coding' in human
+    assert 'focus:' in human
+    assert 'signal:' in human
+    assert 'next: Resume SP17 desk bridge' in human
+    assert 'freshness:' not in human
+    assert 'desk primary:' not in human
+    assert 'desk details:' not in human
+    assert 'active window:' not in human
+    assert 'launcher intents:' not in human
     assert '<!doctype html>' not in human
     assert '"schema_version"' not in human
 
     assert ghost.main(['--fixture', str(FIXTURE_PATH), '--format', 'human']) == 0
     stdout = capsys.readouterr().out
 
-    assert stdout.startswith('mew-wisp SP19a terminal human view\n')
-    assert 'launcher intents:' in stdout
+    assert stdout.startswith('mew-wisp compact terminal HUD\n')
+    assert 'launcher intents:' not in stdout
 
 
 def test_cli_live_desk_opt_in_uses_injected_runner_without_spawning(capsys, tmp_path: Path) -> None:
@@ -644,9 +650,14 @@ def test_human_watch_count_prints_terminal_surface_instead_of_jsonl(capsys) -> N
     output = capsys.readouterr().out
 
     assert sleeps == [0.0]
-    assert output.count('mew-wisp SP19a terminal human view') == 2
-    assert 'freshness: foreground-watch | watch iteration 0 of 2 | refreshed: human-0 | interval: 0.0' in output
-    assert 'freshness: foreground-watch | watch iteration 1 of 2 | refreshed: human-1 | interval: 0.0' in output
+    assert output.count('mew-wisp compact terminal HUD') == 2
+    assert output.count('focus:') == 2
+    assert output.count('signal:') == 2
+    assert output.count('next:') == 2
+    assert 'freshness:' not in output
+    assert 'desk details:' not in output
+    assert 'active window:' not in output
+    assert 'launcher intents:' not in output
     assert 'record_type' not in output
     assert 'schema_version' not in output
     assert not output.lstrip().startswith('{')
@@ -693,9 +704,11 @@ def test_human_watch_without_count_prints_surface_until_keyboard_interrupt(capsy
     output = capsys.readouterr().out
 
     assert sleeps == [0.5, 0.5]
-    assert output.count('mew-wisp SP19a terminal human view') == 2
-    assert 'watch iteration 0 | refreshed: human-loop-0' in output
-    assert 'watch iteration 1 | refreshed: human-loop-1' in output
+    assert output.count('mew-wisp compact terminal HUD') == 2
+    assert output.count('focus:') == 2
+    assert output.count('signal:') == 2
+    assert 'freshness:' not in output
+    assert 'watch iteration' not in output
     assert 'record_type' not in output
     assert 'schema_version' not in output
 
@@ -785,22 +798,47 @@ def _cat_sprite_similarity(rendered: str) -> float:
     return matches / len(expected)
 
 
-def test_terminal_human_default_form_matches_existing_surface() -> None:
+def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None:
     state, html = ghost.render_fixture(FIXTURE_PATH)
 
     implicit = ghost._render_payload(state, html, 'human')
     explicit = ghost._render_payload(state, html, 'human', terminal_form='default')
     cat = ghost._render_payload(state, html, 'human', terminal_form='cat')
+    details = ghost._render_payload(state, html, 'human', terminal_form='cat', terminal_details=True)
 
     assert implicit == explicit
-    assert implicit.startswith('mew-wisp SP19a terminal human view')
+    assert implicit.startswith('mew-wisp compact terminal HUD')
     assert 'terminal form: cat' not in implicit
+    assert 'freshness:' not in implicit
+    assert 'desk details:' not in implicit
+    assert 'active window:' not in implicit
+    assert 'launcher intents:' not in implicit
     assert cat.splitlines()[0] == 'terminal form: cat'
     assert cat.splitlines()[1].startswith('cat state:')
-    assert 'mew-wisp SP19a terminal human view' in cat
+    assert 'mew-wisp compact terminal HUD' in cat
+    assert 'focus:' in cat
+    assert 'signal:' in cat
+    assert 'next:' in cat
+    assert 'freshness:' not in cat
+    assert 'desk details:' not in cat
+    assert 'active window:' not in cat
+    assert 'launcher intents:' not in cat
+    assert 'details:' in details
+    assert 'freshness:' in details
+    assert 'desk details:' in details
+    assert 'active window:' in details
+    assert 'launcher intents:' in details
     assert _cat_sprite_similarity(cat) >= 0.90
+    assert implicit.count('state marker: *') == 1
+    assert cat.count('state marker: *') == 1
     assert 'state marker: *' in cat
     assert 'state marker: *' not in '\n'.join(_cat_sprite_lines(cat))
+    cat_focus_line = next(line for line in cat.splitlines() if line.startswith('focus: '))
+    implicit_focus_line = next(line for line in implicit.splitlines() if line.startswith('focus: '))
+    assert cat_focus_line == 'focus: %s - %s' % (state['ghost']['focus'], state['ghost']['message'])
+    assert implicit_focus_line == cat_focus_line
+    assert all(ord(character) < 128 for character in cat_focus_line)
+    assert chr(8212) not in cat_focus_line
     assert '  code  ' not in cat
     assert '   /\\_____/\\        ' not in cat
     assert ' |  \\_____/  |__/   ' not in cat
@@ -825,6 +863,7 @@ def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_stat
         assert 'terminal form: cat' in rendered
         assert 'cat state: %s' % presence_state in rendered
         assert marker in rendered
+        assert rendered.count(marker) == 1
         assert marker not in '\n'.join(_cat_sprite_lines(rendered))
         assert _cat_sprite_similarity(rendered) >= 0.90
         assert '  code  ' not in rendered
@@ -832,6 +871,23 @@ def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_stat
         masks_by_state[presence_state] = _cat_sprite_mask(rendered)
 
     assert len({mask for mask in masks_by_state.values()}) == 1
+
+
+def test_human_details_flag_prints_diagnostic_sections(capsys) -> None:
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--details'],
+    ) == 0
+
+    output = capsys.readouterr().out
+
+    assert output.startswith('terminal form: cat')
+    assert 'mew-wisp compact terminal HUD' in output
+    assert 'details:' in output
+    assert 'freshness:' in output
+    assert 'desk details:' in output
+    assert 'active window:' in output
+    assert 'launcher intents:' in output
+    assert 'record_type' not in output
 
 
 def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
@@ -849,9 +905,14 @@ def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
     assert sleeps == [0.0]
     assert output.count('terminal form: cat') == 2
     assert output.count('cat state:') == 2
-    assert output.count('mew-wisp SP19a terminal human view') == 2
-    assert 'freshness: foreground-watch | watch iteration 0 of 2 | refreshed: cat-0 | interval: 0.0' in output
-    assert 'freshness: foreground-watch | watch iteration 1 of 2 | refreshed: cat-1 | interval: 0.0' in output
+    assert output.count('mew-wisp compact terminal HUD') == 2
+    assert output.count('focus:') == 2
+    assert output.count('signal:') == 2
+    assert output.count('next:') == 2
+    assert 'freshness:' not in output
+    assert 'desk details:' not in output
+    assert 'active window:' not in output
+    assert 'launcher intents:' not in output
     assert 'record_type' not in output
     assert 'schema_version' not in output
 
@@ -865,6 +926,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --details',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',
@@ -878,6 +940,9 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     assert '--watch-count N' in readme
     assert '--format human' in readme
     assert '--form cat' in readme
+    assert '--details' in readme
+    assert 'compact mew-wisp terminal HUD' in readme
+    assert 'diagnostic details' in readme
     assert 'coarse pixel cat converted from `cat.png`' in readme
     assert 'square white face with thick stepped black outline' in readme
     assert 'blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail' in readme
@@ -895,6 +960,7 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert 'hidden monitoring' in source
     assert '--live-active-window' in source
     assert '--execute-launchers' in source
+    assert '--details' in source
     assert '--watch-count' in source
     assert '--interval' in source
     assert '--desk-json' in source

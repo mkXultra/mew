@@ -79,16 +79,22 @@ Print three bounded foreground watch records as newline-delimited JSON:
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5
 ```
 
-Print two bounded foreground watch iterations as the terminal-first human surface, without JSONL records:
+Print two bounded foreground watch iterations as the compact mew-wisp terminal HUD, without JSONL records or diagnostic details:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5
 ```
 
-Render the same bounded human watch as the cat terminal form, with a literal 22x24 block-cell coarse pixel cat converted from `cat.png` (derived by thresholding the repo-root reference mask; each black cell renders as `██`, each white cell as two spaces). The sprite keeps the square white face with thick stepped black outline, blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail; presence state markers render on a separate line outside the 22x24 silhouette:
+Render the same bounded compact human watch as the cat terminal form, with a literal 22x24 block-cell coarse pixel cat converted from `cat.png` (derived by thresholding the repo-root reference mask; each black cell renders as `██`, each white cell as two spaces). The sprite keeps the square white face with thick stepped black outline, blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail; presence state markers render on a separate line outside the 22x24 silhouette. Freshness, desk counts/details, active-window reason, and launcher intents stay hidden unless `--details` is requested:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5
+```
+
+Show the expanded human diagnostic details when debugging the compact HUD:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --details
 ```
 
 Rewrite local HTML on every bounded watch iteration and emit one CLI record per rewrite:

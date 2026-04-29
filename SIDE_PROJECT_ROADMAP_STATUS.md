@@ -31,7 +31,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP18 mew-ghost Live Desk Opt-In | `done` | Live desk opt-in landed practical: explicit `--live-desk`, no-shell repo-local desk command, timeout/fallback handling, fixture-only defaults, top-level real desk JSON normalization, README examples, local report, real live-desk proof, and focused tests are in place. |
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `deferred/partial` | Broad HTML removal is deferred after issue #18 closed, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
-| SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test while preserving state/HTML/live/launcher behavior. |
+| SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD, hid diagnostics behind `--details`, removed duplicate cat state markers, and preserved state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
@@ -86,6 +86,15 @@ Current target:
   silhouette, and added a focused cell-wise similarity test requiring `>=0.90`;
   the observed rendered-mask similarity is `1.0`, and ledger row `30` records
   the practical result with rescue edits `0`
+- SP21d task `#25` landed practical: normal `--format human` and
+  `--format human --form cat` now render a compact mew-wisp HUD with concise
+  `hud`/`focus`/`signal`/`next` lines, while freshness, desk diagnostics,
+  active-window reason, and launcher intents are opt-in behind `--details`;
+  ledger row `31` records the practical result with rescue edits `0`
+- SP21e task `#26` landed practical as reviewer polish: the cat HUD now keeps
+  exactly one state marker outside the 22x24 silhouette, the focus separator is
+  ASCII, and focused tests cover duplicate-marker regression and ASCII output;
+  ledger row `32` records the practical result with rescue edits `0`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -189,6 +198,13 @@ Current target:
   `rescue_edits_total=0`, and `codex_product_code_rescue_edits=0`. Ledger row
   `30` records the 22x24 mask-similarity slice with failure class
   `similarity_requirement_repair_after_initial_source_edit`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP21d/SP21e on 2026-04-29: `rows_total=32`, six `failed`,
+  twenty-three `practical`, three `clean`, `success_rate=0.812`,
+  `structural_repairs_required=6`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger rows `31` and `32` record the
+  compact HUD and reviewer polish slices with no Codex product-code rescue
+  edits.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,
@@ -663,12 +679,14 @@ Current target:
 - SP16 is closed for the second `mew-ghost` cohort.
 - SP17 is closed for the second `mew-ghost` cohort.
 - SP18 is closed for the second `mew-ghost` cohort.
-- SP19 is blocked: task `#19` / sessions `#42` and `#43` did not land product
-  edits, and issue `#18` captures the coordinated HTML-removal patch-shape
-  failure.
-- SP20 is not started: the foreground watch TUI still needs fixture-first proof.
-- SP21 is not started: swappable forms/skins still need a small state-preserving
-  contract.
+- SP19 broad HTML removal remains deferred/partial: task `#19` / sessions `#42`
+  and `#43` did not land product edits, issue `#18` is closed, and the forward
+  terminal path advanced through additive SP19a-SP21e slices instead.
+- SP20 is closed: foreground human watch now prints terminal surfaces instead
+  of JSONL when `--format human` is selected.
+- SP21 is closed: swappable `default`/`cat` forms, the `cat.png`-derived
+  sprite, compact HUD, `--details` diagnostics, and focused regression tests
+  are in place.
 - SP22 is not started: reconnecting the CLI-first wisp to live mew state should
   wait until the terminal experience is worth keeping on screen.
 - Real local execution of `--execute-launchers` is intentionally unverified by
@@ -682,8 +700,9 @@ Current target:
   normalization coverage and proof.
 - Issue `#17` was resolved after the SP18 closeout-scope finding was recorded
   and closed upstream.
-- Open issue `#18` captures the SP19 mew-first failure to apply coordinated
-  HTML removal after stale hunks and unsupported batch tool-shape handling.
+- Issue `#18` is closed and retained as evidence for the SP19 broad HTML
+  removal blocker; the side project continued by splitting terminal-first work
+  into smaller mew-first slices.
 
 ## Next Action
 

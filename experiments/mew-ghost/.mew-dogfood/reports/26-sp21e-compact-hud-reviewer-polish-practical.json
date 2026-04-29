@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "task_id": 26,
+  "session_id": 55,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP21e is a reviewer polish over the uncommitted SP21d compact terminal HUD slice under experiments/mew-ghost. It fixes normal --format human --form cat output so the state marker appears exactly once outside the 22x24 cat silhouette, while default human output still has one compact HUD state marker. It also replaces the non-ASCII focus separator in renderer text with an ASCII separator. The slice keeps diagnostics behind --details and preserves default/cat forms, state JSON, HTML, watch behavior, live-read gates, launcher safety, and cat sprite similarity coverage.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 2,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/26-sp21e-compact-hud-reviewer-polish-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #26",
+    "mew work session #55",
+    "applied renderer edit tool #1119",
+    "applied focused test edit and pytest verification tool #1120",
+    "experiments/mew-ghost/.mew-dogfood/reports/26-sp21e-compact-hud-reviewer-polish-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 1120,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "35 passed after applying the SP21e renderer and focused test edits."
+    }
+  ],
+  "implemented_contract": {
+    "cat_single_state_marker": "--format human --form cat keeps the cat sprite's post-silhouette state marker and suppresses the duplicate compact HUD state-marker line for cat form.",
+    "default_single_state_marker": "The default human form still inserts exactly one compact HUD state marker line.",
+    "ascii_focus_separator": "The compact renderer focus line now uses an ASCII ' - ' separator instead of the prior em dash.",
+    "cat_sprite_similarity_preserved": "The cat form continues to render terminal form metadata, cat state metadata, the 22x24 block-cell cat sprite, and the existing similarity threshold checks.",
+    "diagnostics_stay_behind_details": "Freshness, desk diagnostics, active-window details, and launcher intents remain opt-in behind --details.",
+    "state_json_html_watch_preserved": "The focused mew-ghost suite continues to cover state JSON, HTML, bounded/watch rendering, live-read gates, and launcher safety behavior.",
+    "scope_limited": "No mew connection work was added and cat.png was not touched."
+  },
+  "test_contract": {
+    "duplicate_marker_tests_added": true,
+    "ascii_separator_tests_added": true,
+    "cat_state_marker_count_tests_added": true,
+    "preservation_suite_run": true,
+    "covered_cases": [
+      "implicit/default human output still has exactly one state marker",
+      "normal cat form output has exactly one coding state marker",
+      "all cat presence states render their expected marker exactly once",
+      "state markers do not appear inside the extracted cat sprite lines",
+      "cat and implicit focus lines use the same ASCII-only focus separator",
+      "the em dash separator is absent from the rendered compact focus line",
+      "cat sprite similarity remains at or above the existing threshold",
+      "diagnostics remain hidden by default and available with --details"
+    ]
+  },
+  "acceptance_notes": [
+    "All SP21e product, test, and report changes are scoped under experiments/mew-ghost.",
+    "README was not updated because this reviewer polish changes renderer correctness and tests without changing documented usage.",
+    "The local side-dogfood report records the SP21e practical reviewer-polish evidence."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "Final git diff/status inspection is still needed after the report write to summarize exact worktree scope and confirm cat.png remains untouched.",
+  "created_at": "2026-04-29T00:31:59Z",
+  "updated_at": "2026-04-29T00:31:59Z"
+}

@@ -888,7 +888,12 @@ def _terminal_cat_lines(presence_state: str) -> list[str]:
     return ['terminal form: cat'] + list(form_lines)
 
 
-def render_terminal_human(state: Mapping[str, Any], terminal_form: str = 'default') -> str:
+def render_terminal_human(
+    state: Mapping[str, Any],
+    terminal_form: str = 'default',
+    *,
+    terminal_details: bool = False,
+) -> str:
     ghost = state['ghost']
     probe = state['active_window']
     presence = state['presence']
@@ -909,69 +914,87 @@ def render_terminal_human(state: Mapping[str, Any], terminal_form: str = 'defaul
     )
     primary_label = 'none' if desk_primary is None else str(desk_primary.get('label', 'none'))
     primary_command = 'none' if desk_primary is None else ' '.join(str(part) for part in desk_primary.get('command', [])) or 'none'
+    presence_state = str(classification.get('state', 'attentive'))
+    state_marker = {
+        'idle': 'zZ',
+        'attentive': '?',
+        'coding': '*',
+        'waiting': '...',
+        'blocked': '!',
+    }.get(presence_state, '?')
 
-    lines = [
-        'mew-wisp SP19a terminal human view',
-        'ghost: %s | mood: %s | focus: %s' % (ghost['name'], ghost['mood'], ghost['focus']),
-        'message: %s' % ghost['message'],
-        'presence: %s | %s | snapshots: %s' % (
-            classification['state'],
-            presence['contract'],
-            presence['refresh_count'],
-        ),
-        'freshness: %s | %s | refreshed: %s | interval: %s' % (
-            freshness.get('mode', 'single-render'),
-            iteration_label,
-            freshness.get('rendered_at', state.get('generated_at')),
-            freshness.get('interval_seconds', 'n/a'),
-        ),
-        'desk: %s | counts: %s' % (desk.get('status', 'disabled'), json.dumps(desk_counts, sort_keys=True)),
-        'desk primary: %s -> %s' % (primary_label, primary_command),
-    ]
-
-    if desk_details:
-        lines.append('desk details:')
-        for detail in desk_details:
-            if not isinstance(detail, Mapping):
-                continue
-            detail_text = str(detail.get('detail') or '')
-            suffix = '' if not detail_text else ' - ' + detail_text
-            lines.append(
-                '  - %s: %s -> %s%s'
-                % (
-                    detail.get('name', 'desk pet'),
-                    detail.get('pet_state', 'unknown'),
-                    detail.get('presence_state', 'unknown'),
-                    suffix,
-                )
-            )
-    else:
-        lines.append('desk details: none')
-
-    lines.extend(
-        [
-            'active window: %s | app: %s | window: %s | reason: %s'
-            % (
-                probe['status'],
-                probe.get('active_app') or 'unavailable',
-                probe.get('window_title') or 'unavailable',
-                probe.get('reason') or 'none',
-            ),
-            'launcher intents:',
-        ]
-    )
-    for intent in intents:
-        if not isinstance(intent, Mapping):
-            continue
-        command = ' '.join(str(part) for part in intent.get('command', [])) or 'none'
-        execution = 'dry-run' if intent.get('dry_run', True) else 'execute'
-        lines.append('  - %s: %s (%s)' % (intent.get('id', 'launcher'), command, execution))
-    if lines[-1] == 'launcher intents:':
-        lines.append('  - none')
     if terminal_form == 'cat':
-        lines = _terminal_cat_lines(str(classification.get('state', 'attentive'))) + lines
-    elif terminal_form != 'default':
+        lines = _terminal_cat_lines(presence_state)
+    elif terminal_form == 'default':
+        lines = []
+    else:
         raise ValueError('unsupported terminal form: %s' % terminal_form)
+
+    compact_lines = [
+        'mew-wisp compact terminal HUD',
+        'hud: %s | mood: %s | state: %s' % (ghost['name'], ghost['mood'], presence_state),
+        'focus: %s - %s' % (ghost['focus'], ghost['message']),
+        'signal: %s | snapshots: %s | desk status: %s'
+        % (presence['contract'], presence['refresh_count'], desk.get('status', 'disabled')),
+        'next: %s' % primary_label,
+    ]
+    if terminal_form == 'default':
+        compact_lines.insert(2, 'state marker: %s' % state_marker)
+    lines.extend(compact_lines)
+
+    if terminal_details:
+        lines.extend(
+            [
+                'details:',
+                'freshness: %s | %s | refreshed: %s | interval: %s'
+                % (
+                    freshness.get('mode', 'single-render'),
+                    iteration_label,
+                    freshness.get('rendered_at', state.get('generated_at')),
+                    freshness.get('interval_seconds', 'n/a'),
+                ),
+                'desk: %s | counts: %s' % (desk.get('status', 'disabled'), json.dumps(desk_counts, sort_keys=True)),
+                'desk primary: %s -> %s' % (primary_label, primary_command),
+            ]
+        )
+        if desk_details:
+            lines.append('desk details:')
+            for detail in desk_details:
+                if not isinstance(detail, Mapping):
+                    continue
+                detail_text = str(detail.get('detail') or '')
+                suffix = '' if not detail_text else ' - ' + detail_text
+                lines.append(
+                    '  - %s: %s -> %s%s'
+                    % (
+                        detail.get('name', 'desk pet'),
+                        detail.get('pet_state', 'unknown'),
+                        detail.get('presence_state', 'unknown'),
+                        suffix,
+                    )
+                )
+        else:
+            lines.append('desk details: none')
+        lines.extend(
+            [
+                'active window: %s | app: %s | window: %s | reason: %s'
+                % (
+                    probe['status'],
+                    probe.get('active_app') or 'unavailable',
+                    probe.get('window_title') or 'unavailable',
+                    probe.get('reason') or 'none',
+                ),
+                'launcher intents:',
+            ]
+        )
+        for intent in intents:
+            if not isinstance(intent, Mapping):
+                continue
+            command = ' '.join(str(part) for part in intent.get('command', [])) or 'none'
+            execution = 'dry-run' if intent.get('dry_run', True) else 'execute'
+            lines.append('  - %s: %s (%s)' % (intent.get('id', 'launcher'), command, execution))
+        if lines[-1] == 'launcher intents:':
+            lines.append('  - none')
     return chr(10).join(lines) + chr(10)
 
 
@@ -1004,11 +1027,12 @@ def _render_payload(
     html: str,
     format_name: str,
     terminal_form: str = 'default',
+    terminal_details: bool = False,
 ) -> str:
     if format_name == 'state':
         return json.dumps(state, indent=2, sort_keys=True) + chr(10)
     if format_name == 'human':
-        return render_terminal_human(state, terminal_form=terminal_form)
+        return render_terminal_human(state, terminal_form=terminal_form, terminal_details=terminal_details)
     if format_name == 'html':
         return html
     raise ValueError('unsupported format: %s' % format_name)
@@ -1057,6 +1081,7 @@ def run_watch(
     desk_provider: DeskProvider | None = None,
     format_name: str = 'html',
     terminal_form: str = 'default',
+    terminal_details: bool = False,
     output: str | Path | None = None,
     probe_provider: ProbeProvider | None = None,
     platform_name: str | None = None,
@@ -1101,7 +1126,13 @@ def run_watch(
                     runner=launcher_runner or subprocess.run,
                 )
                 html = render_local_html(state)
-            rendered = _render_payload(state, html, format_name, terminal_form=terminal_form)
+            rendered = _render_payload(
+                state,
+                html,
+                format_name,
+                terminal_form=terminal_form,
+                terminal_details=terminal_details,
+            )
             if output_path is not None:
                 output_path.write_text(rendered, encoding='utf-8')
             if format_name == 'human' and output_path is None:
@@ -1147,6 +1178,7 @@ def main(
     parser.add_argument('--output', help='write rendered output to this path')
     parser.add_argument('--format', choices=('html', 'state', 'human'), default='html')
     parser.add_argument('--form', choices=TERMINAL_FORMS, default='default', help='terminal form for --format human')
+    parser.add_argument('--details', action='store_true', help='include diagnostic details in --format human output')
     parser.add_argument('--refresh-count', type=int, default=DEFAULT_REFRESH_COUNT, help='single-render snapshot count, clamped locally')
     parser.add_argument('--watch', action='store_true', help='run foreground watch until KeyboardInterrupt')
     parser.add_argument('--watch-count', type=int, help='run exactly this many foreground watch iterations')
@@ -1177,6 +1209,7 @@ def main(
             desk_provider=desk_provider,
             format_name=args.format,
             terminal_form=args.form,
+            terminal_details=args.details,
             output=args.output,
             probe_provider=provider,
             platform_name=platform_name,
@@ -1204,7 +1237,13 @@ def main(
             runner=launcher_runner or subprocess.run,
         )
         html = render_local_html(state)
-    rendered = _render_payload(state, html, args.format, terminal_form=args.form)
+    rendered = _render_payload(
+        state,
+        html,
+        args.format,
+        terminal_form=args.form,
+        terminal_details=args.details,
+    )
     if args.output:
         Path(args.output).write_text(rendered, encoding='utf-8')
     else:

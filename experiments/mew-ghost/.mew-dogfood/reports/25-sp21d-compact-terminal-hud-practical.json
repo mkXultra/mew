@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "task_id": 25,
+  "session_id": 54,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP21d implements a bounded mew-wisp compact terminal HUD slice under experiments/mew-ghost. Normal --format human output, including --form cat, now emphasizes a compact title/HUD/focus/signal/next surface while diagnostic freshness, desk details/counts, active-window reason, and launcher intents are opt-in behind --details. The slice keeps mew connection work out of scope and preserves state JSON, HTML, watch, live-read gates, launcher safety, default human form behavior, and the cat sprite similarity contract.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 4,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/25-sp21d-compact-terminal-hud-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #25",
+    "mew work session #54",
+    "applied compact HUD source edit tool #1101",
+    "applied focused test edit tool #1102",
+    "applied README edit and focused pytest verification tool #1103",
+    "experiments/mew-ghost/.mew-dogfood/reports/25-sp21d-compact-terminal-hud-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 1103,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "35 passed after applying the compact HUD renderer, --details flag, focused output/watch/README tests, and preservation checks."
+    }
+  ],
+  "implemented_contract": {
+    "compact_human_title": "Normal --format human starts with mew-wisp compact terminal HUD instead of the older debug-log-like terminal human view title.",
+    "compact_default_form": "The implicit human renderer and --form default remain equivalent and render the compact HUD without cat-only headings.",
+    "compact_lines": "The compact human surface presents a concise HUD line plus state marker, focus, signal, and next lines.",
+    "cat_form_preserved": "--format human --form cat still prepends the terminal form metadata and 22x24 block-cell cat sprite, keeps the state marker outside the silhouette, and preserves the similarity threshold tests.",
+    "details_flag": "--details is the explicit opt-in for expanded human diagnostics.",
+    "diagnostics_hidden_by_default": "Freshness/watch iteration text, desk details/counts, active-window reason, and launcher intents are hidden from normal human/cat output unless --details is requested.",
+    "diagnostics_available": "When --details is requested, the human cat output includes details, freshness, desk details, active window, and launcher intents sections for debugging.",
+    "watch_behavior_preserved": "Bounded and interrupt-driven human watch continue to print terminal surfaces rather than JSONL records, now using the compact HUD surface by default.",
+    "state_json_preserved": "--format state JSON behavior remains covered by the focused test module and is not replaced by the HUD rendering.",
+    "html_preserved": "HTML output and bounded HTML watch behavior remain covered by the focused test module and are outside the human HUD presentation change.",
+    "live_and_launcher_safety_preserved": "The slice does not add mew connection work and keeps live-active-window/live-desk opt-in gates plus launcher execution safety checks covered by existing tests."
+  },
+  "test_contract": {
+    "compact_output_tests_added": true,
+    "details_output_tests_added": true,
+    "watch_output_tests_updated": true,
+    "readme_usage_tests_updated": true,
+    "preservation_suite_run": true,
+    "covered_cases": [
+      "desk fixture human output starts with the compact HUD and omits launcher intents and desk diagnostics by default",
+      "human bounded watch prints compact HUD surfaces without freshness/debug lines or JSONL record markers",
+      "human unbounded watch until KeyboardInterrupt prints compact HUD surfaces without watch-iteration freshness lines",
+      "default human form equals implicit human form and remains compact",
+      "cat form keeps terminal form metadata, cat state metadata, 22x24 sprite similarity, and state marker outside the sprite",
+      "--details on human cat output includes diagnostic details, freshness, desk details, active window, and launcher intents",
+      "README documents compact human/cat watch usage and --details diagnostic usage",
+      "source isolation test covers --details alongside live-read and launcher safety flags"
+    ]
+  },
+  "acceptance_notes": [
+    "All product, test, doc, and report changes are scoped under experiments/mew-ghost.",
+    "No mew connection work is included in this slice.",
+    "The local side-dogfood report records the SP21d practical compact terminal HUD evidence."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "stale_human_title_expectations_repaired_before_final_verifier",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "Reviewer follow-up SP21e removed a duplicate cat HUD state marker and kept this as a mew-authored repair, not a Codex product-code rescue.",
+  "created_at": "2026-04-29T00:22:09Z",
+  "updated_at": "2026-04-29T00:22:09Z"
+}
