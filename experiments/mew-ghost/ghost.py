@@ -1013,7 +1013,10 @@ def render_terminal_human(
         for label, value in panel_rows:
             panel_lines.extend(_panel_row(label, value))
         panel_lines.append(_panel_plain_border())
-        return panel_lines
+        terminal_width = _terminal_width()
+        panel_width = len(panel_lines[0]) if panel_lines else 0
+        padding = max(0, (terminal_width - panel_width) // 2)
+        return [' ' * padding + line for line in panel_lines]
 
     panel_rows: list[tuple[str, object]] = [
         ('resident', 'mew-wisp | mood: %s | state: %s' % (ghost['mood'], presence_state)),

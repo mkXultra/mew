@@ -849,17 +849,46 @@ def _rendered_reference_row(mask_row: str) -> str:
     return ''.join('██' if cell == '#' else '  ' for cell in mask_row)
 
 
+def _leading_spaces(line: str) -> int:
+    return len(line) - len(line.lstrip(' '))
+
+
+def _resident_panel_content(line: str) -> str:
+    return line.lstrip(' ')
+
+
 def _resident_panel_lines(rendered: str) -> list[str]:
     lines = rendered.splitlines()
     start = next(
         index for index, line in enumerate(lines)
-        if line.startswith('+') and 'mew-wisp resident HUD' in line
+        if _resident_panel_content(line).startswith('+') and 'mew-wisp resident HUD' in line
     )
     end = next(
         index for index in range(start + 1, len(lines))
-        if lines[index].startswith('+') and set(lines[index][1:-1]) == {'-'}
+        if _resident_panel_content(lines[index]).startswith('+')
+        and set(_resident_panel_content(lines[index])[1:-1]) == {'-'}
     )
     return lines[start:end + 1]
+
+
+def _resident_panel_padding(rendered: str) -> int:
+    return _leading_spaces(_resident_panel_lines(rendered)[0])
+
+
+def _expected_resident_panel_padding(terminal_width: int, rendered: str) -> int:
+    panel_width = len(_resident_panel_content(_resident_panel_lines(rendered)[0]))
+    return max(0, (terminal_width - panel_width) // 2)
+
+
+def _assert_resident_panel_padding(rendered: str, terminal_width: int) -> None:
+    panel_lines = _resident_panel_lines(rendered)
+    expected_padding = _expected_resident_panel_padding(terminal_width, rendered)
+    assert _resident_panel_padding(rendered) == expected_padding
+    assert all(_leading_spaces(line) == expected_padding for line in panel_lines)
+    assert all(
+        len(_resident_panel_content(line)) == len(_resident_panel_content(panel_lines[0]))
+        for line in panel_lines
+    )
 
 
 def _resident_panel_values(rendered: str, label: str) -> list[str]:
@@ -868,12 +897,13 @@ def _resident_panel_values(rendered: str, label: str) -> list[str]:
     values: list[str] = []
     collecting = False
     for line in _resident_panel_lines(rendered)[1:-1]:
-        if line.startswith(label_prefix):
-            values.append(line[len(label_prefix):-2].rstrip())
+        content = _resident_panel_content(line)
+        if content.startswith(label_prefix):
+            values.append(content[len(label_prefix):-2].rstrip())
             collecting = True
             continue
-        if collecting and line.startswith(continuation_prefix):
-            values.append(line[len(continuation_prefix):-2].rstrip())
+        if collecting and content.startswith(continuation_prefix):
+            values.append(content[len(continuation_prefix):-2].rstrip())
             continue
         if collecting:
             break
@@ -882,12 +912,17 @@ def _resident_panel_values(rendered: str, label: str) -> list[str]:
 
 def _resident_panel_value_column(rendered: str, label: str) -> int:
     label_prefix = '| ' + (label + ':').ljust(9) + ' '
-    row = next(line for line in _resident_panel_lines(rendered) if line.startswith(label_prefix))
+    row = next(
+        _resident_panel_content(line)
+        for line in _resident_panel_lines(rendered)
+        if _resident_panel_content(line).startswith(label_prefix)
+    )
     value = _resident_panel_values(rendered, label)[0]
     return row.index(value)
 
 
-def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None:
+def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypatch) -> None:
+    monkeypatch.delenv(ghost.CAT_TERMINAL_WIDTH_ENV, raising=False)
     state, html = ghost.render_fixture(FIXTURE_PATH)
 
     implicit = ghost._render_payload(state, html, 'human')
@@ -899,6 +934,9 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     implicit_panel = _resident_panel_lines(implicit)
     cat_panel = _resident_panel_lines(cat)
     details_panel = _resident_panel_lines(details)
+    _assert_resident_panel_padding(implicit, ghost.DEFAULT_TERMINAL_WIDTH)
+    _assert_resident_panel_padding(cat, ghost.DEFAULT_TERMINAL_WIDTH)
+    _assert_resident_panel_padding(details, ghost.DEFAULT_TERMINAL_WIDTH)
     assert implicit.startswith(implicit_panel[0])
     assert 'mew-wisp resident HUD' in implicit_panel[0]
     assert 'mew-wisp resident HUD' in cat_panel[0]
@@ -914,8 +952,10 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert 'desk details:' not in implicit
     assert 'active window:' not in implicit
     assert 'launcher intents:' not in implicit
-    assert cat.splitlines()[0] == 'terminal form: cat'
-    assert cat.splitlines()[1].lstrip().startswith('cat state:')
+    cat_lines = cat.splitlines()
+    assert cat_lines[0] == 'terminal form: cat'
+    assert cat_lines[1].lstrip().startswith('cat state:')
+    assert cat_lines[3 + len(CAT_REFERENCE_MASK)] == cat_panel[0]
     assert 'resident: mew-wisp' in cat
     assert 'focus:' in cat
     assert 'signal:' in cat
@@ -953,6 +993,34 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert '  code  ' not in cat
     assert '   /\\_____/\\        ' not in cat
     assert ' |  \\_____/  |__/   ' not in cat
+
+
+def test_terminal_human_resident_panel_centers_with_forced_width(monkeypatch) -> None:
+    monkeypatch.setenv(ghost.CAT_TERMINAL_WIDTH_ENV, '100')
+    state, html = ghost.render_fixture(FIXTURE_PATH)
+
+    default = ghost._render_payload(state, html, 'human')
+    cat = ghost._render_payload(state, html, 'human', terminal_form='cat')
+
+    _assert_resident_panel_padding(default, 100)
+    _assert_resident_panel_padding(cat, 100)
+    assert _resident_panel_padding(default) > 0
+    assert _resident_panel_padding(cat) > 0
+    assert default.splitlines()[0] == _resident_panel_lines(default)[0]
+    assert cat.splitlines()[3 + len(CAT_REFERENCE_MASK)] == _resident_panel_lines(cat)[0]
+
+
+def test_terminal_human_resident_panel_narrow_width_adds_no_padding(monkeypatch) -> None:
+    monkeypatch.setenv(ghost.CAT_TERMINAL_WIDTH_ENV, '20')
+    state, html = ghost.render_fixture(FIXTURE_PATH)
+
+    default = ghost._render_payload(state, html, 'human')
+    cat = ghost._render_payload(state, html, 'human', terminal_form='cat')
+
+    for rendered in (default, cat):
+        _assert_resident_panel_padding(rendered, 20)
+        assert _resident_panel_padding(rendered) == 0
+        assert all(line == _resident_panel_content(line) for line in _resident_panel_lines(rendered))
 
 
 def test_cat_terminal_form_centers_sprite_and_marker_with_forced_width(monkeypatch) -> None:
@@ -1011,9 +1079,12 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
     padding = ' ' * _expected_cat_padding(96)
     assert sleeps == [0.0]
     assert output.count('terminal form: cat') == 2
+    panel_header = _resident_panel_lines(output)[0]
+    _assert_resident_panel_padding(output, 96)
     assert output.count(padding + 'cat state: coding') == 2
     assert output.count(padding + _rendered_reference_row(CAT_REFERENCE_MASK[0])) == 2
     assert output.count('mew-wisp resident HUD') == 2
+    assert output.count(panel_header) == 2
 
 
 def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:

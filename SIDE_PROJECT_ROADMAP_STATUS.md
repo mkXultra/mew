@@ -32,7 +32,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `deferred/partial` | Broad HTML removal is deferred after issue #18 closed, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
-| SP22 mew-wisp Visual Polish | `in_progress` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel while preserving cat centering, details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
+| SP22 mew-wisp Visual Polish | `in_progress` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
 | SP23 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
@@ -123,6 +123,12 @@ Current target:
   behavior, and product-code rescue edits `0`; ledger row `37` records the
   practical result, and issue `#22` records the recurring report-schema
   closeout gap
+- SP22d task `#32` landed practical from session `#61`: the fixed-width
+  resident HUD panel now centers to the same deterministic terminal-width
+  override/fallback as the cat form, preserves narrow-width no-padding behavior,
+  keeps the cat mask and state marker semantics unchanged, and keeps
+  `--details`, watch, state/HTML/live/launcher behavior intact; ledger row `38`
+  records the practical result with product-code rescue edits `0`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -190,6 +196,10 @@ Current target:
 - route task #31/session #60 report-schema closeout recurrence as open issue
   `#22` evidence for implementation-lane hardening; product tests passed and
   the operator rewrote only the local report JSON into the canonical schema
+- route repeated SP22c/SP22d macOS Objective-C fork crash logs during closeout
+  as open issue `#23` evidence for implementation-lane hardening; both product
+  attempts passed their focused verifiers, but the work loop emitted unsafe
+  fork-after-runtime-initialization diagnostics
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -264,6 +274,13 @@ Current target:
   HUD panel polish with failure class
   `report_schema_closeout_gap_after_panel_polish`; issue `#22` records the
   recurring non-appendable report closeout gap.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP22d on 2026-04-29: `rows_total=38`, eight `failed`, twenty-seven
+  `practical`, three `clean`, `success_rate=0.789`,
+  `structural_repairs_required=8`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `38` records the centered
+  resident surface with failure class
+  `source_panel_centering_helper_prefix_repair`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,
