@@ -220,9 +220,20 @@ M6.24 resume condition:
   `mew work --oneshot --defer-verify` post-run cleanup: if resume-visible
   `stale_runtime_artifact_risk` names `/tmp/...` artifacts, mew removes them
   before returning to the external verifier and records `post_run_cleanup`.
-  Next action: run a 1-trial same-shape speed-rerun for
-  `make-mips-interpreter`; do not resume new broad measurement or escalate to
-  `-k 5 -n 5` unless the speed proof passes or materially improves.
+  The v0.2 same-shape speed rerun is recorded in
+  `docs/M6_24_DEFER_VERIFY_CLEANUP_SPEED_RERUN_2026-04-29.md`: score stayed
+  0/1, but mew finished normally after exact `node vm.js` succeeded, Doom
+  booted, and `/tmp/frame.bmp` plus `/tmp/frame_000001.bmp` were validated.
+  `post_run_cleanup` stayed `{}` because the final resume had no
+  `stale_runtime_artifact_risk`, so the stale frame survived handoff. The v0.3
+  generic repair makes one-shot cleanup fall back to completed tool calls in
+  `work_report.steps` when resume risk is empty, and recognizes `saved /tmp/`
+  plus `exists size=` runtime artifact output. Open GitHub issues #25-#27 were
+  checked after the rerun; they remain M6.16-style implementation-lane
+  hardening inputs and do not block this M6.24 same-shape repair. Next action:
+  run a 1-trial same-shape speed-rerun for `make-mips-interpreter`; do not
+  resume new broad measurement or escalate to `-k 5 -n 5` unless the speed
+  proof passes or materially improves.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.

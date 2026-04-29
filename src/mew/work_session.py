@@ -3697,8 +3697,10 @@ _RUNTIME_ARTIFACT_CREATED_MARKERS = (
     "frame_bytes",
     "magic=bm",
     "path=/tmp/",
+    "saved /tmp/",
     "saved first frame",
     "saved frame",
+    "exists size=",
     "written to /tmp/",
 )
 _RUNTIME_ARTIFACT_CLEANUP_MARKERS = (
