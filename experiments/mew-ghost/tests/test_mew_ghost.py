@@ -581,6 +581,95 @@ def test_cli_default_human_cat_uses_live_desk_with_injected_runner(capsys, tmp_p
     assert '--desk-json' not in detailed
 
 
+def test_cli_wisp_preset_uses_live_cat_watch_with_bounded_count(capsys, tmp_path: Path) -> None:
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    mew_path = repo_root / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    original_repo_root = ghost.REPO_ROOT
+    calls: list[list[str]] = []
+    statuses = iter(['typing', 'alerting'])
+    sleeps: list[float] = []
+
+    def forbidden_launcher(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError('launcher runner must not be called for --wisp live desk proof')
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs['shell'] is False
+        status = next(statuses)
+        payload = {
+            'fixture_name': 'wisp-live-desk',
+            'desk': {
+                'status': status,
+                'pets': [{'name': 'mew-wisp', 'pet_state': status, 'detail': f'wisp foreground {status}'}],
+                'primary_action': {'id': 'resume', 'label': 'Resume wisp task', 'command': ['mew', 'code']},
+            },
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    ghost.REPO_ROOT = repo_root
+    try:
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--wisp', '--watch-count', '2', '--interval', '0'],
+            live_desk_runner=runner,
+            launcher_runner=forbidden_launcher,
+            clock=lambda: 'wisp-clock',
+            sleeper=lambda interval: sleeps.append(interval),
+        ) == 0
+    finally:
+        ghost.REPO_ROOT = original_repo_root
+
+    output = capsys.readouterr().out
+
+    assert calls == [[str(mew_path), 'desk', '--json'], [str(mew_path), 'desk', '--json']]
+    assert sleeps == [0]
+    assert output.count('mew-wisp resident cat') == 2
+    assert 'wisp foreground typing' in output
+    assert 'wisp foreground alerting' in output
+    assert 'schema_version' not in output
+    assert 'launcher intents:' not in output
+
+
+def test_cli_wisp_preserves_explicit_format_form_and_fixture_terminal(capsys) -> None:
+    def forbidden_live_desk(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError('live desk runner must not be called for fixture or explicit state proof')
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--wisp', '--fixture-terminal', '--watch-count', '1', '--interval', '0'],
+        live_desk_runner=forbidden_live_desk,
+        clock=lambda: 'fixture-wisp',
+        sleeper=lambda interval: None,
+    ) == 0
+    fixture_output = capsys.readouterr().out
+
+    assert 'mew-wisp resident cat' in fixture_output
+    assert 'schema_version' not in fixture_output
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--wisp', '--form', 'default', '--fixture-terminal', '--watch-count', '1', '--interval', '0'],
+        live_desk_runner=forbidden_live_desk,
+        clock=lambda: 'default-form-wisp',
+        sleeper=lambda interval: None,
+    ) == 0
+    default_form_output = capsys.readouterr().out
+
+    assert 'mew-wisp resident HUD' in default_form_output
+    assert 'mew-wisp resident cat' not in default_form_output
+
+    assert ghost.main(
+        ['--fixture', str(FIXTURE_PATH), '--wisp', '--format', 'state', '--watch-count', '1', '--interval', '0'],
+        live_desk_runner=forbidden_live_desk,
+        clock=lambda: 'state-wisp',
+        sleeper=lambda interval: None,
+    ) == 0
+    state_records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    assert len(state_records) == 1
+    assert state_records[0]['desk_status'] == 'disabled'
+    assert state_records[0]['state']['desk']['live_mew_reads'] is False
+
+
 def test_cli_live_desk_human_cat_details_sanitizes_raw_grouped_counts(capsys, tmp_path: Path) -> None:
     repo_root = tmp_path / 'repo'
     repo_root.mkdir()
@@ -1640,6 +1729,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     assert usage_lines == [
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --wisp --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --fixture-terminal --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5',
@@ -1655,6 +1745,7 @@ def test_readme_usage_prefers_uv_run_python_commands() -> None:
     ]
     assert all(not line.startswith('python experiments/mew-ghost/ghost.py') for line in usage_lines)
     assert '--watch-count N' in readme
+    assert '--wisp' in readme
     assert '--format human' in readme
     assert '--form cat' in readme
     assert '--details' in readme
@@ -1679,6 +1770,7 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert '--execute-launchers' in source
     assert '--details' in source
     assert '--watch-count' in source
+    assert '--wisp' in source
     assert '--interval' in source
     assert '--desk-json' in source
     assert '--live-desk' in source

@@ -42,10 +42,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP29 mew-wisp Live Work Speech Freshness | `done` | Task #49/session #80 made live speech prefer live desk detail text over fixture ghost copy. Issue #31 was fixed upstream: `./mew desk --json` now exposes freshness/is_stale/is_current_signal so stale resumable sessions are not presented as current live work. |
 | SP30 mew-wisp Live HUD Coherence | `done` | Task #51/session #82 landed practical after task #50 rolled back: default live HUD focus now uses live desk detail/status/action instead of fixture ghost focus/message, while fixture-terminal output stays deterministic. |
 | SP31 mew-wisp Compact Live Detail | `done` | Task #52/session #83 compacted long live desk detail for speech and HUD focus, preserving useful live work signal without flooding the resident terminal surface; fixture-terminal output remains deterministic. |
+| SP32 mew-wisp Launch Preset | `done` | Task #53/session #84 added `--wisp` as the named resident preset: omitted options default to live human cat foreground watch, while explicit format/form/watch-count and fixture-terminal behavior remain intact. |
 
 ## Active Focus
 
-Active side-project focus: **SP31 mew-wisp Compact Live Detail is complete; the mew-wisp terminal resident surface is now at a satisfactory MVP polish line**.
+Active side-project focus: **SP32 mew-wisp Launch Preset is complete; the next valuable slice is likely path/name ergonomics or legacy HTML retirement, not more cat rendering polish**.
 
 Current target:
 
@@ -259,6 +260,13 @@ Current target:
   rescue edits remain `0`. During closeout, the macOS Objective-C fork warning
   recurred after issue `#23` had been closed, so issue `#23` should be treated
   as reopened implementation-lane evidence.
+- SP32 task `#53` landed practical from one-shot session `#84`: `--wisp` now
+  defaults omitted options to the live human cat foreground watch preset, and
+  bounded `--watch-count` still lets tests and demos avoid an infinite watch.
+  Explicit `--format`, `--form`, and `--fixture-terminal` behavior is preserved.
+  The focused verifier passed (`48 passed`), `git diff --check` passed, live
+  and fixture `--wisp --watch-count 1` smoke outputs were inspected, and rescue
+  edits remain `0`.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`

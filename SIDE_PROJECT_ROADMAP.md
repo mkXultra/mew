@@ -609,3 +609,21 @@ Done when:
 - real live and fixture terminal smoke outputs are inspected
 - no core imports, hidden monitoring, launcher execution, shell execution,
   broad refactors, or deeper live adapter coupling are introduced
+
+### SP32: mew-wisp Launch Preset
+
+Give the resident terminal experience a named launch preset so operators do not
+need to remember the full human/cat/watch option stack.
+
+Done when:
+
+- a user-facing flag such as `--wisp` starts or represents the live human cat
+  resident surface
+- bounded `--watch-count` runs remain available for tests and demos
+- explicit `--format`, `--form`, and fixture-terminal choices keep their
+  existing behavior
+- README usage documents the named preset
+- focused tests cover the preset, explicit-option preservation, fixture mode,
+  and existing state/html/launcher safety
+- no core imports, hidden monitoring, launcher execution, shell execution, or
+  broad refactors are introduced

@@ -83,6 +83,12 @@ Print three bounded foreground watch records as newline-delimited JSON:
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5
 ```
 
+Start the named mew-wisp resident preset. `--wisp` expands omitted options to the live human cat foreground watch surface (`--format human --form cat --watch`) while explicit `--format`, `--form`, and `--watch-count` choices still win; the example below stays bounded for tests and demos:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --wisp --watch-count 2 --interval 0.5
+```
+
 Print two bounded foreground watch iterations as the compact mew-wisp terminal HUD. Normal human terminal output reads repo-local live desk state by default, stays in the foreground, and does not emit JSONL records or diagnostic details:
 
 ```bash

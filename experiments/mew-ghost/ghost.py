@@ -1419,8 +1419,9 @@ def main(
     parser.add_argument('--live-desk', action='store_true', help='explicitly opt into repo-local live desk JSON state')
     parser.add_argument('--fixture-terminal', action='store_true', help='render the deterministic fixture terminal instead of the default repo-local live desk terminal')
     parser.add_argument('--output', help='write rendered output to this path')
-    parser.add_argument('--format', choices=('html', 'state', 'human'), default='html')
-    parser.add_argument('--form', choices=TERMINAL_FORMS, default='default', help='terminal form for --format human')
+    parser.add_argument('--format', choices=('html', 'state', 'human'), default=None, help='render format; defaults to html unless --wisp sets human')
+    parser.add_argument('--form', choices=TERMINAL_FORMS, default=None, help='terminal form for --format human; defaults to default unless --wisp sets cat')
+    parser.add_argument('--wisp', action='store_true', help='start the live human cat foreground watch preset; explicit --format/--form choices and --watch-count still win')
     parser.add_argument('--details', action='store_true', help='include diagnostic details in --format human output')
     parser.add_argument('--refresh-count', type=int, default=DEFAULT_REFRESH_COUNT, help='single-render snapshot count, clamped locally')
     parser.add_argument('--watch', action='store_true', help='run foreground watch until KeyboardInterrupt')
@@ -1429,6 +1430,13 @@ def main(
     parser.add_argument('--live-active-window', action='store_true', help='explicitly opt into the macOS osascript active app/window probe')
     parser.add_argument('--execute-launchers', action='store_true', help='explicitly opt into running mew chat and mew code; dry-run remains the default')
     args = parser.parse_args(argv)
+
+    if args.format is None:
+        args.format = 'human' if args.wisp else 'html'
+    if args.form is None:
+        args.form = 'cat' if args.wisp else 'default'
+    if args.wisp and not args.watch and args.watch_count is None:
+        args.watch = True
 
     if args.watch_count is not None and args.watch_count < 1:
         parser.error('--watch-count must be a positive integer')
