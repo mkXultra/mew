@@ -68,6 +68,10 @@ speed proof passes but a parallel proof fails only by wall timeout across all
 trials, record the parallel run as harness evidence and rerun with sequential or
 low-concurrency scheduling before starting a mew-core repair.
 
+For Harbor proof commands used in this project, `-k` is the trial count and
+`-n` is the worker concurrency. A sequential five-trial proof is therefore
+`-k 5 -n 1`, not `-k 1 -n 5`.
+
 Before broad measurement resumes, re-evaluate the controller thresholds against
 the latest aggregate and batch evidence:
 

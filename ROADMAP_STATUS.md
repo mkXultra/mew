@@ -152,8 +152,12 @@ M6.24 resume condition:
   with no runner errors in `25m 38s`. A five-parallel proof then scored `0/5`
   because all trials hit `mew work` `wall_timeout`; this is recorded as
   resource-contention harness evidence, not a mew-core repair trigger. Current
+  follow-up note: a `-k 1 -n 5` probe created only one trial and then failed
+  immediately with `/Users/mk/.codex/auth.json` `HTTP 429`, so it is not proof
+  evidence. The valid sequential proof shape is `-k 5 -n 1` with a
+  non-quota-limited auth file. Current
   selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_wall_clock_and_targeted_artifact_build_contract resource_normalized_proof_5 -> compile-compcert -k1 -n5`.
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_wall_clock_and_targeted_artifact_build_contract resource_normalized_proof_5 -> compile-compcert -k5 -n1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -590,8 +594,9 @@ M6.24 resume condition:
   passed `1/1` with no runner errors. The five-parallel proof
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-5attempts-20260430-0644/2026-04-30__06-44-04/result.json`
   scored `0/5` only after all trials hit wall timeout under parallel Coq build
-  contention. Next action is a resource-normalized sequential five-trial
-  `compile-compcert` proof.
+  contention. A `-k 1 -n 5` probe created only one trial and hit auth quota, so
+  next action is a resource-normalized sequential five-trial `compile-compcert`
+  proof with `-k 5 -n 1` and a non-quota-limited auth file.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
   now treats an `edit_file` action carrying an `edits` list and no scalar

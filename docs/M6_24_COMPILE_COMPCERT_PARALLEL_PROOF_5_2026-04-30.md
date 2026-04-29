@@ -42,4 +42,19 @@ resource-normalized:
 Next action:
 
 Run a resource-normalized five-trial proof for `compile-compcert`, starting
-with sequential `-k 1 -n 5`, unless a user decision changes the proof budget.
+with sequential `-k 5 -n 1`, unless a user decision changes the proof budget.
+
+## Invalid Sequential Probe
+
+An attempted rerun used `-k 1 -n 5` at:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-5attempts-seq-20260430-0719/2026-04-30__07-19-17/result.json`
+
+That run is not score evidence:
+
+- Harbor created `n_total_trials: 1`, so `-k 1 -n 5` is not a five-trial
+  sequential proof shape.
+- The single trial failed before any work because `/Users/mk/.codex/auth.json`
+  returned `HTTP 429 usage_limit_reached`.
+
+Correct next proof shape: `-k 5 -n 1`, with a non-quota-limited auth file.
