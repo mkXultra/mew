@@ -808,7 +808,11 @@ CAT_REFERENCE_MASK = (
 
 def _cat_state_line_index(rendered: str) -> int:
     lines = rendered.splitlines()
-    return next(index for index, line in enumerate(lines) if line.lstrip().startswith('cat state: '))
+    return next(index for index, line in enumerate(lines) if line.lstrip().startswith('resident state: '))
+
+
+def _expected_cat_caption(text: str) -> str:
+    return text.center(ghost.CAT_TERMINAL_PIXEL_WIDTH).rstrip()
 
 
 def _cat_sprite_lines(rendered: str) -> list[str]:
@@ -952,9 +956,12 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert 'desk details:' not in implicit
     assert 'active window:' not in implicit
     assert 'launcher intents:' not in implicit
+    cat_padding = ' ' * _expected_cat_padding(ghost.DEFAULT_TERMINAL_WIDTH)
     cat_lines = cat.splitlines()
-    assert cat_lines[0] == 'terminal form: cat'
-    assert cat_lines[1].lstrip().startswith('cat state:')
+    assert cat_lines[0] == cat_padding + _expected_cat_caption('mew-wisp resident cat')
+    assert cat_lines[1] == cat_padding + _expected_cat_caption('resident state: coding')
+    assert 'terminal form: cat' not in cat
+    assert 'cat state:' not in cat
     assert cat_lines[3 + len(CAT_REFERENCE_MASK)] == cat_panel[0]
     assert 'resident: mew-wisp' in cat
     assert 'focus:' in cat
@@ -1032,10 +1039,11 @@ def test_cat_terminal_form_centers_sprite_and_marker_with_forced_width(monkeypat
     padding = ' ' * _expected_cat_padding(100)
     lines = cat.splitlines()
     cat_state_index = _cat_state_line_index(cat)
-    assert lines[cat_state_index] == padding + 'cat state: coding'
+    assert lines[cat_state_index - 1] == padding + _expected_cat_caption('mew-wisp resident cat')
+    assert lines[cat_state_index] == padding + _expected_cat_caption('resident state: coding')
     assert all(line.startswith(padding) for line in _cat_sprite_lines(cat))
     assert all(len(line) == len(padding) + len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
-    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == padding + 'state marker: *'
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == padding + _expected_cat_caption('state marker: *')
     assert _cat_sprite_similarity(cat) == 1.0
 
 
@@ -1047,9 +1055,10 @@ def test_cat_terminal_form_narrow_width_adds_no_padding_and_preserves_sprite(mon
 
     lines = cat.splitlines()
     cat_state_index = _cat_state_line_index(cat)
-    assert lines[cat_state_index] == 'cat state: coding'
+    assert lines[cat_state_index - 1] == _expected_cat_caption('mew-wisp resident cat')
+    assert lines[cat_state_index] == _expected_cat_caption('resident state: coding')
     assert all(len(line) == len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
-    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == 'state marker: *'
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == _expected_cat_caption('state marker: *')
     assert _cat_sprite_similarity(cat) == 1.0
 
 
@@ -1078,10 +1087,12 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
     output = capsys.readouterr().out
     padding = ' ' * _expected_cat_padding(96)
     assert sleeps == [0.0]
-    assert output.count('terminal form: cat') == 2
+    assert output.count(padding + _expected_cat_caption('mew-wisp resident cat')) == 2
+    assert 'terminal form: cat' not in output
     panel_header = _resident_panel_lines(output)[0]
     _assert_resident_panel_padding(output, 96)
-    assert output.count(padding + 'cat state: coding') == 2
+    assert output.count(padding + _expected_cat_caption('resident state: coding')) == 2
+    assert 'cat state:' not in output
     assert output.count(padding + _rendered_reference_row(CAT_REFERENCE_MASK[0])) == 2
     assert output.count('mew-wisp resident HUD') == 2
     assert output.count(panel_header) == 2
@@ -1103,8 +1114,10 @@ def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_stat
         mutated['presence']['classification']['state'] = presence_state
         rendered = ghost._render_payload(mutated, html, 'human', terminal_form='cat')
 
-        assert 'terminal form: cat' in rendered
-        assert 'cat state: %s' % presence_state in rendered
+        assert 'mew-wisp resident cat' in rendered
+        assert 'resident state: %s' % presence_state in rendered
+        assert 'terminal form: cat' not in rendered
+        assert 'cat state:' not in rendered
         assert marker in rendered
         assert rendered.count(marker) == 1
         assert marker not in '\n'.join(_cat_sprite_lines(rendered))
@@ -1123,7 +1136,10 @@ def test_human_details_flag_prints_diagnostic_sections(capsys) -> None:
 
     output = capsys.readouterr().out
 
-    assert output.startswith('terminal form: cat')
+    assert output.splitlines()[0].strip() == 'mew-wisp resident cat'
+    assert output.splitlines()[1].strip() == 'resident state: coding'
+    assert 'terminal form: cat' not in output
+    assert 'cat state:' not in output
     assert 'mew-wisp resident HUD' in output
     assert 'details:' in output
     assert 'freshness:' in output
@@ -1146,8 +1162,10 @@ def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
     output = capsys.readouterr().out
 
     assert sleeps == [0.0]
-    assert output.count('terminal form: cat') == 2
-    assert output.count('cat state:') == 2
+    assert output.count('mew-wisp resident cat') == 2
+    assert output.count('resident state: coding') == 2
+    assert 'terminal form: cat' not in output
+    assert 'cat state:' not in output
     assert output.count('mew-wisp resident HUD') == 2
     assert output.count('resident: mew-wisp') == 2
     assert output.count('focus:') == 2

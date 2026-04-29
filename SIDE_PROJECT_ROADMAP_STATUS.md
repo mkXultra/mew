@@ -32,7 +32,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `deferred/partial` | Broad HTML removal is deferred after issue #18 closed, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
-| SP22 mew-wisp Visual Polish | `in_progress` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
+| SP22 mew-wisp Visual Polish | `in_progress` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e replaced raw cat-form diagnostics with resident-facing header copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
 | SP23 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
@@ -129,6 +129,13 @@ Current target:
   keeps the cat mask and state marker semantics unchanged, and keeps
   `--details`, watch, state/HTML/live/launcher behavior intact; ledger row `38`
   records the practical result with product-code rescue edits `0`
+- SP22e task `#33` landed practical from session `#62`: normal cat human output
+  now starts with centered resident-facing copy (`mew-wisp resident cat` and
+  `resident state: ...`) instead of `terminal form: cat` / `cat state: ...`,
+  while preserving the literal cat mask, centered panel, state marker semantics,
+  `--details`, watch, state/HTML/live/launcher behavior, and product-code
+  rescue edits `0`; ledger row `39` records the practical result, and issue
+  `#24` records the historical-path report-name closeout follow-up
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -200,6 +207,10 @@ Current target:
   as open issue `#23` evidence for implementation-lane hardening; both product
   attempts passed their focused verifiers, but the work loop emitted unsafe
   fork-after-runtime-initialization diagnostics
+- route task #33/session #62 stale `side_project: mew-ghost` report naming as
+  open issue `#24` evidence for implementation-lane hardening; the operator
+  corrected only the local report to the canonical `mew-wisp` side-project name
+  before ledger append
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -281,6 +292,14 @@ Current target:
   `codex_product_code_rescue_edits=0`. Ledger row `38` records the centered
   resident surface with failure class
   `source_panel_centering_helper_prefix_repair`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP22e on 2026-04-29: `rows_total=39`, eight `failed`, twenty-eight
+  `practical`, three `clean`, `success_rate=0.795`,
+  `structural_repairs_required=8`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `39` records the resident
+  header-copy polish with failure class
+  `report_side_project_stale_name_followup`; issue `#24` records the stale
+  historical path/product-name closeout gap.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,

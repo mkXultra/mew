@@ -107,15 +107,20 @@ def _center_terminal_line(line: str, terminal_width: int) -> str:
     return ' ' * padding + line
 
 
+def _cat_terminal_caption(line: str) -> str:
+    return line.center(CAT_TERMINAL_PIXEL_WIDTH).rstrip()
+
+
 def _cat_terminal_sprite(presence_state: str) -> tuple[str, ...]:
     sprite_lines = tuple(
         ''.join('██' if cell == '#' else '  ' for cell in row)
         for row in CAT_TERMINAL_SPRITE_MASK
     )
     return (
-        'cat state: %s' % presence_state,
+        _cat_terminal_caption('mew-wisp resident cat'),
+        _cat_terminal_caption('resident state: %s' % presence_state),
         *sprite_lines,
-        'state marker: %s' % CAT_TERMINAL_STATE_MARKERS[presence_state],
+        _cat_terminal_caption('state marker: %s' % CAT_TERMINAL_STATE_MARKERS[presence_state]),
     )
 
 
@@ -907,7 +912,7 @@ def _terminal_cat_lines(presence_state: str, terminal_width: int | None = None) 
         CAT_TERMINAL_FORM_BY_PRESENCE['attentive'],
     )
     resolved_width = _terminal_width() if terminal_width is None else max(0, terminal_width)
-    return ['terminal form: cat'] + [_center_terminal_line(line, resolved_width) for line in form_lines]
+    return [_center_terminal_line(line, resolved_width) for line in form_lines]
 
 
 def render_terminal_human(
