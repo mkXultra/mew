@@ -73,6 +73,10 @@ Why M6.24 is active now:
 
 - User decision on 2026-04-27: pause M7 and add Terminal-Bench milestones
   before continuing the senses roadmap.
+- User decision on 2026-04-29: M6.24 is a measurement / improvement loop, not
+  a pure "measure all tasks first" campaign. If the batch gap to Codex exceeds
+  the threshold, pause broad measurement, repair a generic gap class, rerun the
+  same failed shape, then continue measuring.
 - User decision on 2026-04-28: if M6.24 exposes an accepted structural
   problem, stop broad measurement, set M6.24 to `pending`, and repair the
   substrate through M6.14 before returning to the same failing shape.
@@ -122,6 +126,15 @@ Why M6.24 is active now:
 
 M6.24 resume condition:
 
+- Controller docs:
+  `docs/M6_24_DECISION_LEDGER.md` and
+  `docs/M6_24_GAP_BASELINE_2026-04-29.md`.
+- Current controller mode: `improvement_phase`.
+- M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
+  **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
+  Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
+  `> 20 pp` improvement threshold. Do not continue broad measurement just
+  because Batch 6 still lists `gpt2-codegolf` as pending.
 - If a new accepted structural blocker appears, pause M6.24, append it to
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair it through M6.14, record
   focused validation, and rerun the same failed task shape before resuming
@@ -455,14 +468,11 @@ M6.24 resume condition:
 
 Next concrete action:
 
-- Run M6.24 Batch 6 task-by-task from
-  `docs/M6_24_BATCH_6_MANIFEST_2026-04-29.md`, using the aligned
-  `--agent-timeout-multiplier 2`, `timeout_seconds=1800`,
-  `{max_wall_seconds_option}`, and `/tmp` scratch-permission run shape. Next
-  task: `gpt2-codegolf`. If a new accepted structural blocker
-  appears, append it to
-  `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair through M6.14, rerun the
-  same failed shape, then resume broad measurement.
+- Do not run the next broad-measurement task yet. First classify the measured
+  Batch 1-6 failures into gap classes, choose one generic improvement target,
+  name the failed task shape to rerun after repair, and record that selection
+  in `docs/M6_24_DECISION_LEDGER.md`. After the repair and same-shape rerun are
+  recorded, resume broad measurement with Batch 6.
 
 Closed M6.22 result:
 
@@ -1992,8 +2002,9 @@ Planned future milestones:
   combine them with the M6.20 positive-control artifacts.
 - **M6.23 Terminal-Bench Failure-Class Coverage**: classify below-target
   benchmark failures into repair classes and rerun at least one ranked repair.
-- **M6.24 Broad Terminal-Bench Parity Campaign**: run all 89 registry tasks and
-  match or exceed Codex's 366/445 successes, 82.2% aggregate target.
+- **M6.24 Broad Terminal-Bench Parity Campaign**: run measurement /
+  improvement loops over the 89 registry tasks and close the gap to Codex's
+  366/445 successes, 82.2% aggregate target.
 - **M6.25 Codex-Plus Resident Advantage**: preserve Terminal-Bench parity while
   proving mew's persistence, memory, and repair loops make it preferable to
   inhabit over a reactive terminal-agent CLI.

@@ -1341,7 +1341,11 @@ Why it matters:
 
 ## Milestone 6.24: Broad Terminal-Bench Parity Campaign
 
-Run the full target registry and close the gap to Codex on Terminal-Bench 2.0.
+Run a measurement / improvement loop against the frozen Terminal-Bench 2.0
+target registry until mew closes the gap to Codex. M6.24 is not a pure
+"measure everything first" milestone: if a measured batch shows a large Codex
+gap, pause broad measurement, improve the generic work-session substrate, rerun
+the same failed shape, and only then continue measuring new batches.
 
 Target:
 
@@ -1355,18 +1359,31 @@ Target:
 - preserve the generic arbitrary-workspace contract throughout the campaign;
   the same work-session path should be usable for normal repositories and
   Terminal-Bench task directories
+- use a batch-level controller:
+  - batch gap `<= 10 percentage points`: classify gaps and continue measurement
+  - batch gap `> 10` and `<= 20 percentage points`: record gap classes; continue
+    unless the same class repeats or an accepted structural signal appears
+  - batch gap `> 20 percentage points`: enter improvement phase before spending
+    more broad-measurement budget
+  - any accepted structural blocker: pause M6.24, repair through M6.14, rerun
+    the same failed shape, then resume M6.24
+  - aggregate gap `> 20 percentage points` across three consecutive measured
+    batches: enter improvement phase even if the latest batch alone is mixed
 
 Done when:
 
 - all 89 registry tasks have mew results with complete artifacts and no
   unexplained Harbor runner errors
 - mew aggregate successes match or exceed the Codex target of 366 successes out
-  of 445 trials, 82.2% resolution rate
+  of 445 trials, 82.2% resolution rate, or an explicit staged close gate is
+  written after the aggregate gap drops below the agreed near-parity threshold
 - every task where mew is below Codex has a recorded classification and either
   a selected repair route or a written decision to defer it
 - no accepted structural blocker remains unaddressed while broad measurement
   continues; M6.24 may continue measurement only for a named disambiguation
   probe, then must pause behind M6.14 if the blocker is confirmed
+- every improvement phase has a before/after rerun against the same failed
+  task shape or a written reason why the repair cannot be validated that way
 - the final parity report includes aggregate score, per-task deltas, cost/token
   data when available, timeout/error rates, and the top remaining gaps
 
