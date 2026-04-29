@@ -148,8 +148,9 @@ M6.24 resume condition:
   kills timed-out work commands by process group, and surfaces bare/chained/
   wrapped/full-project/variable-assignment `make` forms that do not name the
   required artifact as an explicit target. Codex-ultra re-review approved the
-  repair. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_wall_clock_and_targeted_artifact_build_contract speed rerun -> compile-compcert speed_1`.
+  repair. The v0.2 same-shape speed proof passed `compile-compcert` at `1/1`
+  with no runner errors in `25m 38s`. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_wall_clock_and_targeted_artifact_build_contract proof_5 -> compile-compcert`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -581,8 +582,10 @@ M6.24 resume condition:
   caps `run_command`/`run_tests` to remaining `mew work` wall budget, kills
   timed-out work commands by process group, and surfaces untargeted full-project
   or variable-assignment `make` builds for specific-artifact long dependency
-  tasks. Next action remains a one-trial same-shape `compile-compcert` speed
-  rerun.
+  tasks. The v0.2 speed rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-1attempt-20260430-0615/2026-04-30__06-14-47/result.json`
+  passed `1/1` with no runner errors. Next action is a five-trial same-shape
+  `compile-compcert` proof.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
   now treats an `edit_file` action carrying an `edits` list and no scalar

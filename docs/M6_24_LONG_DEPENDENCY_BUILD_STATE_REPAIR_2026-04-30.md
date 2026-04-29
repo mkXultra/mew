@@ -144,6 +144,34 @@ Result:
 Next validation remains a one-trial same-shape speed rerun for
 `compile-compcert`.
 
+## v0.2 Speed Rerun
+
+The v0.2 same-shape speed rerun passed:
+
+- result:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-1attempt-20260430-0615/2026-04-30__06-14-47/result.json`
+- trial:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-1attempt-20260430-0615/2026-04-30__06-14-47/compile-compcert__42Z5Wsw/result.json`
+- reward: `1.0`
+- errors: `0`
+- runtime: `25m 38s`
+
+Observed behavior:
+
+- the v0.2 strategy blocker surfaced the early untargeted `make -j2 all`;
+- mew recovered from Menhir/toolchain and dependency-generation blockers;
+- the final material build used `make -j2 ccomp`;
+- the external verifier passed executable, functional smoke, and unsupported
+  feature checks.
+
+Residual calibration signal:
+
+- the final report still carried stale `long_dependency_build_state` missing
+  artifact entries after verifier success. This is report/resume cleanup
+  evidence, not a blocker for the selected score repair.
+
+Next validation is a five-trial same-shape proof for `compile-compcert`.
+
 ## v0.1 Speed Rerun Diagnostic
 
 The v0.1 speed rerun is recorded in:
