@@ -3670,6 +3670,43 @@ _RUNTIME_FAILURE_LINE_RE = re.compile(
     r"unsupported syscall|unknown syscall|syscall)",
     re.IGNORECASE,
 )
+_RUNTIME_FRESH_RUN_MARKERS = (
+    "emulator",
+    "execute",
+    "fresh run",
+    "interpreter",
+    "node ",
+    "run ",
+    "vm",
+)
+_RUNTIME_ARTIFACT_GENERATION_MARKERS = (
+    "frame",
+    "frames",
+    "generated",
+    "screenshot",
+    "stdout",
+    "will be written",
+    "will write",
+    "writes",
+    "written",
+)
+_RUNTIME_ARTIFACT_CREATED_MARKERS = (
+    "bmp_header_ok=true",
+    "exists=true",
+    "frame_bytes",
+    "magic=bm",
+    "path=/tmp/",
+    "written to /tmp/",
+)
+_RUNTIME_ARTIFACT_CLEANUP_MARKERS = (
+    "cleaned",
+    "cleanup",
+    "deleted",
+    "remove",
+    "removed",
+    "rm -f",
+    "unlink",
+)
 _VERIFIER_MISSING_ATTRIBUTE_RE = re.compile(
     r"module ['\"]([^'\"]+)['\"] has no attribute ['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
@@ -3708,6 +3745,128 @@ def _verifier_failure_text(call):
         result.get("stdout") or running.get("stdout") or "",
     ]
     return "\n".join(str(part) for part in parts if part)
+
+
+def _runtime_artifact_call_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    parts = [
+        call.get("summary") or "",
+        call.get("error") or "",
+        parameters.get("command") or "",
+        result.get("command") or "",
+        result.get("stdout") or "",
+        result.get("stderr") or "",
+        result.get("summary") or "",
+    ]
+    return "\n".join(str(part) for part in parts if part)
+
+
+def _runtime_fresh_run_artifacts_from_text(text, limit=6):
+    text = str(text or "")
+    lowered = text.casefold()
+    if "/tmp/" not in lowered:
+        return []
+    if not any(marker in lowered for marker in _RUNTIME_FRESH_RUN_MARKERS):
+        return []
+    if not any(marker in lowered for marker in _RUNTIME_ARTIFACT_GENERATION_MARKERS):
+        return []
+    artifacts = []
+    for match in _RUNTIME_EXPECTED_ARTIFACT_RE.finditer(text):
+        artifact = str(match.group(1) or "").rstrip("`'\".,;:)")
+        if artifact and artifact not in artifacts:
+            artifacts.append(artifact)
+        if len(artifacts) >= limit:
+            break
+    return artifacts
+
+
+def _runtime_artifact_created_by_call(call, artifact):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    if str(artifact or "").casefold() not in lowered:
+        return False
+    if "exists=false" in lowered and not any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS):
+        return False
+    return any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS)
+
+
+def _runtime_artifact_cleanup_by_call(call, artifact):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    if str(artifact or "").casefold() not in lowered:
+        return False
+    cleanup_pos = max((lowered.rfind(marker) for marker in _RUNTIME_ARTIFACT_CLEANUP_MARKERS), default=-1)
+    if cleanup_pos < 0:
+        return False
+    created_pos = max((lowered.rfind(marker) for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS), default=-1)
+    return created_pos < 0 or cleanup_pos > created_pos
+
+
+def build_stale_runtime_artifact_risk(task, calls, session=None):
+    task = task if isinstance(task, dict) else {}
+    session = session if isinstance(session, dict) else {}
+    task_text = "\n".join(
+        str(value or "")
+        for value in (
+            task.get("title"),
+            task.get("description"),
+            task.get("notes"),
+            session.get("title"),
+            session.get("goal"),
+        )
+        if value
+    )
+    artifacts = _runtime_fresh_run_artifacts_from_text(task_text)
+    if not artifacts:
+        return {}
+    latest_created = {}
+    latest_cleaned = {}
+    for call in calls or []:
+        if not isinstance(call, dict) or str(call.get("status") or "").casefold() != "completed":
+            continue
+        try:
+            call_id = int(call.get("id"))
+        except (TypeError, ValueError):
+            continue
+        for artifact in artifacts:
+            if _runtime_artifact_created_by_call(call, artifact):
+                latest_created[artifact] = call
+            if _runtime_artifact_cleanup_by_call(call, artifact):
+                latest_cleaned[artifact] = call_id
+    stale = []
+    for artifact, call in latest_created.items():
+        try:
+            created_id = int(call.get("id"))
+        except (TypeError, ValueError):
+            created_id = -1
+        if latest_cleaned.get(artifact, -1) > created_id:
+            continue
+        stale.append(
+            {
+                "artifact": artifact,
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "suggested_cleanup": f"preserve proof, then remove stale {artifact} before finish if the verifier creates it",
+            }
+        )
+    if not stale:
+        return {}
+    return {
+        "kind": "stale_runtime_artifact_risk",
+        "artifacts": stale,
+        "suggested_next": (
+            "runtime self-verification created /tmp artifacts that may short-circuit a fresh external verifier; "
+            "preserve evidence in acceptance_checks, then clean stale runtime artifacts before finish unless "
+            "the task explicitly requires them to pre-exist"
+        ),
+    }
 
 
 def _extract_verifier_error_lines(text, limit=6):
@@ -8052,6 +8211,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         limit=4,
     )
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
+    stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -8134,6 +8294,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "skipped_exact_read_plan_items": skipped_exact_read_plan_items,
         "repair_anchor_observations": repair_anchor_observations,
         "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
+        "stale_runtime_artifact_risk": stale_runtime_artifact_risk,
         "failed_patch_repair": failed_patch_repair,
         "broad_rollback_slice_repair": broad_rollback_slice_repair,
         "retry_context": retry_context,
@@ -8356,6 +8517,17 @@ def format_work_session_resume(resume):
                 "verifier_failure_latest_dry_run: "
                 f"#{dry_run_write.get('tool_call_id')} {dry_run_write.get('path') or ''}"
             )
+    stale_runtime_artifact_risk = resume.get("stale_runtime_artifact_risk") or {}
+    if stale_runtime_artifact_risk:
+        lines.append(f"stale_runtime_artifact_risk: {stale_runtime_artifact_risk.get('kind')}")
+        for item in (stale_runtime_artifact_risk.get("artifacts") or [])[:3]:
+            lines.append(
+                "stale_runtime_artifact: "
+                f"{item.get('artifact')} from tool=#{item.get('source_tool_call_id') or '-'} "
+                f"{item.get('suggested_cleanup') or ''}".strip()
+            )
+        if stale_runtime_artifact_risk.get("suggested_next"):
+            lines.append(f"stale_runtime_artifact_next: {stale_runtime_artifact_risk.get('suggested_next')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)

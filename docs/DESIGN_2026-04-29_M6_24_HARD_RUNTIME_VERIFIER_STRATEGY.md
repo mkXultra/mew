@@ -20,6 +20,19 @@ The next useful substrate behavior is not another broad run. It is to preserve
 runtime failure signatures in reentry so the model maps the artifact and
 runtime source before another rebuild.
 
+## Architecture Fit
+
+Decision: `implementation_profile`.
+
+This repair is hard-task behavior inside the authoritative implementation/tiny
+lane. The changed loop is still the coding loop: preserve verifier evidence,
+inspect runtime/source artifacts, patch, and rerun the same verifier shape.
+
+No new lane is justified here because the output authority remains a code/task
+change plus runtime verifier proof. The repair adds a stronger implementation
+profile for VM/emulator/interpreter failures; it does not make deliberation,
+memory, or verifier helper lanes write-capable.
+
 ## v0 Repair
 
 Implemented in:
@@ -87,3 +100,29 @@ Accept as improved only if:
 
 If the rerun remains 0/5 with the same signatures, keep M6.24 in improvement
 phase and choose the next generic blocker from the recorded evidence.
+
+## Same-Shape Rerun Result
+
+Recorded in:
+
+`docs/M6_24_HARD_RUNTIME_RERUN_2026-04-29.md`
+
+The rerun stayed 0/5, but it improved the underlying shape:
+
+- permission waits no longer dominated
+- all trials pursued real source/runtime paths
+- one trial self-verified exact `node vm.js` plus a valid 640x400 32bpp frame
+- external verifier reached 2/3 on the best trial
+
+The remaining blocker is now classified as:
+
+`runtime_artifact_cleanup_external_verifier_alignment`
+
+The best trial left `/tmp/frame.bmp` from self-verification. The external
+verifier waits only until that path exists, then terminates the fresh VM process
+after one second. Because the stale frame existed before verifier launch, the
+verifier captured stdout too early and failed the expected graphics-init line.
+
+Next repair should preserve self-check evidence in the report while cleaning
+stale runtime artifacts before `finish` when the final verifier is expected to
+create those artifacts itself.

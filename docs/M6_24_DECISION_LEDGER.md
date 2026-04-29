@@ -9,6 +9,7 @@ Companion controller and data files:
 - `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
+- `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
 
 ## Controller Rule
 
@@ -39,6 +40,12 @@ Improvement phase requirements:
    decision explains why the repair cannot be validated with the same shape.
 6. Record classification and repair state in
    `proof-artifacts/m6_24_gap_ledger.jsonl`.
+7. For any structural repair that changes task policy, lane behavior,
+   helper-lane behavior, verifier authority, or repair loop shape, run the
+   Architecture Fit Gate from `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` before code
+   changes start. Coding gaps default to implementation/tiny profile or guard
+   changes unless the resident lane architecture explicitly justifies a new
+   authoritative lane.
 
 Allowed next actions during improvement phase:
 
@@ -61,6 +68,9 @@ direction.
 | 2026-04-29 | Implement v0 hard-task contract capsule. | `docs/REVIEW_2026-04-29_M6_24_CODEX_IMPLEMENTATION_LANE_PATTERNS.md` and `docs/DESIGN_2026-04-29_M6_24_HARD_TASK_CONTRACT_CAPSULE.md`: Codex-style persistent objective/source grounding was translated into `working_memory.implementation_contract` plus a pre-finish source proof blocker. Focused validation passed for acceptance and work-session surfaces. | Rerun one same-shape hard task, preferably `make-doom-for-mips` or `make-mips-interpreter`, and record whether source grounding, surrogate/stub finishes, and reward improve. | rerun_recorded |
 | 2026-04-29 | Same-shape rerun improved behavior but not reward. | `docs/M6_24_HARD_TASK_CONTRACT_RERUN_2026-04-29.md` and codex-ultra review `docs/REVIEW_2026-04-29_M6_24_HARD_CONTRACT_RERUN_NEXT.md`: `make-doom-for-mips` remained 0/5, but the failure shape changed from surrogate/stub completions to real source-build and VM-loader/runtime repair attempts; no false complete state was observed. Two trials still stopped on system package/read-write permission boundaries, and three reached real ELF/VM work before missing `/tmp/frame.bmp`. | Continue improvement phase. Do not run new broad measurement. Next bounded repair is generic hard-runtime verifier strategy: classify VM/emulator/interpreter failure signatures, preserve PC/opcode/artifact evidence, steer runtime-source plus readelf/nm/objdump/addr2line mapping, then rerun `make-doom-for-mips` same shape again. | active |
 | 2026-04-29 | Implement v0 hard-runtime verifier strategy. | `docs/DESIGN_2026-04-29_M6_24_HARD_RUNTIME_VERIFIER_STRATEGY.md`: failed VM/emulator/interpreter verifier output now becomes `verifier_failure_repair_agenda.runtime_contract_gap` with kind, PC/opcode/artifact signature, recommended mapping tools, and resume-visible next action. Reasoning policy also promotes MIPS/ELF/toolchain/provided-source/VM-style implementation tasks to high effort. Focused work-session and reasoning-policy validation passed. | Rerun `make-doom-for-mips` same shape and record whether the runtime gap appears in reentry, permission waits are reduced/absent, and at least one trial passes the current VM startup/opcode blocker or writes `/tmp/frame.bmp`. | rerun_pending |
+| 2026-04-29 | Hard-runtime rerun improved external verifier proximity but not reward. | `docs/M6_24_HARD_RUNTIME_RERUN_2026-04-29.md`: `make-doom-for-mips` remained 0/5, but permission waits disappeared, no surrogate/stub completion dominated, all trials pursued real source/runtime routes, and one trial self-verified exact `node vm.js` plus a valid 640x400 32bpp `/tmp/frame.bmp`. External verifier reached 2/3 on the best trial but failed stdout timing because stale `/tmp/frame.bmp` from self-verification caused the verifier to terminate the fresh VM process too early. | Continue improvement phase. Do not run new broad measurement. Next bounded repair is generic runtime artifact freshness / external verifier alignment: preserve self-check evidence but clean stale runtime artifacts before finish when the verifier is expected to create them, surface `stale_runtime_artifact_risk`, then rerun `make-doom-for-mips` same shape again. | active |
+| 2026-04-29 | Implement v0 runtime artifact freshness repair. | `docs/DESIGN_2026-04-29_M6_24_RUNTIME_ARTIFACT_FRESHNESS.md`: `acceptance_finish_blocker()` now blocks `task_done=true` when a fresh-runtime task self-verifies a generated `/tmp/...` artifact but no later cleanup is visible. Work-session resume surfaces `stale_runtime_artifact_risk`, and THINK guidance tells the model to preserve proof then clean stale runtime artifacts before finish unless the task requires the artifact to pre-exist. Focused acceptance/work-session validation and ruff passed. | Rerun `make-doom-for-mips` same shape and record whether the stale `/tmp/frame.bmp` stdout-timing failure disappears or reward improves. | rerun_pending |
+| 2026-04-29 | Add Resident Lane Architecture fit gate to structural gap repairs. | The hard-task repair sequence showed that `hard task` was treated as a failure symptom without an explicit lane/profile/helper decision. `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` now makes `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md` authoritative for structural design fit and requires an Architecture Fit Gate before code changes that affect lane behavior or repair loop shape. | Future M6.24 structural designs must record whether the repair is `no_lane_change`, `implementation_profile`, `helper_lane`, or `new_lane`; coding gaps default to implementation/tiny profile or guard changes unless a new authoritative lane is explicitly justified. | active |
 
 ## Current Mode
 
@@ -73,4 +83,4 @@ decision supersedes it.
 
 Current selected next action:
 
-`M6.24 -> hard_task_implementation_strategy_contract_retention -> hard-runtime verifier strategy repair implemented -> rerun make-doom-for-mips same shape`
+`M6.24 -> hard_task_implementation_strategy_contract_retention -> runtime artifact freshness repair implemented -> rerun make-doom-for-mips same shape`
