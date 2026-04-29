@@ -6,6 +6,7 @@ from mew.acceptance import (
     implementation_contract_source_requirements,
     is_numeric_artifact_task,
     is_query_only_hidden_model_task,
+    is_runtime_visual_artifact_task,
 )
 
 
@@ -172,6 +173,108 @@ def test_acceptance_finish_blocker_rejects_runtime_command_pass_without_artifact
 
     assert "runtime final verifier artifact evidence missing" in blocker
     assert "/tmp/frame.bmp" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_runtime_visual_artifact_format_only_evidence():
+    text = (
+        "Implement vm.js so I can run `node vm.js`. It should save rendered frames to /tmp/frame.bmp. "
+        "I will check that you booted doom correctly from the first rendered frame."
+    )
+    checks = [
+        {
+            "constraint": "first rendered frame is correct",
+            "status": "verified",
+            "evidence": (
+                "Tool #19 validated /tmp/frame.bmp as a valid/non-uniform BMP, "
+                "and tool #20 removed the stale frame."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 19,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js && python3 check_frame.py"},
+                "result": {
+                    "command": "node vm.js && python3 check_frame.py",
+                    "exit_code": 0,
+                    "stdout": (
+                        "artifact validation passed: both outputs were identical "
+                        "320x200x32 BMPs\npath=/tmp/frame.bmp\n"
+                    ),
+                    "stderr": "saved frame 1 to /tmp/frame.bmp\n",
+                },
+            },
+            {
+                "id": 20,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp"},
+                "result": {"command": "rm -f /tmp/frame.bmp", "exit_code": 0, "stdout": "removed /tmp/frame.bmp\n"},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime visual artifact quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_runtime_visual_artifact_quality_evidence():
+    text = (
+        "Implement vm.js so I can run `node vm.js`. It should save rendered frames to /tmp/frame.bmp. "
+        "I will check that you booted doom correctly from the first rendered frame."
+    )
+    checks = [
+        {
+            "constraint": "first rendered frame is correct",
+            "status": "verified",
+            "evidence": (
+                "Tool #19 confirmed exact stdout I_InitGraphics, expected dimensions 640x400, "
+                "and reference similarity for /tmp/frame.bmp; tool #20 removed the stale frame."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 19,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js && python3 check_frame.py"},
+                "result": {
+                    "command": "node vm.js && python3 check_frame.py",
+                    "exit_code": 0,
+                    "stdout": (
+                        "I_InitGraphics: DOOM screen size: w x h: 320 x 200\n"
+                        "framebuffer expected dimensions 640x400\n"
+                        "reference similarity passed l2=0.01\n"
+                        "saved /tmp/frame.bmp\n"
+                    ),
+                },
+            },
+            {
+                "id": 20,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp"},
+                "result": {"command": "rm -f /tmp/frame.bmp", "exit_code": 0, "stdout": "removed /tmp/frame.bmp\n"},
+            },
+        ]
+    }
+
+    assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session) == ""
+
+
+def test_runtime_visual_artifact_task_classifier_requires_quality_language():
+    assert is_runtime_visual_artifact_task(
+        "Run node vm.js; it should save rendered frames and I will check the first frame is correct."
+    )
+    assert not is_runtime_visual_artifact_task(
+        "Run node vm.js; it will write /tmp/frame.bmp during the fresh VM run."
+    )
 
 
 def test_implementation_contract_source_requirements_extract_provided_source_refs():

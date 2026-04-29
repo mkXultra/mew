@@ -124,6 +124,32 @@ This keeps the authority model unchanged: the implementation lane may verify
 and inspect runtime artifacts, but one-shot handoff cleans fresh-verifier
 artifacts even if the resume bundle missed the risk.
 
+## v0.4 Runtime Visual Artifact Quality Contract
+
+The five-trial make-mips rerun showed that freshness cleanup was no longer the
+only blocker. Some trials finished with valid frame artifacts but still failed
+the external verifier because the frame/output was not semantically correct:
+
+- accepted `320x200x32 BMP` self-consistency when the verifier expected
+  `640x400`;
+- accepted frame creation while missing the expected Doom boot stdout marker;
+- relied on artifact existence, nonzero pixels, valid headers, or matching
+  self-generated outputs.
+
+The guard now treats runtime frame, screenshot, rendered image, and framebuffer
+tasks with explicit expected/correct/check language as a quality-contract
+surface. Before `task_done=true`, such tasks must cite completed grounding
+evidence for at least one externally meaningful property:
+
+- expected dimensions or resolution;
+- reference similarity or comparison;
+- exact stdout, boot marker, screen-size marker, or equivalent runtime marker.
+
+This is still generic implementation-lane behavior. It does not encode Doom,
+Terminal-Bench, or `make-mips-interpreter`; it blocks false completion when a
+runtime visual artifact exists but the observed properties are only format or
+self-consistency checks.
+
 ## Validation
 
 Focused validation:
@@ -182,6 +208,24 @@ Observed:
 - `7 passed, 769 deselected`
 - `ruff`: all checks passed
 
+Additional v0.4 validation:
+
+```sh
+uv run pytest tests/test_acceptance.py -k 'runtime_visual_artifact or runtime_artifact or runtime_command_pass_without_artifact' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/acceptance.py src/mew/work_loop.py tests/test_acceptance.py tests/test_work_session.py
+git diff --check
+jq -c . proof-artifacts/m6_24_gap_ledger.jsonl
+```
+
+Observed:
+
+- `7 passed, 49 deselected`
+- `1 passed, 781 deselected`
+- `ruff`: all checks passed
+- `git diff --check`: passed
+- gap ledger parsed as JSON Lines
+
 ## Same-Shape Rerun Gate
 
 Next proof should rerun:
@@ -193,10 +237,12 @@ Accept as improved only if:
 - no stale runtime artifact finish is accepted;
 - `post_run_cleanup` removes self-verifier `/tmp/...` artifacts before external
   verifier handoff when `--defer-verify` is active;
-- the trial no longer fails because `/tmp/frame.bmp` pre-exists before the
-  external verifier starts;
-- reward improves, or the external verifier passes the previously failing
-  stdout timing condition.
+- the trial no longer accepts format-only or self-consistent visual artifacts
+  as proof for expected rendered output;
+- acceptance cites grounded expected dimensions/resolution, reference
+  similarity, or exact stdout/boot markers before finish;
+- reward improves, or the external verifier failures move away from visual
+  artifact quality / stdout-contract evidence.
 
 If the rerun remains 0/1 but fails on a different concrete verifier condition,
 record that new condition in `proof-artifacts/m6_24_gap_ledger.jsonl` before

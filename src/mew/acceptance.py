@@ -95,6 +95,41 @@ _RUNTIME_ARTIFACT_CLEANUP_MARKERS = (
     "rm -f",
     "unlink",
 )
+_RUNTIME_VISUAL_ARTIFACT_MARKERS = (
+    "frame",
+    "frames",
+    "framebuffer",
+    "image",
+    "render",
+    "rendered",
+    "screenshot",
+    "screen size",
+)
+_RUNTIME_VISUAL_ARTIFACT_QUALITY_TASK_MARKERS = (
+    "check that",
+    "correct",
+    "correctly",
+    "expected",
+    "reference",
+    "similar",
+    "verify",
+    "will check",
+)
+_RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS = (
+    "expected dimensions",
+    "expected resolution",
+    "expected size",
+    "expected text",
+    "exact stdout",
+    "framebuffer",
+    "i_initgraphics",
+    "l2",
+    "reference",
+    "resolution",
+    "screen size",
+    "similarity",
+    "ssim",
+)
 
 _EDIT_SCOPE_MARKERS = (
     "allowed edit",
@@ -486,6 +521,15 @@ def _runtime_fresh_run_context(text: object) -> bool:
     return True
 
 
+def is_runtime_visual_artifact_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not _runtime_fresh_run_context(lowered):
+        return False
+    if not any(marker in lowered for marker in _RUNTIME_VISUAL_ARTIFACT_MARKERS):
+        return False
+    return any(marker in lowered for marker in _RUNTIME_VISUAL_ARTIFACT_QUALITY_TASK_MARKERS)
+
+
 def _runtime_tmp_artifacts_in_text(text: object, limit: int = 6) -> list[str]:
     artifacts: list[str] = []
     for match in _RUNTIME_TMP_ARTIFACT_RE.finditer(str(text or "")):
@@ -659,6 +703,60 @@ def _runtime_artifact_final_state_blocker(
             "whose output proves the artifact was created during the verifier-shaped run"
         )
     return ""
+
+
+def _has_runtime_visual_artifact_quality_marker(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS)
+
+
+def _has_runtime_visual_artifact_quality_evidence(evidence: object, session: object) -> bool:
+    if not _has_runtime_visual_artifact_quality_marker(evidence):
+        return False
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in _GROUNDING_TOOLS:
+            continue
+        if _has_runtime_visual_artifact_quality_marker(_tool_call_text(call)):
+            return True
+    return False
+
+
+def _runtime_visual_artifact_quality_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if not is_runtime_visual_artifact_task(task_description):
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    visual_checks = [
+        check
+        for check in verified_checks
+        if any(
+            marker
+            in f"{check.get('constraint') or ''}\n{check.get('evidence') or ''}".casefold()
+            for marker in _RUNTIME_VISUAL_ARTIFACT_MARKERS
+        )
+    ]
+    if not visual_checks:
+        return (
+            "runtime visual artifact quality evidence missing: rendered frame, screenshot, "
+            "or image tasks with expected/correct output must cite expected dimensions, "
+            "reference similarity, or exact stdout/boot markers before task_done=true"
+        )
+    if any(_has_runtime_visual_artifact_quality_evidence(check.get("evidence"), session) for check in visual_checks):
+        return ""
+    return (
+        "runtime visual artifact quality evidence ungrounded: artifact existence, "
+        "nonzero pixels, valid headers, or self-consistent dimensions are not enough; "
+        "cite a completed grounding tool whose output checks expected dimensions, "
+        "reference similarity, or exact stdout/boot markers"
+    )
 
 
 def _external_command_text_contains_term(command_text: str, term: object) -> bool:
@@ -1428,6 +1526,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     runtime_artifact_final_blocker = _runtime_artifact_final_state_blocker(task_description, checks, session)
     if runtime_artifact_final_blocker:
         return runtime_artifact_final_blocker
+    runtime_visual_artifact_blocker = _runtime_visual_artifact_quality_blocker(task_description, checks, session)
+    if runtime_visual_artifact_blocker:
+        return runtime_visual_artifact_blocker
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker

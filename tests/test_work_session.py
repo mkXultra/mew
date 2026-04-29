@@ -34338,6 +34338,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("generated artifacts, saved files, stdout/stderr text, rendered frames", prompt)
         self.assertIn("inspect those artifact/output properties or run a small command that asserts them", prompt)
         self.assertIn("remember the exact unverified acceptance gap", prompt)
+        self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
+        self.assertIn("expected dimensions/resolution, reference similarity", prompt)
         self.assertIn("For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks", prompt)
         self.assertIn("prefer analyze_table on CSV/TSV/whitespace numeric source files", prompt)
         self.assertIn("schema-only, finite-number, or single-fit residual check is not enough", prompt)
