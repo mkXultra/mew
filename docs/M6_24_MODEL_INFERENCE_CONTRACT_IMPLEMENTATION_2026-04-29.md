@@ -110,3 +110,38 @@ Next proof:
 ```text
 gpt2-codegolf after model_inference_incomplete_handoff_guard v0.1
 ```
+
+## v0.2 Reasoning Policy
+
+The v0.1 speed rerun blocked the unverified handoff, but every model turn still
+used `reasoning_effort=medium` even though the task required compact C
+inference over checkpoint weights and a tokenizer. The session spent the full
+budget in layout/tokenizer repair and stopped with a model timeout.
+
+Generic repair:
+
+- checkpoint/tokenizer/model-inference implementation terms such as `.ckpt`,
+  `.bpe`, `vocab.bpe`, `model weights`, `tokenizer`, `transformer`, and
+  `model inference` now classify as `complex_implementation`;
+- implementation-capable turns for these tasks use `high` reasoning effort and
+  full prompt context;
+- read-only exploration behavior is unchanged.
+
+Validation:
+
+```text
+uv run pytest tests/test_reasoning_policy.py --no-testmon -q
+21 passed
+
+uv run pytest tests/test_work_session.py -k 'model_inference_handoff_without_task_done or finish_blocker_allows_acceptance_repair_continuation' --no-testmon -q
+3 passed, 783 deselected
+
+uv run ruff check src/mew/reasoning_policy.py tests/test_reasoning_policy.py src/mew/commands.py tests/test_work_session.py
+All checks passed
+```
+
+Next proof:
+
+```text
+gpt2-codegolf after model_inference_complex_reasoning_policy v0.2
+```
