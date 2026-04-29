@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import sys
 import textwrap
 import time
 from io import StringIO
@@ -136,11 +137,15 @@ WORK_TASK_GOAL_DESCRIPTION_APPENDIX_MARKERS = (
 )
 
 
+def _work_model_timeout_context_name():
+    return "spawn" if sys.platform == "darwin" else "fork"
+
+
 def _work_model_timeout_guard_available():
     if not hasattr(multiprocessing, "get_context"):
         return False
     try:
-        multiprocessing.get_context("fork")
+        multiprocessing.get_context(_work_model_timeout_context_name())
     except ValueError:
         return False
     return True
@@ -195,7 +200,7 @@ def call_model_json_with_retries(*args, **kwargs):
     ):
         return _agent_call_model_json_with_retries(*args, **kwargs)
 
-    context = multiprocessing.get_context("fork")
+    context = multiprocessing.get_context(_work_model_timeout_context_name())
     recv_conn, send_conn = context.Pipe(duplex=False)
     process = context.Process(
         target=_work_model_call_child,
