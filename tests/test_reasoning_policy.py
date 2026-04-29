@@ -64,6 +64,27 @@ class ReasoningPolicyTests(unittest.TestCase):
         self.assertIn("elf", policy["matched_terms"])
         self.assertIn("provided source", policy["matched_terms"])
 
+    def test_selects_high_for_checkpoint_tokenizer_inference_implementation(self):
+        policy = select_work_reasoning_policy(
+            {
+                "title": "Implement compact GPT sampler",
+                "kind": "coding",
+                "description": (
+                    "Write a dependency-free C file that reads gpt2-124M.ckpt "
+                    "and vocab.bpe, then performs model inference to continue "
+                    "the output for the next 20 tokens."
+                ),
+            },
+            capabilities={"allowed_write_roots": ["."], "allow_verify": True},
+            env={},
+        )
+
+        self.assertEqual(policy["effort"], "high")
+        self.assertEqual(policy["work_type"], "complex_implementation")
+        self.assertIn(".ckpt", policy["matched_terms"])
+        self.assertIn("vocab.bpe", policy["matched_terms"])
+        self.assertIn("model inference", policy["matched_terms"])
+
     def test_selects_high_for_long_implementation_spec(self):
         policy = select_work_reasoning_policy(
             {
