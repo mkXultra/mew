@@ -33,7 +33,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Visual Polish | `done` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e/SP22f replaced raw diagnostics and stale ghost copy with resident-facing mew-wisp copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
-| SP23 mew-wisp Speech Bubble | `in_progress` | SP23a has two failed mew-first attempts: session #64 timed out after a green verifier with no diff, and session #65 left only stale pending approvals; issue #25 records the implementation-lane problem before another fresh retry. |
+| SP23 mew-wisp Speech Bubble | `in_progress` | SP23a has three failed mew-first attempts: sessions #64/#65 reached green verifier states with no durable diff, and session #66 exposed a paired source/test hunk tool-shape blocker; issues #25 and #26 record the implementation-lane problems before another retry. |
 | SP24 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the speech-bubble terminal experience is useful. |
 
 ## Active Focus
@@ -156,6 +156,11 @@ Current target:
   clean with no product diff, so ledger row `42` records the failed attempt
   with rescue edits `0` and issue `#25` was updated with the recovery-path
   evidence
+- SP23a task `#37` retry stopped after session `#66` could not express the
+  required paired source/test hunk patch: batch `edit_file_hunks` is unsupported
+  while standalone `edit_file_hunks` can edit only one file; ledger row `43`
+  records the failed attempt with rescue edits `0`, and issue `#26` records the
+  reusable implementation-lane blocker
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -235,6 +240,10 @@ Current target:
   bubble attempts with no durable product diff as open issue `#25` evidence for
   implementation-lane hardening; the second attempt showed the pending approval
   recovery path can replay stale hunks and still leave no materialized patch
+- route task #37/session #66 paired source/test hunk tool-shape blocker as open
+  issue `#26` evidence for implementation-lane hardening; the next retry should
+  use staged standalone source/test approvals with deferred verification rather
+  than requiring a one-shot multi-file hunk batch
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -344,6 +353,13 @@ Current target:
   `codex_product_code_rescue_edits=0`. Ledger row `42` records the failed
   pending-approval recovery with failure class
   `speech_bubble_pending_approval_stale_hunks_after_verifier_pass`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  the third SP23a attempt on 2026-04-29: `rows_total=43`, eleven `failed`,
+  twenty-nine `practical`, three `clean`, `success_rate=0.744`,
+  `structural_repairs_required=11`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `43` records the paired
+  source/test hunk tool-shape blocker with failure class
+  `speech_bubble_paired_multifile_hunks_blocked_by_batch_tool_schema`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,
@@ -851,8 +867,9 @@ Current target:
 
 Choose the next side-project move:
 
-1. retry SP23a speech bubble from a fresh mew-first task after sessions #64 and
-   #65 both reached green verifier states without durable product diff
+1. retry SP23a speech bubble from a fresh mew-first task using a staged
+   standalone source edit with deferred verification, followed by a standalone
+   test edit and focused verifier
 2. keep state/JSON output as the machine-readable proof path while adding only
    text-based human terminal speech
 3. preserve the old `mew-ghost` name only where it is historical evidence for

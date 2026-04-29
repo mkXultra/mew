@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "task_id": 37,
+  "session_id": 66,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP23a minimal speech-bubble retry stopped before product edits because mew could not apply the required paired source/test hunk patch through the available work-loop tool shapes.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 5,
+  "files_changed": [],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "inside session #66, source-only preview approval failed with 3 failing tests because paired test updates were not applied"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "40 passed on the unchanged baseline after rejecting the pending source-only patch"
+    },
+    {
+      "command": "git status --short",
+      "result": "clean after rejecting pending tool #1470; no product diff persisted"
+    }
+  ],
+  "reviewer_rejections": 5,
+  "verifier_failures": 3,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "speech_bubble_paired_multifile_hunks_blocked_by_batch_tool_schema",
+  "repair_required": true,
+  "proof_artifacts": [
+    "session #66 reached a plausible source hunk for the speech bubble but source-only approval failed verifier",
+    "mew then identified the exact blocker: batch edit_file_hunks is unsupported, while standalone edit_file_hunks can edit only one file",
+    "the required safe patch is paired source+test under experiments/mew-ghost, so the operator rejected the unpaired source-only patch",
+    "post-rejection git status was clean and the focused pytest baseline passed"
+  ],
+  "commit": "",
+  "notes": "Codex did not write product code. This is distinct from issue #25: the patch did not disappear after a green verifier; instead, mew could not express a safe paired multi-file hunk patch through the supported work-session tool shapes."
+}
