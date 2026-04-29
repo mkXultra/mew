@@ -11,6 +11,7 @@ M6.24 is in `improvement_phase`.
 Authoritative inputs:
 
 - `docs/M6_24_DECISION_LEDGER.md`
+- latest `docs/M6_24_GAP_CLASS_PLAN_*`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 - `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` for accepted structural repairs

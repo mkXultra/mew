@@ -39,9 +39,10 @@ When deciding what to do next, apply this order:
    `ROADMAP.md` and `ROADMAP_STATUS.md`.
 4. Active milestone controller/ledger docs, when present. For M6.24, read
    `docs/M6_24_DECISION_LEDGER.md`, `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`,
+   the latest `docs/M6_24_GAP_CLASS_PLAN_*`,
    `proof-artifacts/m6_24_gap_ledger.jsonl`, and the latest
-   `docs/M6_24_GAP_BASELINE_*` before treating a pending benchmark task as the
-   next action.
+   `docs/M6_24_GAP_BASELINE_*` before treating a pending benchmark task as
+   the next action.
 5. Durable project decisions in mew memory and project docs such as
    `docs/ADOPT_FROM_REFERENCES.md`.
 6. Current active task/session state and the latest context checkpoint.
@@ -92,6 +93,8 @@ next benchmark or repair task:
 ```bash
 sed -n '1,220p' docs/M6_24_DECISION_LEDGER.md
 sed -n '1,260p' docs/M6_24_GAP_IMPROVEMENT_LOOP.md
+ls docs/M6_24_GAP_CLASS_PLAN_*.md 2>/dev/null || true
+sed -n '1,220p' docs/M6_24_GAP_CLASS_PLAN_2026-04-29.md
 test -f proof-artifacts/m6_24_gap_ledger.jsonl && tail -n 40 proof-artifacts/m6_24_gap_ledger.jsonl
 ls docs/M6_24_GAP_BASELINE_*.md
 sed -n '1,220p' docs/M6_24_GAP_BASELINE_2026-04-29.md

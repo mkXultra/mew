@@ -19,6 +19,7 @@ Workflow:
    - active milestone controller docs when present. For M6.24, inspect
      `docs/M6_24_DECISION_LEDGER.md`,
      `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`,
+     the latest `docs/M6_24_GAP_CLASS_PLAN_*`,
      `proof-artifacts/m6_24_gap_ledger.jsonl`, and the latest
      `docs/M6_24_GAP_BASELINE_*` before writing the next action.
    - if side-project dogfood is active: `SIDE_PROJECT_ROADMAP_STATUS.md`,

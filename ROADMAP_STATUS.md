@@ -146,6 +146,11 @@ M6.24 resume condition:
   repair one selected gap class, rerun the same shape after repair, or update
   the decision ledger to resume measurement with evidence. New broad benchmark
   measurement is drift until the controller says otherwise.
+- Current selected gap class:
+  `hard_task_implementation_strategy_contract_retention`, recorded in
+  `docs/M6_24_GAP_CLASS_PLAN_2026-04-29.md` and
+  `proof-artifacts/m6_24_gap_ledger.jsonl`. Next action is reference-backed
+  implementation-lane design/repair, not new broad measurement.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.

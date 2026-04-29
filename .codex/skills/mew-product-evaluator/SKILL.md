@@ -21,6 +21,7 @@ Use the smallest useful set, in this order:
 3. Active milestone controller docs when present. For M6.24, read
    `docs/M6_24_DECISION_LEDGER.md`,
    `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`,
+   the latest `docs/M6_24_GAP_CLASS_PLAN_*`,
    `proof-artifacts/m6_24_gap_ledger.jsonl`, and the latest
    `docs/M6_24_GAP_BASELINE_*` before recommending more benchmark measurement.
 4. `docs/ADOPT_FROM_REFERENCES.md` when reference-derived architecture or
