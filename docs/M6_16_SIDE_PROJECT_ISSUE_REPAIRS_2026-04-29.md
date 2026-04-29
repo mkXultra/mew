@@ -18,6 +18,7 @@ hardening input before returning to M6.24.
 | #28 | Pending reviewer steer now enforces target-path / no-read / no-test boundaries before tool execution and coerces requested dry-run writes away from direct apply. |
 | #29 | Broad rollback repair now detects UI/readability failure tails and steers the next attempt to a smaller presentation/readability slice before reconnecting broader live/state behavior. |
 | #30 | Stateful user-facing output tasks now require semantic contrast proof before finish: a positive injected/current-state assertion plus a negative fixture/demo/static/fallback assertion. This generalizes the side-project failure instead of adding a `mew-wisp`-specific rule. |
+| #31 | Desk/resident status now marks stale work sessions with `freshness`, `is_stale`, and `is_current_signal` on both actions and details, and no longer calls stale-only work `Working on`. This lets terminal residents avoid presenting resumable old sessions as current live speech without importing core internals. |
 
 ## Reference Basis
 
@@ -30,6 +31,9 @@ hardening input before returning to M6.24.
 - Claude Code todo completion rules require work to be fully accomplished and
   not partial before marking a task complete; for mew this means `task_done`
   must not be driven by superficial verifier green.
+- Resident Lane Architecture keeps helper/resident surfaces evidence-only and
+  separates current work authority from stale resumable context; desk state
+  should expose freshness instead of forcing clients to infer it from old text.
 
 ## Validation
 
@@ -53,5 +57,14 @@ uv run pytest tests/test_acceptance.py tests/test_work_session.py -k 'stateful_o
 61 passed, 789 deselected
 
 uv run ruff check src/mew/acceptance.py src/mew/work_loop.py tests/test_acceptance.py
+All checks passed
+
+uv run pytest tests/test_desk.py --no-testmon -q
+23 passed
+
+uv run pytest tests/test_brief.py -k 'active_work_session_age or stale_active_work_session_memory or active_work_session_reentry' --no-testmon -q
+3 passed, 59 deselected
+
+uv run ruff check src/mew/desk.py tests/test_desk.py
 All checks passed
 ```
