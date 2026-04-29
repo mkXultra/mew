@@ -263,6 +263,19 @@ _COMMAND_EXAMPLE_OUTPUT_FLAG_TOOLS = {"cc", "clang", "clang++", "gcc", "g++", "r
 _COMMAND_EXAMPLE_SETUP_MUTATION_RE = re.compile(
     r"(?:^|[;&|('\"]\s*)(?:cat|chmod|cp|install|ln|mkdir|mv|rm|touch)\b"
 )
+_IMPLEMENTATION_CONTRACT_CONTEXT_MARKERS = (
+    "along with",
+    "corresponding source",
+    "existing source",
+    "given source",
+    "provided",
+    "source code",
+    "source directory",
+)
+_IMPLEMENTATION_SOURCE_REF_RE = re.compile(
+    r"(?<![\w./-])(?:/[\w.+-]+(?:/[\w.+-]+)*/?|(?:[\w.+-]+/)+[\w.+-]*/?)"
+)
+_IMPLEMENTATION_SOURCE_GROUNDING_TOOLS = {"glob", "read_file", "run_command", "search_text"}
 
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:
@@ -376,7 +389,7 @@ def _tool_call_text(call: object) -> str:
             chunks.append(str(value))
     parameters = call.get("parameters")
     if isinstance(parameters, dict):
-        for key in ("command", "verify_command", "summary", "reason"):
+        for key in ("command", "verify_command", "path", "pattern", "query", "summary", "reason"):
             value = parameters.get(key)
             if value:
                 chunks.append(str(value))
@@ -471,6 +484,130 @@ def exact_command_example_requirements(text: object, *, limit: int = 4) -> list[
         if len(requirements) >= limit:
             break
     return requirements
+
+
+def _clean_source_ref(value: object) -> str:
+    return str(value or "").strip().strip(".,;:()[]{}<>\"'")
+
+
+def _looks_like_source_ref(value: str) -> bool:
+    ref = _clean_source_ref(value)
+    if ref.startswith("./"):
+        ref = ref[2:]
+    if not ref or any(ch.isspace() for ch in ref):
+        return False
+    lowered = ref.casefold()
+    if lowered.startswith(("http://", "https://")):
+        return False
+    if any(ch in ref for ch in ("*", "$", "`", "|", "&", ";")):
+        return False
+    return "/" in ref
+
+
+def _implementation_source_refs(sentence: str) -> list[str]:
+    refs: list[str] = []
+    for value in _BACKTICK_TEXT_RE.findall(sentence):
+        ref = _clean_source_ref(value)
+        if _looks_like_source_ref(ref) and ref not in refs:
+            refs.append(ref)
+    for match in _IMPLEMENTATION_SOURCE_REF_RE.finditer(sentence):
+        ref = _clean_source_ref(match.group(0))
+        if _looks_like_source_ref(ref) and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def implementation_contract_source_requirements(text: object, *, limit: int = 6) -> list[dict[str, str]]:
+    requirements: list[dict[str, str]] = []
+    for sentence in _constraint_sentences(str(text or "")):
+        lowered = sentence.casefold()
+        if not any(marker in lowered for marker in _IMPLEMENTATION_CONTRACT_CONTEXT_MARKERS):
+            continue
+        for ref in _implementation_source_refs(sentence):
+            if any(item["path"] == ref for item in requirements):
+                continue
+            requirements.append({"path": ref, "sentence": sentence})
+            if len(requirements) >= limit:
+                return requirements
+    return requirements
+
+
+def _source_ref_variants(ref: object) -> list[str]:
+    source = _clean_source_ref(ref).casefold()
+    if not source:
+        return []
+    candidates = [source]
+    stripped = source.rstrip("/")
+    if stripped and stripped not in candidates:
+        candidates.append(stripped)
+    if source.startswith("/app/"):
+        app_relative = source[len("/app/") :]
+        for candidate in (app_relative, app_relative.rstrip("/")):
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+    basename = stripped.rsplit("/", 1)[-1] if stripped else ""
+    if basename and basename not in candidates:
+        candidates.append(basename)
+    return candidates
+
+
+def _source_ref_matches_text(ref: object, text: object) -> bool:
+    normalized_text = _normalized_command_text(text)
+    if not normalized_text:
+        return False
+    for variant in _source_ref_variants(ref):
+        if not variant:
+            continue
+        if variant.endswith("/") and variant in normalized_text:
+            return True
+        pattern = rf"(?<![\w.+-]){re.escape(variant)}(?:/|\b)"
+        if re.search(pattern, normalized_text):
+            return True
+    return False
+
+
+def _has_implementation_source_grounding_evidence(evidence: object, session: object, source_ref: object) -> bool:
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in _IMPLEMENTATION_SOURCE_GROUNDING_TOOLS:
+            continue
+        if _source_ref_matches_text(source_ref, _tool_call_text(call)):
+            return True
+    return False
+
+
+def _implementation_contract_source_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    requirements = implementation_contract_source_requirements(task_description)
+    if not requirements:
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return (
+            "implementation contract source evidence missing: hard implementation tasks "
+            "with provided source, binaries, or artifacts must cite completed source "
+            "grounding before task_done=true"
+        )
+    for requirement in requirements:
+        source_ref = requirement.get("path")
+        if any(
+            _has_implementation_source_grounding_evidence(check.get("evidence"), session, source_ref)
+            for check in verified_checks
+        ):
+            continue
+        return (
+            "implementation contract source evidence ungrounded: provided source or "
+            f"artifact {source_ref} must be grounded by cited read/search/command evidence "
+            "before task_done=true"
+        )
+    return ""
 
 
 def _command_example_regex(command: str) -> re.Pattern[str] | None:
@@ -1056,6 +1193,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     exact_command_blocker = _exact_command_example_blocker(task_description, checks, session)
     if exact_command_blocker:
         return exact_command_blocker
+    implementation_contract_blocker = _implementation_contract_source_blocker(task_description, checks, session)
+    if implementation_contract_blocker:
+        return implementation_contract_blocker
     query_only_blocker = _query_only_hidden_model_blocker(task_description, checks, session)
     if query_only_blocker:
         return query_only_blocker
