@@ -18,7 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .acceptance import acceptance_finish_blocker
+from .acceptance import acceptance_finish_blocker, is_model_inference_output_task
 from .agent_runs import (
     build_ai_cli_run_command,
     create_agent_run,
@@ -3618,9 +3618,15 @@ def apply_work_control_action(state, session, task, action):
             same_surface_audit = resume.get("same_surface_audit") or {}
             if same_surface_audit and same_surface_audit.get("status") != "noted":
                 finish_blockers.append("required same-surface audit")
+            acceptance_action = action
+            if not action.get("task_done") and is_model_inference_output_task(
+                (task or {}).get("description") or session.get("goal") or ""
+            ):
+                acceptance_action = dict(action)
+                acceptance_action["task_done"] = True
             acceptance_blocker = acceptance_finish_blocker(
                 (task or {}).get("description") or session.get("goal") or "",
-                action,
+                acceptance_action,
                 session=session,
             )
             if acceptance_blocker:

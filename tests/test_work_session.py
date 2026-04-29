@@ -37126,6 +37126,119 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("acceptance constraints unchecked", result["finished_note"])
         self.assertIn("Work session finish blocked", task["notes"])
 
+    def test_work_finish_blocks_model_inference_handoff_without_task_done_when_equivalence_unknown(self):
+        from mew.commands import apply_work_control_action
+
+        description = (
+            "Write a dependency-free C file that reads gpt2-124M.ckpt and vocab.bpe, "
+            "then continue the output under whatever GPT-2 would print for the next 20 tokens."
+        )
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 26,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {
+                        "exit_code": 0,
+                        "stdout": "3124 gpt2.c\nrc=0\nprogram emitted 20 continuation-shaped tokens\n",
+                    },
+                }
+            ],
+        }
+        task = {
+            "id": 15,
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        action = {
+            "type": "finish",
+            "task_done": False,
+            "summary": (
+                "Exact GPT-2 equivalence is not verified because no independent "
+                "golden-token verifier has been established."
+            ),
+            "acceptance_checks": [
+                {
+                    "constraint": "gpt2.c compiles under 5000 bytes.",
+                    "status": "verified",
+                    "evidence": "Tool #26: gcc exited 0 and wc output 3124 gpt2.c.",
+                },
+                {
+                    "constraint": "Continue the output under whatever GPT-2 would print.",
+                    "status": "unknown",
+                    "evidence": "Tool #26 emitted continuation-shaped output only.",
+                },
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertEqual(session["status"], "active")
+        self.assertFalse(result["task_done"])
+        self.assertIn("model inference output quality evidence", result["finished_note"])
+        self.assertIn("Work session finish blocked", task["notes"])
+
+    def test_work_finish_allows_model_inference_handoff_without_task_done_when_equivalence_is_grounded(self):
+        from mew.commands import apply_work_control_action
+
+        description = (
+            "Load a GPT checkpoint and vocab.bpe, then sample the next token continuation "
+            "from the model."
+        )
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "tool_calls": [
+                {
+                    "id": 7,
+                    "tool": "run_tests",
+                    "status": "completed",
+                    "result": {
+                        "exit_code": 0,
+                        "stdout": "reference implementation top-1 token ids match 20/20; expected continuation passed\n",
+                    },
+                }
+            ],
+        }
+        task = {
+            "id": 15,
+            "description": description,
+            "status": "ready",
+            "notes": "",
+        }
+        action = {
+            "type": "finish",
+            "task_done": False,
+            "summary": "Implementation handed off with grounded reference equivalence.",
+            "acceptance_checks": [
+                {
+                    "constraint": "Generated token continuation matches the reference model.",
+                    "status": "verified",
+                    "evidence": "Tool #7 reference implementation top-1 token ids match 20/20.",
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_called_once_with(session)
+        self.assertEqual(result["finished_note"], "Implementation handed off with grounded reference equivalence.")
+        self.assertFalse(result["task_done"])
+        self.assertIn("Work session finished:", task["notes"])
+
     def test_work_finish_blocks_ungrounded_edit_scope_acceptance_after_write(self):
         from mew.commands import apply_work_control_action
 
