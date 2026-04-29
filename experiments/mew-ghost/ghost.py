@@ -1003,9 +1003,10 @@ def render_terminal_human(
             wrapped.append('')
         bubble_width = max(len(segment) for segment in wrapped)
         border = '+' + '-' * (bubble_width + 2) + '+'
-        bubble_lines = [border]
+        spacer = '| ' + ' ' * bubble_width + ' |'
+        bubble_lines = [border, spacer]
         bubble_lines.extend('| ' + segment.ljust(bubble_width) + ' |' for segment in wrapped)
-        bubble_lines.append(border)
+        bubble_lines.extend([spacer, border])
         return [_center_terminal_line(line, terminal_width) for line in bubble_lines]
 
     if lines:

@@ -37,10 +37,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP24 mew-wisp Mew Adapter Reconnect | `done` | SP24a/SP24b landed practical: the CLI-first human cat surface renders fixture snapshots, injected live desk provider output, and explicit repo-local `--live-desk` output through one opt-in adapter boundary, with visible fallback states and sanitized human details. |
 | SP25 mew-wisp Human Watch Rerender | `done` | Human watch stdout now emits ANSI home/clear controls before each no-output human render, so `--watch`/`--watch-count` repaints the cat/HUD surface in place while state/HTML/output-file behavior remains unchanged. |
 | SP26 mew-wisp Default Live Human Mode | `done` | Human/cat terminal output now uses foreground repo-local live desk reads by default, with `--fixture-terminal` preserving deterministic fixture display; state/HTML `--live-desk`, no hidden monitoring, no launcher execution, focused tests, and smoke proof are in place. |
+| SP27 mew-wisp Readable Live Speech | `partial` | One-shot task #45/session #76 landed the first readable-speech slice: ASCII speech bubbles now include breathing-room spacer rows with deterministic tests. Broader live desk wording is still split into a later slice after issue #29. |
 
 ## Active Focus
 
-Active side-project focus: **SP26 mew-wisp Default Live Human Mode is complete**.
+Active side-project focus: **SP27 mew-wisp Readable Live Speech is partial**.
 
 Current target:
 
@@ -208,6 +209,13 @@ Current target:
   passed`), `git diff --check` passed, and smoke outputs proved both
   fixture-terminal and default-live cat renders. Ledger row `48` records the
   practical result with rescue edits `0`
+- SP27a task `#45` landed clean from one-shot session `#76`: mew self-selected
+  a small readable-speech slice after the broader live-wording attempt exposed
+  issue `#29`. The ASCII speech bubble now renders blank spacer rows inside the
+  border so the spoken text has more terminal breathing room, with deterministic
+  tests covering the new top/bottom spacers. The focused verifier passed (`46
+  passed`), `git diff --check` passed, and ledger row `49` records the
+  successful one-shot result with rescue edits `0`.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -914,6 +922,8 @@ Current target:
 - SP26 is closed: user-facing human/cat terminal output now connects to
   foreground repo-local live desk state by default, while `--fixture-terminal`
   keeps deterministic fixture display available.
+- SP27 is partial: the speech bubble readability base is improved by one-shot
+  task `#45`, while live desk wording remains the next product slice.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -933,8 +943,8 @@ Current target:
 
 Choose the next side-project move:
 
-1. define the next side-project milestone before starting more mew-wisp work;
-   SP26 currently closes the planned side-project roadmap
+1. continue SP27 with a small one-shot slice that makes the now-readable speech
+   bubble use live desk wording without reopening broad UI/test coupling
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for

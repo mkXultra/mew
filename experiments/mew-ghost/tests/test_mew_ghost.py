@@ -1147,6 +1147,11 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert implicit_bubble
     assert cat_bubble == implicit_bubble
     assert details_bubble == implicit_bubble
+    bubble_rows = [line.strip() for line in implicit_bubble]
+    readable_spacer = '|' + ' ' * (len(bubble_rows[0]) - 2) + '|'
+    assert bubble_rows[1] == readable_spacer
+    assert bubble_rows[-2] == readable_spacer
+    assert bubble_rows[0] == bubble_rows[-1]
     assert _panel_start_index(implicit) >= len(implicit_bubble)
     assert _panel_start_index(cat) >= 3 + len(CAT_REFERENCE_MASK) + len(cat_bubble)
     assert 'mew-wisp resident HUD' not in bubble_text
