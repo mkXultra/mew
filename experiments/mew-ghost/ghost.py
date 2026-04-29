@@ -1431,11 +1431,22 @@ def main(
     parser.add_argument('--execute-launchers', action='store_true', help='explicitly opt into running mew chat and mew code; dry-run remains the default')
     args = parser.parse_args(argv)
 
+    invoked_as_wisp_entrypoint = (
+        argv is None and bool(sys.argv) and Path(sys.argv[0]).stem in {'mew_wisp', 'mew-wisp'}
+    )
+    resident_entrypoint_default = invoked_as_wisp_entrypoint and args.output is None
+
     if args.format is None:
-        args.format = 'human' if args.wisp else 'html'
+        args.format = 'human' if args.wisp or resident_entrypoint_default else 'html'
     if args.form is None:
-        args.form = 'cat' if args.wisp else 'default'
-    if args.wisp and not args.watch and args.watch_count is None:
+        args.form = (
+            'cat'
+            if args.wisp or (invoked_as_wisp_entrypoint and args.format == 'human')
+            else 'default'
+        )
+    if (
+        args.wisp or (resident_entrypoint_default and args.format == 'human')
+    ) and not args.watch and args.watch_count is None:
         args.watch = True
 
     if args.watch_count is not None and args.watch_count < 1:

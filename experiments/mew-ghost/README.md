@@ -72,7 +72,13 @@ Direct execution requires `--execute-launchers`. That flag switches only the two
 
 ## Usage
 
-Render deterministic local HTML from the fixture. This is the safe dry-run path and never launches `mew`:
+Start the product-named resident cat HUD with omitted mode/form/watch intent. This is an explicit foreground watch, performs only foreground repo-local live desk reads, and exits cleanly on `KeyboardInterrupt`:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py
+```
+
+Render deterministic local HTML from the fixture with explicit `--output`. This keeps the historical HTML default and never launches `mew`:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --output /tmp/mew-ghost.html

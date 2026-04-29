@@ -47,6 +47,92 @@ def test_product_named_mew_wisp_entrypoint_delegates_to_ghost_main_without_cli_d
     assert Path(mew_wisp.main.__code__.co_filename).resolve() == GHOST_PATH
 
 
+def test_product_named_entrypoint_omitted_mode_form_and_watch_defaults_to_resident(capsys, tmp_path: Path) -> None:
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    mew_path = repo_root / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    original_repo_root = ghost.REPO_ROOT
+    original_argv = sys.argv[:]
+    calls: list[list[str]] = []
+    sleeps: list[float] = []
+
+    def forbidden_launcher(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError('launcher runner must not be called for product default proof')
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs['shell'] is False
+        payload = {
+            'fixture_name': 'product-entrypoint-default',
+            'desk': {
+                'status': 'typing',
+                'pets': [
+                    {
+                        'name': 'mew-wisp',
+                        'pet_state': 'coding',
+                        'detail': 'product entrypoint default',
+                    }
+                ],
+                'primary_action': {
+                    'id': 'resume',
+                    'label': 'Resume resident task',
+                    'command': ['mew', 'code'],
+                },
+            },
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    def sleeper(interval: float) -> None:
+        sleeps.append(interval)
+        raise KeyboardInterrupt
+
+    ghost.REPO_ROOT = repo_root
+    sys.argv = [str(WISP_PATH), '--fixture', str(FIXTURE_PATH), '--interval', '0']
+    try:
+        assert ghost.main(
+            None,
+            live_desk_runner=runner,
+            launcher_runner=forbidden_launcher,
+            sleeper=sleeper,
+        ) == 0
+    finally:
+        ghost.REPO_ROOT = original_repo_root
+        sys.argv = original_argv
+
+    output = capsys.readouterr().out
+
+    assert calls == [[str(mew_path), 'desk', '--json']]
+    assert sleeps == [0.0]
+    assert 'mew-wisp resident cat' in output
+    assert 'resident state: coding' in output
+    assert '<!doctype html>' not in output
+    assert '"record_type"' not in output
+
+
+def test_product_named_entrypoint_output_keeps_historical_html_default(capsys, tmp_path: Path) -> None:
+    output_path = tmp_path / 'mew-wisp.html'
+    original_argv = sys.argv[:]
+    calls: list[list[str]] = []
+
+    def forbidden_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        raise AssertionError('live desk runner must not be called for explicit output default')
+
+    sys.argv = [str(WISP_PATH), '--fixture', str(FIXTURE_PATH), '--output', str(output_path)]
+    try:
+        assert ghost.main(None, live_desk_runner=forbidden_runner) == 0
+    finally:
+        sys.argv = original_argv
+
+    rendered = output_path.read_text(encoding='utf-8')
+
+    assert calls == []
+    assert capsys.readouterr().out == ''
+    assert '<!doctype html>' in rendered
+    assert 'mew-wisp resident cat' not in rendered
+
+
 def test_fixture_builds_deterministic_state_and_html() -> None:
     fixture = ghost.load_fixture(FIXTURE_PATH)
 
@@ -1757,6 +1843,7 @@ def test_readme_usage_prefers_product_named_uv_run_python_commands() -> None:
     usage_lines = [line.strip() for line in readme.splitlines() if 'experiments/mew-ghost/mew_wisp.py' in line]
 
     assert usage_lines == [
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --output /tmp/mew-ghost.html',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --wisp --watch-count 2 --interval 0.5',

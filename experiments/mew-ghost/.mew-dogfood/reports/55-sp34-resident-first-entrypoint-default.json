@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "task_id": 55,
+  "session_id": 86,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP34 made the product-named mew_wisp.py entrypoint resident-first by default: omitted mode/form/watch intent with no --output now enters the human cat foreground watch, while explicit options and historical output compatibility remain intact.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP.md",
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/55-sp34-resident-first-entrypoint-default.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "51 passed in 8.40s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --fixture experiments/mew-ghost/fixtures/sample_ghost_state.json --watch-count 1 --interval 0",
+      "result": "product-named entrypoint rendered the resident human cat surface by default through a bounded watch iteration"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --fixture experiments/mew-ghost/fixtures/sample_ghost_state.json --output /tmp/mew-wisp-sp34.html",
+      "result": "explicit output path preserved historical HTML default and wrote /tmp/mew-wisp-sp34.html"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "clean",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-resident-default-oneshot-report.json",
+    "focused verifier passed: 51 tests",
+    "bounded resident default and explicit HTML output smoke paths inspected"
+  ],
+  "commit": "",
+  "notes": "Mew authored a thin ghost.py defaulting change plus focused README/tests. The default is gated to argv=None invocation as mew_wisp/mew-wisp with no --output; explicit format/form/watch-count/output, fixture-terminal, launcher safety, no shell execution, and isolation constraints remain covered."
+}

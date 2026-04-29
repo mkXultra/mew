@@ -645,3 +645,22 @@ Done when:
   smoke paths
 - no hidden monitoring, launcher execution, broad refactors, or core imports
   are introduced
+
+### SP34: mew-wisp Resident-First Entrypoint Default
+
+Make the product-named entrypoint feel like the resident CLI without requiring
+operators to remember the historical `--wisp` flag.
+
+Done when:
+
+- invoking `mew_wisp.py` with omitted mode/form/watch intent and no `--output`
+  starts the foreground human cat resident surface by default
+- explicit `--format`, `--form`, `--watch`, `--watch-count`, and
+  `--fixture-terminal` choices keep their existing behavior
+- explicit `--output` preserves the historical HTML default for compatibility
+- README usage documents the resident-first product entrypoint and the
+  compatibility HTML output path
+- focused tests cover the resident default, explicit output compatibility, and
+  existing launcher/isolation safety constraints
+- no hidden monitoring, launcher execution, shell execution, broad refactors,
+  or core imports are introduced
