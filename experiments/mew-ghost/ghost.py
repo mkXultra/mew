@@ -120,7 +120,7 @@ def _cat_terminal_sprite(presence_state: str) -> tuple[str, ...]:
         _cat_terminal_caption('mew-wisp resident cat'),
         _cat_terminal_caption('resident state: %s' % presence_state),
         *sprite_lines,
-        _cat_terminal_caption('state marker: %s' % CAT_TERMINAL_STATE_MARKERS[presence_state]),
+        _cat_terminal_caption('resident marker: %s' % CAT_TERMINAL_STATE_MARKERS[presence_state]),
     )
 
 

@@ -32,7 +32,8 @@ def test_fixture_builds_deterministic_state_and_html() -> None:
     assert state_one['active_window']['active_app'] == 'Visual Studio Code'
     assert state_one['presence']['classification']['state'] == 'coding'
     assert [snapshot['presence_state'] for snapshot in state_one['presence']['snapshots']] == ['coding', 'coding', 'coding']
-    assert 'Ghost is watching VS Code without screen capture.' in html_one
+    assert 'mew-wisp is keeping VS Code in view without screen capture.' in html_one
+    assert 'Ghost is watching' not in html_one
     assert 'Writing the SP12 scaffold' in html_one
     assert 'mew-ghost.sp18.v1' in html_one
     assert 'Freshness' in html_one
@@ -979,9 +980,10 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert 'launcher intents:' in details
     assert _cat_sprite_similarity(cat) >= 0.90
     assert _resident_panel_values(implicit, 'marker') == ['*']
-    assert cat.count('state marker: *') == 1
-    assert 'state marker: *' in cat
-    assert 'state marker: *' not in '\n'.join(_cat_sprite_lines(cat))
+    assert cat.count('resident marker: *') == 1
+    assert 'resident marker: *' in cat
+    assert 'state marker:' not in cat
+    assert 'resident marker: *' not in '\n'.join(_cat_sprite_lines(cat))
     cat_focus_line = ' '.join(_resident_panel_values(cat, 'focus'))
     implicit_focus_line = ' '.join(_resident_panel_values(implicit, 'focus'))
     assert cat_focus_line == '%s - %s' % (state['ghost']['focus'], state['ghost']['message'])
@@ -1043,7 +1045,7 @@ def test_cat_terminal_form_centers_sprite_and_marker_with_forced_width(monkeypat
     assert lines[cat_state_index] == padding + _expected_cat_caption('resident state: coding')
     assert all(line.startswith(padding) for line in _cat_sprite_lines(cat))
     assert all(len(line) == len(padding) + len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
-    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == padding + _expected_cat_caption('state marker: *')
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == padding + _expected_cat_caption('resident marker: *')
     assert _cat_sprite_similarity(cat) == 1.0
 
 
@@ -1058,7 +1060,7 @@ def test_cat_terminal_form_narrow_width_adds_no_padding_and_preserves_sprite(mon
     assert lines[cat_state_index - 1] == _expected_cat_caption('mew-wisp resident cat')
     assert lines[cat_state_index] == _expected_cat_caption('resident state: coding')
     assert all(len(line) == len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
-    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == _expected_cat_caption('state marker: *')
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == _expected_cat_caption('resident marker: *')
     assert _cat_sprite_similarity(cat) == 1.0
 
 
@@ -1092,7 +1094,9 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
     panel_header = _resident_panel_lines(output)[0]
     _assert_resident_panel_padding(output, 96)
     assert output.count(padding + _expected_cat_caption('resident state: coding')) == 2
+    assert output.count(padding + _expected_cat_caption('resident marker: *')) == 2
     assert 'cat state:' not in output
+    assert 'state marker:' not in output
     assert output.count(padding + _rendered_reference_row(CAT_REFERENCE_MASK[0])) == 2
     assert output.count('mew-wisp resident HUD') == 2
     assert output.count(panel_header) == 2
@@ -1101,11 +1105,11 @@ def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) ->
 def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:
     state, html = ghost.render_fixture(FIXTURE_PATH)
     expected_markers = {
-        'idle': 'state marker: zZ',
-        'attentive': 'state marker: ?',
-        'coding': 'state marker: *',
-        'waiting': 'state marker: ...',
-        'blocked': 'state marker: !',
+        'idle': 'resident marker: zZ',
+        'attentive': 'resident marker: ?',
+        'coding': 'resident marker: *',
+        'waiting': 'resident marker: ...',
+        'blocked': 'resident marker: !',
     }
     masks_by_state: dict[str, tuple[str, ...]] = {}
 
@@ -1118,6 +1122,7 @@ def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_stat
         assert 'resident state: %s' % presence_state in rendered
         assert 'terminal form: cat' not in rendered
         assert 'cat state:' not in rendered
+        assert 'state marker:' not in rendered
         assert marker in rendered
         assert rendered.count(marker) == 1
         assert marker not in '\n'.join(_cat_sprite_lines(rendered))

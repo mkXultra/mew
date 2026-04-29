@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "task_id": 34,
+  "session_id": 63,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "Polish the remaining mew-wisp human terminal copy by replacing the normal cat-form state marker label with resident-facing wording and updating the sample fixture message so rendered focus text no longer says Ghost is watching, while preserving deterministic fixture behavior and existing terminal surfaces.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 2.0,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/fixtures/sample_ghost_state.json",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/34-sp22f-copy-cleanup.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "copy_cleanup_bounded",
+  "repair_required": false,
+  "proof_artifacts": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/fixtures/sample_ghost_state.json",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/34-sp22f-copy-cleanup.json",
+    "tool_call:1346",
+    "tool_call:1347",
+    "tool_call:1348",
+    "tool_call:1350"
+  ],
+  "commit": "",
+  "notes": "SP22f copy cleanup stayed within experiments/mew-ghost. The normal cat-form marker caption now uses resident marker wording while keeping the same marker values for idle, attentive, coding, waiting, and blocked states. The sample fixture message now uses mew-wisp wording instead of Ghost is watching. Focused tests were updated to assert the replacement copy, absence of old copy in rendered output, preservation of marker semantics, cat mask similarity, centered layout, resident panel behavior, details gating, and watch output. Configured pytest passed 40 tests in tool call #1346. Post-edit searches #1347 and #1348 found the old phrases only in negative test assertions. No ANSI/theme flags, path rename, or mew adapter work was added."
+}
