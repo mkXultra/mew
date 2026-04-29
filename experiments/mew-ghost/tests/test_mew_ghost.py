@@ -1156,7 +1156,34 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert _panel_start_index(cat) >= 3 + len(CAT_REFERENCE_MASK) + len(cat_bubble)
     assert 'mew-wisp resident HUD' not in bubble_text
     assert 'coding' in bubble_text
-    assert state['ghost']['focus'] in normalized_bubble_text
+    assert 'mew-wisp live desk' not in normalized_bubble_text
+    assert 'mew-wisp local terminal' in normalized_bubble_text
+    assert all(word in normalized_bubble_text for word in state['ghost']['focus'].split())
+    live_status = ghost._apply_live_desk_metadata(
+        ghost.build_desk_status(
+            {
+                'desk': {
+                    'status': 'coding',
+                    'pets': [
+                        {
+                            'name': 'wisp',
+                            'pet_state': 'coding',
+                            'detail': 'watching task 47',
+                        }
+                    ],
+                }
+            }
+        )
+    )
+    live_state, live_html = ghost.render_fixture(FIXTURE_PATH, desk_status=live_status)
+    live_rendered = ghost._render_payload(live_state, live_html, 'human')
+    live_bubble_text = ' '.join('\n'.join(_speech_bubble_lines(live_rendered)).split())
+    assert 'mew-wisp live desk coding' in live_bubble_text
+    assert '1 desk pet' in live_bubble_text
+    assert 'status coding' in live_bubble_text
+    assert 'wisp' in live_bubble_text
+    assert 'watching task 47' not in live_bubble_text
+    assert all(word in live_bubble_text for word in live_state['ghost']['focus'].split())
     assert all(word in normalized_bubble_text for word in message_words)
     assert all(ord(character) < 128 for line in implicit_bubble for character in line)
     assert all(len(line.rstrip()) <= ghost.DEFAULT_TERMINAL_WIDTH for line in implicit_bubble if line.strip())

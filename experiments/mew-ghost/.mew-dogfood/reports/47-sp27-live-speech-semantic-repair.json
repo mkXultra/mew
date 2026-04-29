@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "task_id": 47,
+  "session_id": 78,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP27b repaired live speech semantics after a prior one-shot only relabeled old fixture-like text. Live desk speech now branches on live_mew_reads and includes desk status plus pet context; non-live output remains honest as local terminal or fixture-sourced speech.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 2,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/47-sp27-live-speech-semantic-repair.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "46 passed in 11.16s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --fixture-terminal --watch-count 1 --interval 0 --output /tmp/mew-wisp-sp27-fixture-speech.txt",
+      "result": "fixture speech says local terminal and does not claim live desk"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 1 --interval 0 --output /tmp/mew-wisp-sp27-live-speech.txt",
+      "result": "default live speech says live desk with live status/pet context"
+    }
+  ],
+  "reviewer_rejections": 1,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "superficial_live_label_repaired_by_oneshot_self_review",
+  "repair_required": false,
+  "proof_artifacts": [
+    "/private/tmp/mew-wisp-live-speech-wording-oneshot-report.json",
+    "/private/tmp/mew-wisp-live-speech-semantic-repair-oneshot-report.json",
+    "/tmp/mew-wisp-sp27-fixture-speech.txt",
+    "/tmp/mew-wisp-sp27-live-speech.txt",
+    "tool_call:1770 focused verifier passed",
+    "tool_call:1771 final diff inspection"
+  ],
+  "commit": "",
+  "notes": "Task #46 produced a verifier-green but semantically weak live-desk prefix. Codex rejected it as reviewer without product-code edits and launched task #47 as a one-shot semantic repair. mew inspected the prior diff, identified the relabeling issue, and produced the accepted source/test repair. Issue #29 remains implementation-lane evidence for the earlier broad verifier rollback and split-slice need."
+}

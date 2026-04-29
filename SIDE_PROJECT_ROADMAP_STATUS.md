@@ -37,11 +37,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP24 mew-wisp Mew Adapter Reconnect | `done` | SP24a/SP24b landed practical: the CLI-first human cat surface renders fixture snapshots, injected live desk provider output, and explicit repo-local `--live-desk` output through one opt-in adapter boundary, with visible fallback states and sanitized human details. |
 | SP25 mew-wisp Human Watch Rerender | `done` | Human watch stdout now emits ANSI home/clear controls before each no-output human render, so `--watch`/`--watch-count` repaints the cat/HUD surface in place while state/HTML/output-file behavior remains unchanged. |
 | SP26 mew-wisp Default Live Human Mode | `done` | Human/cat terminal output now uses foreground repo-local live desk reads by default, with `--fixture-terminal` preserving deterministic fixture display; state/HTML `--live-desk`, no hidden monitoring, no launcher execution, focused tests, and smoke proof are in place. |
-| SP27 mew-wisp Readable Live Speech | `partial` | One-shot task #45/session #76 landed the first readable-speech slice: ASCII speech bubbles now include breathing-room spacer rows with deterministic tests. Broader live desk wording is still split into a later slice after issue #29. |
+| SP27 mew-wisp Readable Live Speech | `done` | One-shot tasks #45/#47 landed practical: ASCII speech bubbles now include breathing-room spacer rows, live-desk renders say live desk with status/pet context, and fixture/demo renders stay honest as local terminal or fixture-sourced speech. |
 
 ## Active Focus
 
-Active side-project focus: **SP27 mew-wisp Readable Live Speech is partial**.
+Active side-project focus: **SP27 mew-wisp Readable Live Speech is complete**.
 
 Current target:
 
@@ -216,6 +216,14 @@ Current target:
   tests covering the new top/bottom spacers. The focused verifier passed (`46
   passed`), `git diff --check` passed, and ledger row `49` records the
   successful one-shot result with rescue edits `0`.
+- SP27b task `#47` landed practical from one-shot session `#78`: mew first
+  detected that the prior task `#46` only relabeled old fixture-like speech as
+  `live desk`, then repaired it by branching speech wording on `live_mew_reads`.
+  Live desk output now includes desk status and pet context, while non-live
+  output stays honest as `local terminal` or fixture-sourced speech. The focused
+  verifier passed (`46 passed`), `git diff --check` passed, smoke outputs proved
+  fixture/live wording separation, and ledger row `50` records the successful
+  semantic repair with rescue edits `0`.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -922,8 +930,8 @@ Current target:
 - SP26 is closed: user-facing human/cat terminal output now connects to
   foreground repo-local live desk state by default, while `--fixture-terminal`
   keeps deterministic fixture display available.
-- SP27 is partial: the speech bubble readability base is improved by one-shot
-  task `#45`, while live desk wording remains the next product slice.
+- SP27 is closed: the terminal speech bubble has breathing room and now speaks
+  honest live/local wording depending on whether live desk data is present.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -943,8 +951,9 @@ Current target:
 
 Choose the next side-project move:
 
-1. continue SP27 with a small one-shot slice that makes the now-readable speech
-   bubble use live desk wording without reopening broad UI/test coupling
+1. choose the next mew-wisp polish slice after SP27, preferably another small
+   one-shot that improves the terminal resident experience without broad UI/test
+   coupling
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for

@@ -969,11 +969,43 @@ def render_terminal_human(
         terminal_width = _terminal_width()
         left_padding = max(0, (terminal_width - CAT_TERMINAL_PIXEL_WIDTH) // 2)
         content_width = min(60, max(12, terminal_width - left_padding - 6))
-        speech = 'mew-wisp %s: %s - %s' % (
-            presence_state,
-            ghost['focus'],
-            ghost['message'],
-        )
+        if desk.get('live_mew_reads'):
+            pets_total = desk_counts.get('pets_total')
+            if isinstance(pets_total, int):
+                pets_label = '%s desk pet%s' % (pets_total, '' if pets_total == 1 else 's')
+            else:
+                pets_label = 'desk pets present'
+            desk_status = str(desk.get('status') or presence_state)
+            detail_bits = []
+            for detail in desk_details[:2]:
+                if not isinstance(detail, Mapping):
+                    continue
+                detail_name = str(detail.get('name') or 'desk-pet')
+                detail_state = str(detail.get('pet_state') or detail.get('presence_state') or 'unknown')
+                detail_bits.append('%s %s' % (detail_name, detail_state))
+            detail_label = '; ' + ', '.join(detail_bits) if detail_bits else ''
+            speech = 'mew-wisp live desk %s: %s, status %s%s; %s - %s' % (
+                presence_state,
+                pets_label,
+                desk_status,
+                detail_label,
+                ghost['focus'],
+                ghost['message'],
+            )
+        elif desk.get('enabled'):
+            desk_source = str(desk.get('source') or 'desk fixture')
+            speech = 'mew-wisp %s %s: %s - %s' % (
+                desk_source,
+                presence_state,
+                ghost['focus'],
+                ghost['message'],
+            )
+        else:
+            speech = 'mew-wisp local terminal %s: %s - %s' % (
+                presence_state,
+                ghost['focus'],
+                ghost['message'],
+            )
         text = ''.join(
             character if 32 <= ord(character) < 127 else '?'
             for character in speech.replace(chr(10), ' ')
