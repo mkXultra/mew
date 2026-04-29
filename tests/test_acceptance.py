@@ -175,6 +175,58 @@ def test_acceptance_finish_blocker_rejects_runtime_command_pass_without_artifact
     assert "/tmp/frame.bmp" in blocker
 
 
+def test_acceptance_finish_blocker_rejects_wrong_runtime_artifact_path():
+    text = (
+        "Implement a MIPS interpreter called vm.js so I can run `node vm.js`. "
+        "Running this file should result in saving the frames as they are rendered."
+    )
+    checks = [
+        {
+            "constraint": "first rendered frame was saved",
+            "status": "verified",
+            "evidence": "Tool #22 saved frames/frame000001.bmp and tool #23 verified the root frame copy.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 22,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js"},
+                "result": {
+                    "command": "node vm.js",
+                    "exit_code": 0,
+                    "stdout": (
+                        "DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp\n"
+                        "saved frames/frame000001.bmp\n"
+                    ),
+                },
+            },
+            {
+                "id": 23,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "python3 inspect_frames.py"},
+                "result": {
+                    "command": "python3 inspect_frames.py",
+                    "exit_code": 0,
+                    "stdout": (
+                        "path frames/frame000001.bmp exists True size 1024054\n"
+                        "path frame000001.bmp exists True size 1024054\n"
+                        "tmp_frame_before_cleanup False -1\n"
+                    ),
+                },
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime final verifier artifact evidence missing" in blocker
+    assert "/tmp/frame.bmp" in blocker
+
+
 def test_acceptance_finish_blocker_rejects_runtime_visual_artifact_format_only_evidence():
     text = (
         "Implement vm.js so I can run `node vm.js`. It should save rendered frames to /tmp/frame.bmp. "

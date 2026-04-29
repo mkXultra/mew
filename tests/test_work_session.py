@@ -4760,6 +4760,56 @@ class WorkSessionTests(unittest.TestCase):
         finally:
             frame_path.unlink(missing_ok=True)
 
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_detects_validator_tmp_path(self):
+        with tempfile.NamedTemporaryFile(dir="/tmp", delete=False, prefix="mew-frame-", suffix=".bmp") as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+        try:
+            task = {
+                "title": "Build a MIPS interpreter",
+                "description": (
+                    "Implement vm.js so `node vm.js` runs the MIPS file. "
+                    "Running this file should result in saving the frames as they are rendered."
+                ),
+            }
+            work_report = {
+                "steps": [
+                    {
+                        "tool_call": {
+                            "id": 24,
+                            "tool": "run_command",
+                            "status": "completed",
+                            "parameters": {"command": "python3 inspect_frame.py", "cwd": "/app"},
+                            "result": {
+                                "command": "python3 inspect_frame.py",
+                                "cwd": "/app",
+                                "exit_code": 0,
+                                "stdout": (
+                                    f"BMP ok: frames/frame000001.bmp and {frame_path} 640x400 bytes=768054\n"
+                                    "content ok: nonblack_pixels=256000/256000 sampled_unique_colors=237\n"
+                                ),
+                            },
+                        }
+                    }
+                ]
+            }
+            args = SimpleNamespace(defer_verify=True)
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task=task,
+                work_report=work_report,
+            )
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"][0]["artifact"], str(frame_path))
+            self.assertEqual(cleanup["artifacts"][0]["source_tool_call_id"], 24)
+            self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
+            self.assertFalse(frame_path.exists())
+        finally:
+            frame_path.unlink(missing_ok=True)
+
     def test_work_session_resume_surfaces_final_verifier_state_transfer_gap(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -34340,6 +34390,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
         self.assertIn("expected dimensions/resolution, reference similarity", prompt)
+        self.assertIn("proof only checks frames/foo, output/foo, or a root copy", prompt)
+        self.assertIn("prove the exact /tmp verifier path", prompt)
         self.assertIn("For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks", prompt)
         self.assertIn("prefer analyze_table on CSV/TSV/whitespace numeric source files", prompt)
         self.assertIn("schema-only, finite-number, or single-fit residual check is not enough", prompt)

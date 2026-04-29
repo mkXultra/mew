@@ -260,8 +260,13 @@ M6.24 resume condition:
   `runtime_external_artifact_path_and_cleanup_contract`: require exact
   verifier-read runtime artifact path evidence and extend deferred cleanup
   detection for `/tmp/...` paths mentioned by validation output. Run a one-trial
-  same-shape speed proof after that repair. Do not resume new broad measurement
-  yet.
+  same-shape speed proof after that repair. That v0.5 repair is recorded in
+  `docs/DESIGN_2026-04-29_M6_24_RUNTIME_ARTIFACT_FRESHNESS.md`: runtime output
+  can now establish the expected verifier-read `/tmp/...` artifact path,
+  finish blocks sibling-path-only evidence, cleanup recognizes validator output
+  like `BMP ok: ... and /tmp/...`, and the THINK prompt warns against finishing
+  after proving only `frames/...`, `output/...`, or root copies. Do not resume
+  new broad measurement yet.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.

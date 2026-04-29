@@ -150,6 +150,37 @@ Terminal-Bench, or `make-mips-interpreter`; it blocks false completion when a
 runtime visual artifact exists but the observed properties are only format or
 self-consistency checks.
 
+## v0.5 External Artifact Path And Cleanup Contract
+
+The v0.4 five-trial proof in
+`docs/M6_24_VISUAL_QUALITY_PROOF_5_2026-04-29.md` showed that the visual-quality
+miss moved but the verifier handoff still had two generic holes:
+
+- one successful internal run validated `/tmp/frame.bmp`, but the validator
+  output shape was `BMP ok: frames/... and /tmp/frame.bmp ...`, so deferred
+  cleanup did not remove the stale `/tmp` artifact before the external verifier
+  handoff;
+- one finish validated `frames/frame000001.bmp` and a root `frame000001.bmp`
+  copy while the runtime banner named `/tmp/frame.bmp` as the verifier-read
+  artifact path.
+
+The repair keeps the same implementation-lane boundary:
+
+- runtime artifact discovery now recognizes expected verifier paths from
+  output such as `Frames will be saved to /tmp/...` without treating that as a
+  created stale artifact by itself;
+- runtime artifact creation/cleanup detection recognizes validator lines such
+  as `BMP ok: frames/... and /tmp/...`;
+- finish gating now blocks when the discovered verifier-read `/tmp/...` path is
+  not cited by acceptance evidence, even if a semantically valid sibling frame
+  exists elsewhere;
+- THINK guidance explicitly tells the model not to finish when it only proved
+  `frames/foo`, `output/foo`, or a root copy while the verifier reads
+  `/tmp/foo`.
+
+This is still not Terminal-Bench-specific. It is a general handoff rule for
+fresh external verifiers that read generated runtime artifacts from `/tmp`.
+
 ## Validation
 
 Focused validation:
@@ -226,6 +257,20 @@ Observed:
 - `git diff --check`: passed
 - gap ledger parsed as JSON Lines
 
+Additional v0.5 validation:
+
+```sh
+uv run pytest tests/test_acceptance.py -k 'runtime_artifact or runtime_command_pass_without_artifact' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'stale_runtime_artifact or final_verifier_state_transfer or oneshot_cleanup or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/acceptance.py src/mew/work_session.py src/mew/work_loop.py tests/test_acceptance.py tests/test_work_session.py
+```
+
+Observed:
+
+- `5 passed, 52 deselected`
+- `9 passed, 774 deselected`
+- `ruff`: all checks passed
+
 ## Same-Shape Rerun Gate
 
 Next proof should rerun:
@@ -242,7 +287,11 @@ Accept as improved only if:
 - acceptance cites grounded expected dimensions/resolution, reference
   similarity, or exact stdout/boot markers before finish;
 - reward improves, or the external verifier failures move away from visual
-  artifact quality / stdout-contract evidence.
+  artifact quality / stdout-contract evidence;
+- finish no longer accepts sibling frame paths such as `frames/...` or root
+  copies when the verifier-read runtime artifact path is `/tmp/...`;
+- `post_run_cleanup` catches validator output that mentions a generated
+  `/tmp/...` artifact, including `BMP ok: ... and /tmp/...` shapes.
 
 If the rerun remains 0/1 but fails on a different concrete verifier condition,
 record that new condition in `proof-artifacts/m6_24_gap_ledger.jsonl` before
