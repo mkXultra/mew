@@ -25882,6 +25882,90 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("broad_rollback_slice_repair", prompt)
         self.assertIn("smaller complete slice", prompt)
 
+    def test_work_resume_broad_rollback_slice_repair_detects_presentation_focus(self):
+        from mew.work_loop import build_work_deliberation_prompt
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 930,
+            "task_id": 931,
+            "status": "active",
+            "title": "Make live cat speech readable",
+            "goal": "Make the speech bubble readable and reconnect it to live desk state.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 51,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "parameters": {"path": "src/wisp/cat.py"},
+                    "result": {
+                        "path": "src/wisp/cat.py",
+                        "rolled_back": True,
+                        "verification": {
+                            "exit_code": 1,
+                            "stdout": "2 failed, 26 passed",
+                            "stderr": "visible speech bubble proof failed: readable lines do not wrap",
+                        },
+                    },
+                },
+                {
+                    "id": 52,
+                    "tool": "edit_file_hunks",
+                    "status": "completed",
+                    "parameters": {"path": "tests/test_cat.py"},
+                    "result": {
+                        "path": "tests/test_cat.py",
+                        "rolled_back": True,
+                        "verification": {
+                            "exit_code": 1,
+                            "stdout": "1 failed, 27 passed",
+                            "stderr": "cat watch row expectation changed while live desk state wording was also edited",
+                        },
+                    },
+                },
+            ],
+            "model_turns": [
+                {
+                    "id": 90,
+                    "tool_call_ids": [51],
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "edit_file", "path": "src/wisp/cat.py"},
+                            {"type": "edit_file", "path": "tests/test_cat.py"},
+                            {"type": "edit_file", "path": "README.md"},
+                        ],
+                    },
+                },
+                {
+                    "id": 91,
+                    "tool_call_ids": [52],
+                    "action": {
+                        "type": "batch",
+                        "tools": [
+                            {"type": "edit_file_hunks", "path": "src/wisp/cat.py"},
+                            {"type": "edit_file_hunks", "path": "tests/test_cat.py"},
+                        ],
+                    },
+                },
+            ],
+        }
+
+        resume = build_work_session_resume(session)
+        repair = resume["broad_rollback_slice_repair"]
+
+        self.assertEqual(repair["slice_focus"], "presentation_readability")
+        self.assertIn("presentation/readability slice first", repair["suggested_next"])
+
+        text = format_work_session_resume(resume)
+        self.assertIn("presentation/readability slice first", text)
+
+        prompt = build_work_deliberation_prompt({"work_session": {"resume": resume}}, {"todo_id": "t1"})
+        self.assertIn('"slice_focus": "presentation_readability"', prompt)
+        self.assertIn("visible text, wrapping, bubble, row, layout, or readability behavior", prompt)
+        self.assertIn("presentation/readability slice first", prompt)
+
     def test_write_ready_tiny_draft_ignores_unreconstructable_failed_patch_repair(self):
         from mew.work_loop import build_write_ready_tiny_draft_model_context
         from mew.work_session import build_work_session_resume

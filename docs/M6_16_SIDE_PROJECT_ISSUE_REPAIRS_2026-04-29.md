@@ -16,6 +16,7 @@ hardening input before returning to M6.24.
 | #24 | Work-session finish now blocks stale side-project identity in side-dogfood reports when the work context names a canonical side project such as `mew-wisp`. |
 | #23 | Work command subprocesses on macOS default `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` to suppress Objective-C fork-safety crash logs during closeout tools. |
 | #28 | Pending reviewer steer now enforces target-path / no-read / no-test boundaries before tool execution and coerces requested dry-run writes away from direct apply. |
+| #29 | Broad rollback repair now detects UI/readability failure tails and steers the next attempt to a smaller presentation/readability slice before reconnecting broader live/state behavior. |
 
 ## Validation
 
@@ -24,5 +25,11 @@ uv run pytest tests/test_side_project_dogfood.py tests/test_toolbox.py tests/tes
 20 passed, 778 deselected
 
 uv run ruff check src/mew/toolbox.py src/mew/work_session.py src/mew/commands.py tests/test_toolbox.py tests/test_work_session.py tests/test_side_project_dogfood.py
+All checks passed
+
+uv run pytest tests/test_work_session.py -k 'broad_rollback_slice_repair or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+3 passed, 781 deselected
+
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
 All checks passed
 ```

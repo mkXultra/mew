@@ -56,6 +56,25 @@ current resident cannot write this chain in one line, do not implement:
 M6.24 -> selected gap class -> architecture fit -> required next action -> same-shape rerun condition
 ```
 
+## Repair Close Rule
+
+A same-shape proof reaching the frozen Codex target closes only that selected
+repair. It does **not** automatically reopen broad measurement.
+
+Before broad measurement resumes, re-evaluate the controller thresholds against
+the latest aggregate and batch evidence:
+
+```text
+aggregate/current gap <= 20 pp -> measurement may resume if the decision ledger records why
+aggregate/current gap > 20 pp  -> stay in improvement_phase and select the next gap class
+accepted structural blocker    -> pause measurement and repair the blocker first
+```
+
+If a resident just wrote "resume measurement" because a single selected repair
+passed, but the aggregate gap is still above threshold, treat that as process
+drift. Correct the decision ledger, record the process correction, and select
+the next highest-leverage gap instead of launching another broad benchmark.
+
 ## Classification Rules
 
 Use `measurement_missing` when the current artifacts cannot answer why mew lost
