@@ -136,8 +136,10 @@ M6.24 resume condition:
   `gpt2-codegolf` and `git-multibranch` both reached their frozen Codex
   targets after same-shape repairs, so Batch 6 is now near parity for the
   measured slice. The adjusted aggregate remains above the `>20pp` improvement
-  threshold, so broad measurement stays paused. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> selected-gap disambiguation speed rerun -> compile-compcert speed_1`.
+  threshold, so broad measurement stays paused. `compile-compcert` speed_1 on
+  current head confirmed the post-SR-016 gap is long dependency/toolchain build
+  strategy, not `/tmp` permission. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_build_state_progress_contract repair -> compile-compcert speed_1 after repair`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -550,6 +552,14 @@ M6.24 resume condition:
   reached 10 work steps touching `/tmp/CompCert` and ended as `wall_timeout`,
   not immediate permission wait. The remaining `compile-compcert` gap is
   task-solving / long-build strategy.
+- M6.24 post Batch 6 selected-gap speed rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-toolchain-compile-compcert-1attempt-20260430-0317/result.json`
+  scored `0/1` with errors 0 and runtime `31m 02s`. The `/tmp` permission
+  blocker did not recur: mew reached `/tmp/CompCert`, opam Coq `8.16.1`,
+  `make depend`, and the real `make ccomp` path. The verifier still failed
+  because `/tmp/CompCert/ccomp` was missing. The selected next repair is
+  `long_dependency_build_state_progress_contract`, followed by a
+  same-shape `compile-compcert` speed rerun.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
   now treats an `edit_file` action carrying an `edits` list and no scalar

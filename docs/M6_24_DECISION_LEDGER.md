@@ -107,16 +107,16 @@ direction.
 | 2026-04-30 | v0.1 ACT capability-boundary speed rerun passed. | `docs/M6_24_SYSTEM_SERVICE_ACT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-system-service-act-git-multibranch-1attempt-20260430-0255/result.json`: one trial, no runner errors, reward `1.0`. mew preserved the shell-authorized system-service command, configured SSH Git, post-receive deployment, and Nginx HTTPS, then the external verifier passed. | Escalate to a five-trial same-shape proof for `git-multibranch`. If it reaches the frozen Codex target `5/5` without a new repeated structural blocker, close the selected repair and recheck thresholds before broad measurement resumes. | proof_5_pending |
 | 2026-04-30 | v0.1 ACT capability-boundary five-trial proof reached the frozen Codex target. | `docs/M6_24_SYSTEM_SERVICE_ACT_PROOF_5_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-system-service-act-git-multibranch-5attempts-20260430-0304/result.json`: `git-multibranch` scored `5/5` with runner errors 0, matching the frozen Codex target `5/5`. The selected system-service permission/capability repair is closed for this task shape. | Stay in improvement phase because the adjusted aggregate gap is still roughly `101/210` vs Codex `156/210`, about `-26.2pp`. Reclassify remaining Batch 1-5 dominated gap classes before choosing the next repair. | repair_closed_threshold_recheck_required |
 | 2026-04-30 | Select next gap class: `long_dependency_toolchain_build_strategy_contract`. | `docs/M6_24_GAP_RECHECK_2026-04-30.md`: after the Batch 6 `gpt2-codegolf` and `git-multibranch` repairs, adjusted Batch 6 is near parity (`19/20` vs `20/20`) but adjusted aggregate remains about `101/210` vs Codex `156/210`. Remaining large misses are dominated by long dependency/toolchain/domain build tasks such as `compile-compcert`, `mcmc-sampling-stan`, `protein-assembly`, and `adaptive-rejection-sampler`. | Run a one-trial same-shape speed rerun for `compile-compcert` on current head to classify the post-SR-016 strategy gap before designing another repair. Do not run `headless-terminal` or broad measurement first. | speed_rerun_pending |
+| 2026-04-30 | `compile-compcert` speed rerun confirmed a long-build strategy gap. | `docs/M6_24_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-toolchain-compile-compcert-1attempt-20260430-0317/result.json`: one trial, no runner errors, reward `0.0`, runtime `31m 02s`, stop reason `wall_timeout`. SR-016 `/tmp` permission did not recur; mew reached `/tmp/CompCert`, opam Coq `8.16.1`, `make depend`, and the real `make ccomp` path, but `/tmp/CompCert/ccomp` was still missing at verifier handoff. | Do not escalate to five trials. Implement `long_dependency_build_state_progress_contract`: preserve package-manager/toolchain/source/build state, distinguish prerequisite progress from final artifact completion, and allocate remaining wall budget to continuation rather than rediscovery. Then rerun `compile-compcert` speed_1 same shape. | active |
 
 ## Current Mode
 
 `improvement_phase`
 
-The selected `compact_model_inference_contract_failure` repair has a
-same-shape five-trial proof at the frozen Codex target, so that repair is
-closed. The adjusted aggregate and current Batch 6 gaps remain above the M6.24
-improvement threshold, so broad measurement must stay paused.
+The selected `long_dependency_toolchain_build_strategy_contract` speed rerun
+confirmed the post-SR-016 gap. Broad measurement remains paused while this
+selected gap is repaired.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> selected-gap disambiguation speed rerun -> compile-compcert speed_1`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_build_state_progress_contract repair -> compile-compcert speed_1 after repair`
