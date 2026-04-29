@@ -42,7 +42,7 @@ For every candidate gap, run this decision chain:
    no  -> stop and write the lane/profile/helper decision first
    yes -> continue
 
-4. Did the same-shape rerun improve the selected gap class?
+4. Did the speed same-shape rerun improve the selected gap class?
    yes -> record delta, then choose the next highest-leverage gap or resume
           broad measurement if the decision ledger says the threshold is met
    no  -> record unchanged/regressed, then either revise the repair route or
@@ -169,6 +169,37 @@ Process changes are allowed only when all of these are recorded in
 Do not change the loop because a new process feels cleaner. Change it only when
 the current loop blocks classification, repair, or rerun evidence.
 
+## Rerun Budget Rule
+
+Do not spend `-k 5 -n 5` on every repair cycle. A five-trial rerun is the close
+or escalation proof, not the default diagnostic loop.
+
+Use the smallest rerun that can answer the current question:
+
+```text
+classification / missing instrumentation -> 1 trial
+small generic repair smoke               -> 1 trial
+noisy or partially stochastic repair      -> 2 trials
+close-gate / resume-measurement proof     -> 5 trials
+benchmark parity comparison               -> documented batch size
+```
+
+Speed-reruns must keep the same task, model, permissions, timeout shape, and
+agent wrapper unless the selected gap is the run shape itself. The smaller
+trial count is allowed because it answers a narrower question: "did the failure
+mode move?" rather than "what is the stable pass rate?"
+
+Escalate from a speed-rerun to `-k 5 -n 5` only when one of these is true:
+
+- a speed-rerun shows a material improvement and the repair is a close
+  candidate
+- the result is contradictory or variance-sensitive enough that one trial is
+  misleading
+- the decision ledger is about to resume broad measurement
+- the user explicitly asks for a five-trial proof
+
+Record both the rerun tier and the reason in the decision ledger or gap ledger.
+
 ## Gap Ledger Contract
 
 Append one JSON object per classified gap or repair attempt to:
@@ -194,6 +225,8 @@ Recommended fields:
   "authoritative_lane": "tiny|implementation|research|routine|planning|unknown",
   "helper_lanes": ["deliberation"],
   "same_shape_key": "stable rerun shape",
+  "rerun_tier": "speed_1|speed_2|proof_5|batch",
+  "rerun_reason": "why this trial count is enough",
   "same_shape_rerun_required": true,
   "status": "open|repairing|rerun_pending|improved|unchanged|regressed|deferred",
   "score_before": "0/5",
