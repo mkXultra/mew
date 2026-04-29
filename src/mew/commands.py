@@ -3539,6 +3539,7 @@ def work_finish_blocker_allows_continue(finished_note):
             "all-valid answer completeness evidence",
             "numeric artifact quality evidence",
             "query-only hidden-model",
+            "model inference output quality evidence",
         )
     )
 

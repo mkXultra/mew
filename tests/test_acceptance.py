@@ -4,6 +4,7 @@ from mew.acceptance import (
     exact_command_example_requirements,
     extract_acceptance_constraints,
     implementation_contract_source_requirements,
+    is_model_inference_output_task,
     is_numeric_artifact_task,
     is_query_only_hidden_model_task,
     is_runtime_visual_artifact_task,
@@ -858,6 +859,201 @@ def test_numeric_artifact_task_classifier_covers_rank_and_metrics_without_ui_fal
     assert not is_numeric_artifact_task("Fix offset pagination regression where the text does not fit.")
     assert not is_numeric_artifact_task("Update metrics reporting docs.")
     assert not is_numeric_artifact_task("Keep the prompt cache boundary empty without draft metrics.")
+
+
+def test_model_inference_output_task_classifier_covers_checkpoint_sampling():
+    text = (
+        "I have downloaded model weights stored as a TF .ckpt. Write a dependency-free "
+        "C file that samples from the model with arg-max sampling and continues the "
+        "output for the next 20 tokens using vocab.bpe."
+    )
+
+    assert is_model_inference_output_task(text)
+    assert is_model_inference_output_task(
+        "Run inference from checkpoint weights and print the generated token continuation."
+    )
+    assert is_model_inference_output_task("Load a GPT model from model.bin and sample the next token.")
+    assert is_model_inference_output_task(
+        "Given a model checkpoint, perform greedy decoding and print the next tokens."
+    )
+    assert not is_model_inference_output_task("Count dataset tokens from a CSV file.")
+    assert not is_model_inference_output_task("Update docs about model selection.")
+    assert not is_model_inference_output_task("Read token weights from weights.csv and generate output.json.")
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_smoke_only_output():
+    text = (
+        "I have downloaded the gpt-2 weights stored as a TF .ckpt. Write me a dependency-free C file "
+        "that samples from the model with arg-max sampling. Call your program /app/gpt2.c, I will "
+        "compile with gcc -O3 -lm. It should read the .ckpt and the .bpe file. Your c program must "
+        "be <5000 bytes. I will run it /app/a.out gpt2-124M.ckpt vocab.bpe \"[input string here]\" "
+        "and you should continue the output under whatever GPT-2 would print for the next 20 tokens."
+    )
+    checks = [
+        {
+            "constraint": "Call your program /app/gpt2.c, I will compile with gcc -O3 -lm.",
+            "status": "verified",
+            "evidence": "Tool #4 compiled with gcc successfully.",
+        },
+        {
+            "constraint": "It should read the .ckpt and the .bpe file.",
+            "status": "verified",
+            "evidence": "Tool #4 ran with gpt2-124M.ckpt and vocab.bpe.",
+        },
+        {
+            "constraint": "Your c program must be <5000 bytes.",
+            "status": "verified",
+            "evidence": "Tool #4: 2821 gpt2.c.",
+        },
+        {
+            "constraint": "Continue output under whatever GPT-2 would print for the next 20 tokens.",
+            "status": "verified",
+            "evidence": "Tool #4 exited 0 and printed 20 generated tokens.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "compiled ok\n2821 gpt2.c\nprogram output: prompt Damien Damien Damien\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference output quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_model_inference_reference_output_evidence():
+    text = (
+        "I have downloaded model weights stored as a TF .ckpt. Write a compact C sampler "
+        "that uses vocab.bpe and continues the output for the next 20 tokens."
+    )
+    checks = [
+        {
+            "constraint": "The C sampler compiles and reads the checkpoint plus vocab.bpe.",
+            "status": "verified",
+            "evidence": "Tool #5 compile/read checks passed.",
+        },
+        {
+            "constraint": "Continue the output under the model's argmax tokens.",
+            "status": "verified",
+            "evidence": "Tool #5 python reference top-1 token ids match for 20/20 generated tokens.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 5,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "python reference implementation top-1 token ids match 20/20; expected continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_weak_or_failed_reference_text():
+    text = (
+        "Load a GPT model from model.bin and vocab.bpe, then sample the next token "
+        "and print the generated continuation."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #7 reference model loaded ok and top-1 token ids match: false.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 7,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "reference model loaded ok\ntop-1 token ids match: false\nmatched 0/20\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference output quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_oracle_marker_from_command_parameter_only():
+    text = (
+        "Run inference from checkpoint weights and vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #6 reference implementation top-1 token ids match.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 6,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "echo 'reference implementation top-1 token ids match'"},
+                "result": {"exit_code": 0, "stdout": "printed 20 generated tokens\n"},
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference output quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_does_not_escalate_plain_token_output_task():
+    text = "Write a CLI that prints exactly 20 tokens from stdin."
+    checks = [
+        {
+            "constraint": "Print exactly 20 tokens.",
+            "status": "verified",
+            "evidence": "Tool #3 counted exactly 20 tokens.",
+        }
+    ]
+
+    assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}) == ""
 
 
 def test_query_only_hidden_model_classifier_covers_forward_extraction():

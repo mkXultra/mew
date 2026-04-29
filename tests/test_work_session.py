@@ -34474,6 +34474,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
         self.assertIn("expected dimensions/resolution, reference similarity", prompt)
+        self.assertIn("For model/checkpoint/tokenizer inference, sampling, or continuation tasks", prompt)
+        self.assertIn("printed N tokens", prompt)
+        self.assertIn("reference/golden/oracle continuation", prompt)
         self.assertIn("proof only checks frames/foo, output/foo, or a root copy", prompt)
         self.assertIn("prove the exact /tmp verifier path", prompt)
         self.assertIn("For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks", prompt)
@@ -37361,6 +37364,11 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertTrue(
             work_finish_blocker_allows_continue("finish blocked: numeric artifact quality evidence ungrounded")
+        )
+        self.assertTrue(
+            work_finish_blocker_allows_continue(
+                "finish blocked: model inference output quality evidence ungrounded"
+            )
         )
         self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))
 

@@ -410,6 +410,105 @@ _QUERY_ONLY_GENERALIZATION_FAILURE_MARKERS = (
     "skipped",
 )
 
+_MODEL_INFERENCE_SOURCE_MARKERS = (
+    ".bpe",
+    ".ckpt",
+    "checkpoint",
+    "model.bin",
+    "model weights",
+    "tokenizer",
+    "vocab.bpe",
+    "weights",
+)
+_MODEL_INFERENCE_ACTION_MARKERS = (
+    "arg-max",
+    "argmax",
+    "continuation",
+    "continue the output",
+    "decoding",
+    "generate",
+    "generated tokens",
+    "greedy decode",
+    "greedy decoding",
+    "inference",
+    "next token",
+    "next tokens",
+    "next 20 tokens",
+    "sample",
+    "sampling",
+)
+_MODEL_INFERENCE_OUTPUT_MARKERS = (
+    "output",
+    "print",
+    "token",
+)
+_MODEL_INFERENCE_CHECK_MARKERS = (
+    "arg-max",
+    "argmax",
+    "continuation",
+    "continue",
+    "generated",
+    "inference",
+    "output",
+    "sample",
+    "sampling",
+    "token",
+)
+_MODEL_INFERENCE_ORACLE_MARKERS = (
+    "argmax match",
+    "argmax token",
+    "arg-max match",
+    "all matched",
+    "expected continuation",
+    "expected output",
+    "golden",
+    "ground truth",
+    "ground-truth",
+    "known continuation",
+    "logits match",
+    "logits matched",
+    "matched reference",
+    "matches reference",
+    "oracle match",
+    "python reference match",
+    "reference comparison",
+    "reference implementation match",
+    "reference model match",
+    "same tokens",
+    "token id match",
+    "token ids match",
+    "top-1 match",
+    "top-1 token",
+)
+_MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS = (
+    "all matched",
+    "equal",
+    "match",
+    "matched",
+    "pass",
+    "passed",
+    "same",
+    "within tolerance",
+)
+_MODEL_INFERENCE_ORACLE_FAILURE_MARKERS = (
+    "assertionerror",
+    "different",
+    "did not match",
+    "fail",
+    "failed",
+    "false",
+    "missing",
+    "mismatch",
+    "not equal",
+    "not found",
+    "not match",
+    "timed out",
+    "timeout",
+    "wrong",
+    "wrong output",
+)
+_MODEL_INFERENCE_RATIO_RE = re.compile(r"\b(\d+)\s*/\s*(\d+)\b")
+
 _EXTERNAL_TOOL_REQUIREMENT_MARKERS = (
     "command",
     "executable",
@@ -574,6 +673,23 @@ def _tool_call_text(call: object) -> str:
         argv = result.get("argv")
         if isinstance(argv, list):
             chunks.append(" ".join(str(item) for item in argv))
+    elif result:
+        chunks.append(str(result))
+    return "\n".join(chunks)
+
+
+def _tool_call_result_text(call: object) -> str:
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result")
+    chunks: list[str] = []
+    if isinstance(result, dict):
+        if result.get("exit_code") not in (None, 0):
+            return ""
+        for key in ("text", "stdout", "stderr", "summary", "output"):
+            value = result.get(key)
+            if value:
+                chunks.append(str(value))
     elif result:
         chunks.append(str(result))
     return "\n".join(chunks)
@@ -1520,6 +1636,111 @@ def _query_only_hidden_model_blocker(
     )
 
 
+def is_model_inference_output_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not any(marker in lowered for marker in _MODEL_INFERENCE_SOURCE_MARKERS):
+        return False
+    if "weights" in lowered and not any(
+        marker in lowered
+        for marker in (
+            ".bpe",
+            ".ckpt",
+            "checkpoint",
+            "gpt",
+            "llm",
+            "model",
+            "model.bin",
+            "tokenizer",
+            "transformer",
+            "vocab.bpe",
+        )
+    ):
+        return False
+    if not any(marker in lowered for marker in _MODEL_INFERENCE_ACTION_MARKERS):
+        return False
+    if not any(marker in lowered for marker in _MODEL_INFERENCE_OUTPUT_MARKERS):
+        return False
+    return True
+
+
+def _has_model_inference_check_marker(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _MODEL_INFERENCE_CHECK_MARKERS)
+
+
+def _model_inference_clause_has_failed_ratio(text: str) -> bool:
+    for match in _MODEL_INFERENCE_RATIO_RE.finditer(text):
+        try:
+            numerator = int(match.group(1))
+            denominator = int(match.group(2))
+        except (TypeError, ValueError):
+            continue
+        if denominator > 0 and numerator < denominator:
+            return True
+    return False
+
+
+def _has_model_inference_oracle_success_clause(text: object) -> bool:
+    clauses = re.split(r"[\n\r;]+|(?<=[.!?])\s+", str(text or ""))
+    for clause in clauses:
+        lowered = clause.casefold()
+        if not any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_MARKERS):
+            continue
+        if not any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS):
+            continue
+        if any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS):
+            continue
+        if _model_inference_clause_has_failed_ratio(lowered):
+            continue
+        return True
+    return False
+
+
+def _has_model_inference_output_quality_evidence(evidence: object, session: object) -> bool:
+    if not _has_model_inference_oracle_success_clause(evidence):
+        return False
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if _has_model_inference_oracle_success_clause(_tool_call_result_text(call)):
+            return True
+    return False
+
+
+def _model_inference_output_quality_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if not is_model_inference_output_task(task_description):
+        return ""
+    inference_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+        and (
+            _has_model_inference_check_marker(check.get("constraint"))
+            or _has_model_inference_check_marker(check.get("evidence"))
+        )
+    ]
+    if not inference_checks:
+        return (
+            "model inference output quality evidence missing: checkpoint, tokenizer, "
+            "or model-sampling tasks must cite reference, golden, argmax/top-1, "
+            "logit, token-id, or expected-continuation validation before task_done=true"
+        )
+    for check in inference_checks:
+        if _has_model_inference_output_quality_evidence(check.get("evidence"), session):
+            return ""
+    return (
+        "model inference output quality evidence ungrounded: compile success, "
+        "byte-size checks, CLI shape, and token-count smoke output are not enough; "
+        "cite a completed run_command or run_tests tool whose result proves reference, "
+        "golden, argmax/top-1, logit, token-id, or expected-continuation equivalence"
+    )
+
+
 def _command_requirement_terms(command: str, backtick_values: list[str]) -> list[str]:
     terms: list[str] = []
     if command:
@@ -1729,6 +1950,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     query_only_blocker = _query_only_hidden_model_blocker(task_description, checks, session)
     if query_only_blocker:
         return query_only_blocker
+    model_inference_blocker = _model_inference_output_quality_blocker(task_description, checks, session)
+    if model_inference_blocker:
+        return model_inference_blocker
     numeric_artifact_blocker = _numeric_artifact_quality_blocker(task_description, checks, session)
     if numeric_artifact_blocker:
         return numeric_artifact_blocker
