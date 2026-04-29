@@ -4662,6 +4662,51 @@ class WorkSessionTests(unittest.TestCase):
             text,
         )
 
+    def test_work_session_resume_flags_missing_compatibility_override_probe(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure x86_64-linux && make -j2 ccomp",
+                    },
+                    "result": {
+                        "command": "./configure x86_64-linux && make -j2 ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("toolchain_version_constraint_mismatch", codes)
+        self.assertIn("compatibility_override_probe_missing", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: compatibility_override_probe_missing", text)
+        self.assertIn("compatibility/override flags", text)
+
     def test_work_session_resume_flags_chained_untargeted_full_make_for_specific_long_artifact(self):
         from mew.work_session import build_work_session_resume
 
@@ -34837,6 +34882,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("required final executable/artifact is missing", prompt)
         self.assertIn("Before installing a distro toolchain", prompt)
         self.assertIn("version constraints", prompt)
+        self.assertIn("cheap source-provided compatibility/override flags", prompt)
         self.assertIn("invalidates a toolchain/package path", prompt)
         self.assertIn("dependency-generation/configure target", prompt)
         self.assertIn("shortest explicit target that produces that artifact", prompt)

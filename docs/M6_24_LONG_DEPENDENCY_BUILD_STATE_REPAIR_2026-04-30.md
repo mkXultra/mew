@@ -144,6 +144,46 @@ Result:
 Next validation remains a one-trial same-shape speed rerun for
 `compile-compcert`.
 
+## v0.3 Repair
+
+`long_dependency_toolchain_compatibility_override_order_contract`
+
+Resource-normalized `compile-compcert` proof reached `1/2` valid completed
+trials before the `5/5` close target became impossible. The failed completed
+trial grounded the source tree and entered real build work, but after distro
+Coq version rejection it spent budget on an alternate OPAM toolchain instead of
+first trying cheap source-provided compatibility/override configure paths.
+
+Changes:
+
+- long-dependency resume state now surfaces
+  `compatibility_override_probe_missing` when a source-build configure step
+  rejects a dependency version and no cheap compatibility/help probe is visible;
+- THINK guidance now tells source-build tasks to inspect `./configure --help`
+  or equivalent project help and try source-provided compatibility/override
+  flags before constructing an alternate toolchain from scratch;
+- alternate toolchain construction remains allowed after the cheap override path
+  is invalidated.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'long_dependency or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+jq empty proof-artifacts/m6_24_gap_ledger.jsonl
+git diff --check
+```
+
+Result:
+
+- focused work-session tests: `3 passed`
+- ruff: passed
+- gap ledger JSON: valid
+- diff whitespace: clean
+
+Next validation remains a one-trial same-shape speed rerun for
+`compile-compcert`.
+
 ## v0.2 Speed Rerun
 
 The v0.2 same-shape speed rerun passed:

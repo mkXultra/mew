@@ -4124,6 +4124,16 @@ _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS = (
         ),
     ),
 )
+_LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS = (
+    "configure --help",
+    "./configure --help",
+    "--help |",
+    "-ignore",
+    "--ignore",
+    "compatib",
+    "override",
+    "allow-unsupported",
+)
 
 
 def _make_invocation_prefix_is_wrapper(parts):
@@ -4354,6 +4364,28 @@ def _long_dependency_strategy_blockers(call, expected_artifacts=None):
                 "excerpt": excerpt,
             }
         )
+    if (
+        any(marker in lowered for marker in ("requires a version", "unsupported", "version mismatch"))
+        and any(marker in lowered for marker in ("./configure", " configure ", "testing coq", "testing "))
+        and not any(marker in lowered for marker in _LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS)
+    ):
+        excerpt = ""
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line_lower = line.casefold()
+            if any(marker in line_lower for marker in ("requires a version", "unsupported", "version mismatch")):
+                excerpt = clip_inline_text(line, 180)
+                break
+        blockers.append(
+            {
+                "code": "compatibility_override_probe_missing",
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "excerpt": excerpt,
+            }
+        )
     untargeted_make = _long_dependency_untargeted_make_blocker(call, expected_artifacts or [])
     if untargeted_make:
         blockers.append(untargeted_make)
@@ -4437,9 +4469,11 @@ def build_long_dependency_build_state(task, calls, session=None):
         "strategy_blockers": strategy_blockers[-6:],
         "suggested_next": (
             "resume the existing source tree/toolchain state; do not restart package or source setup after a "
-            "compatible path is found. Do not retry invalidated toolchain/package paths. Allocate remaining wall "
-            "budget to the shortest idempotent continuation command that produces the missing final artifact, "
-            "then prove it exists and is executable/invokable."
+            "compatible path is found. If a configure step rejects an installed dependency version, inspect or try "
+            "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
+            "Do not retry invalidated toolchain/package paths. Allocate remaining wall budget to the shortest "
+            "idempotent continuation command that produces the missing final artifact, then prove it exists and "
+            "is executable/invokable."
         ),
     }
 
