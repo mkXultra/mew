@@ -455,7 +455,28 @@ Done when:
 - README examples show the polished terminal view and the escape hatch for
   diagnostic/plain output
 
-### SP23: mew-wisp Mew Adapter Reconnect
+### SP23: mew-wisp Speech Bubble
+
+Make the CLI-first wisp appear to speak in text without adding audio or live
+mew coupling.
+
+Done when:
+
+- normal `--format human` output includes a compact speech bubble between the
+  visible form and the resident HUD panel
+- utterances are deterministic and derived from fixture/state data such as
+  presence state, focus/message, watch iteration, desk status, and primary
+  action
+- `idle`, `coding`, `waiting`, and `blocked` states produce distinct but short
+  resident-facing lines
+- the bubble centers and wraps with the same terminal-width behavior as the
+  polished resident panel
+- no TTS, audio playback, shell execution, hidden monitoring, live `.mew` reads,
+  or core imports are introduced
+- focused tests cover bubble placement, watch output, details gating, no
+  regression to state/HTML/live/launcher behavior, and no audio/TTS flags
+
+### SP24: mew-wisp Mew Adapter Reconnect
 
 Reconnect the CLI-first wisp to real mew state after the terminal experience is
 worth keeping on screen.

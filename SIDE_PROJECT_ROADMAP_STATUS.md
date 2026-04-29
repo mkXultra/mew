@@ -33,11 +33,12 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Visual Polish | `done` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e/SP22f replaced raw diagnostics and stale ghost copy with resident-facing mew-wisp copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
-| SP23 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
+| SP23 mew-wisp Speech Bubble | `in_progress` | SP23a first attempt reached a green focused verifier but timed out during closeout and left no product diff; issue #25 records the implementation-lane problem before a fresh retry. |
+| SP24 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the speech-bubble terminal experience is useful. |
 
 ## Active Focus
 
-Active side-project focus: **SP23 mew-wisp Mew Adapter Reconnect is next**.
+Active side-project focus: **SP23 mew-wisp Speech Bubble is next**.
 
 Current target:
 
@@ -143,6 +144,12 @@ Current target:
   similarity, centered layout, resident panel, `--details`, watch,
   state/HTML/live/launcher behavior, and product-code rescue edits `0` were
   preserved; ledger row `40` records the practical result
+- SP23a task `#35` first attempt stopped after session `#64` reached focused
+  verifier green (`40 passed`) but timed out during closeout with no product
+  diff and no report persisted; ledger row `41` records the failed attempt with
+  rescue edits `0`, issue `#25` records the green-verifier/no-durable-artifact
+  closeout problem, and issue `#23` was updated with another macOS Objective-C
+  fork warning recurrence
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -218,6 +225,10 @@ Current target:
   open issue `#24` evidence for implementation-lane hardening; the operator
   corrected only the local report to the canonical `mew-wisp` side-project name
   before ledger append
+- route task #35/session #64 verifier-green closeout timeout with no durable
+  product diff as open issue `#25` evidence for implementation-lane hardening;
+  the operator recorded a failed local report and will retry SP23a from a fresh
+  task
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -313,6 +324,13 @@ Current target:
   `structural_repairs_required=8`, `rescue_edits_total=0`, and
   `codex_product_code_rescue_edits=0`. Ledger row `40` records the bounded
   copy cleanup with failure class `copy_cleanup_bounded`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  the first SP23a attempt on 2026-04-29: `rows_total=41`, nine `failed`,
+  twenty-nine `practical`, three `clean`, `success_rate=0.780`,
+  `structural_repairs_required=9`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `41` records the failed
+  speech-bubble closeout timeout with failure class
+  `speech_bubble_closeout_timeout_after_verifier_pass_left_no_diff`.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,
@@ -795,10 +813,12 @@ Current target:
 - SP21 is closed: swappable `default`/`cat` forms, the `cat.png`-derived
   sprite, compact HUD, `--details` diagnostics, and focused regression tests
   are in place.
-- SP22 is not started: the fixture-first terminal surface still needs visual
-  polish before reconnecting to live mew state.
-- SP23 is not started: reconnecting the CLI-first wisp to live mew state should
-  wait until the polished terminal experience is worth keeping on screen.
+- SP22 is closed: the fixture-first terminal surface now has a centered cat
+  form, resident-facing copy, and fixed-width HUD panel.
+- SP23 is in progress: the speech-bubble layer is the next fixture-first
+  terminal experience before reconnecting to live mew state.
+- SP24 is not started: reconnecting the CLI-first wisp to live mew state should
+  wait until the speech-bubble terminal experience is useful.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -818,14 +838,14 @@ Current target:
 
 Choose the next side-project move:
 
-1. start SP22 visual polish with a small mew-first slice, likely a theme/plain
-   fallback pass over the compact human and cat terminal surfaces
-2. keep state/JSON output as the machine-readable proof path while polishing
-   only human terminal output
+1. retry SP23a speech bubble from a fresh mew-first task after the session #64
+   closeout timeout left no durable product diff
+2. keep state/JSON output as the machine-readable proof path while adding only
+   text-based human terminal speech
 3. preserve the old `mew-ghost` name only where it is historical evidence for
    SP12-SP18 or the pre-rename implementation path
-4. keep SP23 mew adapter reconnect deferred until SP22 makes the terminal view
-   worth keeping open
+4. keep SP24 mew adapter reconnect deferred until SP23 makes the terminal view
+   feel conversational enough to keep open
 5. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
 
