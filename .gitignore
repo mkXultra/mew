@@ -9,6 +9,9 @@ artifacts/
 proof-artifacts/
 proof-workspace/
 
+# Local visual reference image used while polishing mew-wisp terminal sprites.
+/cat.png
+
 # Local-only reference links to external CLI implementations.
 references/fresh-cli/claude-code
 references/fresh-cli/codex

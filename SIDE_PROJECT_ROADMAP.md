@@ -435,7 +435,27 @@ Done when:
 - README explains that the wisp is the surface/body and the character is a
   replaceable form
 
-### SP22: mew-wisp Mew Adapter Reconnect
+### SP22: mew-wisp Visual Polish
+
+Make the fixture-first terminal surface feel like a resident wisp before adding
+more mew coupling.
+
+Done when:
+
+- the default human view and cat form share a coherent visual theme rather than
+  looking like debug logs
+- the terminal output has a compact HUD, readable alignment, and a clear visual
+  hierarchy for form, state, focus, signal, and next action
+- state-specific form differences are visible but subtle enough for a terminal
+  pane that stays open during work
+- any color or ANSI styling degrades cleanly for plain output, tests, and
+  non-TTY use
+- focused tests cover theme selection, default/plain fallback, watch output,
+  details output, and no regression to live-read or launcher execution behavior
+- README examples show the polished terminal view and the escape hatch for
+  diagnostic/plain output
+
+### SP23: mew-wisp Mew Adapter Reconnect
 
 Reconnect the CLI-first wisp to real mew state after the terminal experience is
 worth keeping on screen.

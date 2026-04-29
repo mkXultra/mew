@@ -32,11 +32,12 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `deferred/partial` | Broad HTML removal is deferred after issue #18 closed, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
-| SP22 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
+| SP22 mew-wisp Visual Polish | `planned` | Polish the fixture-first terminal surface before adding more mew coupling: coherent theme, clearer hierarchy, subtle state-specific form differences, plain fallback, watch/details coverage, and README usage. |
+| SP23 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
 
-Active side-project focus: **SP22 mew-wisp Mew Adapter Reconnect is next**.
+Active side-project focus: **SP22 mew-wisp Visual Polish is next**.
 
 Current target:
 
@@ -707,8 +708,10 @@ Current target:
 - SP21 is closed: swappable `default`/`cat` forms, the `cat.png`-derived
   sprite, compact HUD, `--details` diagnostics, and focused regression tests
   are in place.
-- SP22 is not started: reconnecting the CLI-first wisp to live mew state should
-  wait until the terminal experience is worth keeping on screen.
+- SP22 is not started: the fixture-first terminal surface still needs visual
+  polish before reconnecting to live mew state.
+- SP23 is not started: reconnecting the CLI-first wisp to live mew state should
+  wait until the polished terminal experience is worth keeping on screen.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -728,14 +731,14 @@ Current target:
 
 Choose the next side-project move:
 
-1. resolve or work around issue `#18` before continuing broad SP19
-2. if continuing before a core repair lands, split SP19 into a much smaller
-   mew-first slice that edits one source/test surface at a time and records that
-   split honestly in the ledger
-3. keep state/JSON output as the machine-readable proof path while removing
-   browser-oriented examples and tests
-4. preserve the old `mew-ghost` name only where it is historical evidence for
+1. start SP22 visual polish with a small mew-first slice, likely a theme/plain
+   fallback pass over the compact human and cat terminal surfaces
+2. keep state/JSON output as the machine-readable proof path while polishing
+   only human terminal output
+3. preserve the old `mew-ghost` name only where it is historical evidence for
    SP12-SP18 or the pre-rename implementation path
+4. keep SP23 mew adapter reconnect deferred until SP22 makes the terminal view
+   worth keeping open
 5. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
 
