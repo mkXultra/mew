@@ -265,8 +265,15 @@ M6.24 resume condition:
   can now establish the expected verifier-read `/tmp/...` artifact path,
   finish blocks sibling-path-only evidence, cleanup recognizes validator output
   like `BMP ok: ... and /tmp/...`, and the THINK prompt warns against finishing
-  after proving only `frames/...`, `output/...`, or root copies. Do not resume
-  new broad measurement yet.
+  after proving only `frames/...`, `output/...`, or root copies. The same-shape
+  speed proof is recorded in
+  `docs/M6_24_ARTIFACT_HANDOFF_SPEED_RERUN_2026-04-29.md`:
+  `make-mips-interpreter` passed `1/1` with no runner errors. The trial stopped
+  at `max_steps` after a final MIPS SPECIAL3 repair rather than via finish, so
+  it did not directly exercise deferred cleanup, but it did avoid the
+  wrong-path finish and stale `/tmp/frame.bmp` handoff failures. Next action:
+  escalate to a five-trial same-shape proof for `make-mips-interpreter`. Do not
+  resume new broad measurement yet.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
