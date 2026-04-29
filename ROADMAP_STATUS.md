@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; five-trial make-mips proof improved to 1/5 but exposed runtime visual artifact quality as the next repair. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; visual-artifact quality repair passed speed proof and now needs five-trial make-mips proof. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -243,9 +243,13 @@ M6.24 resume condition:
   external verifier expected 640x400. The v0.4 generic repair adds a
   runtime-visual-artifact quality finish guard plus THINK guidance: format,
   existence, nonzero pixels, or self-consistent dimensions are not enough when
-  the task asks for correct/expected rendered output. The next action is a
-  1-trial same-shape speed proof for `make-mips-interpreter`. Do not resume new
-  broad measurement yet.
+  the task asks for correct/expected rendered output. The v0.4 speed proof is
+  recorded in `docs/M6_24_VISUAL_QUALITY_SPEED_RERUN_2026-04-29.md`:
+  `make-mips-interpreter` passed 1/1 with no runner errors. mew cited Doom boot
+  markers and fresh `640x400` frame validation before finish, cleaned `/tmp`
+  frames, and the external verifier passed all three checks. Next action:
+  escalate to a five-trial same-shape proof for `make-mips-interpreter`. Do not
+  resume new broad measurement yet.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
