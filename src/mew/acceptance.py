@@ -459,7 +459,9 @@ _MODEL_INFERENCE_ORACLE_MARKERS = (
     "argmax token",
     "arg-max match",
     "all matched",
+    "candidate_equals_reference",
     "expected continuation",
+    "expected_continuation",
     "expected output",
     "golden",
     "ground truth",
@@ -474,6 +476,7 @@ _MODEL_INFERENCE_ORACLE_MARKERS = (
     "reference comparison",
     "reference implementation match",
     "reference model match",
+    "reference_output",
     "same tokens",
     "token id match",
     "token ids match",
@@ -482,6 +485,9 @@ _MODEL_INFERENCE_ORACLE_MARKERS = (
 )
 _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS = (
     "all matched",
+    "candidate_equals_reference true",
+    "candidate_equals_reference yes",
+    "candidate_equals_reference 1",
     "equal",
     "match",
     "matched",
@@ -489,6 +495,56 @@ _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS = (
     "passed",
     "same",
     "within tolerance",
+)
+_MODEL_INFERENCE_CANDIDATE_EQUALS_RE = re.compile(
+    r"\bcandidate_equals_reference\b\s*[:=]?\s*(?P<value>[A-Za-z0-9_+-]+)?",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_ORACLE_FALSE_VALUE_RE = re.compile(
+    r"\b(?:"
+    r"all[_\s-]*matched|arg[-\s]?max(?:\s+token)?(?:\s+ids?)?\s+match|"
+    r"candidate_equals_reference|equal|equals|logits?\s+match|match(?:es|ed)?|"
+    r"matched\s+reference|matches\s+reference|oracle\s+match|pass(?:ed)?|"
+    r"python\s+reference\s+match|reference\s+comparison|reference\s+implementation\s+match|"
+    r"reference\s+model\s+match|same|token(?:\s+ids?)?\s+match|"
+    r"top-1(?:\s+token(?:\s+ids?)?)?\s+match"
+    r")\b\s*(?::|=|\bis\b)?\s*"
+    r"(?:false\b|no\s+match\b|(?:0|no)\b(?!\s+(?:differences?|errors?|failures?|mismatches?)))",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_ZERO_NEGATIVE_COUNT_RE = re.compile(
+    r"\b(?:0|no)\s+(?:differences?|errors?|failures?|mismatches?)\b",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_SELF_DERIVED_ORACLE_PATTERNS = (
+    re.compile(r"\bstandard[-\s]?libm\s+reference\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:candidate|current|same)\s+(?:implementation|program|source)\b"
+        r".{0,120}\b(?:reference|oracle)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\b(?:reference|oracle)\b.{0,120}"
+        r"\b(?:candidate|current|same)\s+(?:implementation|program|source)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+_MODEL_INFERENCE_OPEN_READ_WRITE_RE = re.compile(
+    r"\bopen\s*\(\s*['\"](?P<src>[^'\"]+\.(?:c|cc|cpp|cxx|py|rs|go))['\"][^)]*\)"
+    r"\s*\.read\s*\(\).*?"
+    r"\bopen\s*\(\s*['\"](?P<dst>[^'\"]*(?:expected|golden|oracle|ref|reference|truth)[^'\"]*)['\"]",
+    re.IGNORECASE | re.DOTALL,
+)
+_MODEL_INFERENCE_COPY_TO_REF_RE = re.compile(
+    r"(?:^|[;&|(\n]\s*)"
+    r"(?:cp|copy)\s+['\"]?(?P<src>[^'\"\s]+\.(?:c|cc|cpp|cxx|py|rs|go))['\"]?"
+    r"\s+['\"]?(?P<dst>[^'\"\s]*(?:expected|golden|oracle|ref|reference|truth)[^'\"\s]*)['\"]?",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_CAT_TO_REF_RE = re.compile(
+    r"(?:^|[;&|(\n]\s*)cat\s+['\"]?(?P<src>[^'\"\s]+\.(?:c|cc|cpp|cxx|py|rs|go))['\"]?"
+    r"\s*>\s*['\"]?(?P<dst>[^'\"\s]*(?:expected|golden|oracle|ref|reference|truth)[^'\"\s]*)['\"]?",
+    re.IGNORECASE,
 )
 _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS = (
     "assertionerror",
@@ -502,6 +558,7 @@ _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS = (
     "not equal",
     "not found",
     "not match",
+    "no match",
     "timed out",
     "timeout",
     "wrong",
@@ -1686,9 +1743,21 @@ def _has_model_inference_oracle_success_clause(text: object) -> bool:
         lowered = clause.casefold()
         if not any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_MARKERS):
             continue
-        if not any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS):
+        candidate_equals = _MODEL_INFERENCE_CANDIDATE_EQUALS_RE.search(lowered)
+        if candidate_equals:
+            value = str(candidate_equals.group("value") or "").casefold()
+            if value and value not in {"1", "pass", "passed", "true", "yes"}:
+                continue
+            if not value and "candidate_equals_reference true" not in lowered:
+                continue
+        if _MODEL_INFERENCE_ORACLE_FALSE_VALUE_RE.search(lowered):
             continue
-        if any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS):
+        has_success_marker = any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS)
+        has_zero_negative_count = bool(_MODEL_INFERENCE_ZERO_NEGATIVE_COUNT_RE.search(lowered))
+        if not has_success_marker and not has_zero_negative_count:
+            continue
+        failure_text = _MODEL_INFERENCE_ZERO_NEGATIVE_COUNT_RE.sub("", lowered)
+        if any(marker in failure_text for marker in _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS):
             continue
         if _model_inference_clause_has_failed_ratio(lowered):
             continue
@@ -1696,12 +1765,83 @@ def _has_model_inference_oracle_success_clause(text: object) -> bool:
     return False
 
 
+def _model_inference_reference_path(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").casefold()
+    if not normalized:
+        return False
+    basename = normalized.rsplit("/", 1)[-1]
+    if "/tests/" in normalized or normalized.startswith("tests/"):
+        return True
+    return any(marker in basename for marker in ("expected", "golden", "oracle", "reference", "truth"))
+
+
+def _model_inference_candidate_source_path(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").casefold()
+    if not normalized:
+        return False
+    return not _model_inference_reference_path(normalized)
+
+
+def _has_model_inference_self_derived_path_operation(text: object) -> bool:
+    value = str(text or "")
+    for pattern in (
+        _MODEL_INFERENCE_OPEN_READ_WRITE_RE,
+        _MODEL_INFERENCE_COPY_TO_REF_RE,
+        _MODEL_INFERENCE_CAT_TO_REF_RE,
+    ):
+        for match in pattern.finditer(value):
+            src = match.group("src")
+            if _model_inference_candidate_source_path(src):
+                return True
+    return False
+
+
+def _has_model_inference_self_derived_oracle(text: object) -> bool:
+    value = str(text or "")
+    if not value.strip():
+        return False
+    if any(pattern.search(value) for pattern in _MODEL_INFERENCE_SELF_DERIVED_ORACLE_PATTERNS):
+        return True
+    return _has_model_inference_self_derived_path_operation(value)
+
+
+def _model_inference_self_derived_oracle_blocker(evidence: object, session: object) -> str:
+    if not _has_model_inference_oracle_success_clause(evidence):
+        return ""
+    if _has_model_inference_self_derived_oracle(evidence):
+        return (
+            "model inference oracle provenance ungrounded: a reference/oracle built from "
+            "the current candidate implementation or same source is not independent; cite "
+            "a completed tool using a task-provided, external, golden, or independently "
+            "derived reference/expected-continuation check"
+        )
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        result_text = _tool_call_result_text(call)
+        if not _has_model_inference_oracle_success_clause(result_text):
+            continue
+        if _has_model_inference_self_derived_oracle(_tool_call_text(call)):
+            return (
+                "model inference oracle provenance ungrounded: a reference/oracle built from "
+                "the current candidate implementation or same source is not independent; cite "
+                "a completed tool using a task-provided, external, golden, or independently "
+                "derived reference/expected-continuation check"
+            )
+    return ""
+
+
 def _has_model_inference_output_quality_evidence(evidence: object, session: object) -> bool:
     if not _has_model_inference_oracle_success_clause(evidence):
+        return False
+    if _has_model_inference_self_derived_oracle(evidence):
         return False
     for tool_id in _evidence_tool_ids(evidence):
         call = _tool_call_by_id(session, tool_id)
         if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if _has_model_inference_self_derived_oracle(_tool_call_text(call)):
             continue
         if _has_model_inference_oracle_success_clause(_tool_call_result_text(call)):
             return True
@@ -1733,6 +1873,10 @@ def _model_inference_output_quality_blocker(
     for check in inference_checks:
         if _has_model_inference_output_quality_evidence(check.get("evidence"), session):
             return ""
+    for check in inference_checks:
+        blocker = _model_inference_self_derived_oracle_blocker(check.get("evidence"), session)
+        if blocker:
+            return blocker
     return (
         "model inference output quality evidence ungrounded: compile success, "
         "byte-size checks, CLI shape, and token-count smoke output are not enough; "
