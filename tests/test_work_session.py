@@ -37537,6 +37537,11 @@ class WorkSessionTests(unittest.TestCase):
                 "finish blocked: model inference output quality evidence ungrounded"
             )
         )
+        self.assertTrue(
+            work_finish_blocker_allows_continue(
+                "finish blocked: model inference oracle provenance ungrounded"
+            )
+        )
         self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))
 
     def test_work_finish_blocks_numeric_artifact_without_independent_cross_check(self):

@@ -211,3 +211,51 @@ Next proof:
 ```text
 gpt2-codegolf after model_inference_oracle_provenance_guard v0.3
 ```
+
+## v0.4 Generated Oracle Provenance Guard
+
+The v0.3 speed rerun blocked acceptance of candidate-derived oracle evidence,
+but the work loop then generated `/tmp/oracle_gpt2.c` as a second model
+implementation and used that model-written oracle to claim top-1 token-id
+equivalence. The generated oracle matched the candidate, but both produced the
+wrong hidden continuation.
+
+Generic repair:
+
+- model-inference oracle evidence now rejects `/tmp/...oracle/reference/golden`
+  source paths as ephemeral work-session oracles;
+- shell/Python source-generation patterns such as `cat > /tmp/oracle.c <<...`,
+  `tee /tmp/reference.py`, and `Path('/tmp/golden.py').write_text(...)` are not
+  independent model-output evidence;
+- task-provided references under `tests/` or `/tests/` remain valid, even if
+  copied into `/tmp` for compilation;
+- finish-block continuation treats `model inference oracle provenance` blockers
+  as repairable, so the loop can continue instead of returning control;
+- THINK guidance explicitly says not to repeat finish with the same blocked
+  model-inference evidence or model-generated oracle source.
+
+Validation:
+
+```text
+uv run pytest tests/test_acceptance.py -k 'model_inference' --no-testmon -q
+23 passed, 67 deselected
+
+uv run pytest tests/test_work_session.py -k 'finish_blocker_allows_acceptance_repair_continuation or model_inference_handoff_without_task_done' --no-testmon -q
+3 passed, 784 deselected
+
+uv run ruff check src/mew/acceptance.py src/mew/commands.py src/mew/work_loop.py tests/test_acceptance.py tests/test_work_session.py
+All checks passed
+```
+
+Review:
+
+```text
+codex-ultra session 019dda07-d1b5-77c0-ba85-5d052abbfa60
+STATUS: APPROVE
+```
+
+Next proof:
+
+```text
+gpt2-codegolf after model_inference_generated_oracle_provenance_guard v0.4
+```

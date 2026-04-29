@@ -529,6 +529,65 @@ _MODEL_INFERENCE_SELF_DERIVED_ORACLE_PATTERNS = (
         re.IGNORECASE | re.DOTALL,
     ),
 )
+_MODEL_INFERENCE_EPHEMERAL_ORACLE_PATH_RE = re.compile(
+    r"/tmp/[^\s'\";|&<>]*(?:expected|golden|oracle|ref|reference|truth)[^\s'\";|&<>]*"
+    r"\.(?:c|cc|cpp|cxx|h|hpp|py|rs|go|js|ts|sh|txt|json)\b",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE = (
+    r"(?P<path>[^'\"\s;|&<>]*(?:expected|golden|oracle|ref|reference|truth)[^'\"\s;|&<>]*"
+    r"\.(?:c|cc|cpp|cxx|h|hpp|py|rs|go|js|ts|sh|txt|json))"
+)
+_MODEL_INFERENCE_GENERATED_ORACLE_TARGET_RE = (
+    re.compile(
+        r"\bcat\s*>\s*['\"]?" + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE + r"\b.*?<<",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"<<\s*['\"]?[A-Za-z0-9_+-]+['\"]?.{0,240}>\s*['\"]?"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\btee\s+['\"]?" + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE + r"\b.{0,240}<<",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"<<\s*['\"]?[A-Za-z0-9_+-]+['\"]?.{0,240}\|\s*tee\s+['\"]?"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\bopen\s*\(\s*['\"]"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"['\"]\s*,\s*['\"][^'\"]*w[^'\"]*['\"][^)]*\)"
+        r".{0,240}\bwrite\s*\(",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\bPath\s*\(\s*['\"]"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"['\"]\s*\).{0,120}\bwrite_text\s*\(",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+_MODEL_INFERENCE_TASK_REFERENCE_COPY_RE = (
+    re.compile(
+        r"(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+        r"open\s*\(\s*['\"](?P<src>(?:/tests/|tests/)[^'\"]*)['\"][^)]*\)"
+        r"\s*\.read\s*\(\).*?"
+        r"open\s*\(\s*['\"](?P<dst>[^'\"]+)['\"]\s*,\s*['\"][^'\"]*w[^'\"]*['\"][^)]*\)"
+        r"\s*\.write\s*\(\s*(?P=var)\s*\)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:^|[;&|(\n]\s*)cp\s+['\"]?(?P<src>(?:/tests/|tests/)[^'\"\s]+)['\"]?"
+        r"\s+['\"]?(?P<dst>[^'\"\s]+)['\"]?",
+        re.IGNORECASE,
+    ),
+)
 _MODEL_INFERENCE_OPEN_READ_WRITE_RE = re.compile(
     r"\bopen\s*\(\s*['\"](?P<src>[^'\"]+\.(?:c|cc|cpp|cxx|py|rs|go))['\"][^)]*\)"
     r"\s*\.read\s*\(\).*?"
@@ -1805,9 +1864,76 @@ def _has_model_inference_self_derived_oracle(text: object) -> bool:
     return _has_model_inference_self_derived_path_operation(value)
 
 
+def _normalize_model_inference_path(path: object) -> str:
+    return str(path or "").strip().strip("'\"").replace("\\", "/").casefold()
+
+
+def _model_inference_task_reference_copy_allowance(text: object) -> tuple[set[str], list[tuple[int, int]]]:
+    value = str(text or "")
+    destinations: set[str] = set()
+    spans: list[tuple[int, int]] = []
+    for pattern in _MODEL_INFERENCE_TASK_REFERENCE_COPY_RE:
+        for match in pattern.finditer(value):
+            src = match.group("src") or ""
+            dst = match.group("dst") or ""
+            if not src or not dst:
+                continue
+            if not _model_inference_reference_path(src):
+                continue
+            destinations.add(_normalize_model_inference_path(dst))
+            spans.append(match.span())
+    return destinations, spans
+
+
+def _without_spans(value: str, spans: list[tuple[int, int]]) -> str:
+    if not spans:
+        return value
+    chars = list(value)
+    for start, end in spans:
+        for index in range(max(0, start), min(len(chars), end)):
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _model_inference_generated_oracle_targets(text: object) -> list[str]:
+    value = str(text or "")
+    targets: list[str] = []
+    for pattern in _MODEL_INFERENCE_GENERATED_ORACLE_TARGET_RE:
+        for match in pattern.finditer(value):
+            path = _normalize_model_inference_path(match.group("path"))
+            if path:
+                targets.append(path)
+    return targets
+
+
+def _has_model_inference_ephemeral_oracle_source(text: object) -> bool:
+    value = str(text or "")
+    if not value.strip():
+        return False
+    allowed_destinations, allowed_spans = _model_inference_task_reference_copy_allowance(value)
+    for match in _MODEL_INFERENCE_EPHEMERAL_ORACLE_PATH_RE.finditer(value):
+        if _normalize_model_inference_path(match.group(0)) not in allowed_destinations:
+            return True
+    scan_value = _without_spans(value, allowed_spans)
+    if _model_inference_generated_oracle_targets(scan_value):
+        return True
+    return False
+
+
+def _model_inference_generated_oracle_blocker_text() -> str:
+    return (
+        "model inference oracle provenance ungrounded: an oracle/reference source "
+        "generated in the current work session or under /tmp is not independent "
+        "model-output evidence; cite a task-provided, external, golden, or hidden "
+        "verifier-derived reference/expected-continuation check"
+    )
+
+
 def _model_inference_self_derived_oracle_blocker(evidence: object, session: object) -> str:
     if not _has_model_inference_oracle_success_clause(evidence):
         return ""
+    if _has_model_inference_ephemeral_oracle_source(evidence):
+        return _model_inference_generated_oracle_blocker_text()
     if _has_model_inference_self_derived_oracle(evidence):
         return (
             "model inference oracle provenance ungrounded: a reference/oracle built from "
@@ -1822,6 +1948,8 @@ def _model_inference_self_derived_oracle_blocker(evidence: object, session: obje
         result_text = _tool_call_result_text(call)
         if not _has_model_inference_oracle_success_clause(result_text):
             continue
+        if _has_model_inference_ephemeral_oracle_source(_tool_call_text(call)):
+            return _model_inference_generated_oracle_blocker_text()
         if _has_model_inference_self_derived_oracle(_tool_call_text(call)):
             return (
                 "model inference oracle provenance ungrounded: a reference/oracle built from "
@@ -1835,11 +1963,15 @@ def _model_inference_self_derived_oracle_blocker(evidence: object, session: obje
 def _has_model_inference_output_quality_evidence(evidence: object, session: object) -> bool:
     if not _has_model_inference_oracle_success_clause(evidence):
         return False
+    if _has_model_inference_ephemeral_oracle_source(evidence):
+        return False
     if _has_model_inference_self_derived_oracle(evidence):
         return False
     for tool_id in _evidence_tool_ids(evidence):
         call = _tool_call_by_id(session, tool_id)
         if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if _has_model_inference_ephemeral_oracle_source(_tool_call_text(call)):
             continue
         if _has_model_inference_self_derived_oracle(_tool_call_text(call)):
             continue
