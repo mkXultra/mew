@@ -190,9 +190,20 @@ M6.24 resume condition:
   stay in `implementation/tiny`, with no new authoritative lane in M6.24. Next
   action is to implement the smallest generic final-verifier state-transfer
   repair, then run a 1-trial same-shape speed rerun for `make-doom-for-mips`.
-  Do not spend `-k 5 -n 5` unless the speed rerun shows material improvement,
+  That v0 repair is recorded in
+  `docs/DESIGN_2026-04-29_M6_24_FINAL_VERIFIER_STATE_TRANSFER.md`: finish now
+  blocks fresh-runtime command success without required `/tmp/...` artifact
+  proof, and resume surfaces `final_verifier_state_transfer`. Do not spend
+  `-k 5 -n 5` unless the speed rerun shows material improvement,
   contradictory variance, or the controller is ready for close/resume proof.
-  Do not resume new broad measurement yet.
+  The speed-rerun is recorded in
+  `docs/M6_24_FINAL_VERIFIER_TRANSFER_SPEED_RERUN_2026-04-29.md`: score stayed
+  0/1, but `final_verifier_state_transfer` surfaced, the agent did not finish
+  after command success without artifact proof, and the task advanced to a
+  concrete runtime blocker `W_GetNumForName: STCFN33 not found`. Do not
+  escalate this to `-k 5 -n 5`; choose the next highest-leverage gap instead.
+  Do not resume new broad measurement yet unless the decision ledger explicitly
+  changes controller mode.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.

@@ -3869,6 +3869,74 @@ def build_stale_runtime_artifact_risk(task, calls, session=None):
     }
 
 
+def _runtime_fresh_run_call(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _runtime_artifact_call_text(call).casefold()
+    return any(marker in text for marker in _RUNTIME_FRESH_RUN_MARKERS)
+
+
+def build_final_verifier_state_transfer(task, calls, session=None):
+    task = task if isinstance(task, dict) else {}
+    session = session if isinstance(session, dict) else {}
+    task_text = "\n".join(
+        str(value or "")
+        for value in (
+            task.get("title"),
+            task.get("description"),
+            task.get("notes"),
+            session.get("title"),
+            session.get("goal"),
+        )
+        if value
+    )
+    artifacts = _runtime_fresh_run_artifacts_from_text(task_text)
+    if not artifacts:
+        return {}
+    latest_success = {}
+    for call in calls or []:
+        if not isinstance(call, dict) or str(call.get("status") or "").casefold() != "completed":
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("exit_code") != 0:
+            continue
+        if not _runtime_fresh_run_call(call):
+            continue
+        latest_success = call
+    if not latest_success:
+        return {}
+    missing = []
+    for artifact in artifacts:
+        if _runtime_artifact_created_by_call(latest_success, artifact):
+            continue
+        missing.append(
+            {
+                "artifact": artifact,
+                "source_tool_call_id": latest_success.get("id"),
+                "tool": latest_success.get("tool") or "",
+                "command": (
+                    (latest_success.get("result") or {}).get("command")
+                    if isinstance(latest_success.get("result"), dict)
+                    else ""
+                )
+                or ((latest_success.get("parameters") or {}).get("command") if isinstance(latest_success.get("parameters"), dict) else "")
+                or "",
+                "observed": "runtime command exited 0 but did not prove expected artifact creation",
+            }
+        )
+    if not missing:
+        return {}
+    return {
+        "kind": "final_verifier_state_transfer",
+        "artifacts": missing,
+        "suggested_next": (
+            "run the exact final verifier-shaped command from the final cwd, wait for each expected runtime artifact, "
+            "record artifact proof in acceptance_checks, then clean stale artifacts only if the external verifier "
+            "is expected to create them fresh"
+        ),
+    }
+
+
 def _extract_verifier_error_lines(text, limit=6):
     lines = []
     for raw_line in str(text or "").splitlines():
@@ -8212,6 +8280,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     )
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
     stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
+    final_verifier_state_transfer = build_final_verifier_state_transfer(task, calls, session=session)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -8295,6 +8364,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "repair_anchor_observations": repair_anchor_observations,
         "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "stale_runtime_artifact_risk": stale_runtime_artifact_risk,
+        "final_verifier_state_transfer": final_verifier_state_transfer,
         "failed_patch_repair": failed_patch_repair,
         "broad_rollback_slice_repair": broad_rollback_slice_repair,
         "retry_context": retry_context,
@@ -8528,6 +8598,17 @@ def format_work_session_resume(resume):
             )
         if stale_runtime_artifact_risk.get("suggested_next"):
             lines.append(f"stale_runtime_artifact_next: {stale_runtime_artifact_risk.get('suggested_next')}")
+    final_verifier_state_transfer = resume.get("final_verifier_state_transfer") or {}
+    if final_verifier_state_transfer:
+        lines.append(f"final_verifier_state_transfer: {final_verifier_state_transfer.get('kind')}")
+        for item in (final_verifier_state_transfer.get("artifacts") or [])[:3]:
+            lines.append(
+                "final_verifier_artifact_missing: "
+                f"{item.get('artifact')} after tool=#{item.get('source_tool_call_id') or '-'} "
+                f"{item.get('observed') or ''}".strip()
+            )
+        if final_verifier_state_transfer.get("suggested_next"):
+            lines.append(f"final_verifier_next: {final_verifier_state_transfer.get('suggested_next')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)

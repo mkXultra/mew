@@ -568,6 +568,56 @@ def _runtime_artifact_freshness_blocker(
     return ""
 
 
+def _has_runtime_artifact_grounding_evidence(evidence: object, session: object, artifact: str) -> bool:
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if call and _runtime_artifact_created_by_call(call, artifact):
+            return True
+    return False
+
+
+def _runtime_artifact_final_state_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    artifacts = _runtime_fresh_run_artifacts(task_description)
+    if not artifacts or not isinstance(session, dict):
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return (
+            "runtime final verifier artifact evidence missing: fresh runtime tasks "
+            "must cite the final verifier-shaped run and expected /tmp artifact "
+            "creation before task_done=true"
+        )
+    for artifact in artifacts:
+        matching_checks = [
+            check
+            for check in verified_checks
+            if artifact.casefold()
+            in f"{check.get('constraint') or ''}\n{check.get('evidence') or ''}".casefold()
+        ]
+        if not matching_checks:
+            return (
+                "runtime final verifier artifact evidence missing: "
+                f"{artifact} must be verified by a completed final verifier-shaped run "
+                "before task_done=true"
+            )
+        if any(_has_runtime_artifact_grounding_evidence(check.get("evidence"), session, artifact) for check in matching_checks):
+            continue
+        return (
+            "runtime final verifier artifact evidence ungrounded: "
+            f"{artifact} checks must cite a completed run_command or run_tests tool "
+            "whose output proves the artifact was created during the verifier-shaped run"
+        )
+    return ""
+
+
 def _external_command_text_contains_term(command_text: str, term: object) -> bool:
     normalized = _normalized_command_text(term)
     if not normalized:
@@ -1332,6 +1382,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     implementation_contract_blocker = _implementation_contract_source_blocker(task_description, checks, session)
     if implementation_contract_blocker:
         return implementation_contract_blocker
+    runtime_artifact_final_blocker = _runtime_artifact_final_state_blocker(task_description, checks, session)
+    if runtime_artifact_final_blocker:
+        return runtime_artifact_final_blocker
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker
