@@ -3,6 +3,7 @@ import re
 import shlex
 import signal
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -244,6 +245,13 @@ def _default_shell_argv(command):
     return ["sh", "-lc", command]
 
 
+def _subprocess_env(extra_env=None):
+    env = {**os.environ, **(extra_env or {})}
+    if sys.platform == "darwin":
+        env.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+    return env
+
+
 def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_process_group=False, use_shell=False):
     if use_shell:
         argv = _default_shell_argv(command or "")
@@ -258,7 +266,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
     execution_mode = "shell" if use_shell else "argv"
     try:
         shell_guard_env = {"MEW_WORK_COMMAND_GUARD": "1"} if use_shell else {}
-        env = {**os.environ, **env_overrides, **shell_guard_env, **(extra_env or {})}
+        env = _subprocess_env({**env_overrides, **shell_guard_env, **(extra_env or {})})
         if kill_process_group:
             process = subprocess.Popen(
                 argv,
@@ -370,7 +378,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
     started_at = now_iso()
     execution_mode = "shell" if use_shell else "argv"
     shell_guard_env = {"MEW_WORK_COMMAND_GUARD": "1"} if use_shell else {}
-    env = {**os.environ, **env_overrides, **shell_guard_env, **(extra_env or {})}
+    env = _subprocess_env({**env_overrides, **shell_guard_env, **(extra_env or {})})
     try:
         process = subprocess.Popen(
             argv,

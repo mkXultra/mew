@@ -131,3 +131,72 @@ Accept as materially improved if:
 
 Do not escalate to `-k 5 -n 5` unless this speed rerun passes or shows material
 improvement that needs stability proof.
+
+## Report-Step Fallback Rerun
+
+Artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-report-step-cleanup-make-mips-interpreter-1attempt-20260429-1727/result.json`
+
+Command shape:
+
+- task: `terminal-bench/make-mips-interpreter`
+- trials: `-k 1 -n 1`
+- model: `gpt-5.5`
+- wrapper: `mew_terminal_bench_agent:MewTerminalBenchAgent`
+- max steps: 30
+- result: `1/1`
+- exceptions: 0
+- total runtime: 13m 22s
+
+Observed mew report:
+
+```json
+{
+  "work_exit_code": 0,
+  "post_run_cleanup": {
+    "artifacts": [
+      {
+        "artifact": "/tmp/frame-000001.bmp",
+        "source_tool_call_id": 13,
+        "status": "removed"
+      }
+    ],
+    "kind": "deferred_verify_runtime_artifact_cleanup"
+  },
+  "stop_reason": "finish",
+  "step_count": 9
+}
+```
+
+Verifier result:
+
+- reward: `1`
+- `test_vm_execution`: passed
+- `test_frame_bmp_exists`: passed
+- `test_frame_bmp_similar_to_reference`: passed
+
+Interpretation:
+
+The v0.3 report-step cleanup fallback closed the selected stale-runtime
+artifact handoff gap for one same-shape diagnostic trial. mew still performed
+real source/runtime work: it implemented `vm.js`, ran exact `node vm.js`,
+emitted the expected `I_InitGraphics` stdout, created valid frame artifacts,
+removed a stale runtime frame before external verifier handoff, and passed the
+fresh external verifier.
+
+## Next Proof
+
+Escalate to a five-trial same-shape proof for `make-mips-interpreter`.
+
+Rationale:
+
+- The speed rerun passed and directly exercised the selected repair.
+- The frozen Codex target for `make-mips-interpreter` is `3/5`.
+- `-k 5 -n 5` is now justified by
+  `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` as close/escalation proof, not as a
+  default diagnostic rerun.
+
+Accept this repair as stable enough to choose the next gap or resume broader
+measurement if the five-trial proof reaches or exceeds the Codex target and
+does not expose a new repeated structural blocker.

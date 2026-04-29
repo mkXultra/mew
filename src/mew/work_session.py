@@ -343,10 +343,16 @@ def _resolve_work_git_cwd_and_pathspec(cwd, allowed_read_roots, *, default_cwd_r
     except ValueError as exc:
         if not default_cwd_requested or "outside allowed read roots" not in str(exc):
             raise
+    scopes = []
     for root in allowed_read_roots or []:
         scope = _git_scope_from_allowed_root(root)
         if scope:
-            return scope
+            scopes.append(scope)
+    for scope_cwd, scope_pathspec in scopes:
+        if scope_pathspec == ".":
+            return scope_cwd, scope_pathspec
+    if scopes:
+        return scopes[0]
     raise ValueError(f"path is outside allowed read roots: {cwd}; allowed={', '.join(allowed_read_roots or [])}")
 
 
@@ -2612,6 +2618,17 @@ def execute_work_write_tool(tool, parameters, on_output=None):
         result["verification_deferred"] = True
         result["rolled_back"] = False
     elif apply and result.get("written"):
+        failed_patch = {
+            "tool": tool,
+            "path": result.get("path") or str(path or ""),
+            "diff": result.get("diff") or "",
+            "diff_stats": result.get("diff_stats") or {},
+            "parameters": {
+                key: parameters.get(key)
+                for key in ("path", "old", "new", "content", "edits", "replace_all", "create")
+                if key in parameters
+            },
+        }
         verification = run_command_for_work(
             parameters.get("verify_command") or "",
             cwd=parameters.get("verify_cwd") or ".",
@@ -2621,6 +2638,11 @@ def execute_work_write_tool(tool, parameters, on_output=None):
         result["verification"] = verification
         result["verification_exit_code"] = verification.get("exit_code")
         if verification.get("exit_code") != 0 and snapshot:
+            result["failed_patch"] = failed_patch
+            result["failed_patch_preserved"] = True
+            result["failed_patch_recovery_hint"] = (
+                "review result.failed_patch, then retry as a smaller dry-run write or approve with --defer-verify"
+            )
             try:
                 result["rollback"] = restore_write_snapshot(snapshot)
                 result["rolled_back"] = True
@@ -2744,6 +2766,11 @@ def summarize_work_tool_result(tool, result):
                 summary += "\nverification_failure:\n" + format_command_failure_summary(verification)
         if (result or {}).get("rolled_back"):
             summary += "\nrolled_back: True"
+        if (result or {}).get("failed_patch_preserved"):
+            summary += "\nfailed_patch_preserved: True"
+            hint = (result or {}).get("failed_patch_recovery_hint")
+            if hint:
+                summary += f"\nfailed_patch_recovery_hint: {hint}"
         if (result or {}).get("rollback_error"):
             summary += f"\nrollback_error: {(result or {}).get('rollback_error')}"
         return summary
