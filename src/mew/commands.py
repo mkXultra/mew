@@ -4611,6 +4611,42 @@ def _write_work_oneshot_final_report(report_path, report):
         _write_json_file_atomic(report_path, report)
 
 
+def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume):
+    if not getattr(args, "defer_verify", False):
+        return {}
+    risk = (resume or {}).get("stale_runtime_artifact_risk") or {}
+    artifacts = []
+    for item in risk.get("artifacts") or []:
+        if not isinstance(item, dict):
+            continue
+        artifact = str(item.get("artifact") or "")
+        if not artifact.startswith("/tmp/"):
+            continue
+        record = {
+            "artifact": artifact,
+            "source_tool_call_id": item.get("source_tool_call_id"),
+            "status": "",
+        }
+        try:
+            Path(artifact).unlink(missing_ok=True)
+            record["status"] = "removed"
+        except OSError as exc:
+            record["status"] = "error"
+            record["error"] = str(exc)
+        artifacts.append(record)
+    if not artifacts:
+        return {}
+    return {
+        "kind": "deferred_verify_runtime_artifact_cleanup",
+        "artifacts": artifacts,
+        "reason": (
+            "--defer-verify will hand the workspace to an external verifier; "
+            "remove stale /tmp runtime artifacts created by self-verification so "
+            "fresh runtime checks are not short-circuited"
+        ),
+    }
+
+
 def _parse_json_object(text):
     try:
         value = json.loads(text or "{}")
@@ -4685,6 +4721,12 @@ def cmd_work_oneshot(args):
         task = find_task(state, task.get("id")) or task
         session = latest_work_session_for_task(state, task.get("id"))
         resume = build_work_session_resume(session, task=task, state=state) if session else {}
+    post_run_cleanup = _work_oneshot_cleanup_deferred_runtime_artifacts(work_args, resume)
+    if post_run_cleanup:
+        resume = dict(resume)
+        resume["post_run_cleanup"] = post_run_cleanup
+        if all(item.get("status") == "removed" for item in post_run_cleanup.get("artifacts") or []):
+            resume["stale_runtime_artifact_risk"] = {}
 
     report = {
         "summary": "mew work --oneshot completed generic work-session attempt",
@@ -4695,6 +4737,7 @@ def cmd_work_oneshot(args):
         "work_exit_code": exit_code,
         "work_report": work_report,
         "work_stdout": work_stdout if not work_report else "",
+        "post_run_cleanup": post_run_cleanup,
         "auto_verify_command": auto_verify_command,
         "resume": resume,
         "verification": {

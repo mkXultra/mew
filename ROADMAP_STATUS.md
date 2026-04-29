@@ -210,10 +210,19 @@ M6.24 resume condition:
   self-verification, causing the fresh verifier process to be terminated before
   the expected `I_InitGraphics` line. The v0.1 generic repair extends runtime
   artifact freshness detection to `/tmp/...` artifacts discovered from verified
-  checks and tool output, not only paths named in the task text. Next action:
-  run a 1-trial same-shape speed-rerun for `make-mips-interpreter`; do not
-  resume new broad measurement or escalate to `-k 5 -n 5` unless the speed
-  proof passes or materially improves.
+  checks and tool output, not only paths named in the task text. The v0.1
+  same-shape speed rerun is recorded in
+  `docs/M6_24_DISCOVERED_ARTIFACT_CLEANUP_RERUN_2026-04-29.md`: score stayed
+  0/1, but the final successful tool #30 ran exact `node vm.js`, emitted the
+  expected `I_InitGraphics` stdout, saved `/tmp/frame.bmp`, and exited 0. The
+  session then hit `wall_timeout` before finish/cleanup, so the stale frame
+  survived external verifier handoff. The v0.2 generic repair adds
+  `mew work --oneshot --defer-verify` post-run cleanup: if resume-visible
+  `stale_runtime_artifact_risk` names `/tmp/...` artifacts, mew removes them
+  before returning to the external verifier and records `post_run_cleanup`.
+  Next action: run a 1-trial same-shape speed-rerun for
+  `make-mips-interpreter`; do not resume new broad measurement or escalate to
+  `-k 5 -n 5` unless the speed proof passes or materially improves.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
