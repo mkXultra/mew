@@ -63,7 +63,10 @@ before selecting a new task. These issues are exceptions, not normal progress:
 only open issues with the `[side-pj]` title prefix should affect reentry, and
 they should interrupt the current milestone only when they point to a core mew
 blocker, an M6.14 repair candidate, or M6.16 implementation-lane evidence that
-must be collected now.
+must be collected now. Before implementing an issue fix, read
+`docs/ISSUE_REPAIR_POLICY.md` and write the chain
+`issue -> generic failure class -> reference/policy basis -> bounded repair -> proof -> return path`.
+Do not convert a side-project issue into a side-project-specific core mew rule.
 Do not emit user-visible commentary/status updates during a long session unless
 the saved output gate explicitly allows reporting. Commentary counts as
 returning control.
@@ -105,6 +108,7 @@ and open problem issues before selecting the next task:
 
 ```bash
 sed -n '1,180p' SIDE_PROJECT_ROADMAP_STATUS.md
+sed -n '1,220p' docs/ISSUE_REPAIR_POLICY.md
 ./mew side-dogfood report --json
 gh issue list --state open --search "[side-pj] in:title" --json number,title,url,updatedAt
 ```
@@ -158,6 +162,8 @@ Summarize only:
 - side-project issue queue status when side-project dogfood is active:
   no open problem issue, issue checked but unavailable, or issue number(s) that
   require M6.14/M6.16/main-side action
+- for issue fixes, the one-line chain
+  `issue -> generic failure class -> reference/policy basis -> bounded repair -> proof -> return path`
 - output gate: whether this is an internal checkpoint or a user-visible report
 - remaining long-session budget and the next allowed report trigger
 
@@ -184,6 +190,9 @@ Before starting or continuing a self-improve task, compare it against the sessio
   implementation: `M6.24 -> selected gap class -> required next action ->
   same-shape rerun condition`. If you cannot write it, read/update the gap
   ledger instead of implementing.
+- If an issue fix is active, require the issue-repair chain from
+  `docs/ISSUE_REPAIR_POLICY.md`. If the proposed repair names the triggering
+  product/app/task instead of a generic failure class, stop and reclassify.
 - If you have already spent three cycles on blocker reduction or nearby polish
   for the same active criterion, do not start a fourth. Recommend running the
   gate proof or rewriting the criterion/measurement.

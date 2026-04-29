@@ -143,6 +143,87 @@ _RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS = (
     "ssim",
 )
 
+_STATEFUL_OUTPUT_STATE_MARKERS = (
+    "current state",
+    "live state",
+    "live status",
+    "real state",
+    "runtime state",
+    "runtime status",
+    "state object",
+    "state payload",
+    "store state",
+)
+_STATEFUL_OUTPUT_SURFACE_MARKERS = (
+    "badge",
+    "bubble",
+    "copy",
+    "display",
+    "label",
+    "message",
+    "notification",
+    "render",
+    "speech",
+    "status",
+    "text",
+    "title",
+    "ui",
+)
+_STATEFUL_OUTPUT_CONNECT_MARKERS = (
+    "connect",
+    "derive",
+    "display",
+    "read",
+    "reflect",
+    "render",
+    "show",
+    "surface",
+    "use",
+    "uses",
+    "using",
+)
+_STATEFUL_OUTPUT_POSITIVE_MARKERS = (
+    "adapter input",
+    "adapter returned",
+    "current state",
+    "fake live",
+    "injected",
+    "live path",
+    "live state",
+    "live-state",
+    "mock live",
+    "state object",
+    "state payload",
+)
+_STATEFUL_OUTPUT_NEGATIVE_MARKERS = (
+    "demo",
+    "fixture",
+    "fixture path",
+    "fallback",
+    "non-live",
+    "non live",
+    "offline",
+    "static",
+    "without live",
+)
+_STATEFUL_OUTPUT_NOT_LIVE_MARKERS = (
+    "does not claim live",
+    "doesn't claim live",
+    "not claim live",
+    "not live",
+    "without claiming live",
+)
+_STATEFUL_OUTPUT_ASSERTION_MARKERS = (
+    "assert",
+    "check",
+    "expect",
+    "pass",
+    "prove",
+    "test",
+    "validat",
+    "verify",
+)
+
 _EDIT_SCOPE_MARKERS = (
     "allowed edit",
     "allowed edits",
@@ -655,7 +736,13 @@ def _runtime_artifact_freshness_blocker(
         if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
     ]
     if not verified_checks:
-        return ""
+        return (
+            "stateful output semantic contrast evidence missing: tasks that connect "
+            "user-facing copy, labels, messages, or status text to live/current state "
+            "must cite a positive injected-state assertion and a negative fixture, "
+            "demo, static, or fallback assertion before task_done=true; label-only "
+            "or relabel-only verifier evidence is not enough"
+        )
     for artifact in artifacts:
         creation_call = _latest_runtime_artifact_creation_call(session, artifact)
         if not creation_call:
@@ -771,6 +858,95 @@ def _runtime_visual_artifact_quality_blocker(
         "nonzero pixels, valid headers, or self-consistent dimensions are not enough; "
         "cite a completed grounding tool whose output checks expected dimensions, "
         "reference similarity, or exact stdout/boot markers"
+    )
+
+
+def is_stateful_output_semantic_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not lowered:
+        return False
+    if not any(marker in lowered for marker in _STATEFUL_OUTPUT_STATE_MARKERS):
+        return False
+    if not any(marker in lowered for marker in _STATEFUL_OUTPUT_SURFACE_MARKERS):
+        return False
+    return any(marker in lowered for marker in _STATEFUL_OUTPUT_CONNECT_MARKERS)
+
+
+def _has_stateful_output_assertion_marker(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    return any(marker in lowered for marker in _STATEFUL_OUTPUT_ASSERTION_MARKERS)
+
+
+def _stateful_output_evidence_texts(checks: list[dict[str, str]], session: object) -> list[str]:
+    texts: list[str] = []
+    for check in checks:
+        evidence = str(check.get("evidence") or "")
+        for tool_id in _evidence_tool_ids(evidence):
+            call = _tool_call_by_id(session, tool_id)
+            if call and call.get("tool") in {"run_command", "run_tests"}:
+                result = call.get("result")
+                if isinstance(result, dict) and result.get("exit_code") not in (None, 0):
+                    continue
+                chunks: list[str] = []
+                if isinstance(result, dict):
+                    for key in ("text", "stdout", "stderr", "summary", "output"):
+                        value = result.get(key)
+                        if value:
+                            chunks.append(str(value))
+                elif result:
+                    chunks.append(str(result))
+                if chunks:
+                    texts.append("\n".join(chunks))
+    return texts
+
+
+def _has_stateful_output_positive_evidence(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not any(marker in lowered for marker in _STATEFUL_OUTPUT_POSITIVE_MARKERS):
+        return False
+    return _has_stateful_output_assertion_marker(lowered)
+
+
+def _has_stateful_output_negative_evidence(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not any(marker in lowered for marker in _STATEFUL_OUTPUT_NEGATIVE_MARKERS):
+        return False
+    if any(marker in lowered for marker in _STATEFUL_OUTPUT_NOT_LIVE_MARKERS):
+        return _has_stateful_output_assertion_marker(lowered)
+    return "live" not in lowered and _has_stateful_output_assertion_marker(lowered)
+
+
+def _stateful_output_semantic_contrast_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if not is_stateful_output_semantic_task(task_description):
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return (
+            "stateful output semantic contrast evidence missing: tasks that connect "
+            "user-facing copy, labels, messages, or status text to live/current state "
+            "must cite a positive injected-state assertion and a negative fixture, "
+            "demo, static, or fallback assertion before task_done=true; label-only "
+            "or relabel-only verifier evidence is not enough"
+        )
+    evidence_texts = _stateful_output_evidence_texts(verified_checks, session)
+    has_positive = any(_has_stateful_output_positive_evidence(text) for text in evidence_texts)
+    has_negative = any(_has_stateful_output_negative_evidence(text) for text in evidence_texts)
+    if has_positive and has_negative:
+        return ""
+    return (
+        "stateful output semantic contrast evidence missing: tasks that connect "
+        "user-facing copy, labels, messages, or status text to live/current state "
+        "must cite a positive injected-state assertion and a negative fixture, "
+        "demo, static, or fallback assertion before task_done=true; label-only "
+        "or relabel-only verifier evidence is not enough"
     )
 
 
@@ -1547,6 +1723,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker
+    stateful_output_blocker = _stateful_output_semantic_contrast_blocker(task_description, checks, session)
+    if stateful_output_blocker:
+        return stateful_output_blocker
     query_only_blocker = _query_only_hidden_model_blocker(task_description, checks, session)
     if query_only_blocker:
         return query_only_blocker

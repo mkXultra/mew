@@ -17,6 +17,19 @@ hardening input before returning to M6.24.
 | #23 | Work command subprocesses on macOS default `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` to suppress Objective-C fork-safety crash logs during closeout tools. |
 | #28 | Pending reviewer steer now enforces target-path / no-read / no-test boundaries before tool execution and coerces requested dry-run writes away from direct apply. |
 | #29 | Broad rollback repair now detects UI/readability failure tails and steers the next attempt to a smaller presentation/readability slice before reconnecting broader live/state behavior. |
+| #30 | Stateful user-facing output tasks now require semantic contrast proof before finish: a positive injected/current-state assertion plus a negative fixture/demo/static/fallback assertion. This generalizes the side-project failure instead of adding a `mew-wisp`-specific rule. |
+
+## Reference Basis
+
+- Codex `execpolicy` validates both positive `match` examples and negative
+  `not_match` examples before accepting a rule, so policy changes cannot pass
+  by only proving the easy side of the behavior.
+- Codex review mode requires a concrete scenario/input and provably affected
+  behavior before a finding is valid, which maps to evidence tied to the actual
+  semantic path instead of a renamed label.
+- Claude Code todo completion rules require work to be fully accomplished and
+  not partial before marking a task complete; for mew this means `task_done`
+  must not be driven by superficial verifier green.
 
 ## Validation
 
@@ -31,5 +44,14 @@ uv run pytest tests/test_work_session.py -k 'broad_rollback_slice_repair or work
 3 passed, 781 deselected
 
 uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+All checks passed
+
+uv run pytest tests/test_acceptance.py -k 'stateful_output or plain_current_copy or literal_current_status or literal_state_title or accepts_complete_verified_checks or requires_verified_checks' --no-testmon -q
+11 passed, 55 deselected
+
+uv run pytest tests/test_acceptance.py tests/test_work_session.py -k 'stateful_output or plain_current_copy or literal_current_status or literal_state_title or work_finish_blocks_task_done_without_acceptance_checks or acceptance_finish_blocker' --no-testmon -q
+61 passed, 789 deselected
+
+uv run ruff check src/mew/acceptance.py src/mew/work_loop.py tests/test_acceptance.py
 All checks passed
 ```

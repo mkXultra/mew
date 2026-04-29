@@ -147,6 +147,11 @@ polish findings. Do not use labels for the first version; GitHub's open/closed
 state is enough. Use the title prefix `[side-pj]` so main Codex can poll
 issues without labels.
 
+Write issues so they can be repaired through `docs/ISSUE_REPAIR_POLICY.md`.
+Describe the reusable failure class and evidence, not just the side-project
+symptom. If the issue is truly product-specific, say so explicitly so main
+Codex does not turn it into a core mew rule.
+
 Do not upload the whole ledger as an issue. The ledger is the canonical local
 evidence record. Issues are work items extracted from that evidence. Create one
 issue per problem or polish finding, usually keyed by one repeated or reusable
