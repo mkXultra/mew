@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Artifact-handoff proof reached the frozen Codex target on `make-mips-interpreter`; broad measurement resumes with Batch 6 `gpt2-codegolf`. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; artifact-handoff repair closed, but aggregate/current gaps remain above threshold, so select the next gap class. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -131,7 +131,7 @@ M6.24 resume condition:
   `docs/M6_24_GAP_BASELINE_2026-04-29.md`. Improvement-phase work must also
   follow `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` and record gap state in
   `proof-artifacts/m6_24_gap_ledger.jsonl`.
-- Current controller mode: `measurement_resume`.
+- Current controller mode: `improvement_phase`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -279,9 +279,12 @@ M6.24 resume condition:
   `docs/M6_24_ARTIFACT_HANDOFF_PROOF_5_2026-04-29.md`:
   `make-mips-interpreter` scored `3/5` with no runner errors, matching the
   frozen Codex target `3/5`. The selected wrong-path and stale-cleanup handoff
-  misses did not recur. Current next action: resume broad measurement with
-  M6.24 Batch 6 `gpt2-codegolf`; do not keep polishing
-  `make-mips-interpreter` before the next measured task.
+  misses did not recur. That closes only the selected handoff repair. Threshold
+  recheck still shows aggregate M6.24 gap above `20pp`, and
+  `gpt2-codegolf` measured `0/5` vs Codex `5/5` before the drift was corrected.
+  Current next action: stay in improvement phase and classify/select the next
+  highest-leverage gap class; do not run `headless-terminal` or other new
+  broad-measurement tasks first.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
@@ -608,14 +611,22 @@ M6.24 resume condition:
   `NonZeroAgentExitCodeError` exit 100. Treat this as task-solving plus
   runner/setup debt, not an accepted M6.14 structural blocker unless the same
   install/setup shape repeats.
+- M6.24 Batch 6 `gpt2-codegolf` scored 0/5 against Codex target 5/5, errors
+  0, runtime 8m 2s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-batch6-gpt2-codegolf-5attempts-20260429-2103/result.json`.
+  All trials created and compiled a small `gpt2.c`, but external verification
+  failed the exact GPT-2 continuation contract or timed out. This is fresh
+  implementation-lane evidence for the next gap selection.
 
 Next concrete action:
 
 - Do not run the next broad-measurement task yet. First classify the measured
   Batch 1-6 failures into gap classes, choose one generic improvement target,
   name the failed task shape to rerun after repair, and record that selection
-  in `docs/M6_24_DECISION_LEDGER.md`. After the repair and same-shape rerun are
-  recorded, resume broad measurement with Batch 6.
+  in `docs/M6_24_DECISION_LEDGER.md`. The artifact-handoff repair is closed,
+  but the aggregate/current gaps remain above threshold, so do not resume
+  Batch 6 with `headless-terminal` before the next gap selection and repair
+  plan are recorded.
 
 Closed M6.22 result:
 
