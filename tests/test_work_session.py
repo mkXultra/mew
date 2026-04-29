@@ -4545,8 +4545,8 @@ class WorkSessionTests(unittest.TestCase):
                         "command": "rm -f /tmp/frame.bmp && node vm.js && python3 check_frame.py",
                         "cwd": "/app",
                         "exit_code": 0,
-                        "stdout": "path=/tmp/frame.bmp\nmagic=b'BM'\nframe bmp validation ok\n",
-                        "stderr": "saved first frame /tmp/frame.bmp after 30670791 instructions\n",
+                        "stdout": "frame bmp validation ok\n",
+                        "stderr": "saved frame 1 to /tmp/frame.bmp after 30670791 instructions\n",
                     },
                 },
             ],
@@ -4597,6 +4597,57 @@ class WorkSessionTests(unittest.TestCase):
         resume = build_work_session_resume(session)
 
         self.assertEqual(resume["stale_runtime_artifact_risk"], {})
+
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_removes_tmp_stale_risk(self):
+        with tempfile.NamedTemporaryFile(dir="/tmp", delete=False) as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+        try:
+            resume = {
+                "stale_runtime_artifact_risk": {
+                    "artifacts": [
+                        {
+                            "artifact": str(frame_path),
+                            "source_tool_call_id": 30,
+                        }
+                    ]
+                }
+            }
+            args = SimpleNamespace(defer_verify=True)
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, resume)
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"][0]["artifact"], str(frame_path))
+            self.assertEqual(cleanup["artifacts"][0]["source_tool_call_id"], 30)
+            self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
+            self.assertFalse(frame_path.exists())
+        finally:
+            frame_path.unlink(missing_ok=True)
+
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_skips_when_not_deferred(self):
+        with tempfile.NamedTemporaryFile(dir="/tmp", delete=False) as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+        try:
+            resume = {
+                "stale_runtime_artifact_risk": {
+                    "artifacts": [
+                        {
+                            "artifact": str(frame_path),
+                            "source_tool_call_id": 30,
+                        }
+                    ]
+                }
+            }
+            args = SimpleNamespace(defer_verify=False)
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, resume)
+
+            self.assertEqual(cleanup, {})
+            self.assertTrue(frame_path.exists())
+        finally:
+            frame_path.unlink(missing_ok=True)
 
     def test_work_session_resume_surfaces_final_verifier_state_transfer_gap(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume

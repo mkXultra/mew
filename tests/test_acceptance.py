@@ -99,8 +99,8 @@ def test_acceptance_finish_blocker_rejects_discovered_stale_runtime_artifact_bef
                 "result": {
                     "command": "rm -f /tmp/frame.bmp && node vm.js && python3 check_frame.py",
                     "exit_code": 0,
-                    "stdout": "path=/tmp/frame.bmp\nmagic=b'BM'\nframe bmp validation ok\n",
-                    "stderr": "saved first frame /tmp/frame.bmp after 30670791 instructions\n",
+                    "stdout": "frame bmp validation ok\n",
+                    "stderr": "saved frame 1 to /tmp/frame.bmp after 30670791 instructions\n",
                 },
             }
         ]

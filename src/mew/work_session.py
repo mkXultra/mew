@@ -3692,10 +3692,13 @@ _RUNTIME_ARTIFACT_GENERATION_MARKERS = (
 )
 _RUNTIME_ARTIFACT_CREATED_MARKERS = (
     "bmp_header_ok=true",
+    "created /tmp/",
     "exists=true",
     "frame_bytes",
     "magic=bm",
     "path=/tmp/",
+    "saved first frame",
+    "saved frame",
     "written to /tmp/",
 )
 _RUNTIME_ARTIFACT_CLEANUP_MARKERS = (

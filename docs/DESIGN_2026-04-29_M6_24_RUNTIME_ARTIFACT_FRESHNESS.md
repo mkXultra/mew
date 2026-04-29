@@ -74,6 +74,29 @@ completed tool output when the task text has the fresh runtime / generated
 artifact shape. This keeps the rule generic while covering tasks where the
 artifact path is discovered from source rather than stated by the user.
 
+## v0.2 Deferred Verify Cleanup
+
+The v0.1 speed rerun in
+`docs/M6_24_DISCOVERED_ARTIFACT_CLEANUP_RERUN_2026-04-29.md` showed a second
+handoff miss: after tool #30 successfully ran exact `node vm.js`, emitted the
+expected `I_InitGraphics` stdout, and wrote `/tmp/frame.bmp`, the session hit
+`wall_timeout` before a final cleanup/finish turn. Because
+`mew work --oneshot --defer-verify` then returned to the external harness with
+the stale frame still present, the fresh verifier process was terminated too
+early again.
+
+The repair is deliberately outside Terminal-Bench:
+
+- only `mew work --oneshot --defer-verify` performs this cleanup;
+- only `/tmp/...` artifacts already surfaced by `stale_runtime_artifact_risk`
+  are removed;
+- the final one-shot report records `post_run_cleanup`;
+- if every stale artifact was removed, the final resume clears
+  `stale_runtime_artifact_risk` before handoff.
+
+This protects external verifier freshness even when the model has no final turn
+left after a successful runtime self-check.
+
 ## Validation
 
 Focused validation:
@@ -104,20 +127,36 @@ Observed:
 - `4 passed, 769 deselected`
 - `ruff`: all checks passed
 
+Additional v0.2 validation:
+
+```sh
+uv run pytest tests/test_acceptance.py -k 'stale_runtime_artifact or runtime_command_pass_without_artifact' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'stale_runtime_artifact or final_verifier_state_transfer or oneshot_cleanup' --no-testmon -q
+uv run ruff check src/mew/acceptance.py src/mew/work_session.py src/mew/commands.py tests/test_acceptance.py tests/test_work_session.py
+```
+
+Observed:
+
+- `4 passed, 49 deselected`
+- `6 passed, 769 deselected`
+- `ruff`: all checks passed
+
 ## Same-Shape Rerun Gate
 
 Next proof should rerun:
 
-`terminal-bench/make-doom-for-mips`
+`terminal-bench/make-mips-interpreter`
 
 Accept as improved only if:
 
-- no stale runtime artifact finish is accepted
-- the best trial no longer fails because `/tmp/frame.bmp` pre-exists before the
-  external verifier starts
-- reward improves, or external verifier passes the previously failing stdout
-  timing condition in the best trial
+- no stale runtime artifact finish is accepted;
+- `post_run_cleanup` removes self-verifier `/tmp/...` artifacts before external
+  verifier handoff when `--defer-verify` is active;
+- the trial no longer fails because `/tmp/frame.bmp` pre-exists before the
+  external verifier starts;
+- reward improves, or the external verifier passes the previously failing
+  stdout timing condition.
 
-If the rerun remains 0/5 but fails on a different concrete verifier condition,
+If the rerun remains 0/1 but fails on a different concrete verifier condition,
 record that new condition in `proof-artifacts/m6_24_gap_ledger.jsonl` before
 choosing another repair.
