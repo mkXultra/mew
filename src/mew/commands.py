@@ -153,6 +153,7 @@ from .side_project_dogfood import (
     append_side_project_dogfood_record,
     dogfood_record_template,
     format_side_project_dogfood_report,
+    normalize_side_project_dogfood_record,
     summarize_side_project_dogfood,
 )
 from .signals import (
@@ -3542,6 +3543,62 @@ def work_finish_blocker_allows_continue(finished_note):
     )
 
 
+def _work_side_dogfood_report_paths(session):
+    paths = []
+    for call in (session or {}).get("tool_calls") or []:
+        if call.get("tool") not in WRITE_WORK_TOOLS:
+            continue
+        result = call.get("result") or {}
+        if not result.get("written"):
+            continue
+        path = str(result.get("path") or (call.get("parameters") or {}).get("path") or "").strip()
+        normalized = path.replace("\\", "/")
+        if "/.mew-dogfood/reports/" not in normalized and not normalized.startswith(".mew-dogfood/reports/"):
+            continue
+        if not normalized.endswith(".json"):
+            continue
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _expected_side_project_from_work_context(task, session):
+    parts = []
+    if isinstance(task, dict):
+        parts.extend(str(task.get(key) or "") for key in ("title", "description", "summary"))
+    if isinstance(session, dict):
+        parts.append(str(session.get("goal") or ""))
+        for note in session.get("notes") or []:
+            if isinstance(note, dict):
+                parts.append(str(note.get("text") or ""))
+        for turn in session.get("model_turns") or []:
+            if isinstance(turn, dict):
+                parts.append(str(turn.get("guidance_snapshot") or ""))
+    text = "\n".join(parts).casefold()
+    for name in ("mew-wisp", "mew-ghost", "mew-companion-log"):
+        if name in text:
+            return name
+    return ""
+
+
+def side_dogfood_finish_blockers(session, task):
+    blockers = []
+    expected_side_project = _expected_side_project_from_work_context(task, session)
+    for report_path in _work_side_dogfood_report_paths(session):
+        try:
+            payload = json.loads(Path(report_path).read_text(encoding="utf-8"))
+            normalized = normalize_side_project_dogfood_record(payload)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            blockers.append(f"invalid side-dogfood report {report_path}: {exc}")
+            continue
+        if expected_side_project and normalized.get("side_project") != expected_side_project:
+            blockers.append(
+                "side-dogfood report side_project mismatch "
+                f"{report_path}: expected {expected_side_project}, got {normalized.get('side_project')}"
+            )
+    return blockers
+
+
 def apply_work_control_action(state, session, task, action):
     action = action or {}
     action_type = action.get("type") or ""
@@ -3567,6 +3624,7 @@ def apply_work_control_action(state, session, task, action):
             )
             if acceptance_blocker:
                 finish_blockers.append(acceptance_blocker)
+            finish_blockers.extend(side_dogfood_finish_blockers(session, task))
             if finish_blockers:
                 blocked_note = f"finish blocked: {', '.join(finish_blockers)}"
                 if task is not None:
@@ -5358,6 +5416,8 @@ def complete_work_session_steer(session, steer, step_index, action_type=None, ac
             return False
         if result is None or not result.get("changed"):
             return False
+    elif _pending_steer_action_blocker(current, action_type, action):
+        return False
     session.pop("pending_steer", None)
     add_work_session_note(
         session,
@@ -5452,6 +5512,127 @@ def _work_path_is_tests_path(path):
     return normalized == "tests" or normalized.startswith("tests/")
 
 
+def _pending_steer_requests_dry_run(steer):
+    text = str((steer or {}).get("text") or "").casefold()
+    if not text:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "dry-run",
+            "dry run",
+            "pending approval",
+            "stop at pending",
+            "do not apply",
+            "don't apply",
+            "without applying",
+        )
+    )
+
+
+def _pending_steer_forbids_reads(steer):
+    text = str((steer or {}).get("text") or "").casefold()
+    return any(marker in text for marker in ("do not read", "don't read", "no more read", "read no more"))
+
+
+def _pending_steer_forbids_tests(steer):
+    text = str((steer or {}).get("text") or "").casefold()
+    return any(marker in text for marker in ("do not run tests", "don't run tests", "no tests"))
+
+
+def _looks_like_work_path(text):
+    value = str(text or "").strip().strip(".,:;()[]{}")
+    if not value or " " in value:
+        return False
+    return (
+        "/" in value
+        or value.startswith(".")
+        or value.endswith((".py", ".md", ".json", ".toml", ".txt", ".css", ".js", ".ts", ".tsx", ".jsx"))
+    )
+
+
+def _pending_steer_target_paths(steer):
+    text = str((steer or {}).get("text") or "")
+    if not text:
+        return []
+    lowered = text.casefold()
+    if not any(marker in lowered for marker in ("target", "only", "path", "file")):
+        return []
+    candidates = []
+    candidates.extend(match.group(1) for match in re.finditer(r"`([^`]+)`", text))
+    candidates.extend(match.group(1) for match in re.finditer(r"(?<![\w./-])((?:[\w.@+-]+/)+[\w.@+-]+)(?![\w./-])", text))
+    paths = []
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if not _looks_like_work_path(value):
+            continue
+        if value not in paths:
+            paths.append(value)
+    return paths
+
+
+def _normalized_work_steer_path(path):
+    text = str(path or "").replace("\\", "/").strip().lstrip("./")
+    return text.rstrip("/")
+
+
+def _work_steer_paths_match(candidate, expected):
+    left = _normalized_work_steer_path(candidate)
+    right = _normalized_work_steer_path(expected)
+    if not left or not right:
+        return False
+    return left == right or left.endswith(f"/{right}") or right.endswith(f"/{left}")
+
+
+def _work_action_write_paths(action):
+    action = action or {}
+    action_type = action.get("type") or action.get("tool")
+    if action_type == "batch":
+        paths = []
+        for sub_action in action.get("tools") or []:
+            if not isinstance(sub_action, dict):
+                continue
+            if (sub_action.get("type") or sub_action.get("tool")) in WRITE_WORK_TOOLS and sub_action.get("path"):
+                paths.append(str(sub_action.get("path")))
+        return paths
+    if action_type in WRITE_WORK_TOOLS and action.get("path"):
+        return [str(action.get("path"))]
+    return []
+
+
+def _pending_steer_action_blocker(pending_steer, action_type, action):
+    if not pending_steer or pending_steer.get("source") == "paired_test_steer":
+        return ""
+    if _pending_steer_forbids_tests(pending_steer) and action_type == "run_tests":
+        return "steer boundary blocked run_tests because the pending steer said not to run tests"
+    if _pending_steer_forbids_reads(pending_steer) and (
+        action_type in READ_ONLY_WORK_TOOLS or action_type in GIT_WORK_TOOLS
+    ):
+        return f"steer boundary blocked {action_type} because the pending steer said not to read more"
+    target_paths = _pending_steer_target_paths(pending_steer)
+    if target_paths:
+        for path in _work_action_write_paths(action):
+            if not any(_work_steer_paths_match(path, expected) for expected in target_paths):
+                expected = ", ".join(target_paths)
+                return f"steer boundary blocked write to {path}; pending steer target path(s): {expected}"
+    return ""
+
+
+def _force_pending_steer_write_to_dry_run(pending_steer, action_type, parameters, action):
+    if not _pending_steer_requests_dry_run(pending_steer):
+        return False
+    if action_type not in WRITE_WORK_TOOLS:
+        return False
+    if not (parameters or {}).get("apply"):
+        return False
+    parameters["apply"] = False
+    if isinstance(action, dict):
+        action["apply"] = False
+        action["dry_run"] = True
+        action["coerced_dry_run_reason"] = "pending_steer_dry_run"
+    return True
+
+
 def _force_paired_test_steer_write_to_dry_run(pending_steer, action_type, parameters, action):
     if not pending_steer or pending_steer.get("source") != "paired_test_steer":
         return False
@@ -5474,6 +5655,40 @@ def _force_paired_test_steer_write_to_dry_run(pending_steer, action_type, parame
         if metadata.get("source_path"):
             action["paired_test_source_path"] = metadata.get("source_path")
     return True
+
+
+def _finish_work_turn_for_steer_blocker(
+    state,
+    session_id,
+    planning_turn_id,
+    planned,
+    action,
+    blocker,
+):
+    session = find_work_session(state, session_id)
+    turn = update_work_model_turn_plan(
+        state,
+        session_id,
+        planning_turn_id,
+        planned.get("decision_plan") or {},
+        planned.get("action_plan") or {},
+        {"type": "wait", "reason": blocker, "blocked_action": action},
+        model_metrics=planned.get("model_metrics"),
+    )
+    turn = finish_work_model_turn(state, session_id, planning_turn_id)
+    if turn is not None:
+        turn["steer_blocker"] = blocker
+        turn["blocked_action"] = action
+        turn["summary"] = clip_output(blocker, 4000)
+    add_work_session_note(session, f"Steer boundary blocked tool execution: {blocker}", source="system")
+    record_active_work_todo_executor_lifecycle(
+        state,
+        session_id,
+        "yielded",
+        model_turn=turn or {},
+        reason=blocker,
+    )
+    return turn
 
 
 def paired_test_steer_text(pairing):
@@ -6398,6 +6613,32 @@ def cmd_work_ai(args):
                 print("")
                 print(f"Work live step #{index} action")
                 print(format_work_action(action))
+            steer_blocker = _pending_steer_action_blocker(pending_steer, action_type, action)
+            if steer_blocker:
+                with state_lock():
+                    state = load_state()
+                    turn = _finish_work_turn_for_steer_blocker(
+                        state,
+                        session_id,
+                        planning_turn_id,
+                        planned,
+                        action,
+                        steer_blocker,
+                    )
+                    save_state(state)
+                step = {
+                    "index": index,
+                    "status": "blocked",
+                    "action": {"type": "wait", "reason": steer_blocker, "blocked_action": action},
+                    "model_turn": turn,
+                    "steer_blocker": steer_blocker,
+                    "summary": steer_blocker,
+                }
+                report["steps"].append(step)
+                report["stop_reason"] = "steer_blocked"
+                if progress:
+                    progress(f"step #{index}: steer boundary blocked")
+                break
             try:
                 batch_step = run_work_batch_action(
                     session_id,
@@ -6641,6 +6882,12 @@ def cmd_work_ai(args):
             verify_timeout=effective_args.verify_timeout,
             default_cwd=getattr(effective_args, "cwd", "") or "",
         )
+        coerced_user_dry_run = _force_pending_steer_write_to_dry_run(
+            pending_steer,
+            action_type,
+            parameters,
+            action,
+        )
         if action_type in WRITE_WORK_TOOLS and parameters.get("apply") and getattr(effective_args, "defer_verify", False):
             parameters["defer_verify"] = True
         coerced_test_dry_run = _force_paired_test_steer_write_to_dry_run(
@@ -6649,6 +6896,7 @@ def cmd_work_ai(args):
             parameters,
             action,
         )
+        steer_blocker = _pending_steer_action_blocker(pending_steer, action_type, action)
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
@@ -6700,6 +6948,31 @@ def cmd_work_ai(args):
                 if progress:
                     progress(f"step #{index}: continuing after interrupt submit")
                 continue
+            break
+        if steer_blocker:
+            with state_lock():
+                state = load_state()
+                turn = _finish_work_turn_for_steer_blocker(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    planned,
+                    action,
+                    steer_blocker,
+                )
+                save_state(state)
+            step = {
+                "index": index,
+                "status": "blocked",
+                "action": {"type": "wait", "reason": steer_blocker, "blocked_action": action},
+                "model_turn": turn,
+                "steer_blocker": steer_blocker,
+                "summary": steer_blocker,
+            }
+            report["steps"].append(step)
+            report["stop_reason"] = "steer_blocked"
+            if progress:
+                progress(f"step #{index}: steer boundary blocked")
             break
         safety_blocker = m5_self_improve_tool_execution_blocker(task, action_type, parameters)
         if safety_blocker:
@@ -6834,7 +7107,9 @@ def cmd_work_ai(args):
                 action,
                 model_metrics=planned.get("model_metrics"),
             )
-            if coerced_test_dry_run:
+            if coerced_user_dry_run:
+                turn["coerced_dry_run_reason"] = "pending_steer_dry_run"
+            elif coerced_test_dry_run:
                 turn["coerced_dry_run_reason"] = "paired_test_steer"
             broad_read_guard = broad_read_after_search_miss_guard(session, action_type, parameters, task=task)
             repeat_guard = {}
@@ -7956,6 +8231,24 @@ def _pending_approval_tool_ids(session):
     return ids
 
 
+def _filter_superseded_pending_approval_ids(session, ids):
+    calls_by_id = {call.get("id"): call for call in (session or {}).get("tool_calls") or []}
+    latest_by_path = {}
+    for approve_id in ids or []:
+        call = calls_by_id.get(approve_id)
+        path = _normalized_work_steer_path(work_call_path(call))
+        if path:
+            latest_by_path[path] = approve_id
+    filtered = []
+    for approve_id in ids or []:
+        call = calls_by_id.get(approve_id)
+        path = _normalized_work_steer_path(work_call_path(call))
+        if path and latest_by_path.get(path) != approve_id:
+            continue
+        filtered.append(approve_id)
+    return filtered
+
+
 def _pending_approval_tool_ids_for_batch(session, task=None, *, promote_paired_source_verifiers=False):
     ids = _pending_approval_tool_ids(session)
     calls_by_id = {call.get("id"): call for call in (session or {}).get("tool_calls") or []}
@@ -7981,7 +8274,7 @@ def _pending_approval_tool_ids_for_batch(session, task=None, *, promote_paired_s
                     seen.add(paired_id)
         ordered.append(approve_id)
         seen.add(approve_id)
-    return ordered
+    return _filter_superseded_pending_approval_ids(session, ordered)
 
 
 def _deferred_verify_approval_ids_for_batch(_session, approve_ids):

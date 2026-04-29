@@ -95,3 +95,18 @@ class ToolboxTests(unittest.TestCase):
 
             self.assertEqual(seen["stdin"], subprocess.DEVNULL)
             self.assertEqual(result["exit_code"], 0)
+
+    def test_run_command_record_sets_macos_objc_fork_safety_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = shlex.join(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os; print(os.environ.get('OBJC_DISABLE_INITIALIZE_FORK_SAFETY', ''))",
+                ]
+            )
+            with patch("mew.toolbox.sys.platform", "darwin"):
+                result = run_command_record(command, cwd=tmp, timeout=1)
+
+            self.assertEqual(result["exit_code"], 0)
+            self.assertEqual(result["stdout"].strip(), "YES")

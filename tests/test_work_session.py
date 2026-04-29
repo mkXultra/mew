@@ -1810,6 +1810,67 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_run_work_batch_action_accepts_side_project_multi_file_hunks(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                side_root = Path("experiments/mew-ghost")
+                side_root.mkdir(parents=True)
+                (side_root / "ghost.py").write_text("render_html()\n", encoding="utf-8")
+                tests_dir = side_root / "tests"
+                tests_dir.mkdir()
+                (tests_dir / "test_mew_ghost.py").write_text("assert_html()\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    task = add_coding_task(state)
+                    session, _created = create_work_session(state, task)
+                    save_state(state)
+
+                args = SimpleNamespace(
+                    allow_read=[],
+                    allow_write=["experiments/mew-ghost"],
+                    allow_verify=False,
+                    verify_command="",
+                    verify_timeout=300,
+                    max_steps=30,
+                    cwd=tmp,
+                )
+                action = {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "experiments/mew-ghost/ghost.py",
+                            "edits": [{"old": "render_html()\n", "new": "render_cli()\n"}],
+                        },
+                        {
+                            "type": "edit_file_hunks",
+                            "path": "experiments/mew-ghost/tests/test_mew_ghost.py",
+                            "edits": [{"old": "assert_html()\n", "new": "assert_cli()\n"}],
+                        },
+                    ],
+                }
+
+                step = commands.run_work_batch_action(
+                    session["id"],
+                    task["id"],
+                    0,
+                    {"decision_plan": {"summary": "draft side project patch"}, "action_plan": {"summary": "paired"}},
+                    action,
+                    args,
+                    progress=lambda _message: None,
+                )
+
+                self.assertEqual(step["status"], "completed")
+                self.assertEqual(len(step["tool_calls"]), 2)
+                self.assertEqual(step["pending_approval_ids"], [call["id"] for call in step["tool_calls"]])
+                self.assertEqual((side_root / "ghost.py").read_text(encoding="utf-8"), "render_html()\n")
+                self.assertTrue(step["tool_calls"][0]["result"]["dry_run"])
+                self.assertTrue(step["tool_calls"][1]["result"]["dry_run"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_action_single_dry_run_edit_displays_diff_preview(self):
         text = format_work_action(
             {
@@ -8373,6 +8434,8 @@ class WorkSessionTests(unittest.TestCase):
             )
             (side_root / "app.py").write_text("print('old')\n", encoding="utf-8")
             (repo / "root.txt").write_text("old\n", encoding="utf-8")
+            (repo / "SIDE_PROJECT_ROADMAP.md").write_text("# side roadmap\n", encoding="utf-8")
+            (repo / "SIDE_PROJECT_ROADMAP_STATUS.md").write_text("# side status\n", encoding="utf-8")
             subprocess.run(["git", "add", "."], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             subprocess.run(
                 ["git", "commit", "-m", "init"],
@@ -8390,12 +8453,20 @@ class WorkSessionTests(unittest.TestCase):
                     state = load_state()
                     add_coding_task(state)
                     save_state(state)
+                allow_read_args = [
+                    "--allow-read",
+                    "SIDE_PROJECT_ROADMAP.md",
+                    "--allow-read",
+                    "SIDE_PROJECT_ROADMAP_STATUS.md",
+                    "--allow-read",
+                    str(side_root),
+                ]
                 with redirect_stdout(StringIO()):
-                    self.assertEqual(main(["work", "1", "--start-session", "--allow-read", str(side_root)]), 0)
+                    self.assertEqual(main(["work", "1", "--start-session", *allow_read_args]), 0)
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
-                        main(["work", "1", "--tool", "git_status", "--allow-read", str(side_root), "--json"]),
+                        main(["work", "1", "--tool", "git_status", *allow_read_args, "--json"]),
                         0,
                     )
                 status_data = json.loads(stdout.getvalue())
@@ -8407,7 +8478,7 @@ class WorkSessionTests(unittest.TestCase):
 
                 with redirect_stdout(StringIO()) as stdout:
                     self.assertEqual(
-                        main(["work", "1", "--tool", "git_diff", "--allow-read", str(side_root), "--json"]),
+                        main(["work", "1", "--tool", "git_diff", *allow_read_args, "--json"]),
                         0,
                     )
                 diff_data = json.loads(stdout.getvalue())
@@ -8644,6 +8715,57 @@ class WorkSessionTests(unittest.TestCase):
                 commands_section = commands_section.split("\n\nNext CLI controls", 1)[0]
                 self.assertIn("shell-only ok", commands_section)
                 self.assertNotIn("test-only ok", commands_section)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_failed_verifier_preserves_rolled_back_patch(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                target = Path("notes.md")
+                target.write_text("old text\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+
+                command = f"{sys.executable} -c \"import sys; sys.exit(1)\""
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "edit_file",
+                                "--path",
+                                "notes.md",
+                                "--old",
+                                "old",
+                                "--new",
+                                "new",
+                                "--allow-write",
+                                ".",
+                                "--apply",
+                                "--allow-verify",
+                                "--verify-command",
+                                command,
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+
+                data = json.loads(stdout.getvalue())
+                result = data["tool_call"]["result"]
+                self.assertTrue(result["rolled_back"])
+                self.assertTrue(result["failed_patch_preserved"])
+                self.assertIn("-old text", result["failed_patch"]["diff"])
+                self.assertIn("+new text", result["failed_patch"]["diff"])
+                self.assertEqual(target.read_text(encoding="utf-8"), "old text\n")
             finally:
                 os.chdir(old_cwd)
 
@@ -22786,6 +22908,73 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_session_steer_blocks_wrong_target_write_before_execution(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                side_root = Path("experiments/mew-ghost")
+                side_root.mkdir(parents=True)
+                (side_root / "ghost.py").write_text("source old\n", encoding="utf-8")
+                tests_dir = side_root / "tests"
+                tests_dir.mkdir()
+                (tests_dir / "test_mew_ghost.py").write_text("test old\n", encoding="utf-8")
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                steer = (
+                    "do not run tests, do not read more, produce a dry-run edit_file patch, "
+                    "target `experiments/mew-ghost/ghost.py` only, stop at pending approval"
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--steer", steer]), 0)
+
+                def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+                    return {
+                        "summary": "repair test directly",
+                        "action": {
+                            "type": "edit_file",
+                            "path": "experiments/mew-ghost/tests/test_mew_ghost.py",
+                            "old": "test old",
+                            "new": "test new",
+                            "dry_run": False,
+                        },
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "1",
+                                        "--ai",
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-write",
+                                        "experiments/mew-ghost",
+                                        "--act-mode",
+                                        "deterministic",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                report = json.loads(stdout.getvalue())
+                self.assertEqual(report["stop_reason"], "steer_blocked")
+                self.assertIn("target path", report["steps"][0]["steer_blocker"])
+                session = load_state()["work_sessions"][0]
+                self.assertEqual(session["pending_steer"]["text"], steer)
+                self.assertEqual((tests_dir / "test_mew_ghost.py").read_text(encoding="utf-8"), "test old\n")
+                self.assertEqual(session["tool_calls"], [])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_ai_compact_live_forces_compact_prompt_context_on_high_risk_task(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -28190,6 +28379,79 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn("approved work tool #2", output)
                 self.assertEqual(Path("one.md").read_text(encoding="utf-8"), "one\n")
                 self.assertEqual(Path("two.md").read_text(encoding="utf-8"), "two\n")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_session_approve_all_skips_superseded_same_path_dry_runs(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with state_lock():
+                    state = load_state()
+                    add_coding_task(state)
+                    save_state(state)
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(main(["work", "1", "--start-session"]), 0)
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "same.md",
+                                "--content",
+                                "old pending\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--tool",
+                                "write_file",
+                                "--path",
+                                "same.md",
+                                "--content",
+                                "new pending\n",
+                                "--create",
+                                "--allow-write",
+                                ".",
+                            ]
+                        ),
+                        0,
+                    )
+
+                with redirect_stdout(StringIO()) as stdout:
+                    self.assertEqual(
+                        main(
+                            [
+                                "work",
+                                "1",
+                                "--approve-all",
+                                "--allow-write",
+                                ".",
+                                "--allow-verify",
+                                "--verify-command",
+                                "true",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+                data = json.loads(stdout.getvalue())
+
+                self.assertEqual(data["count"], 1)
+                self.assertEqual(data["approved"][0]["approved_tool_call"]["id"], 2)
+                self.assertEqual(Path("same.md").read_text(encoding="utf-8"), "new pending\n")
             finally:
                 os.chdir(old_cwd)
 
@@ -36613,6 +36875,89 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertIn(blocker, result["finished_note"])
                 self.assertIn("Work session finish blocked", task["notes"])
                 self.assertNotIn("Work session finished:", task["notes"])
+
+    def test_work_finish_blocks_invalid_side_dogfood_report_closeout(self):
+        from mew.commands import apply_work_control_action
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / ".mew-dogfood" / "reports" / "sp22c.json"
+            report.parent.mkdir(parents=True)
+            report.write_text(json.dumps({"summary": "descriptive, not canonical"}), encoding="utf-8")
+            state = {}
+            session = {
+                "id": 9,
+                "status": "active",
+                "goal": "Finish mew-wisp side project report.",
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "write_file",
+                        "status": "completed",
+                        "result": {
+                            "path": str(report),
+                            "written": True,
+                            "dry_run": False,
+                        },
+                    }
+                ],
+            }
+            task = {"id": 15, "title": "mew-wisp report closeout", "status": "ready", "notes": ""}
+            with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+                "mew.commands.close_work_session"
+            ) as close_session:
+                result = apply_work_control_action(
+                    state,
+                    session,
+                    task,
+                    {"type": "finish", "reason": "report written", "task_done": False},
+                )
+
+            close_session.assert_not_called()
+            self.assertIn("invalid side-dogfood report", result["finished_note"])
+            self.assertIn("missing required side-project dogfood field", result["finished_note"])
+
+    def test_work_finish_blocks_stale_side_project_identity_in_report(self):
+        from mew.commands import apply_work_control_action
+        from mew.side_project_dogfood import dogfood_record_template
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / ".mew-dogfood" / "reports" / "sp22e.json"
+            report.parent.mkdir(parents=True)
+            payload = dogfood_record_template()
+            payload["side_project"] = "mew-ghost"
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            state = {}
+            session = {
+                "id": 9,
+                "status": "active",
+                "goal": "Finish mew-wisp side project report.",
+                "tool_calls": [
+                    {
+                        "id": 1,
+                        "tool": "write_file",
+                        "status": "completed",
+                        "result": {
+                            "path": str(report),
+                            "written": True,
+                            "dry_run": False,
+                        },
+                    }
+                ],
+            }
+            task = {"id": 15, "title": "mew-wisp report closeout", "status": "ready", "notes": ""}
+            with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+                "mew.commands.close_work_session"
+            ) as close_session:
+                result = apply_work_control_action(
+                    state,
+                    session,
+                    task,
+                    {"type": "finish", "reason": "report written", "task_done": False},
+                )
+
+            close_session.assert_not_called()
+            self.assertIn("side_project mismatch", result["finished_note"])
+            self.assertIn("expected mew-wisp, got mew-ghost", result["finished_note"])
 
     def test_work_finish_blocks_task_done_without_acceptance_checks(self):
         from mew.commands import apply_work_control_action
