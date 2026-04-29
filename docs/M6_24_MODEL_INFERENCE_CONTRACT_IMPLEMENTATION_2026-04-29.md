@@ -75,3 +75,38 @@ gpt2-codegolf after compact model/inference contract repair
 ```
 
 Do not resume broad measurement before recording that rerun.
+
+## v0.1 Handoff Guard
+
+The first speed rerun showed that the v0 guard moved behavior from smoke-only
+completion to a real checkpoint/BPE-reading implementation, but the session
+still closed with `task_done=false` while stating that exact GPT-2 equivalence
+was unverified. In one-shot/external-harness mode, a closed work session is a
+handoff even if the task record is not marked done.
+
+Generic repair:
+
+- model/checkpoint/tokenizer inference tasks now apply the model-output
+  acceptance gate to `finish` handoffs even when `task_done=false`;
+- grounded reference/golden/token equivalence still allows the handoff;
+- unverified exact output blocks the finish so the work loop can continue
+  repairing instead of returning a successful handoff.
+
+Validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'model_inference_handoff_without_task_done or finish_blocker_allows_acceptance_repair_continuation' --no-testmon -q
+3 passed, 783 deselected
+
+uv run pytest tests/test_acceptance.py -k 'model_inference' --no-testmon -q
+5 passed, 67 deselected
+
+uv run ruff check src/mew/commands.py tests/test_work_session.py
+All checks passed
+```
+
+Next proof:
+
+```text
+gpt2-codegolf after model_inference_incomplete_handoff_guard v0.1
+```
