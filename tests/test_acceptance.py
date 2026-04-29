@@ -970,6 +970,47 @@ def test_acceptance_finish_blocker_accepts_long_dependency_final_artifact_eviden
     assert blocker == ""
 
 
+def test_acceptance_finish_blocker_accepts_long_dependency_artifact_proof_in_command_with_clean_stdout():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Tool #9 completed the build and ran /tmp/CompCert/ccomp -version successfully.",
+        },
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Tool #9 ran /tmp/CompCert/ccomp -version successfully.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version"},
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "CompCert C compiler, version 3.13.1\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+
+
 def test_acceptance_finish_blocker_rejects_model_inference_smoke_only_output():
     text = (
         "I have downloaded the gpt-2 weights stored as a TF .ckpt. Write me a dependency-free C file "

@@ -4606,6 +4606,28 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("long_dependency_incomplete_reason: make_failed_or_timeout", text)
         self.assertIn("long_dependency_next: resume the existing source tree/toolchain state", text)
 
+    def test_work_session_resume_omits_long_dependency_state_before_progress(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["long_dependency_build_state"], {})
+        self.assertNotIn("long_dependency_build_state:", format_work_session_resume(resume))
+
     def test_work_session_resume_surfaces_stale_runtime_artifact_risk(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 

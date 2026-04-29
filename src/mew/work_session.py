@@ -4167,8 +4167,9 @@ def build_long_dependency_build_state(task, calls, session=None):
                     "status": "proven",
                     "source_tool_call_id": call.get("id"),
                 }
+    proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
-    if not progress and not missing:
+    if not progress and not proven:
         return {}
     latest_command = ""
     if latest_build_call:

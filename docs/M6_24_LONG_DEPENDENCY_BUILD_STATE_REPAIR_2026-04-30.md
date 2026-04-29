@@ -49,9 +49,30 @@ uv run ruff check src/mew/acceptance.py src/mew/work_session.py src/mew/work_loo
 
 Result:
 
-- acceptance long-dependency tests: `3 passed`
+- acceptance long-dependency tests: `4 passed`
+- work-session long-dependency tests: `2 passed`
 - work-session/prompt tests: `2 passed`
 - ruff: passed
+
+## Review Follow-up
+
+`codex-ultra` reviewed commit `ef5abf8` and found two correctness risks before
+the validation rerun:
+
+- command-only executable smoke proofs such as
+  `test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version` could be
+  rejected when stdout did not repeat the artifact path;
+- a fresh long-dependency session with no completed progress could still emit a
+  "resume existing source tree/toolchain" hint because missing artifacts were
+  initialized before any progress existed.
+
+The follow-up fix keeps the final-artifact blocker strict, but evaluates the
+successful tool command together with stdout/stderr, and suppresses
+`long_dependency_build_state` until there is actual build progress or proven
+artifact state.
+
+The same `codex-ultra` review session re-reviewed the follow-up diff and
+returned `APPROVED`.
 
 ## Next Validation
 

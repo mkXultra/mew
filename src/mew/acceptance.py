@@ -1204,7 +1204,11 @@ def _has_long_dependency_artifact_evidence(evidence: object, session: object, ar
         call = _tool_call_by_id(session, tool_id)
         if not call or call.get("tool") not in {"run_command", "run_tests"}:
             continue
-        if _long_dependency_artifact_proved_by_text(_tool_call_result_text(call), artifact):
+        result_text = _tool_call_result_text(call)
+        if not result_text:
+            continue
+        command_and_result = "\n".join(part for part in (_tool_call_external_command_text(call), result_text) if part)
+        if _long_dependency_artifact_proved_by_text(command_and_result, artifact):
             return True
     return False
 
