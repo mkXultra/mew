@@ -108,6 +108,7 @@ class DeskTests(unittest.TestCase):
                 ]
             },
             explicit_date="2026-04-17",
+            current_time="2026-04-17T00:00:04Z",
         )
 
         self.assertEqual(thinking["pet_state"], "thinking")
@@ -330,6 +331,77 @@ class DeskTests(unittest.TestCase):
         self.assertEqual(view["primary_action"]["label"], "Resume task #4")
         self.assertEqual(view["actions"][0]["label"], "Resume task #4")
         self.assertEqual(view["actions"][1]["label"], "Resume task #3")
+
+    def test_build_desk_view_model_marks_stale_work_session_not_current_signal(self):
+        view = build_desk_view_model(
+            {
+                "tasks": [
+                    {"id": 3, "title": "Old resident speech", "status": "ready", "kind": "coding"},
+                ],
+                "work_sessions": [
+                    {
+                        "id": 8,
+                        "task_id": 3,
+                        "status": "active",
+                        "goal": "Old resident speech",
+                        "updated_at": "2026-04-17T00:30:00Z",
+                        "tool_calls": [
+                            {
+                                "id": 1,
+                                "tool": "read_file",
+                                "status": "completed",
+                                "finished_at": "2026-04-17T00:45:00Z",
+                            }
+                        ],
+                    }
+                ],
+            },
+            explicit_date="2026-04-17",
+            current_time="2026-04-17T07:00:00Z",
+            kind="coding",
+        )
+
+        action = view["primary_action"]
+        detail = view["details"]["active_work_sessions"][0]
+
+        self.assertEqual(view["pet_state"], "alerting")
+        self.assertEqual(view["focus"], "Resumable stale work: Old resident speech")
+        self.assertEqual(action["kind"], "resume_work")
+        self.assertTrue(action["is_stale"])
+        self.assertFalse(action["is_current_signal"])
+        self.assertEqual(action["freshness"], "stale")
+        self.assertEqual(action["reason"], "stale active work session can be resumed; not current live work")
+        self.assertTrue(detail["is_stale"])
+        self.assertFalse(detail["is_current_signal"])
+        self.assertEqual(detail["freshness"], "stale")
+        self.assertEqual(detail["last_active_at"], "2026-04-17T00:45:00Z")
+
+    def test_build_desk_view_model_keeps_recent_work_session_current_signal(self):
+        view = build_desk_view_model(
+            {
+                "tasks": [
+                    {"id": 3, "title": "Fresh resident speech", "status": "ready", "kind": "coding"},
+                ],
+                "work_sessions": [
+                    {
+                        "id": 8,
+                        "task_id": 3,
+                        "status": "active",
+                        "goal": "Fresh resident speech",
+                        "updated_at": "2026-04-17T00:55:00Z",
+                    }
+                ],
+            },
+            explicit_date="2026-04-17",
+            current_time="2026-04-17T01:00:00Z",
+            kind="coding",
+        )
+
+        self.assertEqual(view["pet_state"], "typing")
+        self.assertEqual(view["focus"], "Working on: Fresh resident speech")
+        self.assertFalse(view["primary_action"]["is_stale"])
+        self.assertTrue(view["primary_action"]["is_current_signal"])
+        self.assertEqual(view["primary_action"]["freshness"], "recent")
 
     def test_build_desk_view_model_surfaces_paused_active_work_session(self):
         view = build_desk_view_model(

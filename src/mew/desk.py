@@ -26,6 +26,7 @@ DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_DETAIL_ITEMS = 3
 MAX_DETAIL_SUMMARY_LENGTH = 140
 MAX_ACTION_ITEMS = 8
+STALE_WORK_SESSION_SECONDS = 4 * 60 * 60
 
 
 def validate_date(value: str) -> str:
@@ -136,6 +137,23 @@ def work_session_activity_sort_value(session: dict[str, Any]) -> float:
 
 def work_session_is_paused(session: dict[str, Any]) -> bool:
     return bool(session.get("stop_requested_at")) and not work_session_has_running_activity(session)
+
+
+def work_session_freshness(session: dict[str, Any], current_time: str | None = None) -> str:
+    if work_session_has_running_activity(session):
+        return "running"
+    stale_seconds = work_session_stale_for_seconds(session, current_time)
+    if stale_seconds is None:
+        return "unknown"
+    if stale_seconds >= STALE_WORK_SESSION_SECONDS:
+        return "stale"
+    return "recent"
+
+
+def work_session_is_current_signal(session: dict[str, Any], current_time: str | None = None) -> bool:
+    if work_session_is_paused(session):
+        return False
+    return work_session_freshness(session, current_time) in ("running", "recent", "unknown")
 
 
 def attach_action_metadata(action: dict[str, Any], reason: str, stale_seconds: int | None) -> dict[str, Any]:
@@ -249,6 +267,7 @@ def choose_pet_state(
     questions: list[dict[str, Any]] | None = None,
     attention: list[dict[str, Any]] | None = None,
     sessions: list[dict[str, Any]] | None = None,
+    current_time: str | None = None,
 ) -> str:
     if questions is None:
         questions = open_questions_for_desk(state)
@@ -263,8 +282,10 @@ def choose_pet_state(
         return "thinking"
     if phase in ("applying", "acting", "executing", "committing"):
         return "typing"
-    if sessions:
+    if any(work_session_is_current_signal(session, current_time) for session in sessions):
         return "typing"
+    if sessions:
+        return "alerting"
     return "sleeping"
 
 
@@ -319,7 +340,11 @@ def task_detail_item(task: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-def work_session_detail_item(session: dict[str, Any], state: dict[str, Any] | None = None) -> dict[str, Any]:
+def work_session_detail_item(
+    session: dict[str, Any],
+    state: dict[str, Any] | None = None,
+    current_time: str | None = None,
+) -> dict[str, Any]:
     session_id = session.get("id")
     task_id = session.get("task_id")
     effort = build_work_session_effort(session)
@@ -328,13 +353,24 @@ def work_session_detail_item(session: dict[str, Any], state: dict[str, Any] | No
     continuity = resume.get("continuity") or {}
     continuity_summary = format_work_continuity_inline(continuity)
     continuity_next = format_work_continuity_recommendation(continuity)
+    last_active_at = work_session_latest_activity_at(session)
+    stale_seconds = work_session_stale_for_seconds(session, current_time)
+    freshness = work_session_freshness(session, current_time)
+    is_current_signal = work_session_is_current_signal(session, current_time)
     item = {
         "kind": "work_session",
         "label": f"Work session #{session_id}" if session_id is not None else "Work session",
         "summary": compact_detail_summary(session.get("goal"), session.get("title")) or "active work",
         "status": "paused" if work_session_is_paused(session) else (normalize_text(session.get("status")) or "active"),
         "effort": effort,
+        "freshness": freshness,
+        "is_stale": freshness == "stale",
+        "is_current_signal": is_current_signal,
     }
+    if last_active_at:
+        item["last_active_at"] = last_active_at
+    if stale_seconds is not None:
+        item["stale_for_seconds"] = stale_seconds
     if effort_summary:
         item["effort_summary"] = effort_summary
     if continuity:
@@ -398,10 +434,23 @@ def work_session_action_item(session: dict[str, Any], current_time: str | None =
     task_id = session.get("task_id")
     session_id = session.get("id")
     paused = work_session_is_paused(session)
+    freshness = work_session_freshness(session, current_time)
+    is_stale = freshness == "stale"
+    if paused and is_stale:
+        reason = "stale paused work session can be resumed; not current live work"
+    elif paused:
+        reason = "active work session is intentionally paused"
+    elif is_stale:
+        reason = "stale active work session can be resumed; not current live work"
+    else:
+        reason = "active work session can be resumed"
     action = {
         "kind": "paused_work" if paused else "resume_work",
         "label": "Paused active work" if paused else "Resume active work",
         "command": mew_command("work", "--session", "--resume", "--allow-read", "."),
+        "freshness": freshness,
+        "is_stale": is_stale,
+        "is_current_signal": work_session_is_current_signal(session, current_time),
     }
     if task_id is not None:
         action["task_id"] = task_id
@@ -416,7 +465,7 @@ def work_session_action_item(session: dict[str, Any], current_time: str | None =
         action["effort_summary"] = effort_summary
     return attach_action_metadata(
         action,
-        "active work session is intentionally paused" if paused else "active work session can be resumed",
+        reason,
         work_session_stale_for_seconds(session, current_time),
     )
 
@@ -543,12 +592,14 @@ def desk_detail_items(
     sessions: list[dict[str, Any]],
     attention: list[dict[str, Any]],
     state: dict[str, Any] | None = None,
+    current_time: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     return {
         "questions": [question_detail_item(question) for question in questions[:MAX_DETAIL_ITEMS]],
         "tasks": [task_detail_item(task) for task in tasks[:MAX_DETAIL_ITEMS]],
         "active_work_sessions": [
-            work_session_detail_item(session, state=state) for session in sessions[-MAX_DETAIL_ITEMS:]
+            work_session_detail_item(session, state=state, current_time=current_time)
+            for session in sessions[-MAX_DETAIL_ITEMS:]
         ],
         "attention": [attention_detail_item(item) for item in attention[:MAX_DETAIL_ITEMS]],
     }
@@ -576,6 +627,7 @@ def focus_summary(
     questions: list[dict[str, Any]] | None = None,
     sessions: list[dict[str, Any]] | None = None,
     tasks: list[dict[str, Any]] | None = None,
+    current_time: str | None = None,
 ) -> str:
     if questions is None:
         questions = open_questions_for_desk(state)
@@ -585,9 +637,15 @@ def focus_summary(
     if sessions is None:
         sessions = active_work_sessions_for_desk(state)
     if sessions:
-        goal = normalize_text(sessions[-1].get("goal") or sessions[-1].get("title")) or "active work"
-        if work_session_is_paused(sessions[-1]):
+        current_sessions = [
+            session for session in sessions if work_session_is_current_signal(session, current_time)
+        ]
+        session = current_sessions[-1] if current_sessions else sessions[-1]
+        goal = normalize_text(session.get("goal") or session.get("title")) or "active work"
+        if work_session_is_paused(session):
             return f"Paused: {goal}"
+        if not current_sessions:
+            return f"Resumable stale work: {goal}"
         return f"Working on: {goal}"
     if tasks is None:
         tasks = open_tasks_for_desk(state)
@@ -618,8 +676,20 @@ def build_desk_view_model(
     primary_action = actions[0] if actions else None
     view_model = {
         "date": day,
-        "pet_state": choose_pet_state(state, questions=questions, attention=attention, sessions=sessions),
-        "focus": focus_summary(state, questions=questions, sessions=sessions, tasks=tasks),
+        "pet_state": choose_pet_state(
+            state,
+            questions=questions,
+            attention=attention,
+            sessions=sessions,
+            current_time=current_time,
+        ),
+        "focus": focus_summary(
+            state,
+            questions=questions,
+            sessions=sessions,
+            tasks=tasks,
+            current_time=current_time,
+        ),
         "primary_action": primary_action,
         "actions": actions,
         "counts": {
@@ -628,7 +698,7 @@ def build_desk_view_model(
             "active_work_sessions": len(sessions),
             "open_attention": len(attention),
         },
-        "details": desk_detail_items(questions, tasks, sessions, attention, state=state),
+        "details": desk_detail_items(questions, tasks, sessions, attention, state=state, current_time=current_time),
     }
     checkpoint = latest_context_checkpoint()
     if checkpoint:
