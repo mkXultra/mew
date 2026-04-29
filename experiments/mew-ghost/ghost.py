@@ -1294,7 +1294,9 @@ def run_watch(
             if output_path is not None:
                 output_path.write_text(rendered, encoding='utf-8')
             if format_name == 'human' and output_path is None:
+                stream.write('\x1b[H\x1b[J')
                 stream.write(rendered)
+                stream.flush()
             else:
                 print(
                     json.dumps(

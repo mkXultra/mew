@@ -1316,6 +1316,80 @@ def test_terminal_human_cat_renders_injected_live_desk_provider(capsys) -> None:
     assert '--desk-json' not in detailed
 
 
+def test_human_watch_stdout_rerenders_terminal_surface(capsys) -> None:
+    ticks = iter(['2026-04-29T09:00:00Z', '2026-04-29T09:00:01Z'])
+
+    exit_code = ghost.run_watch(
+        FIXTURE_PATH,
+        format_name='human',
+        terminal_form='cat',
+        watch_count=2,
+        interval_seconds=0,
+        sleeper=lambda _seconds: None,
+        clock=lambda: next(ticks),
+    )
+    captured = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert captured.startswith('\x1b[H\x1b[J')
+    assert captured.count('\x1b[H\x1b[J') == 2
+    assert captured.count('mew-wisp resident cat') == 2
+    assert captured.count('mew-wisp resident HUD') == 2
+    assert 'resident state: coding' in captured
+
+
+def test_watch_jsonl_state_html_and_output_file_skip_rerender_controls(tmp_path: Path, capsys) -> None:
+    state_exit = ghost.run_watch(
+        FIXTURE_PATH,
+        format_name='state',
+        watch_count=2,
+        interval_seconds=0,
+        sleeper=lambda _seconds: None,
+        clock=lambda: '2026-04-29T09:01:00Z',
+    )
+    state_stdout = capsys.readouterr().out
+    state_records = [json.loads(line) for line in state_stdout.splitlines()]
+
+    html_exit = ghost.run_watch(
+        FIXTURE_PATH,
+        format_name='html',
+        watch_count=2,
+        interval_seconds=0,
+        sleeper=lambda _seconds: None,
+        clock=lambda: '2026-04-29T09:02:00Z',
+    )
+    html_stdout = capsys.readouterr().out
+    html_records = [json.loads(line) for line in html_stdout.splitlines()]
+
+    output_path = tmp_path / 'watch-human.txt'
+    output_exit = ghost.run_watch(
+        FIXTURE_PATH,
+        format_name='human',
+        terminal_form='cat',
+        output=output_path,
+        watch_count=2,
+        interval_seconds=0,
+        sleeper=lambda _seconds: None,
+        clock=lambda: '2026-04-29T09:03:00Z',
+    )
+    output_stdout = capsys.readouterr().out
+    output_records = [json.loads(line) for line in output_stdout.splitlines()]
+    output_text = output_path.read_text(encoding='utf-8')
+
+    assert state_exit == 0
+    assert html_exit == 0
+    assert output_exit == 0
+    assert len(state_records) == 2
+    assert len(html_records) == 2
+    assert len(output_records) == 2
+    assert '\x1b[' not in state_stdout
+    assert '\x1b[' not in html_stdout
+    assert '\x1b[' not in output_stdout
+    assert '\x1b[' not in output_text
+    assert 'mew-wisp resident cat' in output_text
+    assert 'mew-wisp resident HUD' in output_text
+
+
 def test_terminal_human_resident_panel_centers_with_forced_width(monkeypatch) -> None:
     monkeypatch.setenv(ghost.CAT_TERMINAL_WIDTH_ENV, '100')
     state, html = ghost.render_fixture(FIXTURE_PATH)

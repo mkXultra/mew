@@ -490,3 +490,18 @@ Done when:
 - tests use injected runners and fixture snapshots; a separate smoke proof may
   run the real `./mew desk --json` command from the repo root
 - no internal mew state schema detail leaks into the form layer
+
+### SP25: mew-wisp Human Watch Rerender
+
+Make the terminal resident view behave like a live surface instead of an
+append-only log when human watch mode is active.
+
+Done when:
+
+- `--format human` with `--watch` or `--watch-count` and no `--output` repaints
+  the terminal surface in place
+- state/HTML watch output and human `--output` behavior remain unchanged
+- focused tests prove rerender controls are emitted for watched human output and
+  are absent from JSONL/output-file modes
+- no background monitoring, shell execution, launcher execution, hidden reads,
+  or core imports are introduced

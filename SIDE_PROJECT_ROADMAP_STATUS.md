@@ -35,10 +35,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP22 mew-wisp Visual Polish | `done` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e/SP22f replaced raw diagnostics and stale ghost copy with resident-facing mew-wisp copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
 | SP23 mew-wisp Speech Bubble | `done` | SP23a landed practical in task #38/session #67: human terminal output now renders an ASCII mew-wisp speech bubble between the cat/default form and resident HUD, with focused tests and zero product-code rescue edits. Issues #25/#26/#27 remain implementation-lane hardening evidence. |
 | SP24 mew-wisp Mew Adapter Reconnect | `done` | SP24a/SP24b landed practical: the CLI-first human cat surface renders fixture snapshots, injected live desk provider output, and explicit repo-local `--live-desk` output through one opt-in adapter boundary, with visible fallback states and sanitized human details. |
+| SP25 mew-wisp Human Watch Rerender | `done` | Human watch stdout now emits ANSI home/clear controls before each no-output human render, so `--watch`/`--watch-count` repaints the cat/HUD surface in place while state/HTML/output-file behavior remains unchanged. |
 
 ## Active Focus
 
-Active side-project focus: **SP24 mew-wisp Mew Adapter Reconnect is complete**.
+Active side-project focus: **SP25 mew-wisp Human Watch Rerender is complete**.
 
 Current target:
 
@@ -188,6 +189,15 @@ Current target:
   passed`), and an explicit repo-local real `--live-desk` smoke wrote sanitized
   human output to `/tmp/mew-wisp-sp24b-human.txt`. Ledger row `46` records the
   practical result with rescue edits `0`
+- SP25 task `#41` landed practical from session `#72`: mew-authored source and
+  tests make human watch stdout emit ANSI cursor-home/clear controls before each
+  no-output human render, so `--format human --form cat --watch-count 2` behaves
+  as a terminal repaint instead of visually appending repeated cat/HUD screens.
+  Focused tests prove rerender controls appear for watched human output and stay
+  absent from state/html JSONL and human `--output` paths. The focused verifier
+  passed (`46 passed`), and a terminal smoke confirmed two human cat frames each
+  begin with rerender controls. Ledger row `47` records the practical result
+  with rescue edits `0`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -888,6 +898,8 @@ Current target:
 - SP24 is closed: reconnecting the CLI-first wisp to explicit live mew desk
   output now has injected-provider, CLI/main injected-runner, fallback, sanitized
   human-details, and real repo-local smoke proof.
+- SP25 is closed: watched human terminal output now repaints in place instead of
+  visually appending repeated cat/HUD surfaces.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
