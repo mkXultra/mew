@@ -39,6 +39,7 @@ _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
 _TOOL_ID_RE = re.compile(r"\btool(?:\s+call)?\s*#?\s*(\d+)\b", re.IGNORECASE)
 _RUNTIME_TMP_ARTIFACT_RE = re.compile(r"(/tmp/[A-Za-z0-9._/@%+=:,\-]+)")
+_ABSOLUTE_PATH_RE = re.compile(r"(/[A-Za-z0-9._/@%+=:,\-]+(?:/[A-Za-z0-9._/@%+=:,\-]+)*)")
 
 _WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 _GROUNDING_TOOLS = {
@@ -141,6 +142,67 @@ _RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS = (
     "screen size",
     "similarity",
     "ssim",
+)
+
+_LONG_DEPENDENCY_BUILD_ACTION_MARKERS = (
+    "build",
+    "compile ",
+    "compiled ",
+    "compiling ",
+    "configure",
+    "from source",
+    "install",
+    "make ",
+    "freshly built",
+)
+_LONG_DEPENDENCY_BUILD_DOMAIN_MARKERS = (
+    "apt-get",
+    "cargo",
+    "cmake",
+    "compiler",
+    "dependency",
+    "dependencies",
+    "make ",
+    "maven",
+    "npm",
+    "ocaml",
+    "opam",
+    "package",
+    "pip",
+    "source",
+    "toolchain",
+)
+_LONG_DEPENDENCY_ARTIFACT_CONTEXT_MARKERS = (
+    "artifact",
+    "binary",
+    "created",
+    "ensure",
+    "executable",
+    "exists",
+    "functional",
+    "invoked",
+    "invokable",
+    "output",
+    "produce",
+    "through",
+    "version",
+)
+_LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS = (
+    "-version",
+    "executable",
+    "exists=true",
+    "functional smoke",
+    "invoked",
+    "ls -l",
+    "regular file",
+    "smoke_ok",
+    "test -x",
+)
+_LONG_DEPENDENCY_ARTIFACT_NEGATIVE_MARKERS = (
+    "does not exist",
+    "missing",
+    "no such file",
+    "not found",
 )
 
 _STATEFUL_OUTPUT_STATE_MARKERS = (
@@ -1090,6 +1152,94 @@ def _runtime_visual_artifact_quality_blocker(
         "nonzero pixels, valid headers, or self-consistent dimensions are not enough; "
         "cite a completed grounding tool whose output checks expected dimensions, "
         "reference similarity, or exact stdout/boot markers"
+    )
+
+
+def is_long_dependency_toolchain_build_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not any(marker in lowered for marker in _LONG_DEPENDENCY_BUILD_ACTION_MARKERS):
+        return False
+    return any(marker in lowered for marker in _LONG_DEPENDENCY_BUILD_DOMAIN_MARKERS)
+
+
+def _path_context(text: str, start: int, end: int, *, radius: int = 80) -> str:
+    return text[max(0, start - radius) : min(len(text), end + radius)]
+
+
+def long_dependency_final_artifacts(text: object, *, limit: int = 6) -> list[str]:
+    value = str(text or "")
+    if not is_long_dependency_toolchain_build_task(value):
+        return []
+    artifacts: list[str] = []
+    for match in _ABSOLUTE_PATH_RE.finditer(value):
+        path = str(match.group(1) or "").rstrip("`'\".,;:)")
+        if not path or path.endswith("/"):
+            continue
+        context = _path_context(value, match.start(), match.end()).casefold()
+        if re.search(r"\b(?:under|inside|within|in)\s+" + re.escape(path.casefold()) + r"\b", context):
+            continue
+        if not any(marker in context for marker in _LONG_DEPENDENCY_ARTIFACT_CONTEXT_MARKERS):
+            continue
+        if path not in artifacts:
+            artifacts.append(path)
+        if len(artifacts) >= limit:
+            break
+    return artifacts
+
+
+def _long_dependency_artifact_proved_by_text(text: object, artifact: str) -> bool:
+    lowered = str(text or "").casefold()
+    artifact_lower = str(artifact or "").casefold()
+    if not artifact_lower or artifact_lower not in lowered:
+        return False
+    if any(marker in lowered for marker in _LONG_DEPENDENCY_ARTIFACT_NEGATIVE_MARKERS):
+        return False
+    return any(marker in lowered for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS)
+
+
+def _has_long_dependency_artifact_evidence(evidence: object, session: object, artifact: str) -> bool:
+    if not _long_dependency_artifact_proved_by_text(evidence, artifact):
+        return False
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if _long_dependency_artifact_proved_by_text(_tool_call_result_text(call), artifact):
+            return True
+    return False
+
+
+def _long_dependency_build_artifact_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    artifacts = long_dependency_final_artifacts(task_description)
+    if not artifacts:
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return (
+            "long dependency/toolchain final artifact evidence missing: source-build "
+            "tasks must cite completed tool output proving the required final executable "
+            "or artifact exists, is invokable/executable, or passed a smoke command"
+        )
+    missing = [
+        artifact
+        for artifact in artifacts
+        if not any(_has_long_dependency_artifact_evidence(check.get("evidence"), session, artifact) for check in verified_checks)
+    ]
+    if not missing:
+        return ""
+    return (
+        "long dependency/toolchain final artifact evidence ungrounded: prerequisite "
+        "installation, configure, dependency generation, or partial build progress is "
+        "not completion; cite a completed tool proving "
+        f"{', '.join(missing[:3])} exists and is executable/invokable"
     )
 
 
@@ -2220,6 +2370,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker
+    long_dependency_blocker = _long_dependency_build_artifact_blocker(task_description, checks, session)
+    if long_dependency_blocker:
+        return long_dependency_blocker
     stateful_output_blocker = _stateful_output_semantic_contrast_blocker(task_description, checks, session)
     if stateful_output_blocker:
         return stateful_output_blocker

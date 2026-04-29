@@ -4548,6 +4548,64 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("expected_artifacts=/tmp/frame.bmp", text)
         self.assertIn("verifier_failure_runtime_tools: readelf, nm, objdump, addr2line", text)
 
+    def test_work_session_resume_surfaces_long_dependency_build_state(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "opam install -y coq.8.16.1 coq-flocq"},
+                    "result": {"command": "opam install -y coq.8.16.1 coq-flocq", "exit_code": 0},
+                },
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "make depend && timeout 120 make -j4 ccomp", "cwd": "/tmp/CompCert"},
+                    "result": {
+                        "command": "make depend && timeout 120 make -j4 ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": (
+                            "SOURCE_ARCHIVE_ROOT=CompCert-3.13.1\n"
+                            "opam switch compcert-ocaml-system\n"
+                            "make depend\n.depend generated\n"
+                            "MAKE_FAILED_OR_TIMEOUT exit=124\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        state = resume["long_dependency_build_state"]
+
+        self.assertEqual(state["kind"], "long_dependency_build_state")
+        self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
+        self.assertEqual(state["latest_build_tool_call_id"], 9)
+        self.assertEqual(state["incomplete_reason"], "make_failed_or_timeout")
+        self.assertIn("dependencies_generated", [item["stage"] for item in state["progress"]])
+        self.assertIn("build_attempted", [item["stage"] for item in state["progress"]])
+
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_build_state: long_dependency_build_state", text)
+        self.assertIn("long_dependency_missing_artifact: /tmp/CompCert/ccomp", text)
+        self.assertIn("long_dependency_incomplete_reason: make_failed_or_timeout", text)
+        self.assertIn("long_dependency_next: resume the existing source tree/toolchain state", text)
+
     def test_work_session_resume_surfaces_stale_runtime_artifact_risk(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -34528,6 +34586,11 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
         self.assertIn("expected dimensions/resolution, reference similarity", prompt)
+        self.assertIn("For long dependency/toolchain/source-build tasks", prompt)
+        self.assertIn("work_session.resume.long_dependency_build_state", prompt)
+        self.assertIn("Prerequisite installation, configure, dependency generation", prompt)
+        self.assertIn("required final executable/artifact is missing", prompt)
+        self.assertIn("Do not restart package-manager or source-tree setup", prompt)
         self.assertIn("For model/checkpoint/tokenizer inference, sampling, or continuation tasks", prompt)
         self.assertIn("printed N tokens", prompt)
         self.assertIn("reference/golden/oracle continuation", prompt)

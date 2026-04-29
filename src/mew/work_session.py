@@ -5,7 +5,12 @@ from pathlib import Path
 import re
 import shlex
 
-from .acceptance import coerce_acceptance_checks, implementation_contract_source_requirements
+from .acceptance import (
+    coerce_acceptance_checks,
+    implementation_contract_source_requirements,
+    is_long_dependency_toolchain_build_task,
+    long_dependency_final_artifacts,
+)
 from .cli_command import mew_command, mew_executable
 from .data_tools import analyze_table
 from .read_tools import (
@@ -4044,6 +4049,144 @@ def build_final_verifier_state_transfer(task, calls, session=None):
             "run the exact final verifier-shaped command from the final cwd, wait for each expected runtime artifact, "
             "record artifact proof in acceptance_checks, then clean stale artifacts only if the external verifier "
             "is expected to create them fresh"
+        ),
+    }
+
+
+_LONG_DEPENDENCY_STAGE_MARKERS = (
+    ("package_manager_setup", ("apt-get", "pip install", "opam install", "npm install", "cargo install")),
+    ("source_tree_prepared", ("download", "extract", "tar -x", "source tree", "source_archive_root")),
+    ("toolchain_selected", ("opam switch", "coq ", "ocaml", "tool versions", "compiler")),
+    ("configured", ("./configure", "cmake", "makefile.config", "config.status")),
+    ("dependencies_generated", ("make depend", ".depend", "dependency file", "analyzing coq dependencies")),
+    ("build_attempted", ("make -j", "make ccomp", "cargo build", "cmake --build", "npm run build")),
+)
+_LONG_DEPENDENCY_INCOMPLETE_MARKERS = (
+    "make_failed_or_timeout",
+    "not_enough_time_to_build",
+    "opam_still_running",
+    "prereqs_not_ready",
+    "timeout",
+)
+_LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS = (
+    "-version",
+    "executable",
+    "exists=true",
+    "functional smoke",
+    "ls -l",
+    "regular file",
+    "smoke_ok",
+    "test -x",
+)
+
+
+def _long_dependency_task_text(task, session=None):
+    task = task if isinstance(task, dict) else {}
+    session = session if isinstance(session, dict) else {}
+    return "\n".join(
+        str(value or "")
+        for value in (
+            task.get("title"),
+            task.get("description"),
+            task.get("notes"),
+            session.get("title"),
+            session.get("goal"),
+        )
+        if value
+    )
+
+
+def _long_dependency_artifact_proven_by_call(call, artifact):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("exit_code") not in (None, 0):
+        return False
+    text = _runtime_artifact_call_text(call).casefold()
+    artifact_lower = str(artifact or "").casefold()
+    if not artifact_lower or artifact_lower not in text:
+        return False
+    if any(marker in text for marker in ("does not exist", "missing", "no such file", "not found")):
+        return False
+    return any(marker in text for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS)
+
+
+def _long_dependency_call_stages(call):
+    text = _runtime_artifact_call_text(call).casefold()
+    stages = []
+    for stage, markers in _LONG_DEPENDENCY_STAGE_MARKERS:
+        if any(marker in text for marker in markers):
+            stages.append(stage)
+    return stages
+
+
+def _long_dependency_incomplete_reason(call):
+    text = _runtime_artifact_call_text(call).casefold()
+    for marker in _LONG_DEPENDENCY_INCOMPLETE_MARKERS:
+        if marker in text:
+            return marker
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("timed_out"):
+        return "tool_timeout"
+    return ""
+
+
+def build_long_dependency_build_state(task, calls, session=None):
+    task_text = _long_dependency_task_text(task, session=session)
+    if not is_long_dependency_toolchain_build_task(task_text):
+        return {}
+    expected_artifacts = long_dependency_final_artifacts(task_text)
+    if not expected_artifacts:
+        return {}
+    progress = []
+    seen_stages = set()
+    latest_build_call = {}
+    latest_incomplete_reason = ""
+    artifact_status = {
+        artifact: {"path": artifact, "status": "missing_or_unproven", "source_tool_call_id": None}
+        for artifact in expected_artifacts
+    }
+    for call in calls or []:
+        if not isinstance(call, dict) or str(call.get("status") or "").casefold() != "completed":
+            continue
+        stages = _long_dependency_call_stages(call)
+        for stage in stages:
+            if stage in seen_stages:
+                continue
+            seen_stages.add(stage)
+            progress.append({"stage": stage, "source_tool_call_id": call.get("id"), "tool": call.get("tool") or ""})
+        if "build_attempted" in stages:
+            latest_build_call = call
+        incomplete_reason = _long_dependency_incomplete_reason(call)
+        if incomplete_reason:
+            latest_incomplete_reason = incomplete_reason
+        for artifact in expected_artifacts:
+            if _long_dependency_artifact_proven_by_call(call, artifact):
+                artifact_status[artifact] = {
+                    "path": artifact,
+                    "status": "proven",
+                    "source_tool_call_id": call.get("id"),
+                }
+    missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
+    if not progress and not missing:
+        return {}
+    latest_command = ""
+    if latest_build_call:
+        result = latest_build_call.get("result") if isinstance(latest_build_call.get("result"), dict) else {}
+        parameters = latest_build_call.get("parameters") if isinstance(latest_build_call.get("parameters"), dict) else {}
+        latest_command = result.get("command") or parameters.get("command") or ""
+    return {
+        "kind": "long_dependency_build_state",
+        "progress": progress[-6:],
+        "expected_artifacts": list(artifact_status.values())[:6],
+        "missing_artifacts": missing[:6],
+        "latest_build_tool_call_id": latest_build_call.get("id") if latest_build_call else None,
+        "latest_build_command": clip_inline_text(latest_command, 500),
+        "incomplete_reason": latest_incomplete_reason,
+        "suggested_next": (
+            "resume the existing source tree/toolchain state; do not restart package or source setup after a "
+            "compatible path is found. Allocate remaining wall budget to the shortest continuation command that "
+            "produces the missing final artifact, then prove it exists and is executable/invokable."
         ),
     }
 
@@ -8392,6 +8535,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
     stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
     final_verifier_state_transfer = build_final_verifier_state_transfer(task, calls, session=session)
+    long_dependency_build_state = build_long_dependency_build_state(task, calls, session=session)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -8476,6 +8620,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "stale_runtime_artifact_risk": stale_runtime_artifact_risk,
         "final_verifier_state_transfer": final_verifier_state_transfer,
+        "long_dependency_build_state": long_dependency_build_state,
         "failed_patch_repair": failed_patch_repair,
         "broad_rollback_slice_repair": broad_rollback_slice_repair,
         "retry_context": retry_context,
@@ -8720,6 +8865,27 @@ def format_work_session_resume(resume):
             )
         if final_verifier_state_transfer.get("suggested_next"):
             lines.append(f"final_verifier_next: {final_verifier_state_transfer.get('suggested_next')}")
+    long_dependency_build_state = resume.get("long_dependency_build_state") or {}
+    if long_dependency_build_state:
+        lines.append(f"long_dependency_build_state: {long_dependency_build_state.get('kind')}")
+        progress = [
+            str(item.get("stage") or "")
+            for item in (long_dependency_build_state.get("progress") or [])
+            if isinstance(item, dict) and item.get("stage")
+        ]
+        if progress:
+            lines.append("long_dependency_progress: " + ", ".join(progress))
+        for item in (long_dependency_build_state.get("missing_artifacts") or [])[:3]:
+            lines.append(
+                "long_dependency_missing_artifact: "
+                f"{item.get('path')} status={item.get('status') or 'missing_or_unproven'}"
+            )
+        if long_dependency_build_state.get("incomplete_reason"):
+            lines.append(f"long_dependency_incomplete_reason: {long_dependency_build_state.get('incomplete_reason')}")
+        if long_dependency_build_state.get("latest_build_command"):
+            lines.append(f"long_dependency_latest_build: {long_dependency_build_state.get('latest_build_command')}")
+        if long_dependency_build_state.get("suggested_next"):
+            lines.append(f"long_dependency_next: {long_dependency_build_state.get('suggested_next')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)

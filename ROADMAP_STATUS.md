@@ -138,8 +138,10 @@ M6.24 resume condition:
   measured slice. The adjusted aggregate remains above the `>20pp` improvement
   threshold, so broad measurement stays paused. `compile-compcert` speed_1 on
   current head confirmed the post-SR-016 gap is long dependency/toolchain build
-  strategy, not `/tmp` permission. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_build_state_progress_contract repair -> compile-compcert speed_1 after repair`.
+  strategy, not `/tmp` permission. The v0 long dependency build-state progress
+  contract is implemented and awaiting same-shape validation. Current selected
+  chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_build_state_progress_contract speed rerun -> compile-compcert speed_1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -558,7 +560,8 @@ M6.24 resume condition:
   blocker did not recur: mew reached `/tmp/CompCert`, opam Coq `8.16.1`,
   `make depend`, and the real `make ccomp` path. The verifier still failed
   because `/tmp/CompCert/ccomp` was missing. The selected next repair is
-  `long_dependency_build_state_progress_contract`, followed by a
+  `long_dependency_build_state_progress_contract`; v0 is implemented in
+  `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md` and is awaiting
   same-shape `compile-compcert` speed rerun.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`

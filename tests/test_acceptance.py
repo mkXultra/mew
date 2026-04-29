@@ -4,10 +4,12 @@ from mew.acceptance import (
     exact_command_example_requirements,
     extract_acceptance_constraints,
     implementation_contract_source_requirements,
+    is_long_dependency_toolchain_build_task,
     is_model_inference_output_task,
     is_numeric_artifact_task,
     is_query_only_hidden_model_task,
     is_runtime_visual_artifact_task,
+    long_dependency_final_artifacts,
 )
 
 
@@ -879,6 +881,93 @@ def test_model_inference_output_task_classifier_covers_checkpoint_sampling():
     assert not is_model_inference_output_task("Count dataset tokens from a CSV file.")
     assert not is_model_inference_output_task("Update docs about model selection.")
     assert not is_model_inference_output_task("Read token weights from weights.csv and generate output.json.")
+
+
+def test_long_dependency_toolchain_build_classifier_extracts_final_artifact():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+
+    assert is_long_dependency_toolchain_build_task(text)
+    assert long_dependency_final_artifacts(text) == ["/tmp/CompCert/ccomp"]
+    assert not is_long_dependency_toolchain_build_task("Update docs about compiler options.")
+
+
+def test_acceptance_finish_blocker_rejects_long_dependency_partial_build_progress():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert build prerequisites and dependency generation completed.",
+            "status": "verified",
+            "evidence": "Tool #7 installed opam Coq 8.16.1 and ran make depend.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 7,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "coqc 8.16.1\nmake depend completed\nmake ccomp timed out\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+    assert "/tmp/CompCert/ccomp" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_long_dependency_final_artifact_evidence():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Tool #9 built from source and ran /tmp/CompCert/ccomp -version; SMOKE_OK.",
+        },
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Tool #9: ls -l /tmp/CompCert/ccomp; /tmp/CompCert/ccomp -version; SMOKE_OK.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "-rwxr-xr-x /tmp/CompCert/ccomp\nCompCert version 3.13\nSMOKE_OK\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
 
 
 def test_acceptance_finish_blocker_rejects_model_inference_smoke_only_output():
