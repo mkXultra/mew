@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "task_id": 28,
+  "session_id": 57,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP21g is a fresh retry of the bounded mew-wisp display-polish slice after task #27/session #56 was blocked by issue #20. It centers normal --format human --form cat terminal output for the 22x24 block-cell cat sprite relative to terminal width, with deterministic forced-width behavior for tests and non-TTY fallback. The cat state line, sprite, and post-silhouette state marker stay visually aligned as one centered cat block while the metadata/HUD remains readable. The slice preserves compact HUD behavior, --details diagnostics, --form default, state JSON, HTML, watch behavior, live-read gates, launcher safety, and cat sprite similarity coverage.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 6,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/28-sp21g-centered-cat-terminal-form-practical.json"
+  ],
+  "proof_artifacts": [
+    "mew task #28",
+    "mew work session #57",
+    "applied renderer edit tool #1166",
+    "applied focused test edit and pytest verification tool #1167",
+    "experiments/mew-ghost/.mew-dogfood/reports/28-sp21g-centered-cat-terminal-form-practical.json"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py"
+  ],
+  "verification_evidence": [
+    {
+      "tool_call_id": 1167,
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "exit_code": 0,
+      "summary": "38 passed after applying the SP21g centered-cat renderer and focused test edits."
+    }
+  ],
+  "implemented_contract": {
+    "fresh_retry_scope": "SP21g was implemented as a fresh retry under experiments/mew-ghost only after task #27/session #56 was blocked by issue #20.",
+    "cat_terminal_centering": "--format human --form cat centers the 22x24 terminal cat sprite block relative to the detected terminal width when there is room for padding.",
+    "deterministic_width_fallback": "Tests can force terminal width deterministically through the local CAT_TERMINAL_WIDTH_ENV override, while non-TTY or invalid-width output falls back to a stable width path without negative padding.",
+    "narrow_width_safe": "Narrow terminal widths do not add negative or broken padding; the sprite remains intact with no leading padding when the width is smaller than the cat block.",
+    "state_marker_alignment": "The cat state metadata line and post-silhouette state marker are padded with the same prefix as the sprite, keeping the marker outside the silhouette and visually aligned with the centered cat block.",
+    "metadata_hud_readable": "The compact terminal HUD remains after the cat block and continues to render focus, signal, and next-action metadata readably.",
+    "diagnostics_stay_behind_details": "Freshness, desk diagnostics, active-window details, and launcher intents remain opt-in behind --details.",
+    "state_json_html_watch_preserved": "The focused mew-ghost suite continues to cover state JSON, HTML, bounded/watch rendering, live-read gates, and launcher safety behavior.",
+    "cat_sprite_similarity_preserved": "The cat form continues to render a reference-like 22x24 block-cell sprite with similarity checks preserved.",
+    "scope_limited": "No mew connection work was added and cat.png was not touched."
+  },
+  "test_contract": {
+    "centered_cat_output_test_added": true,
+    "narrow_width_no_padding_test_added": true,
+    "watch_centered_cat_output_test_added": true,
+    "preservation_suite_run": true,
+    "covered_cases": [
+      "forced wide terminal width pads cat state, sprite lines, and post-silhouette state marker consistently",
+      "forced narrow terminal width adds no padding and preserves the full sprite",
+      "human watch output with --form cat prints centered cat terminal surfaces for each bounded iteration",
+      "default human form remains compact and diagnostics remain hidden unless --details is passed",
+      "cat sprite similarity remains exactly reference-like in the focused tests",
+      "state JSON, HTML, live-read gates, and launcher safety remain covered by the focused mew-ghost test suite"
+    ]
+  },
+  "acceptance_notes": [
+    "All SP21g product, test, and report changes are scoped under experiments/mew-ghost.",
+    "README was not updated because the slice changes renderer polish and deterministic tests without changing documented CLI usage.",
+    "The local side-dogfood report records the SP21g practical retry evidence with rescue_edits=0."
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "none_observed",
+  "repair_required": false,
+  "commit": "",
+  "remaining_risk": "Final git diff/status inspection is still needed after the report write to summarize exact worktree scope and confirm cat.png remains untouched.",
+  "created_at": "2026-04-29T02:25:37Z",
+  "updated_at": "2026-04-29T02:25:37Z"
+}

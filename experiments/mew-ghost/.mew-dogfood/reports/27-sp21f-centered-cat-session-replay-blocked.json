@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": 27,
+  "session_id": 56,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP21f attempted to center the mew-wisp cat terminal form, but stopped before product edits because the work session proposed an invalid mixed read/write batch and then replayed the same invalid action after retry guidance.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 6,
+  "files_changed": [],
+  "tests_run": [],
+  "reviewer_rejections": 1,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "work_session_replays_invalid_mixed_read_write_batch",
+  "repair_required": true,
+  "proof_artifacts": [
+    "mew task #27",
+    "mew work session #56",
+    "https://github.com/mkXultra/mew/issues/20"
+  ],
+  "commit": "",
+  "notes": "The first attempt stopped before product edits with `write batch cannot mix read-only tools; use a separate read step before paired writes`. A retry with explicit steering to split read and write steps reused the same session and immediately replayed the same invalid pending action. No product diff was applied; `git status --short` showed only the pre-existing untracked `cat.png`. Issue #20 records the implementation-lane polish problem. The product work continued from fresh task #28/session #57.",
+  "created_at": "2026-04-29T02:18:33Z",
+  "updated_at": "2026-04-29T02:18:33Z"
+}

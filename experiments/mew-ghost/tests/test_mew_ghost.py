@@ -770,9 +770,14 @@ CAT_REFERENCE_MASK = (
 )
 
 
+def _cat_state_line_index(rendered: str) -> int:
+    lines = rendered.splitlines()
+    return next(index for index, line in enumerate(lines) if line.lstrip().startswith('cat state: '))
+
+
 def _cat_sprite_lines(rendered: str) -> list[str]:
     lines = rendered.splitlines()
-    cat_state_index = next(index for index, line in enumerate(lines) if line.startswith('cat state: '))
+    cat_state_index = _cat_state_line_index(rendered)
     start = cat_state_index + 1
     end = start + len(CAT_REFERENCE_MASK)
     return lines[start:end]
@@ -781,11 +786,13 @@ def _cat_sprite_lines(rendered: str) -> list[str]:
 def _cat_sprite_mask(rendered: str) -> tuple[str, ...]:
     mask_lines: list[str] = []
     for expected_row, rendered_row in zip(CAT_REFERENCE_MASK, _cat_sprite_lines(rendered), strict=True):
-        assert len(rendered_row) == len(expected_row) * 2
+        sprite_width = len(expected_row) * 2
+        sprite_row = rendered_row[-sprite_width:]
+        assert len(sprite_row) == sprite_width
         mask_lines.append(
             ''.join(
-                '#' if rendered_row[index:index + 2] == '██' else '.'
-                for index in range(0, len(rendered_row), 2)
+                '#' if sprite_row[index:index + 2] == '██' else '.'
+                for index in range(0, len(sprite_row), 2)
             )
         )
     return tuple(mask_lines)
@@ -796,6 +803,14 @@ def _cat_sprite_similarity(rendered: str) -> float:
     expected = ''.join(CAT_REFERENCE_MASK)
     matches = sum(1 for actual_cell, expected_cell in zip(actual, expected, strict=True) if actual_cell == expected_cell)
     return matches / len(expected)
+
+
+def _expected_cat_padding(terminal_width: int) -> int:
+    return max(0, (terminal_width - len(CAT_REFERENCE_MASK[0]) * 2) // 2)
+
+
+def _rendered_reference_row(mask_row: str) -> str:
+    return ''.join('██' if cell == '#' else '  ' for cell in mask_row)
 
 
 def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None:
@@ -814,7 +829,7 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert 'active window:' not in implicit
     assert 'launcher intents:' not in implicit
     assert cat.splitlines()[0] == 'terminal form: cat'
-    assert cat.splitlines()[1].startswith('cat state:')
+    assert cat.splitlines()[1].lstrip().startswith('cat state:')
     assert 'mew-wisp compact terminal HUD' in cat
     assert 'focus:' in cat
     assert 'signal:' in cat
@@ -842,6 +857,67 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in() -> None
     assert '  code  ' not in cat
     assert '   /\\_____/\\        ' not in cat
     assert ' |  \\_____/  |__/   ' not in cat
+
+
+def test_cat_terminal_form_centers_sprite_and_marker_with_forced_width(monkeypatch) -> None:
+    monkeypatch.setenv(ghost.CAT_TERMINAL_WIDTH_ENV, '100')
+    state, html = ghost.render_fixture(FIXTURE_PATH)
+
+    cat = ghost._render_payload(state, html, 'human', terminal_form='cat')
+
+    padding = ' ' * _expected_cat_padding(100)
+    lines = cat.splitlines()
+    cat_state_index = _cat_state_line_index(cat)
+    assert lines[cat_state_index] == padding + 'cat state: coding'
+    assert all(line.startswith(padding) for line in _cat_sprite_lines(cat))
+    assert all(len(line) == len(padding) + len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == padding + 'state marker: *'
+    assert _cat_sprite_similarity(cat) == 1.0
+
+
+def test_cat_terminal_form_narrow_width_adds_no_padding_and_preserves_sprite(monkeypatch) -> None:
+    monkeypatch.setenv(ghost.CAT_TERMINAL_WIDTH_ENV, '20')
+    state, html = ghost.render_fixture(FIXTURE_PATH)
+
+    cat = ghost._render_payload(state, html, 'human', terminal_form='cat')
+
+    lines = cat.splitlines()
+    cat_state_index = _cat_state_line_index(cat)
+    assert lines[cat_state_index] == 'cat state: coding'
+    assert all(len(line) == len(CAT_REFERENCE_MASK[0]) * 2 for line in _cat_sprite_lines(cat))
+    assert lines[cat_state_index + 1 + len(CAT_REFERENCE_MASK)] == 'state marker: *'
+    assert _cat_sprite_similarity(cat) == 1.0
+
+
+def test_human_watch_cat_output_centers_terminal_surface(monkeypatch, capsys) -> None:
+    monkeypatch.setenv(ghost.CAT_TERMINAL_WIDTH_ENV, '96')
+    clocks = iter(['cat-watch-0', 'cat-watch-1'])
+    sleeps: list[float] = []
+
+    assert ghost.main(
+        [
+            '--fixture',
+            str(FIXTURE_PATH),
+            '--format',
+            'human',
+            '--form',
+            'cat',
+            '--watch-count',
+            '2',
+            '--interval',
+            '0',
+        ],
+        clock=lambda: next(clocks),
+        sleeper=lambda interval: sleeps.append(interval),
+    ) == 0
+
+    output = capsys.readouterr().out
+    padding = ' ' * _expected_cat_padding(96)
+    assert sleeps == [0.0]
+    assert output.count('terminal form: cat') == 2
+    assert output.count(padding + 'cat state: coding') == 2
+    assert output.count(padding + _rendered_reference_row(CAT_REFERENCE_MASK[0])) == 2
+    assert output.count('mew-wisp compact terminal HUD') == 2
 
 
 def test_cat_terminal_form_uses_reference_like_pixel_silhouette_by_presence_state() -> None:

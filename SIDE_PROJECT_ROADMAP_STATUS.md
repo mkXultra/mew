@@ -31,7 +31,7 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP18 mew-ghost Live Desk Opt-In | `done` | Live desk opt-in landed practical: explicit `--live-desk`, no-shell repo-local desk command, timeout/fallback handling, fixture-only defaults, top-level real desk JSON normalization, README examples, local report, real live-desk proof, and focused tests are in place. |
 | SP19 mew-wisp CLI-First Reset and HTML Removal | `deferred/partial` | Broad HTML removal is deferred after issue #18 closed, but SP19a task #20 landed an additive `--format human` terminal renderer with focused tests while preserving existing `html` and `state` outputs. |
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
-| SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD, hid diagnostics behind `--details`, removed duplicate cat state markers, and preserved state/HTML/watch/live/launcher behavior. |
+| SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the terminal experience is useful. |
 
 ## Active Focus
@@ -95,6 +95,16 @@ Current target:
   exactly one state marker outside the 22x24 silhouette, the focus separator is
   ASCII, and focused tests cover duplicate-marker regression and ASCII output;
   ledger row `32` records the practical result with rescue edits `0`
+- SP21f task `#27` stopped before product edits when session `#56` replayed an
+  invalid mixed read/write batch after retry guidance; issue `#20` records the
+  implementation-lane problem, and ledger row `33` records the failed attempt
+  with rescue edits `0`
+- SP21g task `#28` landed practical from fresh session `#57`: normal
+  `--format human --form cat` centers the 22x24 block-cell sprite, cat-state
+  line, and post-silhouette state marker relative to terminal width, includes a
+  deterministic width override/fallback for tests, preserves narrow-width
+  output, and keeps compact HUD/details/state/HTML/watch/live/launcher behavior
+  intact; ledger row `34` records the practical result with rescue edits `0`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -153,6 +163,9 @@ Current target:
 - route repeated pre-edit SP20a model timeouts as closed issue `#19` evidence
   for implementation-lane hardening; the working operator pattern was closing
   the stale session and retrying fresh with `--model-timeout 300`
+- route task #27/session #56 invalid mixed read/write batch replay as open
+  issue `#20` evidence for implementation-lane hardening; the working operator
+  pattern was to stop reusing the stale session and retry from fresh task #28
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -205,6 +218,13 @@ Current target:
   `codex_product_code_rescue_edits=0`. Ledger rows `31` and `32` record the
   compact HUD and reviewer polish slices with no Codex product-code rescue
   edits.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  SP21f/SP21g on 2026-04-29: `rows_total=34`, seven `failed`,
+  twenty-four `practical`, three `clean`, `success_rate=0.794`,
+  `structural_repairs_required=7`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `33` records the blocked
+  session-replay failure behind issue `#20`; row `34` records the centered cat
+  terminal form retry.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,

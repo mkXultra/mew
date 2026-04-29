@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -84,6 +85,26 @@ CAT_TERMINAL_STATE_MARKERS = {
     'waiting': '...',
     'blocked': '!',
 }
+CAT_TERMINAL_PIXEL_WIDTH = len(CAT_TERMINAL_SPRITE_MASK[0]) * 2
+CAT_TERMINAL_WIDTH_ENV = 'MEW_GHOST_TERMINAL_WIDTH'
+DEFAULT_TERMINAL_WIDTH = 80
+
+
+def _terminal_width() -> int:
+    raw_width = os.environ.get(CAT_TERMINAL_WIDTH_ENV)
+    if raw_width is not None:
+        try:
+            return max(0, int(raw_width))
+        except ValueError:
+            return DEFAULT_TERMINAL_WIDTH
+    if sys.stdout.isatty():
+        return max(0, shutil.get_terminal_size(fallback=(DEFAULT_TERMINAL_WIDTH, 24)).columns)
+    return DEFAULT_TERMINAL_WIDTH
+
+
+def _center_terminal_line(line: str, terminal_width: int) -> str:
+    padding = max(0, (terminal_width - CAT_TERMINAL_PIXEL_WIDTH) // 2)
+    return ' ' * padding + line
 
 
 def _cat_terminal_sprite(presence_state: str) -> tuple[str, ...]:
@@ -880,12 +901,13 @@ def render_local_html(state: Mapping[str, Any]) -> str:
     ) + chr(10)
 
 
-def _terminal_cat_lines(presence_state: str) -> list[str]:
+def _terminal_cat_lines(presence_state: str, terminal_width: int | None = None) -> list[str]:
     form_lines = CAT_TERMINAL_FORM_BY_PRESENCE.get(
         presence_state,
         CAT_TERMINAL_FORM_BY_PRESENCE['attentive'],
     )
-    return ['terminal form: cat'] + list(form_lines)
+    resolved_width = _terminal_width() if terminal_width is None else max(0, terminal_width)
+    return ['terminal form: cat'] + [_center_terminal_line(line, resolved_width) for line in form_lines]
 
 
 def render_terminal_human(
