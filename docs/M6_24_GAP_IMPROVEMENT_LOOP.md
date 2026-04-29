@@ -61,6 +61,13 @@ M6.24 -> selected gap class -> architecture fit -> required next action -> same-
 A same-shape proof reaching the frozen Codex target closes only that selected
 repair. It does **not** automatically reopen broad measurement.
 
+For CPU-heavy long dependency/toolchain builds, proof escalation must be
+resource-normalized. A high-parallelism `-k N -n N` proof can create host-level
+CPU/memory contention that is not part of the per-trial task contract. When a
+speed proof passes but a parallel proof fails only by wall timeout across all
+trials, record the parallel run as harness evidence and rerun with sequential or
+low-concurrency scheduling before starting a mew-core repair.
+
 Before broad measurement resumes, re-evaluate the controller thresholds against
 the latest aggregate and batch evidence:
 

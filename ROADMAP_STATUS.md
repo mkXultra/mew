@@ -149,8 +149,11 @@ M6.24 resume condition:
   wrapped/full-project/variable-assignment `make` forms that do not name the
   required artifact as an explicit target. Codex-ultra re-review approved the
   repair. The v0.2 same-shape speed proof passed `compile-compcert` at `1/1`
-  with no runner errors in `25m 38s`. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_wall_clock_and_targeted_artifact_build_contract proof_5 -> compile-compcert`.
+  with no runner errors in `25m 38s`. A five-parallel proof then scored `0/5`
+  because all trials hit `mew work` `wall_timeout`; this is recorded as
+  resource-contention harness evidence, not a mew-core repair trigger. Current
+  selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_wall_clock_and_targeted_artifact_build_contract resource_normalized_proof_5 -> compile-compcert -k1 -n5`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -584,7 +587,10 @@ M6.24 resume condition:
   or variable-assignment `make` builds for specific-artifact long dependency
   tasks. The v0.2 speed rerun
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-1attempt-20260430-0615/2026-04-30__06-14-47/result.json`
-  passed `1/1` with no runner errors. Next action is a five-trial same-shape
+  passed `1/1` with no runner errors. The five-parallel proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-5attempts-20260430-0644/2026-04-30__06-44-04/result.json`
+  scored `0/5` only after all trials hit wall timeout under parallel Coq build
+  contention. Next action is a resource-normalized sequential five-trial
   `compile-compcert` proof.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
