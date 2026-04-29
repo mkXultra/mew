@@ -1,12 +1,13 @@
 # mew-wisp SP26 default live human terminal
 
-`mew-ghost` is the historical implementation path for the isolated `mew-wisp` side project. SP26 makes the normal user-facing human terminal/cat path prefer foreground repo-local live desk state by default, while `--fixture-terminal` keeps deterministic fixture display available for tests, docs, and smoke proof. Machine-readable `state`/`html` surfaces keep their explicit `--live-desk` opt-in, `--desk-json` remains fixture-only, direct launcher execution stays behind `--execute-launchers`, and desk `primary_action` is always surfaced as a dry-run intent.
+`mew_wisp.py` is the product-named Python entrypoint for the isolated `mew-wisp` side project; `ghost.py` remains the historical implementation module for compatibility. SP26 makes the normal user-facing human terminal/cat path prefer foreground repo-local live desk state by default, while `--fixture-terminal` keeps deterministic fixture display available for tests, docs, and smoke proof. Machine-readable `state`/`html` surfaces keep their explicit `--live-desk` opt-in, `--desk-json` remains fixture-only, direct launcher execution stays behind `--execute-launchers`, and desk `primary_action` is always surfaced as a dry-run intent.
 
 The shell does not import core mew code, read live `.mew` state for machine-readable `state`/`html` renders unless `--live-desk` is provided, run a hidden desk command, capture the screen, monitor hidden activity, use the network, or package a native app. Default human/cat live reads are foreground repo-local `./mew desk --json` reads and can be replaced with deterministic fixture display by passing `--fixture-terminal`.
 
 ## What this slice provides
 
-- `ghost.py`: a standalone Python entrypoint/module.
+- `mew_wisp.py`: the product-named Python entrypoint for operators; it delegates to `ghost.py` without duplicating CLI logic.
+- `ghost.py`: the historical standalone implementation module retained for compatibility.
 - `fixtures/sample_ghost_state.json`: deterministic input for ghost state, active-window classification, presence classification, and local HTML rendering.
 - `fixtures/sample_desk_view.json`: deterministic desk view-model input for `--desk-json` status/counts/details/primary_action rendering.
 - `tests/test_mew_ghost.py`: focused tests for fixture rendering, foreground watch output, repeated HTML rewrites, explicit live-probe fallbacks, launcher dry-run/execution gating, desk fixture mapping, isolation, and README usage.
@@ -74,91 +75,91 @@ Direct execution requires `--execute-launchers`. That flag switches only the two
 Render deterministic local HTML from the fixture. This is the safe dry-run path and never launches `mew`:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --output /tmp/mew-ghost.html
 ```
 
 Print three bounded foreground watch records as newline-delimited JSON:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --watch-count 3 --interval 0.5
 ```
 
 Start the named mew-wisp resident preset. `--wisp` expands omitted options to the live human cat foreground watch surface (`--format human --form cat --watch`) while explicit `--format`, `--form`, and `--watch-count` choices still win; the example below stays bounded for tests and demos:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --wisp --watch-count 2 --interval 0.5
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --wisp --watch-count 2 --interval 0.5
 ```
 
 Print two bounded foreground watch iterations as the compact mew-wisp terminal HUD. Normal human terminal output reads repo-local live desk state by default, stays in the foreground, and does not emit JSONL records or diagnostic details:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --watch-count 2 --interval 0.5
 ```
 
 Keep the same human terminal surface on deterministic fixture display for tests, docs, and smoke proof:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --fixture-terminal --watch-count 2 --interval 0.5
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --fixture-terminal --watch-count 2 --interval 0.5
 ```
 
 Render the bounded compact human watch as the cat terminal form, with a literal 22x24 block-cell coarse pixel cat converted from `cat.png` (derived by thresholding the repo-root reference mask; each black cell renders as `██`, each white cell as two spaces). The sprite keeps the square white face with thick stepped black outline, blocky pointed ears, vertical rectangular eyes, tiny square nose, slim standing body, two narrow legs/feet, and a large stepped curled right tail; presence state markers render on a separate line outside the 22x24 silhouette. Freshness, desk counts/details, active-window reason, and launcher intents stay hidden unless `--details` is requested:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --form cat --watch-count 2 --interval 0.5
 ```
 
 Show the expanded human diagnostic details when debugging the compact HUD:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --details
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --form cat --details
 ```
 
 Rewrite local HTML on every bounded watch iteration and emit one CLI record per rewrite:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5
 ```
 
 Run foreground watch until interrupted by the operator:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --watch --interval 2
 ```
 
 Load the static desk fixture and render desk status/counts/details/primary_action into CLI state:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state
 ```
 
 Render the static desk fixture as terminal-first human text for an operator console:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json
 ```
 
 Explicitly opt into live repo-local desk JSON for one machine-readable state render:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --live-desk
 ```
 
 Explicitly opt into live desk state while rewriting local HTML in bounded foreground watch:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 1
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 1
 ```
 
 Explicitly opt into the live macOS active-window probe while keeping the watch bounded:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --watch-count 2
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --live-active-window --watch-count 2
 ```
 
 Explicitly opt into direct launcher execution for local macOS dogfood. This runs only `mew chat` and `mew code`; omit the flag to stay in dry-run mode, and desk primary_action remains non-executable either way:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --execute-launchers
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --execute-launchers
 ```
 
 Run the focused verifier:

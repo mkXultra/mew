@@ -627,3 +627,21 @@ Done when:
   and existing state/html/launcher safety
 - no core imports, hidden monitoring, launcher execution, shell execution, or
   broad refactors are introduced
+
+### SP33: mew-wisp Product-Named Entrypoint
+
+Move the user-facing Python entrypoint name toward `mew-wisp` while keeping the
+historical `ghost.py` implementation module stable for compatibility.
+
+Done when:
+
+- a product-named local entrypoint such as `mew_wisp.py` delegates to the
+  existing `ghost.py` main without duplicating CLI logic
+- README usage prefers the product-named entrypoint while documenting that
+  `ghost.py` is the historical implementation module
+- focused tests prove the alias delegates to `ghost.main` and does not add
+  shell execution, core imports, or duplicated argument parsing
+- the product-named entrypoint can run the `--wisp` live and fixture terminal
+  smoke paths
+- no hidden monitoring, launcher execution, broad refactors, or core imports
+  are introduced

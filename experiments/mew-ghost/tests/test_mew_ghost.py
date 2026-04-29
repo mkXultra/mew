@@ -3,11 +3,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 README_PATH = ROOT / 'README.md'
 GHOST_PATH = ROOT / 'ghost.py'
+WISP_PATH = ROOT / 'mew_wisp.py'
 FIXTURE_PATH = ROOT / 'fixtures' / 'sample_ghost_state.json'
 DESK_FIXTURE_PATH = ROOT / 'fixtures' / 'sample_desk_view.json'
 
@@ -15,6 +17,34 @@ spec = importlib.util.spec_from_file_location('mew_ghost_sp18', GHOST_PATH)
 ghost = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(ghost)
+
+
+def test_product_named_mew_wisp_entrypoint_delegates_to_ghost_main_without_cli_duplication() -> None:
+    source = WISP_PATH.read_text(encoding='utf-8')
+
+    assert 'from ghost import main' in source
+    assert 'argparse' not in source
+    assert 'subprocess' not in source
+    assert 'import mew' not in source
+    assert 'shell' not in source
+
+    previous_path = list(sys.path)
+    previous_ghost = sys.modules.pop('ghost', None)
+    try:
+        sys.path.insert(0, str(ROOT))
+        wisp_spec = importlib.util.spec_from_file_location('mew_wisp_entrypoint', WISP_PATH)
+        mew_wisp = importlib.util.module_from_spec(wisp_spec)
+        assert wisp_spec.loader is not None
+        wisp_spec.loader.exec_module(mew_wisp)
+    finally:
+        sys.path[:] = previous_path
+        if previous_ghost is None:
+            sys.modules.pop('ghost', None)
+        else:
+            sys.modules['ghost'] = previous_ghost
+
+    assert mew_wisp.main.__name__ == 'main'
+    assert Path(mew_wisp.main.__code__.co_filename).resolve() == GHOST_PATH
 
 
 def test_fixture_builds_deterministic_state_and_html() -> None:
@@ -1722,28 +1752,29 @@ def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
     assert 'schema_version' not in output
 
 
-def test_readme_usage_prefers_uv_run_python_commands() -> None:
+def test_readme_usage_prefers_product_named_uv_run_python_commands() -> None:
     readme = README_PATH.read_text(encoding='utf-8')
-    usage_lines = [line.strip() for line in readme.splitlines() if 'experiments/mew-ghost/ghost.py' in line]
+    usage_lines = [line.strip() for line in readme.splitlines() if 'experiments/mew-ghost/mew_wisp.py' in line]
 
     assert usage_lines == [
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --output /tmp/mew-ghost.html',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch-count 3 --interval 0.5',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --wisp --watch-count 2 --interval 0.5',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --watch-count 2 --interval 0.5',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --fixture-terminal --watch-count 2 --interval 0.5',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --watch-count 2 --interval 0.5',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --details',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --watch --interval 2',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-desk',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 1',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --live-active-window --watch-count 2',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format state --execute-launchers',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --output /tmp/mew-ghost.html',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --watch-count 3 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --wisp --watch-count 2 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --watch-count 2 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --fixture-terminal --watch-count 2 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --form cat --watch-count 2 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --form cat --details',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format html --output /tmp/mew-ghost.html --watch-count 3 --interval 0.5',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --watch --interval 2',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json --format state',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --desk-json experiments/mew-ghost/fixtures/sample_desk_view.json',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --live-desk',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format html --output /tmp/mew-ghost-live-desk.html --live-desk --watch-count 2 --interval 1',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --live-active-window --watch-count 2',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --execute-launchers',
     ]
-    assert all(not line.startswith('python experiments/mew-ghost/ghost.py') for line in usage_lines)
+    assert all(not line.startswith('python experiments/mew-ghost/mew_wisp.py') for line in usage_lines)
+    assert 'uv run python experiments/mew-ghost/ghost.py' not in readme
     assert '--watch-count N' in readme
     assert '--wisp' in readme
     assert '--format human' in readme

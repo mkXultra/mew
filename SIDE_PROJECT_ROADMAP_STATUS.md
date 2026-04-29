@@ -43,10 +43,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP30 mew-wisp Live HUD Coherence | `done` | Task #51/session #82 landed practical after task #50 rolled back: default live HUD focus now uses live desk detail/status/action instead of fixture ghost focus/message, while fixture-terminal output stays deterministic. |
 | SP31 mew-wisp Compact Live Detail | `done` | Task #52/session #83 compacted long live desk detail for speech and HUD focus, preserving useful live work signal without flooding the resident terminal surface; fixture-terminal output remains deterministic. |
 | SP32 mew-wisp Launch Preset | `done` | Task #53/session #84 added `--wisp` as the named resident preset: omitted options default to live human cat foreground watch, while explicit format/form/watch-count and fixture-terminal behavior remain intact. |
+| SP33 mew-wisp Product-Named Entrypoint | `done` | Task #54/session #85 added `experiments/mew-ghost/mew_wisp.py` as the product-named Python entrypoint delegating to `ghost.main`; README usage now prefers the wisp name while `ghost.py` remains the compatibility implementation module. |
 
 ## Active Focus
 
-Active side-project focus: **SP32 mew-wisp Launch Preset is complete; the next valuable slice is likely path/name ergonomics or legacy HTML retirement, not more cat rendering polish**.
+Active side-project focus: **SP33 mew-wisp Product-Named Entrypoint is complete; the remaining forward-product cleanup is legacy HTML/ghost naming retirement, which is larger and should stay split into bounded slices**.
 
 Current target:
 
@@ -267,6 +268,13 @@ Current target:
   The focused verifier passed (`48 passed`), `git diff --check` passed, live
   and fixture `--wisp --watch-count 1` smoke outputs were inspected, and rescue
   edits remain `0`.
+- SP33 task `#54` landed clean from one-shot session `#85`: `mew_wisp.py` now
+  gives operators a product-named Python entrypoint that delegates directly to
+  `ghost.main` without duplicating CLI logic, while README examples prefer the
+  wisp entrypoint and `ghost.py` stays as the historical implementation module.
+  The focused verifier passed (`49 passed`), `git diff --check` passed, live
+  and fixture `mew_wisp.py --wisp --watch-count 1` smoke outputs were inspected,
+  and rescue edits remain `0`.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
