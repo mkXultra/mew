@@ -437,6 +437,14 @@ M6.24 resume condition:
   was manually interrupted too early during long verifier execution and is not
   counted. Treat the counted 4/5 result as task-solving / runtime repair
   evidence, not an accepted M6.14 structural blocker.
+- M6.24 Batch 6 `git-multibranch` produced 1/4 completed reward trials
+  against Codex target 5/5, plus 1 setup error, runtime 26m 47s, artifact
+  `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__10-59-27/result.json`.
+  Completed trials scored 1 pass / 3 fail; `git-multibranch__o4HqSBy` failed
+  before mew work during the agent setup install command with
+  `NonZeroAgentExitCodeError` exit 100. Treat this as task-solving plus
+  runner/setup debt, not an accepted M6.14 structural blocker unless the same
+  install/setup shape repeats.
 
 Next concrete action:
 
@@ -444,7 +452,7 @@ Next concrete action:
   `docs/M6_24_BATCH_6_MANIFEST_2026-04-29.md`, using the aligned
   `--agent-timeout-multiplier 2`, `timeout_seconds=1800`,
   `{max_wall_seconds_option}`, and `/tmp` scratch-permission run shape. Next
-  task: `git-multibranch`. If a new accepted structural blocker
+  task: `gpt2-codegolf`. If a new accepted structural blocker
   appears, append it to
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair through M6.14, rerun the
   same failed shape, then resume broad measurement.
