@@ -205,18 +205,59 @@ def is_resident_mew_loop_command(command):
     return False
 
 
-def _terminate_process_group(process):
+def _can_kill_process_group():
+    return os.name == "posix" and hasattr(os, "killpg")
+
+
+def _popen_process_group_kwargs(kill_process_group=False):
+    if kill_process_group and _can_kill_process_group():
+        return {"start_new_session": True}
+    return {}
+
+
+def _terminate_process(process, *, kill_process_group=False, grace_seconds=2):
+    if process.poll() is not None:
+        return "already_exited"
+    if kill_process_group and _can_kill_process_group():
+        return _terminate_process_group(process, grace_seconds=grace_seconds)
+    try:
+        process.terminate()
+    except OSError:
+        return "kill_failed"
+    try:
+        process.wait(timeout=grace_seconds)
+        return "terminated"
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        process.kill()
+    except OSError:
+        return "kill_failed"
+    try:
+        process.wait(timeout=grace_seconds)
+        return "killed_after_grace"
+    except subprocess.TimeoutExpired:
+        return "kill_failed"
+
+
+def _terminate_process_group(process, *, grace_seconds=2):
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError):
-        return
+        return "kill_failed"
     try:
-        process.wait(timeout=2)
+        process.wait(timeout=grace_seconds)
+        return "process_group_terminated"
     except subprocess.TimeoutExpired:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
-            pass
+            return "kill_failed"
+    try:
+        process.wait(timeout=grace_seconds)
+        return "process_group_killed_after_grace"
+    except subprocess.TimeoutExpired:
+        return "kill_failed"
 
 
 def _tail_output(text, max_chars=2000, max_lines=20):
@@ -279,12 +320,12 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
                 stdin=subprocess.DEVNULL,
                 shell=False,
                 env=env,
-                start_new_session=True,
+                **_popen_process_group_kwargs(kill_process_group=True),
             )
             try:
                 stdout, stderr = process.communicate(timeout=timeout)
             except subprocess.TimeoutExpired as exc:
-                _terminate_process_group(process)
+                kill_status = _terminate_process(process, kill_process_group=True)
                 stdout, stderr = process.communicate()
                 stdout = stdout if isinstance(stdout, str) else (exc.stdout if isinstance(exc.stdout, str) else "")
                 stderr = stderr if isinstance(stderr, str) else (exc.stderr if isinstance(exc.stderr, str) else "")
@@ -299,6 +340,7 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
                     "timed_out": True,
                     "stdout": clip_output(stdout),
                     "stderr": clip_output(stderr or f"command timed out after {timeout} second(s)"),
+                    "kill_status": kill_status,
                 }
             return {
                 "command": command,
@@ -365,7 +407,15 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
         }
 
 
-def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None, on_output=None, use_shell=False):
+def run_command_record_streaming(
+    command,
+    cwd=None,
+    timeout=300,
+    extra_env=None,
+    on_output=None,
+    use_shell=False,
+    kill_process_group=False,
+):
     if use_shell:
         argv = _default_shell_argv(command or "")
         env_overrides = {}
@@ -392,6 +442,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
             bufsize=1,
             shell=False,
             env=env,
+            **_popen_process_group_kwargs(kill_process_group=kill_process_group),
         )
     except OSError as exc:
         stderr = f"executable not found: {argv[0]}" if isinstance(exc, FileNotFoundError) and argv else str(exc)
@@ -432,24 +483,7 @@ def run_command_record_streaming(command, cwd=None, timeout=300, extra_env=None,
         exit_code = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        try:
-            process.terminate()
-            kill_status = "terminated"
-        except OSError:
-            kill_status = "kill_failed"
-        if kill_status != "kill_failed":
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                try:
-                    process.kill()
-                    kill_status = "killed_after_grace"
-                except OSError:
-                    kill_status = "kill_failed"
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    kill_status = "kill_failed"
+        kill_status = _terminate_process(process, kill_process_group=kill_process_group)
         exit_code = None
 
     for thread in threads:

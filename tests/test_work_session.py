@@ -4623,6 +4623,118 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("long_dependency_strategy_blocker: dependency_generation_order_issue", text)
         self.assertIn("long_dependency_next: resume the existing source tree/toolchain state", text)
 
+    def test_work_session_resume_flags_untargeted_full_make_for_specific_long_artifact(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "running",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j\"$(nproc)\"",
+                    },
+                    "running_output": {"stdout": "COQC lib/Maps.v\n"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        state = resume["long_dependency_build_state"]
+        codes = [item["code"] for item in state["strategy_blockers"]]
+
+        self.assertIn("untargeted_full_project_build_for_specific_artifact", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_dependency_strategy_blocker: untargeted_full_project_build_for_specific_artifact",
+            text,
+        )
+
+    def test_work_session_resume_flags_chained_untargeted_full_make_for_specific_long_artifact(self):
+        from mew.work_session import build_work_session_resume
+
+        commands = [
+            'cd /tmp/CompCert && make -j"$(nproc)"',
+            'make depend && make -j"$(nproc)"',
+            'timeout 120 make -j"$(nproc)"',
+            "make -j2 CCOMP=/tmp/CompCert/ccomp",
+            "make all",
+        ]
+
+        for command in commands:
+            with self.subTest(command=command):
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Compile CompCert",
+                    "goal": (
+                        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+                    ),
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 8,
+                            "tool": "run_command",
+                            "status": "running",
+                            "parameters": {
+                                "cwd": "/tmp/CompCert",
+                                "command": command,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+                self.assertIn("untargeted_full_project_build_for_specific_artifact", codes)
+
+    def test_work_session_resume_accepts_chained_artifact_target_make_for_specific_long_artifact(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "running",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make depend && timeout 120 make -j2 ccomp",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertNotIn("untargeted_full_project_build_for_specific_artifact", codes)
+
     def test_work_session_resume_omits_long_dependency_state_before_progress(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -5758,6 +5870,100 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertLess(timeout, 60.0)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_oneshot_caps_run_command_timeout_to_fit_wall_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "run a long bounded command",
+                    "action": {
+                        "type": "run_command",
+                        "command": "echo ok",
+                        "timeout": 1800,
+                    },
+                }
+                observed_parameters = {}
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    self.assertEqual(tool, "run_command")
+                    observed_parameters.update(parameters)
+                    return {
+                        "command": parameters["command"],
+                        "exit_code": 0,
+                        "stdout": "ok\n",
+                        "stderr": "",
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            "Run a bounded command.",
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-shell",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "5",
+                                            "--max-wall-seconds",
+                                            "20",
+                                            "--max-steps",
+                                            "1",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertIn("wall_timeout_ceiling", observed_parameters)
+                self.assertEqual(observed_parameters["wall_timeout_ceiling"]["requested_timeout_seconds"], 1800.0)
+                self.assertLess(observed_parameters["timeout"], 20.0)
+                self.assertGreaterEqual(observed_parameters["timeout"], 1.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_command_for_work_streaming_kills_process_group_on_timeout(self):
+        from mew.work_session import run_command_for_work
+
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "work-runner-grandchild-survived.txt"
+            child_code = (
+                "import pathlib, time; "
+                "time.sleep(0.7); "
+                f"pathlib.Path({str(marker)!r}).write_text('alive', encoding='utf-8')"
+            )
+            parent_code = (
+                "import subprocess, sys, time; "
+                f"subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
+                "time.sleep(10)"
+            )
+            command = shlex.join([sys.executable, "-c", parent_code])
+
+            result = run_command_for_work(command, cwd=tmp, timeout=0.2, on_output=lambda _name, _chunk: None)
+            time.sleep(1.0)
+
+            self.assertTrue(result["timed_out"])
+            self.assertFalse(marker.exists())
 
     def test_work_oneshot_writes_partial_report_before_model_turn(self):
         old_cwd = os.getcwd()
@@ -34633,6 +34839,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("version constraints", prompt)
         self.assertIn("invalidates a toolchain/package path", prompt)
         self.assertIn("dependency-generation/configure target", prompt)
+        self.assertIn("shortest explicit target that produces that artifact", prompt)
+        self.assertIn("over full project, proof, doc, test, or all-target builds", prompt)
         self.assertIn("set a bounded run_command timeout", prompt)
         self.assertIn("optional run_tests/run_command timeout seconds", prompt)
         self.assertIn("Do not restart package-manager or source-tree setup", prompt)

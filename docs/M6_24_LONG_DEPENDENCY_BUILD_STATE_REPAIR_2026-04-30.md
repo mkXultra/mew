@@ -143,3 +143,74 @@ Result:
 
 Next validation remains a one-trial same-shape speed rerun for
 `compile-compcert`.
+
+## v0.1 Speed Rerun Diagnostic
+
+The v0.1 speed rerun is recorded in:
+
+- `docs/M6_24_COMPILE_COMPCERT_V01_RERUN_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-dep-v01-compile-compcert-1attempt-20260430-0509/result.json`
+
+This run is diagnostic, not score evidence:
+
+- Harbor ended with `CancelledError` because the operator stopped the runaway
+  trial after the intended wall-clock window was exceeded;
+- mew partial report was still `phase=running`;
+- the active `run_command` had been running inside the final build for `1693s`;
+- `/tmp/CompCert/ccomp` was still missing/unproven.
+
+The repair improved state visibility, but exposed two generic loop gaps:
+
+- running `run_command` / `run_tests` calls were not capped to the remaining
+  `mew work --max-wall-seconds` budget;
+- the selected build command was `make -j"$(nproc)"`, a full project/proof
+  build, while the task required one named final artifact:
+  `/tmp/CompCert/ccomp`.
+
+## v0.2 Repair
+
+The next bounded generic repair keeps the same lane/profile:
+
+`long_dependency_wall_clock_and_targeted_artifact_build_contract`
+
+Changes:
+
+- `run_command` / `run_tests` tool parameters are capped to the remaining
+  `mew work` wall-clock budget before tool execution;
+- work-session command execution uses process-group termination for bounded
+  command timeouts, so long build children cannot survive after the parent
+  command is timed out;
+- if the remaining budget cannot fit a bounded tool call, mew records a
+  `wall_timeout` step instead of starting the tool;
+- capped tool calls record `wall_timeout_ceiling` in their parameters;
+- long-dependency resume state surfaces
+  `untargeted_full_project_build_for_specific_artifact` when a bare `make` or
+  option-only `make -j...` is used even though the task names a specific final
+  artifact. This includes chained/wrapped invocations such as
+  `cd ... && make -j...`, `timeout 120 make -j...`, and variable-assignment
+  forms such as `make -j2 CCOMP=/tmp/CompCert/ccomp`;
+- THINK guidance now tells source-build tasks to prefer the shortest explicit
+  target that produces the required final artifact over full project, proof,
+  doc, test, or all-target builds unless the task explicitly requires them.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_acceptance.py --no-testmon -q
+uv run pytest tests/test_toolbox.py tests/test_work_session.py -k 'process_group or work_runner or untargeted_full_make or long_dependency or wall_budget or work_think_prompt_guides_independent_reads_to_batch or preserves_bounded_run_command_timeout or system_service' --no-testmon -q
+uv run ruff check src/mew/toolbox.py src/mew/commands.py src/mew/work_session.py src/mew/work_loop.py tests/test_toolbox.py tests/test_work_session.py
+jq empty proof-artifacts/m6_24_gap_ledger.jsonl
+git diff --check
+```
+
+Result:
+
+- acceptance tests: `94 passed`
+- focused toolbox/work-session tests: `15 passed`, `5 subtests passed`
+- ruff: passed
+- gap ledger JSON: valid
+- diff whitespace: clean
+- codex-ultra review session `019ddb03-0e3b-7351-b1a3-c76549be27e3`: `APPROVED`
+
+Next validation remains a one-trial same-shape speed rerun for
+`compile-compcert`.

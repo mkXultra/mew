@@ -2196,8 +2196,15 @@ def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=
 
 def run_command_for_work(command, cwd=".", timeout=300, on_output=None, use_shell=False):
     if on_output:
-        return run_command_record_streaming(command, cwd=cwd, timeout=timeout, on_output=on_output, use_shell=use_shell)
-    return run_command_record(command, cwd=cwd, timeout=timeout, use_shell=use_shell)
+        return run_command_record_streaming(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            on_output=on_output,
+            use_shell=use_shell,
+            kill_process_group=True,
+        )
+    return run_command_record(command, cwd=cwd, timeout=timeout, use_shell=use_shell, kill_process_group=True)
 
 
 def first_unquoted_shell_operator_span(command):
@@ -4119,6 +4126,155 @@ _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS = (
 )
 
 
+def _make_invocation_prefix_is_wrapper(parts):
+    index = 0
+    while index < len(parts):
+        token = str(parts[index] or "")
+        name = Path(token).name.casefold()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+            index += 1
+            continue
+        if name in {"command", "time"}:
+            index += 1
+            continue
+        if name in {"timeout", "gtimeout"}:
+            index += 1
+            while index < len(parts):
+                option = str(parts[index] or "")
+                if option == "--":
+                    index += 1
+                    break
+                if option in {"-s", "--signal", "-k", "--kill-after"} and index + 1 < len(parts):
+                    index += 2
+                    continue
+                if option.startswith("-"):
+                    index += 1
+                    continue
+                index += 1
+                break
+            continue
+        if name == "env":
+            index += 1
+            while index < len(parts):
+                env_token = str(parts[index] or "")
+                if env_token == "--":
+                    index += 1
+                    break
+                if env_token in {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"} and index + 1 < len(
+                    parts
+                ):
+                    index += 2
+                    continue
+                if env_token.startswith("-") or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", env_token):
+                    index += 1
+                    continue
+                break
+            continue
+        return False
+    return True
+
+
+def _long_dependency_make_token_index(parts):
+    for index, token in enumerate(parts or []):
+        if Path(str(token or "")).name.casefold() == "make" and _make_invocation_prefix_is_wrapper(parts[:index]):
+            return index
+    return None
+
+
+def _make_explicit_targets(parts):
+    targets = []
+    index = 1
+    while index < len(parts):
+        token = str(parts[index] or "")
+        if token == "--":
+            targets.extend(part for part in parts[index + 1 :] if part)
+            break
+        if token.startswith("-"):
+            option_name = token.split("=", 1)[0]
+            if option_name in {"-C", "-f", "-I", "-j", "-l", "-O", "-W", "--directory", "--file", "--jobs"}:
+                if "=" not in token and index + 1 < len(parts) and not str(parts[index + 1] or "").startswith("-"):
+                    index += 2
+                    continue
+            index += 1
+            continue
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+            index += 1
+            continue
+        targets.append(token)
+        index += 1
+    return targets
+
+
+_LONG_DEPENDENCY_FULL_PROJECT_MAKE_TARGETS = {
+    "all",
+    "build",
+    "check",
+    "doc",
+    "docs",
+    "html",
+    "install",
+    "proof",
+    "proofs",
+    "test",
+    "tests",
+    "world",
+}
+
+
+def _long_dependency_make_invocations(command):
+    invocations = []
+    for segment in split_unquoted_shell_command_segments(command):
+        segment = str(segment or "").strip()
+        if not segment:
+            continue
+        try:
+            parts = shlex.split(segment, posix=True)
+        except ValueError:
+            parts = segment.split()
+        make_index = _long_dependency_make_token_index(parts)
+        if make_index is None:
+            continue
+        invocation_parts = parts[make_index:]
+        if invocation_parts:
+            invocations.append(shlex.join(invocation_parts))
+    return invocations
+
+
+def _long_dependency_untargeted_make_blocker(call, expected_artifacts):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = result.get("command") or parameters.get("command") or ""
+    if not command:
+        return {}
+    artifact_names = {
+        Path(str(artifact or "")).name.casefold()
+        for artifact in expected_artifacts or []
+        if Path(str(artifact or "")).name
+    }
+    for invocation in _long_dependency_make_invocations(command):
+        try:
+            parts = shlex.split(invocation, posix=True) if invocation else []
+        except ValueError:
+            parts = invocation.split()
+        if not parts or parts[0] != "make":
+            continue
+        explicit_targets = _make_explicit_targets(parts)
+        target_names = {Path(str(target or "")).name.casefold() for target in explicit_targets}
+        if explicit_targets and any(name and name in target_names for name in artifact_names):
+            continue
+        if explicit_targets and not all(target.casefold() in _LONG_DEPENDENCY_FULL_PROJECT_MAKE_TARGETS for target in explicit_targets):
+            continue
+        return {
+            "code": "untargeted_full_project_build_for_specific_artifact",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": clip_inline_text(invocation, 180),
+        }
+    return {}
+
+
 def _long_dependency_task_text(task, session=None):
     task = task if isinstance(task, dict) else {}
     session = session if isinstance(session, dict) else {}
@@ -4172,7 +4328,7 @@ def _long_dependency_incomplete_reason(call):
     return ""
 
 
-def _long_dependency_strategy_blockers(call):
+def _long_dependency_strategy_blockers(call, expected_artifacts=None):
     if not isinstance(call, dict):
         return []
     text = _runtime_artifact_call_text(call)
@@ -4198,6 +4354,9 @@ def _long_dependency_strategy_blockers(call):
                 "excerpt": excerpt,
             }
         )
+    untargeted_make = _long_dependency_untargeted_make_blocker(call, expected_artifacts or [])
+    if untargeted_make:
+        blockers.append(untargeted_make)
     return blockers
 
 
@@ -4242,7 +4401,7 @@ def build_long_dependency_build_state(task, calls, session=None):
         incomplete_reason = _long_dependency_incomplete_reason(call)
         if incomplete_reason:
             latest_incomplete_reason = incomplete_reason
-        for blocker in _long_dependency_strategy_blockers(call):
+        for blocker in _long_dependency_strategy_blockers(call, expected_artifacts):
             key = (blocker.get("code"), blocker.get("source_tool_call_id"), blocker.get("excerpt"))
             if key in seen_strategy_blockers:
                 continue
@@ -4259,7 +4418,7 @@ def build_long_dependency_build_state(task, calls, session=None):
                 }
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
-    if not progress and not proven:
+    if not progress and not proven and not strategy_blockers:
         return {}
     latest_command = ""
     if latest_build_call:

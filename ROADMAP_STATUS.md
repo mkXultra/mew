@@ -141,8 +141,15 @@ M6.24 resume condition:
   strategy, not `/tmp` permission. The v0 long dependency build-state progress
   contract plus review follow-up improved continuity but the follow-up speed
   rerun still missed `/tmp/CompCert/ccomp` by wall time after entering the real
-  `make -j2 ccomp` proof build. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_toolchain_compatibility_and_continuation_contract speed rerun -> compile-compcert speed_1`.
+  `make -j2 ccomp` proof build. The v0.1 rerun exposed that running tool calls
+  could outlive `mew work --max-wall-seconds` and that the model could choose a
+  full project/proof `make -j"$(nproc)"` despite a specific final artifact
+  requirement. The v0.2 repair now caps work tools to the remaining wall clock,
+  kills timed-out work commands by process group, and surfaces bare/chained/
+  wrapped/full-project/variable-assignment `make` forms that do not name the
+  required artifact as an explicit target. Codex-ultra re-review approved the
+  repair. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_wall_clock_and_targeted_artifact_build_contract speed rerun -> compile-compcert speed_1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -564,6 +571,18 @@ M6.24 resume condition:
   `long_dependency_build_state_progress_contract`; v0 is implemented in
   `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md` and is awaiting
   same-shape `compile-compcert` speed rerun.
+- M6.24 `compile-compcert` v0/v0.1 follow-up work is recorded in
+  `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md`.
+  The v0 follow-up rerun improved continuity but still missed
+  `/tmp/CompCert/ccomp` by wall time. The v0.1 rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-dep-v01-compile-compcert-1attempt-20260430-0509/result.json`
+  is diagnostic rather than score evidence because the operator cancelled a
+  runaway full `make -j"$(nproc)"` build after the wall-clock window. v0.2 now
+  caps `run_command`/`run_tests` to remaining `mew work` wall budget, kills
+  timed-out work commands by process group, and surfaces untargeted full-project
+  or variable-assignment `make` builds for specific-artifact long dependency
+  tasks. Next action remains a one-trial same-shape `compile-compcert` speed
+  rerun.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
   now treats an `edit_file` action carrying an `edits` list and no scalar
