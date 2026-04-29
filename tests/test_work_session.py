@@ -34077,6 +34077,41 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("write batch cannot mix non-write tools (wait)", action["reason"])
         self.assertIn("separate turn", action["reason"])
 
+    def test_work_model_batch_treats_edit_file_edits_as_hunks(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "batch",
+                    "tools": [
+                        {
+                            "type": "edit_file",
+                            "path": "experiments/mew-ghost/ghost.py",
+                            "old": "return old\n",
+                            "new": "return new\n",
+                        },
+                        {
+                            "type": "edit_file",
+                            "path": "experiments/mew-ghost/tests/test_mew_ghost.py",
+                            "edits": [
+                                {"old": "assert old\n", "new": "assert new\n"},
+                                {"old": "assert second_old\n", "new": "assert second_new\n"},
+                            ],
+                        },
+                    ],
+                    "reason": "multi-hunk test update with source edit",
+                },
+            },
+            allowed_write_roots=["experiments/mew-ghost"],
+            default_cwd=".",
+        )
+
+        self.assertEqual(action["type"], "batch")
+        self.assertEqual(action["tools"][0]["type"], "edit_file")
+        self.assertEqual(action["tools"][1]["type"], "edit_file_hunks")
+        self.assertEqual(len(action["tools"][1]["edits"]), 2)
+
     def test_work_model_batch_collapses_same_path_write_edits(self):
         from mew.work_loop import normalize_work_model_action
 

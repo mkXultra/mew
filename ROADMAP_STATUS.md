@@ -47,7 +47,7 @@ is tracked below.
 | 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
 | 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
 | 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`; deterministic and live gpt-5.5 internalization proofs apply and verify the later tiny solve through the normal work path. |
-| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-016 terminal-bench scratch permission repair is recorded; M6.24 can resume broad measurement. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-017 side-project write-batch normalizer repair is recorded; M6.24 can resume broad measurement. |
 | 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
 | 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`; residual first-edit samples feed M6.17/M6.14 rather than keeping M6.16 open. |
 | 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
@@ -385,6 +385,13 @@ M6.24 resume condition:
   reached 10 work steps touching `/tmp/CompCert` and ended as `wall_timeout`,
   not immediate permission wait. The remaining `compile-compcert` gap is
   task-solving / long-build strategy.
+- Closed M6.14 follow-on episode:
+  SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
+  now treats an `edit_file` action carrying an `edits` list and no scalar
+  `old`/`new` as `edit_file_hunks` before write-batch classification. The
+  focused regression covers the side-project failure shape where a source edit
+  plus multi-hunk test edit was incorrectly downgraded into a read/write mixed
+  batch. Targeted pytest and ruff passed.
 - M6.24 Batch 5 `count-dataset-tokens` scored 4/5 against Codex target 5/5,
   errors 0, runtime 5m 40s, artifact
   `proof-artifacts/terminal-bench/harbor-smoke/2026-04-29__07-42-06/result.json`.

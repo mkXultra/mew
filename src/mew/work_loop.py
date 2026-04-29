@@ -6461,6 +6461,13 @@ def normalize_work_model_action(
         normalized["summary"] = action_plan.get("summary")
     edit_old = normalized.get("old")
     edit_new = normalized.get("new")
+    if (
+        action_type == "edit_file"
+        and normalized.get("edits") is not None
+        and (edit_old is None or edit_new is None)
+    ):
+        action_type = "edit_file_hunks"
+        normalized["type"] = "edit_file_hunks"
     if action_type == "edit_file" and (
         not normalized.get("path")
         or not isinstance(edit_old, str)
