@@ -957,6 +957,54 @@ def render_terminal_human(
     else:
         raise ValueError('unsupported terminal form: %s' % terminal_form)
 
+    def _speech_bubble_lines() -> list[str]:
+        terminal_width = _terminal_width()
+        left_padding = max(0, (terminal_width - CAT_TERMINAL_PIXEL_WIDTH) // 2)
+        content_width = min(60, max(12, terminal_width - left_padding - 6))
+        speech = 'mew-wisp %s: %s - %s' % (
+            presence_state,
+            ghost['focus'],
+            ghost['message'],
+        )
+        text = ''.join(
+            character if 32 <= ord(character) < 127 else '?'
+            for character in speech.replace(chr(10), ' ')
+        ).strip()
+        if not text:
+            text = 'mew-wisp %s' % presence_state
+        wrapped: list[str] = []
+        current = ''
+        for word in text.split():
+            while len(word) > content_width:
+                if current:
+                    wrapped.append(current)
+                    current = ''
+                wrapped.append(word[:content_width])
+                word = word[content_width:]
+            if not word:
+                continue
+            candidate = word if not current else current + ' ' + word
+            if len(candidate) <= content_width:
+                current = candidate
+            else:
+                wrapped.append(current)
+                current = word
+        if current:
+            wrapped.append(current)
+        if not wrapped:
+            wrapped.append('')
+        bubble_width = max(len(segment) for segment in wrapped)
+        border = '+' + '-' * (bubble_width + 2) + '+'
+        bubble_lines = [border]
+        bubble_lines.extend('| ' + segment.ljust(bubble_width) + ' |' for segment in wrapped)
+        bubble_lines.append(border)
+        return [_center_terminal_line(line, terminal_width) for line in bubble_lines]
+
+    if lines:
+        lines.append('')
+    lines.extend(_speech_bubble_lines())
+    lines.append('')
+
     panel_content_width = 68
     panel_border_width = panel_content_width + 2
     panel_label_width = 9

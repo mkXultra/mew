@@ -390,7 +390,11 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
     human = human_output.read_text(encoding='utf-8')
 
     human_panel = _resident_panel_lines(human)
-    assert human.startswith(human_panel[0] + '\n')
+    human_lines = human.splitlines()
+    human_bubble = _speech_bubble_lines(human)
+    assert human_bubble
+    assert human_lines.index(human_bubble[0]) < _panel_start_index(human)
+    assert 'mew-wisp resident HUD' not in '\n'.join(human_bubble)
     assert 'mew-wisp resident HUD' in human_panel[0]
     assert _resident_panel_values(human, 'resident') == ['mew-wisp | mood: curious | state: coding']
     assert _resident_panel_values(human, 'marker') == ['*']
@@ -414,7 +418,11 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
     details = details_output.read_text(encoding='utf-8')
 
     details_panel = _resident_panel_lines(details)
-    assert details.startswith(details_panel[0] + '\n')
+    details_lines = details.splitlines()
+    details_bubble = _speech_bubble_lines(details)
+    assert details_bubble
+    assert details_lines.index(details_bubble[0]) < _panel_start_index(details)
+    assert 'mew-wisp resident HUD' not in '\n'.join(details_bubble)
     assert 'mew-wisp resident HUD' in details_panel[0]
     assert 'details:\n' in details
     assert 'freshness:' in details
@@ -430,7 +438,11 @@ def test_cli_renders_terminal_human_for_desk_fixture(capsys, tmp_path: Path) -> 
     stdout = capsys.readouterr().out
 
     stdout_panel = _resident_panel_lines(stdout)
-    assert stdout.startswith(stdout_panel[0] + '\n')
+    stdout_lines = stdout.splitlines()
+    stdout_bubble = _speech_bubble_lines(stdout)
+    assert stdout_bubble
+    assert stdout_lines.index(stdout_bubble[0]) < _panel_start_index(stdout)
+    assert 'mew-wisp resident HUD' not in '\n'.join(stdout_bubble)
     assert 'mew-wisp resident HUD' in stdout_panel[0]
     assert 'resident: mew-wisp' in stdout
     assert 'hud: mew-ghost' not in stdout
@@ -926,6 +938,33 @@ def _resident_panel_value_column(rendered: str, label: str) -> int:
     return row.index(value)
 
 
+def _panel_start_index(rendered: str) -> int:
+    lines = rendered.splitlines()
+    panel = _resident_panel_lines(rendered)
+    return lines.index(panel[0])
+
+
+def _trim_blank_separator_lines(lines: list[str]) -> list[str]:
+    start = 0
+    end = len(lines)
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return lines[start:end]
+
+
+def _speech_bubble_lines(rendered: str) -> list[str]:
+    lines = rendered.splitlines()
+    return _trim_blank_separator_lines(lines[:_panel_start_index(rendered)])
+
+
+def _cat_speech_bubble_lines(rendered: str) -> list[str]:
+    lines = rendered.splitlines()
+    bubble_start = 3 + len(CAT_REFERENCE_MASK)
+    return _trim_blank_separator_lines(lines[bubble_start:_panel_start_index(rendered)])
+
+
 def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypatch) -> None:
     monkeypatch.delenv(ghost.CAT_TERMINAL_WIDTH_ENV, raising=False)
     state, html = ghost.render_fixture(FIXTURE_PATH)
@@ -942,7 +981,23 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     _assert_resident_panel_padding(implicit, ghost.DEFAULT_TERMINAL_WIDTH)
     _assert_resident_panel_padding(cat, ghost.DEFAULT_TERMINAL_WIDTH)
     _assert_resident_panel_padding(details, ghost.DEFAULT_TERMINAL_WIDTH)
-    assert implicit.startswith(implicit_panel[0])
+    implicit_bubble = _speech_bubble_lines(implicit)
+    cat_bubble = _cat_speech_bubble_lines(cat)
+    details_bubble = _cat_speech_bubble_lines(details)
+    bubble_text = '\n'.join(implicit_bubble)
+    normalized_bubble_text = ' '.join(bubble_text.split())
+    message_words = state['ghost']['message'].split()
+    assert implicit_bubble
+    assert cat_bubble == implicit_bubble
+    assert details_bubble == implicit_bubble
+    assert _panel_start_index(implicit) >= len(implicit_bubble)
+    assert _panel_start_index(cat) >= 3 + len(CAT_REFERENCE_MASK) + len(cat_bubble)
+    assert 'mew-wisp resident HUD' not in bubble_text
+    assert 'coding' in bubble_text
+    assert state['ghost']['focus'] in normalized_bubble_text
+    assert all(word in normalized_bubble_text for word in message_words)
+    assert all(ord(character) < 128 for line in implicit_bubble for character in line)
+    assert all(len(line.rstrip()) <= ghost.DEFAULT_TERMINAL_WIDTH for line in implicit_bubble if line.strip())
     assert 'mew-wisp resident HUD' in implicit_panel[0]
     assert 'mew-wisp resident HUD' in cat_panel[0]
     assert 'mew-wisp resident HUD' in details_panel[0]
@@ -963,7 +1018,12 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert cat_lines[1] == cat_padding + _expected_cat_caption('resident state: coding')
     assert 'terminal form: cat' not in cat
     assert 'cat state:' not in cat
-    assert cat_lines[3 + len(CAT_REFERENCE_MASK)] == cat_panel[0]
+    cat_bubble_start = next(
+        index for index in range(3 + len(CAT_REFERENCE_MASK), _panel_start_index(cat))
+        if cat_lines[index].strip()
+    )
+    assert cat_lines[cat_bubble_start] == cat_bubble[0]
+    assert cat_lines[_panel_start_index(cat)] == cat_panel[0]
     assert 'resident: mew-wisp' in cat
     assert 'focus:' in cat
     assert 'signal:' in cat
@@ -995,7 +1055,14 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     long_state['ghost']['focus'] = 'SP22c'
     long_state['ghost']['message'] = 'x' * 140
     long_focus = ghost._render_payload(long_state, html, 'human')
+    long_bubble = _speech_bubble_lines(long_focus)
+    long_bubble_text = '\n'.join(long_bubble)
     long_panel = _resident_panel_lines(long_focus)
+    assert 'x' * 140 not in long_bubble_text
+    assert long_bubble_text.count('x') == 140
+    assert sum(1 for line in long_bubble if 'x' in line) > 1
+    assert all(ord(character) < 128 for line in long_bubble for character in line)
+    assert all(len(line.rstrip()) <= ghost.DEFAULT_TERMINAL_WIDTH for line in long_bubble if line.strip())
     assert len({len(line) for line in long_panel}) == 1
     assert len(_resident_panel_values(long_focus, 'focus')) > 1
     assert all(len(line) == len(long_panel[0]) for line in long_panel)
@@ -1015,8 +1082,13 @@ def test_terminal_human_resident_panel_centers_with_forced_width(monkeypatch) ->
     _assert_resident_panel_padding(cat, 100)
     assert _resident_panel_padding(default) > 0
     assert _resident_panel_padding(cat) > 0
-    assert default.splitlines()[0] == _resident_panel_lines(default)[0]
-    assert cat.splitlines()[3 + len(CAT_REFERENCE_MASK)] == _resident_panel_lines(cat)[0]
+    default_bubble = _speech_bubble_lines(default)
+    default_bubble_content = [line for line in default_bubble if line.strip()]
+    assert default_bubble_content
+    assert all(line.startswith(' ') for line in default_bubble_content)
+    assert _cat_speech_bubble_lines(cat) == default_bubble
+    assert _panel_start_index(default) >= len(default_bubble)
+    assert _panel_start_index(cat) >= 3 + len(CAT_REFERENCE_MASK) + len(_cat_speech_bubble_lines(cat))
 
 
 def test_terminal_human_resident_panel_narrow_width_adds_no_padding(monkeypatch) -> None:
@@ -1025,6 +1097,9 @@ def test_terminal_human_resident_panel_narrow_width_adds_no_padding(monkeypatch)
 
     default = ghost._render_payload(state, html, 'human')
     cat = ghost._render_payload(state, html, 'human', terminal_form='cat')
+
+    assert _speech_bubble_lines(default)
+    assert _cat_speech_bubble_lines(cat) == _speech_bubble_lines(default)
 
     for rendered in (default, cat):
         _assert_resident_panel_padding(rendered, 20)

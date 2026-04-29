@@ -33,12 +33,12 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP20 mew-wisp Watch TUI Experience | `done` | SP20a task #21 landed practical after fresh session #48 with `--model-timeout 300`: human watch/no-output prints terminal surfaces instead of JSONL, while state JSONL and HTML output behavior remain intact. |
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Visual Polish | `done` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e/SP22f replaced raw diagnostics and stale ghost copy with resident-facing mew-wisp copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
-| SP23 mew-wisp Speech Bubble | `in_progress` | SP23a has three failed mew-first attempts: sessions #64/#65 reached green verifier states with no durable diff, and session #66 exposed a paired source/test hunk tool-shape blocker; issues #25 and #26 record the implementation-lane problems before another retry. |
+| SP23 mew-wisp Speech Bubble | `done` | SP23a landed practical in task #38/session #67: human terminal output now renders an ASCII mew-wisp speech bubble between the cat/default form and resident HUD, with focused tests and zero product-code rescue edits. Issues #25/#26/#27 remain implementation-lane hardening evidence. |
 | SP24 mew-wisp Mew Adapter Reconnect | `planned` | Reconnect the CLI-first wisp to explicit live mew desk output through one adapter boundary after the speech-bubble terminal experience is useful. |
 
 ## Active Focus
 
-Active side-project focus: **SP23 mew-wisp Speech Bubble is next**.
+Active side-project focus: **SP24 mew-wisp Mew Adapter Reconnect is next**.
 
 Current target:
 
@@ -161,6 +161,12 @@ Current target:
   while standalone `edit_file_hunks` can edit only one file; ledger row `43`
   records the failed attempt with rescue edits `0`, and issue `#26` records the
   reusable implementation-lane blocker
+- SP23a task `#38` landed practical from session `#67`: mew-authored staged
+  dry-run source/test patches added the CLI-only speech bubble, normalized the
+  tests around bubble-before-HUD ordering, preserved state/HTML/watch/live/launcher
+  behavior, and passed the focused verifier (`40 passed`). Ledger row `44`
+  records the practical result with rescue edits `0`; issue `#27` records the
+  verifier-rollback polish finding exposed during the attempt
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -244,6 +250,10 @@ Current target:
   issue `#26` evidence for implementation-lane hardening; the next retry should
   use staged standalone source/test approvals with deferred verification rather
   than requiring a one-shot multi-file hunk batch
+- route task #38/session #67 near-complete verifier rollback as open issue
+  `#27` evidence for implementation-lane hardening; the working operator
+  pattern was dry-run/pending patches followed by deferred verification so
+  useful hunks were not discarded after one narrow assertion failure
 - preserve the current operating model for any future side-project cohort:
   current-repo `./mew`, side-project target directory, Codex as
   operator/reviewer/verifier, and rescue edits explicitly tracked
@@ -360,6 +370,14 @@ Current target:
   `codex_product_code_rescue_edits=0`. Ledger row `43` records the paired
   source/test hunk tool-shape blocker with failure class
   `speech_bubble_paired_multifile_hunks_blocked_by_batch_tool_schema`.
+- `./mew side-dogfood report --json` returned a valid telemetry report after
+  the fourth SP23a attempt on 2026-04-29: `rows_total=44`, eleven `failed`,
+  thirty `practical`, three `clean`, `success_rate=0.750`,
+  `structural_repairs_required=11`, `rescue_edits_total=0`, and
+  `codex_product_code_rescue_edits=0`. Ledger row `44` records the practical
+  speech-bubble slice with failure class
+  `speech_bubble_deferred_dry_run_workaround_after_verifier_rollback`; issue
+  `#27` records the reusable verifier-rollback polish finding.
 - `./mew side-dogfood report --json` returned a valid telemetry report after
   the SP19 blocked attempt on 2026-04-28: `rows_total=22`, four `failed`,
   fifteen `practical`, three `clean`, `success_rate=0.818`,
@@ -844,10 +862,10 @@ Current target:
   are in place.
 - SP22 is closed: the fixture-first terminal surface now has a centered cat
   form, resident-facing copy, and fixed-width HUD panel.
-- SP23 is in progress: the speech-bubble layer is the next fixture-first
-  terminal experience before reconnecting to live mew state.
-- SP24 is not started: reconnecting the CLI-first wisp to live mew state should
-  wait until the speech-bubble terminal experience is useful.
+- SP23 is closed: the fixture-first terminal surface now has an ASCII speech
+  bubble before the resident HUD, focused tests, and terminal proof output.
+- SP24 is not started: reconnecting the CLI-first wisp to live mew state is now
+  the next side-project milestone candidate.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -867,15 +885,14 @@ Current target:
 
 Choose the next side-project move:
 
-1. retry SP23a speech bubble from a fresh mew-first task using a staged
-   standalone source edit with deferred verification, followed by a standalone
-   test edit and focused verifier
-2. keep state/JSON output as the machine-readable proof path while adding only
-   text-based human terminal speech
+1. start SP24 with a narrow adapter-boundary slice that reads explicit live mew
+   desk output only through an opt-in path and keeps fixture defaults stable
+2. keep state/JSON output as the machine-readable proof path while preserving
+   the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for
    SP12-SP18 or the pre-rename implementation path
-4. keep SP24 mew adapter reconnect deferred until SP23 makes the terminal view
-   feel conversational enough to keep open
+4. keep broad live-state coupling deferred; SP24 should reconnect through one
+   small adapter boundary rather than turning mew-wisp into a hidden monitor
 5. before any new mew coding operation, run the repo-root sync rule from
    `/Users/mk/dev/personal-pj/mew_side_pj`
 
