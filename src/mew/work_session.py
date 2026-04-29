@@ -3835,6 +3835,7 @@ def _runtime_artifact_call_text(call):
         return ""
     result = call.get("result") if isinstance(call.get("result"), dict) else {}
     parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    running_output = call.get("running_output") if isinstance(call.get("running_output"), dict) else {}
     parts = [
         call.get("summary") or "",
         call.get("error") or "",
@@ -3842,6 +3843,8 @@ def _runtime_artifact_call_text(call):
         result.get("command") or "",
         result.get("stdout") or "",
         result.get("stderr") or "",
+        running_output.get("stdout") or "",
+        running_output.get("stderr") or "",
         result.get("summary") or "",
     ]
     return "\n".join(str(part) for part in parts if part)
@@ -4078,6 +4081,42 @@ _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS = (
     "smoke_ok",
     "test -x",
 )
+_LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS = (
+    (
+        "toolchain_version_constraint_mismatch",
+        (
+            "requires a version",
+            "too old",
+            "too new",
+            "version mismatch",
+            "required version",
+        ),
+    ),
+    (
+        "package_source_or_name_mismatch",
+        (
+            "no package named",
+            "unable to locate package",
+            "package not found",
+        ),
+    ),
+    (
+        "preinstalled_tool_conflict",
+        (
+            "preinstalled",
+            "installation aborted",
+            "bypass this safety check",
+        ),
+    ),
+    (
+        "dependency_generation_order_issue",
+        (
+            "can't find file ./",
+            "cannot find file ./",
+            "no rule to make target",
+        ),
+    ),
+)
 
 
 def _long_dependency_task_text(task, session=None):
@@ -4125,10 +4164,41 @@ def _long_dependency_incomplete_reason(call):
     for marker in _LONG_DEPENDENCY_INCOMPLETE_MARKERS:
         if marker in text:
             return marker
+    if str(call.get("status") or "").casefold() in {"running", "interrupted"}:
+        return str(call.get("status") or "").casefold()
     result = call.get("result") if isinstance(call.get("result"), dict) else {}
     if result.get("timed_out"):
         return "tool_timeout"
     return ""
+
+
+def _long_dependency_strategy_blockers(call):
+    if not isinstance(call, dict):
+        return []
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    blockers = []
+    for code, markers in _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS:
+        if not any(marker in lowered for marker in markers):
+            continue
+        excerpt = ""
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line_lower = line.casefold()
+            if any(marker in line_lower for marker in markers):
+                excerpt = clip_inline_text(line, 180)
+                break
+        blockers.append(
+            {
+                "code": code,
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "excerpt": excerpt,
+            }
+        )
+    return blockers
 
 
 def build_long_dependency_build_state(task, calls, session=None):
@@ -4142,24 +4212,44 @@ def build_long_dependency_build_state(task, calls, session=None):
     seen_stages = set()
     latest_build_call = {}
     latest_incomplete_reason = ""
+    strategy_blockers = []
+    seen_strategy_blockers = set()
     artifact_status = {
         artifact: {"path": artifact, "status": "missing_or_unproven", "source_tool_call_id": None}
         for artifact in expected_artifacts
     }
     for call in calls or []:
-        if not isinstance(call, dict) or str(call.get("status") or "").casefold() != "completed":
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
             continue
         stages = _long_dependency_call_stages(call)
         for stage in stages:
             if stage in seen_stages:
                 continue
             seen_stages.add(stage)
-            progress.append({"stage": stage, "source_tool_call_id": call.get("id"), "tool": call.get("tool") or ""})
+            progress.append(
+                {
+                    "stage": stage,
+                    "source_tool_call_id": call.get("id"),
+                    "tool": call.get("tool") or "",
+                    "status": call_status,
+                }
+            )
         if "build_attempted" in stages:
             latest_build_call = call
         incomplete_reason = _long_dependency_incomplete_reason(call)
         if incomplete_reason:
             latest_incomplete_reason = incomplete_reason
+        for blocker in _long_dependency_strategy_blockers(call):
+            key = (blocker.get("code"), blocker.get("source_tool_call_id"), blocker.get("excerpt"))
+            if key in seen_strategy_blockers:
+                continue
+            seen_strategy_blockers.add(key)
+            strategy_blockers.append(blocker)
+        if call_status != "completed":
+            continue
         for artifact in expected_artifacts:
             if _long_dependency_artifact_proven_by_call(call, artifact):
                 artifact_status[artifact] = {
@@ -4182,12 +4272,15 @@ def build_long_dependency_build_state(task, calls, session=None):
         "expected_artifacts": list(artifact_status.values())[:6],
         "missing_artifacts": missing[:6],
         "latest_build_tool_call_id": latest_build_call.get("id") if latest_build_call else None,
+        "latest_build_status": str(latest_build_call.get("status") or "") if latest_build_call else "",
         "latest_build_command": clip_inline_text(latest_command, 500),
         "incomplete_reason": latest_incomplete_reason,
+        "strategy_blockers": strategy_blockers[-6:],
         "suggested_next": (
             "resume the existing source tree/toolchain state; do not restart package or source setup after a "
-            "compatible path is found. Allocate remaining wall budget to the shortest continuation command that "
-            "produces the missing final artifact, then prove it exists and is executable/invokable."
+            "compatible path is found. Do not retry invalidated toolchain/package paths. Allocate remaining wall "
+            "budget to the shortest idempotent continuation command that produces the missing final artifact, "
+            "then prove it exists and is executable/invokable."
         ),
     }
 
@@ -8883,6 +8976,19 @@ def format_work_session_resume(resume):
             )
         if long_dependency_build_state.get("incomplete_reason"):
             lines.append(f"long_dependency_incomplete_reason: {long_dependency_build_state.get('incomplete_reason')}")
+        if long_dependency_build_state.get("latest_build_status"):
+            lines.append(f"long_dependency_latest_build_status: {long_dependency_build_state.get('latest_build_status')}")
+        for item in (long_dependency_build_state.get("strategy_blockers") or [])[:4]:
+            code = item.get("code") or "unknown"
+            excerpt = item.get("excerpt") or ""
+            source_tool = item.get("source_tool_call_id")
+            suffix = f" tool=#{source_tool}" if source_tool is not None else ""
+            lines.append(
+                "long_dependency_strategy_blocker: "
+                + code
+                + suffix
+                + (f" excerpt={excerpt}" if excerpt else "")
+            )
         if long_dependency_build_state.get("latest_build_command"):
             lines.append(f"long_dependency_latest_build: {long_dependency_build_state.get('latest_build_command')}")
         if long_dependency_build_state.get("suggested_next"):

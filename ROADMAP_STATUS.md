@@ -139,10 +139,10 @@ M6.24 resume condition:
   threshold, so broad measurement stays paused. `compile-compcert` speed_1 on
   current head confirmed the post-SR-016 gap is long dependency/toolchain build
   strategy, not `/tmp` permission. The v0 long dependency build-state progress
-  contract is implemented; a pre-rerun `codex-ultra` review found and fixed two
-  correctness risks around command-only artifact smoke proofs and premature
-  resume hints before progress. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_build_state_progress_contract speed rerun -> compile-compcert speed_1`.
+  contract plus review follow-up improved continuity but the follow-up speed
+  rerun still missed `/tmp/CompCert/ccomp` by wall time after entering the real
+  `make -j2 ccomp` proof build. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_toolchain_compatibility_and_continuation_contract speed rerun -> compile-compcert speed_1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the

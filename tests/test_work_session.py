@@ -4582,9 +4582,22 @@ class WorkSessionTests(unittest.TestCase):
                             "SOURCE_ARCHIVE_ROOT=CompCert-3.13.1\n"
                             "opam switch compcert-ocaml-system\n"
                             "make depend\n.depend generated\n"
+                            "Error: Can't find file ./Axioms.v\n"
                             "MAKE_FAILED_OR_TIMEOUT exit=124\n"
                         ),
                     },
+                },
+                {
+                    "id": 10,
+                    "tool": "run_command",
+                    "status": "running",
+                    "parameters": {"command": "make depend && make -j2 ccomp", "cwd": "/tmp/CompCert"},
+                    "result": {
+                        "command": "make depend && make -j2 ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                    },
+                    "running_output": {"stdout": "COQC backend/Asmgenproof0.v\nCOQC x86/Asmgenproof1.v\n"},
                 },
             ],
             "model_turns": [],
@@ -4595,15 +4608,19 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(state["kind"], "long_dependency_build_state")
         self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
-        self.assertEqual(state["latest_build_tool_call_id"], 9)
-        self.assertEqual(state["incomplete_reason"], "make_failed_or_timeout")
+        self.assertEqual(state["latest_build_tool_call_id"], 10)
+        self.assertEqual(state["latest_build_status"], "running")
+        self.assertEqual(state["incomplete_reason"], "running")
         self.assertIn("dependencies_generated", [item["stage"] for item in state["progress"]])
         self.assertIn("build_attempted", [item["stage"] for item in state["progress"]])
+        self.assertEqual(state["strategy_blockers"][0]["code"], "dependency_generation_order_issue")
 
         text = format_work_session_resume(resume)
         self.assertIn("long_dependency_build_state: long_dependency_build_state", text)
         self.assertIn("long_dependency_missing_artifact: /tmp/CompCert/ccomp", text)
-        self.assertIn("long_dependency_incomplete_reason: make_failed_or_timeout", text)
+        self.assertIn("long_dependency_incomplete_reason: running", text)
+        self.assertIn("long_dependency_latest_build_status: running", text)
+        self.assertIn("long_dependency_strategy_blocker: dependency_generation_order_issue", text)
         self.assertIn("long_dependency_next: resume the existing source tree/toolchain state", text)
 
     def test_work_session_resume_omits_long_dependency_state_before_progress(self):
@@ -34612,6 +34629,12 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("work_session.resume.long_dependency_build_state", prompt)
         self.assertIn("Prerequisite installation, configure, dependency generation", prompt)
         self.assertIn("required final executable/artifact is missing", prompt)
+        self.assertIn("Before installing a distro toolchain", prompt)
+        self.assertIn("version constraints", prompt)
+        self.assertIn("invalidates a toolchain/package path", prompt)
+        self.assertIn("dependency-generation/configure target", prompt)
+        self.assertIn("set a bounded run_command timeout", prompt)
+        self.assertIn("optional run_tests/run_command timeout seconds", prompt)
         self.assertIn("Do not restart package-manager or source-tree setup", prompt)
         self.assertIn("For model/checkpoint/tokenizer inference, sampling, or continuation tasks", prompt)
         self.assertIn("printed N tokens", prompt)
@@ -34725,6 +34748,27 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertEqual(explicit["max_matches"], 50)
         self.assertEqual(explicit["context_lines"], 5)
+
+    def test_work_model_preserves_bounded_run_command_timeout(self):
+        from mew.work_loop import normalize_work_model_action, work_tool_parameters_from_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "run_command",
+                    "command": "make -j2 ccomp",
+                    "timeout": "900",
+                }
+            }
+        )
+
+        self.assertEqual(action["timeout"], "900")
+        params = work_tool_parameters_from_action(action, allow_shell=True, default_cwd="/tmp/CompCert")
+        self.assertEqual(params["timeout"], 900.0)
+        self.assertEqual(params["cwd"], "/tmp/CompCert")
+
+        invalid = work_tool_parameters_from_action({"type": "run_command", "command": "make", "timeout": "soon"})
+        self.assertNotIn("timeout", invalid)
 
     def test_work_model_splits_pipe_search_text_queries(self):
         from mew.work_loop import normalize_work_model_action

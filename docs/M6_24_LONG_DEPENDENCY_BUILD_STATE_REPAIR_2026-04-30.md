@@ -80,3 +80,66 @@ Run a one-trial same-shape speed rerun for `compile-compcert`.
 
 Do not resume broad measurement and do not escalate to five trials before this
 speed rerun is recorded.
+
+## Follow-up Speed Rerun
+
+The follow-up speed rerun is recorded in:
+
+- `docs/M6_24_COMPILE_COMPCERT_FOLLOWUP_RERUN_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-build-state-followup-compile-compcert-1attempt-20260430-0418/result.json`
+
+Result:
+
+- reward: `0/1`
+- runner errors: `0`
+- runtime: `31m 43s`
+- behavior: partial report before oneshot completion, `29/30` steps used,
+  one build command still running at handoff
+
+The repair moved behavior in the right direction: mew preserved build state,
+used the compatible opam Coq `8.16.1` path, ran `make depend`, and entered the
+real `make -j2 ccomp` proof build. It did not close the gap because it still
+spent too much wall budget on invalidated package/toolchain paths, discovered
+dependency-generation order late, and did not surface the actively running
+final build command as the latest long-build state.
+
+## v0.1 Repair
+
+The next bounded generic repair is:
+
+`long_dependency_toolchain_compatibility_and_continuation_contract`
+
+It extends v0 without adding a new lane:
+
+- reentry state now surfaces strategy blockers such as toolchain version
+  mismatch, package source/name mismatch, preinstalled-tool conflict, and
+  dependency-generation order issues;
+- running or interrupted build commands are included as active long-build state
+  so partial reports can preserve the latest continuation command;
+- THINK guidance now tells long source-build tasks to probe explicit version
+  constraints before distro package installs, avoid retrying invalidated
+  package/toolchain paths, run dependency-generation/configure targets before
+  target-specific builds when errors indicate missing generated dependencies,
+  and set a bounded per-command timeout for genuinely long build commands.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_acceptance.py --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'long_dependency or work_think_prompt_guides_independent_reads_to_batch or preserves_bounded_run_command_timeout or system_service' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+jq empty proof-artifacts/m6_24_gap_ledger.jsonl
+git diff --check
+```
+
+Result:
+
+- acceptance tests: `94 passed`
+- focused work-session tests: `5 passed`
+- ruff: passed
+- gap ledger JSON: valid
+- diff whitespace: clean
+- codex-ultra review session `019ddad3-4dd2-7ac1-9285-4cc44c5f7b28`: `APPROVED`
+
+Next validation remains a one-trial same-shape speed rerun for
+`compile-compcert`.

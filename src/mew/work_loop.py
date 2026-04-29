@@ -6076,7 +6076,8 @@ def _work_action_schema_text():
         '"edits": [{"old": "edit_file_hunks old text", "new": "replacement"}], '
         '"create": false, '
         '"replace_all": false, '
-        '"dry_run": true}],\n'
+        '"dry_run": true, '
+        '"timeout": "optional run_tests/run_command timeout seconds"}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text literal fixed-string query",\n'
         '    "pattern": "glob pattern",\n'
@@ -6091,6 +6092,7 @@ def _work_action_schema_text():
         '    "max_output_chars": "optional read_images output cap",\n'
         '    "stat": "optional git_diff diffstat; set false only when full diff is needed",\n'
         '    "command": "run_tests/run_command command",\n'
+        '    "timeout": "optional run_tests/run_command timeout seconds; use only for bounded long-running verifier/build commands",\n'
         '    "content": "write_file content",\n'
         '    "old": "edit_file old text",\n'
         '    "new": "edit_file new text",\n'
@@ -6158,7 +6160,7 @@ def build_work_think_prompt(context):
         "If work_session.resume.stale_runtime_artifact_risk is present, the prior self-check created a /tmp runtime artifact that may short-circuit a fresh external verifier. Preserve the proof in acceptance_checks or working_memory.last_verified_state, then run a small cleanup command to clean stale runtime artifacts before finish unless the task explicitly requires that artifact to pre-exist. "
         "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
         "For runtime frame, screenshot, or image-output tasks, artifact existence, nonzero pixels, valid headers, or self-consistent dimensions are not enough; cite a completed tool that checks expected dimensions/resolution, reference similarity, or exact stdout/boot markers before finish. "
-        "For long dependency/toolchain/source-build tasks, preserve work_session.resume.long_dependency_build_state when present. Prerequisite installation, configure, dependency generation, or partial make/build output is progress, not completion, while a required final executable/artifact is missing. Do not restart package-manager or source-tree setup after a compatible toolchain path is found; allocate remaining wall budget to the shortest continuation command that produces the missing final artifact, then prove it exists and is executable/invokable before finish. "
+        "For long dependency/toolchain/source-build tasks, preserve work_session.resume.long_dependency_build_state when present. Prerequisite installation, configure, dependency generation, or partial make/build output is progress, not completion, while a required final executable/artifact is missing. Before installing a distro toolchain for a source project with version constraints, run or inspect the smallest compatibility probe; if configure or package-manager output invalidates a toolchain/package path, record it in working_memory and switch paths instead of retrying it. If a Makefile/CMake/project build reports missing generated dependencies, missing source-path prefixes, or absent dependency files, run the project's dependency-generation/configure target before repeating the final target. Do not restart package-manager or source-tree setup after a compatible toolchain path is found; allocate remaining wall budget to one shortest idempotent continuation command that produces the missing final artifact. For genuinely long prerequisite or source-build commands, set a bounded run_command timeout sized to the remaining wall budget instead of repeatedly slicing the same build into default-timeout commands. Then prove the final artifact exists and is executable/invokable before finish. "
         "For black-box or query-only model extraction tasks, do not read or copy visible fixture internals such as hidden weights from the provided source; local checks against exposed fixture weights are not enough to finish. Before task_done=true, cite synthetic, randomized, or holdout validation that demonstrates the method generalizes beyond the visible fixture. "
         "For model/checkpoint/tokenizer inference, sampling, or continuation tasks, compile success, byte size, the advertised CLI shape, and 'printed N tokens' are not enough. Before finish, cite completed tool output that proves model-output equivalence with a reference/golden/oracle continuation, argmax/top-1 token match, logits check, token-id match, or expected continuation. A reference/oracle built by copying, slicing, lightly modifying the current candidate implementation, or generating a new /tmp oracle source in this same work session is not independent evidence; if finish is blocked for model inference evidence/provenance, do not repeat finish with the same tool id or same oracle source. Run a new grounding/repair command or keep the exact model-output contract gap open. "
         "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, prefer analyze_table on CSV/TSV/whitespace numeric source files before choosing fit windows, scales, extrema, or output values. A schema-only, finite-number, or single-fit residual check is not enough; before finish, cite a completed grounding tool whose output contains an independent cross-check such as an alternative method, recomputation, holdout, bootstrap, or sensitivity/stability validation against the input data, plus residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric. "
@@ -6405,6 +6407,7 @@ def normalize_work_model_action(
         "pattern",
         "max_chars",
         "max_output_chars",
+        "timeout",
         "detail",
         "prompt",
         "command",
@@ -6811,6 +6814,18 @@ def normalize_paired_write_batch_tools(tools, allowed_write_roots=None, cwd=""):
     return normalized
 
 
+def _coerce_work_tool_timeout(value):
+    if value is None:
+        return None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return None
+    if timeout <= 0:
+        return None
+    return timeout
+
+
 def work_tool_parameters_from_action(
     action,
     allowed_write_roots=None,
@@ -6835,6 +6850,12 @@ def work_tool_parameters_from_action(
     else:
         parameters.setdefault("verify_cwd", parameters.get("cwd") or ".")
     parameters.setdefault("verify_timeout", verify_timeout)
+    if action_type in {"run_command", "run_tests"} and parameters.get("timeout") is not None:
+        timeout = _coerce_work_tool_timeout(parameters.get("timeout"))
+        if timeout is None:
+            parameters.pop("timeout", None)
+        else:
+            parameters["timeout"] = timeout
     if action_type == "read_file":
         try:
             parameters["max_chars"] = _line_window_auto_max_chars(parameters)
