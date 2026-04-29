@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; artifact-handoff repair closed, but aggregate/current gaps remain above threshold, so select the next gap class. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; Batch 6 `gpt2-codegolf` and `git-multibranch` same-shape repairs reached Codex targets, but adjusted aggregate gap remains above threshold. Next selected class is long dependency/toolchain build strategy. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -132,6 +132,12 @@ M6.24 resume condition:
   follow `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` and record gap state in
   `proof-artifacts/m6_24_gap_ledger.jsonl`.
 - Current controller mode: `improvement_phase`.
+- Latest controller checkpoint on 2026-04-30:
+  `gpt2-codegolf` and `git-multibranch` both reached their frozen Codex
+  targets after same-shape repairs, so Batch 6 is now near parity for the
+  measured slice. The adjusted aggregate remains above the `>20pp` improvement
+  threshold, so broad measurement stays paused. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> selected-gap disambiguation speed rerun -> compile-compcert speed_1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
