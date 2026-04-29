@@ -6273,6 +6273,7 @@ def build_work_act_prompt(context, decision_plan):
         "Return only JSON. Do not use markdown.\n"
         "Normalize the THINK decision into one executable action. Preserve the intent, but remove unsupported fields. "
         "Never broaden file roots or permissions. If the decision is unsafe or unsupported, return wait with a reason.\n"
+        "If THINK selected run_command, capabilities.allow_shell is true, and the task explicitly requires system service state such as localhost daemons, system users, package/service config, ports, or verifier-visible paths like /git, /srv, /var, /run, or /etc, do not convert that shell command to wait solely because native allowed_write_roots exclude those paths. allowed_write_roots constrain native write_file/edit_file/edit_file_hunks tools, not shell-authorized service setup by itself. Preserve the run_command when it is bounded and exact-interface oriented; still reject resident mew loop commands, unsupported actions, sensitive host-secret access, or broad unrelated system changes.\n"
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"Context JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
         f"ThinkDecision JSON:\n{json.dumps(decision_plan, ensure_ascii=False, indent=2)}"

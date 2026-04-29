@@ -71,6 +71,19 @@ Change `build_work_think_prompt()` to make the capability boundary explicit:
 This is generic arbitrary-workspace work-loop behavior, not a Terminal-Bench
 solver.
 
+## v0.1 Repair
+
+The first speed rerun showed that THINK already selected the right
+system-service `run_command`, but ACT converted it to `wait` because the command
+would write outside native write roots.
+
+Apply the same boundary to `build_work_act_prompt()`:
+
+- preserve a THINK-selected `run_command` when `allow_shell` is true and the
+  command exists to satisfy explicit system-service acceptance criteria;
+- do not broaden native write roots;
+- still reject unsupported/sensitive shell commands and resident mew loops.
+
 ## Same-Shape Rerun
 
 After v0, run a 1-trial same-shape speed rerun for `git-multibranch`.

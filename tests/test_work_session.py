@@ -34600,6 +34600,34 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("literal fixed-string", prompt)
         self.assertIn("use batch for OR searches", prompt)
 
+    def test_work_act_prompt_preserves_shell_authorized_system_service_commands(self):
+        from mew.work_loop import build_work_act_prompt
+
+        context = {
+            "capabilities": {
+                "allow_shell": True,
+                "allowed_write_roots": [".", "/usr/local/bin", "/tmp"],
+            },
+            "work_session": {
+                "goal": "Set up git@localhost:/git/project and Nginx HTTPS on localhost:8443.",
+            },
+        }
+        decision_plan = {
+            "summary": "configure real services",
+            "action": {
+                "type": "run_command",
+                "command": "mkdir -p /git /srv && /usr/sbin/sshd && nginx",
+            },
+        }
+
+        prompt = build_work_act_prompt(context, decision_plan)
+
+        self.assertIn("capabilities.allow_shell is true", prompt)
+        self.assertIn("do not convert that shell command to wait solely because native allowed_write_roots exclude those paths", prompt)
+        self.assertIn("allowed_write_roots constrain native write_file/edit_file/edit_file_hunks tools", prompt)
+        self.assertIn("Preserve the run_command when it is bounded and exact-interface oriented", prompt)
+        self.assertIn("still reject resident mew loop commands", prompt)
+
     def test_work_model_search_text_defaults_are_bounded(self):
         from mew.work_loop import work_tool_parameters_from_action
 
