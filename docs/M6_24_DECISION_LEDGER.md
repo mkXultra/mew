@@ -88,16 +88,16 @@ direction.
 | 2026-04-29 | v0.4 five-trial proof stayed below target and selected verifier-handoff repair. | `docs/M6_24_VISUAL_QUALITY_PROOF_5_2026-04-29.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-visual-quality-make-mips-interpreter-5attempts-20260429-1908/result.json`: `make-mips-interpreter` scored `1/5` with errors 0 against frozen Codex target `3/5`. One trial passed; one finished with valid `/tmp/frame.bmp` evidence but missed deferred cleanup because validator output was not recognized; one finished with valid frame evidence at `frames/frame000001.bmp` / root copy while the external verifier expected `/tmp/frame.bmp`; two timed out in real VM/runtime repair paths. | Continue improvement phase. Next bounded repair is `runtime_external_artifact_path_and_cleanup_contract`: require exact verifier-read artifact path evidence and extend deferred cleanup detection for `/tmp/...` paths mentioned by validation output. Then run a 1-trial same-shape speed proof for `make-mips-interpreter`. | active |
 | 2026-04-29 | Implement v0.5 external artifact path and cleanup contract. | `docs/DESIGN_2026-04-29_M6_24_RUNTIME_ARTIFACT_FRESHNESS.md`: artifact discovery now recognizes expected verifier `/tmp/...` paths from runtime output, cleanup recognizes validator output such as `BMP ok: ... and /tmp/...`, finish blocks sibling-path proof when the verifier-read `/tmp/...` path is not cited, and THINK guidance warns against finishing after proving only `frames/...`, `output/...`, or root copies. Focused acceptance/work-session tests and ruff passed. | Run a 1-trial same-shape speed proof for `make-mips-interpreter`; do not resume broad measurement before recording that rerun. | speed_rerun_pending |
 | 2026-04-29 | v0.5 same-shape speed rerun passed. | `docs/M6_24_ARTIFACT_HANDOFF_SPEED_RERUN_2026-04-29.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-artifact-handoff-make-mips-interpreter-1attempt-20260429-1950/result.json`: one trial, no runner errors, reward 1.0. mew did not accept a wrong-path finish; it stayed in the hard runtime repair loop until `max_steps`, applied a final MIPS SPECIAL3 `EXT` / `INS` repair, and the external verifier passed VM execution, frame existence, and frame similarity. The cleanup-marker path was not directly exercised because no final self-verification artifact was created before handoff. | Escalate to a five-trial same-shape proof for `make-mips-interpreter`. If it reaches the frozen Codex target `3/5` without a new repeated structural blocker, record this repair stable enough to choose the next gap or resume broader measurement. | proof_5_pending |
+| 2026-04-29 | v0.5 five-trial proof reached the frozen Codex target. | `docs/M6_24_ARTIFACT_HANDOFF_PROOF_5_2026-04-29.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-artifact-handoff-make-mips-interpreter-5attempts-20260429-2021/result.json`: `make-mips-interpreter` scored `3/5` with runner errors 0, matching the frozen Codex target `3/5`. The previous wrong-path and stale-cleanup handoff misses did not recur. Remaining failures were VM stdout capture and image similarity quality, not the selected artifact-handoff blocker. | Resume broad measurement with M6.24 Batch 6 `gpt2-codegolf`. Do not continue polishing `make-mips-interpreter` before collecting the next Batch 6 result. | resume_measurement |
 
 ## Current Mode
 
-`improvement_phase`
+`measurement_resume`
 
-Do not run the next broad-measurement task merely because
-`docs/M6_24_BATCH_6_MANIFEST_2026-04-29.md` lists `gpt2-codegolf` as pending.
-That was the previous measurement-only next action. The current M6.24 controller
-decision supersedes it.
+The selected `runtime_external_artifact_path_and_cleanup_contract` repair has a
+same-shape five-trial proof at the frozen Codex target. Broad measurement may
+resume until the next above-threshold gap or accepted structural blocker.
 
 Current selected next action:
 
-`M6.24 -> hard_task_implementation_strategy_contract_retention -> runtime_external_artifact_path_and_cleanup_contract -> proof_5 rerun make-mips-interpreter`
+`M6.24 -> Batch 6 -> gpt2-codegolf`

@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; visual-artifact quality proof stayed 1/5, so verifier artifact-path/cleanup handoff is the selected next repair. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Artifact-handoff proof reached the frozen Codex target on `make-mips-interpreter`; broad measurement resumes with Batch 6 `gpt2-codegolf`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -131,12 +131,14 @@ M6.24 resume condition:
   `docs/M6_24_GAP_BASELINE_2026-04-29.md`. Improvement-phase work must also
   follow `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` and record gap state in
   `proof-artifacts/m6_24_gap_ledger.jsonl`.
-- Current controller mode: `improvement_phase`.
+- Current controller mode: `measurement_resume`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
-  `> 20 pp` improvement threshold. Do not continue broad measurement just
-  because Batch 6 still lists `gpt2-codegolf` as pending.
+  `> 20 pp` improvement threshold. Broad measurement was paused for the
+  selected artifact-handoff repair, then resumed only after
+  `docs/M6_24_ARTIFACT_HANDOFF_PROOF_5_2026-04-29.md` reached the frozen Codex
+  target on the same failed shape.
 - If a new accepted structural blocker appears, pause M6.24, append it to
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair it through M6.14, record
   focused validation, and rerun the same failed task shape before resuming
@@ -272,8 +274,14 @@ M6.24 resume condition:
   at `max_steps` after a final MIPS SPECIAL3 repair rather than via finish, so
   it did not directly exercise deferred cleanup, but it did avoid the
   wrong-path finish and stale `/tmp/frame.bmp` handoff failures. Next action:
-  escalate to a five-trial same-shape proof for `make-mips-interpreter`. Do not
-  resume new broad measurement yet.
+  escalate to a five-trial same-shape proof for `make-mips-interpreter`. The
+  five-trial proof is recorded in
+  `docs/M6_24_ARTIFACT_HANDOFF_PROOF_5_2026-04-29.md`:
+  `make-mips-interpreter` scored `3/5` with no runner errors, matching the
+  frozen Codex target `3/5`. The selected wrong-path and stale-cleanup handoff
+  misses did not recur. Current next action: resume broad measurement with
+  M6.24 Batch 6 `gpt2-codegolf`; do not keep polishing
+  `make-mips-interpreter` before the next measured task.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
   context compression and milestone transitions do not lose repair obligations.
