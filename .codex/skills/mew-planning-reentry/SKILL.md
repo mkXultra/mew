@@ -38,8 +38,10 @@ When deciding what to do next, apply this order:
 3. `mew-product-evaluator` active milestone / Done-when decision, backed by
    `ROADMAP.md` and `ROADMAP_STATUS.md`.
 4. Active milestone controller/ledger docs, when present. For M6.24, read
-   `docs/M6_24_DECISION_LEDGER.md` and the latest `docs/M6_24_GAP_BASELINE_*`
-   before treating a pending benchmark task as the next action.
+   `docs/M6_24_DECISION_LEDGER.md`, `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`,
+   `proof-artifacts/m6_24_gap_ledger.jsonl`, and the latest
+   `docs/M6_24_GAP_BASELINE_*` before treating a pending benchmark task as the
+   next action.
 5. Durable project decisions in mew memory and project docs such as
    `docs/ADOPT_FROM_REFERENCES.md`.
 6. Current active task/session state and the latest context checkpoint.
@@ -89,6 +91,8 @@ next benchmark or repair task:
 
 ```bash
 sed -n '1,220p' docs/M6_24_DECISION_LEDGER.md
+sed -n '1,260p' docs/M6_24_GAP_IMPROVEMENT_LOOP.md
+test -f proof-artifacts/m6_24_gap_ledger.jsonl && tail -n 40 proof-artifacts/m6_24_gap_ledger.jsonl
 ls docs/M6_24_GAP_BASELINE_*.md
 sed -n '1,220p' docs/M6_24_GAP_BASELINE_2026-04-29.md
 ```
@@ -170,8 +174,13 @@ Before starting or continuing a self-improve task, compare it against the sessio
   user explicitly changed direction.
 - If M6.24 controller mode is `improvement_phase`, do not run the next pending
   broad benchmark task just because a batch manifest lists it. Select only a
-  gap-class classification, generic repair, or same-shape rerun task until the
-  decision ledger says measurement may resume.
+  gap-class classification, missing-instrumentation speed rerun, generic
+  repair, or same-shape rerun task until the decision ledger says measurement
+  may resume.
+- If M6.24 `improvement_phase` is active, require this one-line chain before
+  implementation: `M6.24 -> selected gap class -> required next action ->
+  same-shape rerun condition`. If you cannot write it, read/update the gap
+  ledger instead of implementing.
 - If you have already spent three cycles on blocker reduction or nearby polish
   for the same active criterion, do not start a fourth. Recommend running the
   gate proof or rewriting the criterion/measurement.

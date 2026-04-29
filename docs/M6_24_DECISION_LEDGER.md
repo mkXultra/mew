@@ -4,6 +4,12 @@ Purpose: keep the measure-vs-improve decisions for M6.24 in one compact,
 append-friendly file so long sessions and context compression do not drift back
 to stale next-batch execution.
 
+Companion controller and data files:
+
+- `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
+- `proof-artifacts/m6_24_gap_ledger.jsonl`
+- `docs/M6_24_GAP_BASELINE_2026-04-29.md`
+
 ## Controller Rule
 
 After each batch or partial batch checkpoint, compare mew against the frozen
@@ -31,6 +37,20 @@ Improvement phase requirements:
 4. Record before/after evidence.
 5. Resume broad measurement only after the rerun is recorded or a written
    decision explains why the repair cannot be validated with the same shape.
+6. Record classification and repair state in
+   `proof-artifacts/m6_24_gap_ledger.jsonl`.
+
+Allowed next actions during improvement phase:
+
+- classify a measured failure into the gap ledger
+- add missing instrumentation for a selected gap and speed-rerun the same shape
+- make a bounded local/polish repair for a selected gap
+- open/complete a reference-backed structural repair for a selected gap
+- rerun the same failed shape after repair
+- update this decision ledger to resume broad measurement with evidence
+
+Anything else is drift unless the user's newest explicit instruction changes
+direction.
 
 ## Decisions
 

@@ -1356,6 +1356,9 @@ Target:
 - iterate benchmark-driven repairs without losing per-task evidence
 - keep parity work bounded by artifacts, classifications, and reruns, not
   impressionistic prompt tuning
+- use `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` and
+  `proof-artifacts/m6_24_gap_ledger.jsonl` as the improvement-phase controller
+  when the measured Codex gap crosses the threshold
 - preserve the generic arbitrary-workspace contract throughout the campaign;
   the same work-session path should be usable for normal repositories and
   Terminal-Bench task directories
@@ -1379,6 +1382,9 @@ Done when:
   written after the aggregate gap drops below the agreed near-parity threshold
 - every task where mew is below Codex has a recorded classification and either
   a selected repair route or a written decision to defer it
+- every improvement-phase process change is recorded with current pain,
+  expected benefit, one-run trial boundary, rollback condition, and an
+  adopted/rejected decision
 - no accepted structural blocker remains unaddressed while broad measurement
   continues; M6.24 may continue measurement only for a named disambiguation
   probe, then must pause behind M6.14 if the blocker is confirmed
