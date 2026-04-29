@@ -46,6 +46,72 @@ def test_acceptance_finish_blocker_accepts_complete_verified_checks():
     assert coerce_acceptance_checks(checks) == checks
 
 
+def test_acceptance_finish_blocker_rejects_stale_runtime_artifact_before_fresh_verifier():
+    text = "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run."
+    checks = [
+        {
+            "constraint": "frame written by node vm.js",
+            "status": "verified",
+            "evidence": "Tool #7 verified /tmp/frame.bmp with bmp_header_ok=True.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 7,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js && python3 check_frame.py"},
+                "result": {
+                    "command": "node vm.js && python3 check_frame.py",
+                    "exit_code": 0,
+                    "stdout": "path=/tmp/frame.bmp\nframe_bytes=1024054\nbmp_header_ok=True\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime artifact freshness unchecked" in blocker
+    assert "/tmp/frame.bmp" in blocker
+
+
+def test_acceptance_finish_blocker_allows_stale_runtime_artifact_after_cleanup():
+    text = "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run."
+    checks = [
+        {
+            "constraint": "frame written by node vm.js",
+            "status": "verified",
+            "evidence": "Tool #7 verified /tmp/frame.bmp and tool #8 removed the stale frame for the fresh verifier.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 7,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js && python3 check_frame.py"},
+                "result": {
+                    "command": "node vm.js && python3 check_frame.py",
+                    "exit_code": 0,
+                    "stdout": "path=/tmp/frame.bmp\nframe_bytes=1024054\nbmp_header_ok=True\n",
+                },
+            },
+            {
+                "id": 8,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp"},
+                "result": {"command": "rm -f /tmp/frame.bmp", "exit_code": 0, "stdout": "cleaned /tmp/frame.bmp\n"},
+            },
+        ]
+    }
+
+    assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session) == ""
+
+
 def test_implementation_contract_source_requirements_extract_provided_source_refs():
     text = (
         "I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, "

@@ -38,6 +38,7 @@ ACCEPTANCE_CONSTRAINT_KEYWORDS = (
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
 _TOOL_ID_RE = re.compile(r"\btool(?:\s+call)?\s*#?\s*(\d+)\b", re.IGNORECASE)
+_RUNTIME_TMP_ARTIFACT_RE = re.compile(r"(/tmp/[A-Za-z0-9._/@%+=:,\-]+)")
 
 _WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 _GROUNDING_TOOLS = {
@@ -51,6 +52,44 @@ _GROUNDING_TOOLS = {
     "run_tests",
     "search_text",
 }
+
+_RUNTIME_FRESH_RUN_MARKERS = (
+    "emulator",
+    "execute",
+    "fresh run",
+    "interpreter",
+    "node ",
+    "run ",
+    "vm",
+)
+_RUNTIME_ARTIFACT_GENERATION_MARKERS = (
+    "frame",
+    "frames",
+    "generated",
+    "screenshot",
+    "stdout",
+    "will be written",
+    "will write",
+    "writes",
+    "written",
+)
+_RUNTIME_ARTIFACT_CREATED_MARKERS = (
+    "bmp_header_ok=true",
+    "exists=true",
+    "frame_bytes",
+    "magic=bm",
+    "path=/tmp/",
+    "written to /tmp/",
+)
+_RUNTIME_ARTIFACT_CLEANUP_MARKERS = (
+    "cleaned",
+    "cleanup",
+    "deleted",
+    "remove",
+    "removed",
+    "rm -f",
+    "unlink",
+)
 
 _EDIT_SCOPE_MARKERS = (
     "allowed edit",
@@ -430,6 +469,103 @@ def _tool_call_external_command_text(call: object) -> str:
         if isinstance(argv, list):
             chunks.append(" ".join(str(item) for item in argv))
     return _normalized_command_text("\n".join(chunks))
+
+
+def _runtime_fresh_run_artifacts(task_description: object) -> list[str]:
+    text = str(task_description or "")
+    lowered = text.casefold()
+    if "/tmp/" not in lowered:
+        return []
+    if not any(marker in lowered for marker in _RUNTIME_FRESH_RUN_MARKERS):
+        return []
+    if not any(marker in lowered for marker in _RUNTIME_ARTIFACT_GENERATION_MARKERS):
+        return []
+    artifacts: list[str] = []
+    for match in _RUNTIME_TMP_ARTIFACT_RE.finditer(text):
+        artifact = str(match.group(1) or "").rstrip("`'\".,;:)")
+        if artifact and artifact not in artifacts:
+            artifacts.append(artifact)
+    return artifacts[:6]
+
+
+def _runtime_artifact_created_by_call(call: object, artifact: str) -> bool:
+    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+        return False
+    text = _tool_call_text(call)
+    lowered = text.casefold()
+    if artifact.casefold() not in lowered:
+        return False
+    if "exists=false" in lowered and not any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS):
+        return False
+    return any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS)
+
+
+def _runtime_artifact_cleanup_by_call(call: object, artifact: str) -> bool:
+    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+        return False
+    text = _tool_call_text(call)
+    lowered = text.casefold()
+    if artifact.casefold() not in lowered:
+        return False
+    cleanup_pos = max((lowered.rfind(marker) for marker in _RUNTIME_ARTIFACT_CLEANUP_MARKERS), default=-1)
+    if cleanup_pos < 0:
+        return False
+    created_pos = max((lowered.rfind(marker) for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS), default=-1)
+    return created_pos < 0 or cleanup_pos > created_pos
+
+
+def _latest_runtime_artifact_creation_call(session: object, artifact: str) -> dict | None:
+    latest: dict | None = None
+    for call in _completed_tool_calls(session):
+        if _runtime_artifact_created_by_call(call, artifact):
+            latest = call
+    return latest
+
+
+def _has_runtime_artifact_cleanup_after(session: object, artifact: str, after_tool_id: object) -> bool:
+    try:
+        after_id = int(after_tool_id)
+    except (TypeError, ValueError):
+        after_id = -1
+    for call in _completed_tool_calls(session):
+        try:
+            call_id = int(call.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if call_id <= after_id:
+            continue
+        if _runtime_artifact_cleanup_by_call(call, artifact):
+            return True
+    return False
+
+
+def _runtime_artifact_freshness_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    artifacts = _runtime_fresh_run_artifacts(task_description)
+    if not artifacts or not isinstance(session, dict):
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return ""
+    for artifact in artifacts:
+        creation_call = _latest_runtime_artifact_creation_call(session, artifact)
+        if not creation_call:
+            continue
+        if _has_runtime_artifact_cleanup_after(session, artifact, creation_call.get("id")):
+            continue
+        return (
+            f"runtime artifact freshness unchecked: {artifact} was created during self-verification; "
+            "if the external verifier is expected to create runtime artifacts from a fresh run, "
+            "preserve the proof in acceptance_checks but clean stale runtime artifacts before task_done=true"
+        )
+    return ""
 
 
 def _external_command_text_contains_term(command_text: str, term: object) -> bool:
@@ -1196,6 +1332,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     implementation_contract_blocker = _implementation_contract_source_blocker(task_description, checks, session)
     if implementation_contract_blocker:
         return implementation_contract_blocker
+    runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
+    if runtime_artifact_blocker:
+        return runtime_artifact_blocker
     query_only_blocker = _query_only_hidden_model_blocker(task_description, checks, session)
     if query_only_blocker:
         return query_only_blocker

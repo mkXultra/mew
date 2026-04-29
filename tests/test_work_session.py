@@ -4487,6 +4487,79 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("expected_artifacts=/tmp/frame.bmp", text)
         self.assertIn("verifier_failure_runtime_tools: readelf, nm, objdump, addr2line", text)
 
+    def test_work_session_resume_surfaces_stale_runtime_artifact_risk(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Build Doom for a VM",
+            "goal": "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "node vm.js && python3 check_frame.py", "cwd": "/app"},
+                    "result": {
+                        "command": "node vm.js && python3 check_frame.py",
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "path=/tmp/frame.bmp\nframe_bytes=1024054\nbmp_header_ok=True\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["stale_runtime_artifact_risk"]["kind"], "stale_runtime_artifact_risk")
+        self.assertEqual(resume["stale_runtime_artifact_risk"]["artifacts"][0]["artifact"], "/tmp/frame.bmp")
+        text = format_work_session_resume(resume)
+        self.assertIn("stale_runtime_artifact_risk: stale_runtime_artifact_risk", text)
+        self.assertIn("stale_runtime_artifact: /tmp/frame.bmp from tool=#7", text)
+
+    def test_work_session_resume_clears_stale_runtime_artifact_risk_after_cleanup(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Build Doom for a VM",
+            "goal": "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "node vm.js && python3 check_frame.py", "cwd": "/app"},
+                    "result": {
+                        "command": "node vm.js && python3 check_frame.py",
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "path=/tmp/frame.bmp\nframe_bytes=1024054\nbmp_header_ok=True\n",
+                    },
+                },
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "rm -f /tmp/frame.bmp", "cwd": "/app"},
+                    "result": {"command": "rm -f /tmp/frame.bmp", "cwd": "/app", "exit_code": 0},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["stale_runtime_artifact_risk"], {})
+
     def test_work_session_resume_clears_verifier_failure_agenda_after_later_green_command(self):
         from mew.work_session import build_work_session_resume
 
@@ -33821,6 +33894,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user", prompt)
         self.assertIn("If work_session.resume.broad_rollback_slice_repair is present", prompt)
         self.assertIn("Choose one smaller complete slice", prompt)
+        self.assertIn("If work_session.resume.stale_runtime_artifact_risk is present", prompt)
+        self.assertIn("clean stale runtime artifacts before finish", prompt)
         self.assertIn("A runnable smoke command with exit_code=0 is not enough to finish", prompt)
         self.assertIn("generated artifacts, saved files, stdout/stderr text, rendered frames", prompt)
         self.assertIn("inspect those artifact/output properties or run a small command that asserts them", prompt)

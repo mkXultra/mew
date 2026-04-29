@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; hard-runtime rerun improved proximity but exposed stale runtime artifact / external verifier alignment. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; runtime artifact freshness repair is implemented and awaiting same-shape rerun. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -171,7 +171,12 @@ M6.24 resume condition:
   the external verifier reached 2/3 on the best trial. The next selected blocker
   is generic runtime artifact freshness / external verifier alignment: stale
   `/tmp/frame.bmp` left by self-verification can short-circuit the external
-  verifier's fresh-run wait and cause premature stdout capture. Do not resume
+  verifier's fresh-run wait and cause premature stdout capture. The v0 repair
+  is recorded in
+  `docs/DESIGN_2026-04-29_M6_24_RUNTIME_ARTIFACT_FRESHNESS.md`: finish is now
+  blocked when a fresh-runtime task self-verifies a generated `/tmp/...`
+  artifact without later cleanup, and resume exposes `stale_runtime_artifact_risk`.
+  Next action is to rerun `make-doom-for-mips` same shape again. Do not resume
   new broad measurement yet.
 - Canonical structural blocker queue:
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`. Append accepted blockers there so
