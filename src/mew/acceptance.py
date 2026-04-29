@@ -74,10 +74,14 @@ _RUNTIME_ARTIFACT_GENERATION_MARKERS = (
     "written",
 )
 _RUNTIME_ARTIFACT_CREATED_MARKERS = (
+    "and /tmp/",
+    "artifact ok",
+    "bmp ok:",
     "bmp_header_ok=true",
     "created /tmp/",
     "exists=true",
     "frame_bytes",
+    "frame ok",
     "magic=bm",
     "path=/tmp/",
     "saved /tmp/",
@@ -85,6 +89,14 @@ _RUNTIME_ARTIFACT_CREATED_MARKERS = (
     "saved frame",
     "exists size=",
     "written to /tmp/",
+)
+_RUNTIME_ARTIFACT_EXPECTED_PATH_MARKERS = (
+    "frames will be saved to /tmp/",
+    "output will be saved to /tmp/",
+    "saved to /tmp/",
+    "will save to /tmp/",
+    "will write /tmp/",
+    "will write to /tmp/",
 )
 _RUNTIME_ARTIFACT_CLEANUP_MARKERS = (
     "cleaned",
@@ -567,7 +579,10 @@ def _runtime_fresh_run_artifacts_for_finish(
         for call in _completed_tool_calls(session):
             text = _tool_call_text(call)
             lowered = text.casefold()
-            if not any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS):
+            if not any(
+                marker in lowered
+                for marker in (*_RUNTIME_ARTIFACT_CREATED_MARKERS, *_RUNTIME_ARTIFACT_EXPECTED_PATH_MARKERS)
+            ):
                 continue
             for artifact in _runtime_tmp_artifacts_in_text(text):
                 if artifact not in artifacts:
