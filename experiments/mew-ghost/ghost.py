@@ -335,7 +335,15 @@ def build_live_desk_fallback_status(
             'generated_at': utc_now_iso(),
             'status': 'fallback',
             'counts': {'pets_total': 0, 'pet_states': {}},
-            'details': [],
+            'details': [
+                {
+                    'name': 'live-desk-fallback',
+                    'pet_state': 'fallback',
+                    'presence_state': reason,
+                    'detail': 'message=%s; returncode=%s; command=%s'
+                    % (message or 'none', returncode if returncode is not None else 'none', ' '.join(LIVE_DESK_COMMAND_DISPLAY)),
+                }
+            ],
             'primary_action': None,
             'live_mew_reads': True,
             'command': list(LIVE_DESK_COMMAND_DISPLAY),
@@ -1096,7 +1104,14 @@ def render_terminal_human(
                     freshness.get('rendered_at', state.get('generated_at')),
                     freshness.get('interval_seconds', 'n/a'),
                 ),
-                'desk: %s | counts: %s' % (desk.get('status', 'disabled'), json.dumps(desk_counts, sort_keys=True)),
+                'desk: %s | counts: %s'
+                % (
+                    desk.get('status', 'disabled'),
+                    json.dumps(
+                        {key: desk_counts[key] for key in ('pets_total', 'pet_states') if key in desk_counts},
+                        sort_keys=True,
+                    ),
+                ),
                 'desk primary: %s -> %s' % (primary_label, primary_command),
             ]
         )

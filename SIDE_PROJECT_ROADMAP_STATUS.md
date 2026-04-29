@@ -34,11 +34,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP21 mew-wisp Form Layer | `done` | SP21a added `--form default`/`--form cat`; SP21b/SP21c used `read_image` on `cat.png`, then replaced the weak ASCII cat with a literal 22x24 `cat.png`-derived mask sprite and >=0.90 similarity test. SP21d/SP21e compacted the human HUD and hid diagnostics behind `--details`; SP21g centers the cat block in terminal output while preserving state/HTML/watch/live/launcher behavior. |
 | SP22 mew-wisp Visual Polish | `done` | SP22a exposed issue #21 before landing product edits. SP22b landed visible identity. SP22c replaced loose HUD lines with a fixed-width ASCII resident panel. SP22d centered the panel with the cat form. SP22e/SP22f replaced raw diagnostics and stale ghost copy with resident-facing mew-wisp copy while preserving details gating, state/HTML/watch/live/launcher behavior, and no product-code rescue edits. |
 | SP23 mew-wisp Speech Bubble | `done` | SP23a landed practical in task #38/session #67: human terminal output now renders an ASCII mew-wisp speech bubble between the cat/default form and resident HUD, with focused tests and zero product-code rescue edits. Issues #25/#26/#27 remain implementation-lane hardening evidence. |
-| SP24 mew-wisp Mew Adapter Reconnect | `in_progress` | SP24a landed practical: the CLI-first human cat surface now has focused proof for rendering explicit live desk adapter output through the existing opt-in injected `desk_provider` path without hidden live reads, shell execution, core imports, or launcher execution. |
+| SP24 mew-wisp Mew Adapter Reconnect | `done` | SP24a/SP24b landed practical: the CLI-first human cat surface renders fixture snapshots, injected live desk provider output, and explicit repo-local `--live-desk` output through one opt-in adapter boundary, with visible fallback states and sanitized human details. |
 
 ## Active Focus
 
-Active side-project focus: **SP24 mew-wisp Mew Adapter Reconnect is in progress**.
+Active side-project focus: **SP24 mew-wisp Mew Adapter Reconnect is complete**.
 
 Current target:
 
@@ -174,8 +174,20 @@ Current target:
   diagnostics gated behind `--details`, avoids static `--desk-json` proof, and
   preserves the focused verifier (`41 passed`). Ledger row `45` records the
   practical result with rescue edits `0`; issue `#28` records the dry-run/target
-  steering miss, and reopened issue `#17` records the closeout `git_diff`
-  read-root recurrence as implementation-lane polish evidence
+  steering miss, and issue `#17` records prior closeout `git_diff` read-root
+  evidence. Both issues are closed after upstream fixes; reopen only if the
+  same behavior recurs in the next work
+- SP24b task `#40` landed practical from sessions `#69` and `#70`:
+  mew-authored CLI/main tests prove `--live-desk --format human --form cat`
+  reaches the terminal resident surface through injected `live_desk_runner`
+  seams without spawning real mew in automation, without launcher execution,
+  without `--desk-json`, and with diagnostics gated behind `--details`. mew
+  also made live-desk fallback details visible in human output and sanitized the
+  human counts line so real desk `raw_grouped_details` stays in machine-readable
+  state but does not leak into the form layer. Focused verifier passed (`44
+  passed`), and an explicit repo-local real `--live-desk` smoke wrote sanitized
+  human output to `/tmp/mew-wisp-sp24b-human.txt`. Ledger row `46` records the
+  practical result with rescue edits `0`
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -873,8 +885,9 @@ Current target:
   form, resident-facing copy, and fixed-width HUD panel.
 - SP23 is closed: the fixture-first terminal surface now has an ASCII speech
   bubble before the resident HUD, focused tests, and terminal proof output.
-- SP24 is not started: reconnecting the CLI-first wisp to live mew state is now
-  the next side-project milestone candidate.
+- SP24 is closed: reconnecting the CLI-first wisp to explicit live mew desk
+  output now has injected-provider, CLI/main injected-runner, fallback, sanitized
+  human-details, and real repo-local smoke proof.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -894,8 +907,8 @@ Current target:
 
 Choose the next side-project move:
 
-1. start SP24 with a narrow adapter-boundary slice that reads explicit live mew
-   desk output only through an opt-in path and keeps fixture defaults stable
+1. define the next side-project milestone before starting more mew-wisp work;
+   SP24 currently closes the planned side-project roadmap
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for

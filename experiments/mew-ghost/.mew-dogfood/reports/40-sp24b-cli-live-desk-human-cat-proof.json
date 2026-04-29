@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "task_id": 40,
+  "session_id": 70,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP24b extends the live desk human cat proof from injected run_watch provider coverage to the CLI/main --live-desk path, makes live-desk fallback fields visible in human details, and sanitizes human counts so raw grouped desk internals stay out of the form layer.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 5,
+  "files_changed": [
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/40-sp24b-cli-live-desk-human-cat-proof.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "44 passed in 0.12s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --format human --form cat --live-desk --watch-count 1 --interval 0 --details --output /tmp/mew-wisp-sp24b-human.txt",
+      "result": "real repo-local live-desk smoke wrote human cat output and emitted one JSON watch record"
+    },
+    {
+      "command": "rg -n \"raw_grouped_details|active_work_sessions|open_tasks|counts:|desk primary\" /tmp/mew-wisp-sp24b-human.txt",
+      "result": "only sanitized counts and desk primary lines matched; raw_grouped_details/open task internals were absent"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 4,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "cli_live_desk_human_details_sanitized_after_raw_counts_smoke_gap",
+  "repair_required": false,
+  "proof_artifacts": [
+    "tool_call:1554 added CLI/main --live-desk human cat success and fallback proof tests as a dry-run patch",
+    "tool_call:1555 wrote the initial SP24b report as a dry-run patch",
+    "tool_call:1566 made live-desk fallback details visible in human --details output",
+    "tool_call:1577 sanitized human details counts to pets_total/pet_states",
+    "tool_call:1578 added a regression test proving raw_grouped_details remains in state normalization but not human --details output",
+    "real smoke proof: /tmp/mew-wisp-sp24b-human.txt",
+    "mew task #40",
+    "mew work sessions #69 and #70"
+  ],
+  "commit": "",
+  "notes": "Codex did not write product code. mew authored the CLI/main live-desk human cat tests, visible fallback rendering, and human details count sanitization. Automated tests use injected live_desk_runner seams and a forbidden launcher runner, so they do not spawn real mew or execute launcher intents. The operator ran one explicit real --live-desk smoke from the repo root after the focused tests passed and found the raw_grouped_details leak; mew repaired it in fresh session #70. Issues #17 and #28 are closed after upstream fixes; do not reopen them for this historical evidence, but reopen if the same behavior recurs in the next work."
+}

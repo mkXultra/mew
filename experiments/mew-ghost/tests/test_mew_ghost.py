@@ -493,6 +493,163 @@ def test_cli_live_desk_opt_in_uses_injected_runner_without_spawning(capsys, tmp_
     assert state['launch_intents'][-1]['execution']['executed'] is False
 
 
+def test_cli_live_desk_human_cat_reaches_main_with_injected_runner(capsys, tmp_path: Path) -> None:
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    mew_path = repo_root / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    original_repo_root = ghost.REPO_ROOT
+    calls: list[list[str]] = []
+
+    def forbidden_launcher(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError('launcher runner must not be called for live desk proof')
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs['shell'] is False
+        payload = {
+            'fixture_name': 'sp24b-cli-live-desk',
+            'desk': {
+                'status': 'sp24b-cli-live-ready',
+                'pets': [{'name': 'mew-wisp', 'pet_state': 'coding', 'detail': 'SP24b CLI live desk status'}],
+                'primary_action': {
+                    'id': 'sp24b-cli-live-action',
+                    'label': 'SP24b CLI live desk action',
+                    'command': ['mew', 'code', '--task', '40'],
+                },
+            },
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    ghost.REPO_ROOT = repo_root
+    try:
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--live-desk'],
+            live_desk_runner=runner,
+            launcher_runner=forbidden_launcher,
+        ) == 0
+        minimal = capsys.readouterr().out
+
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--live-desk', '--details'],
+            live_desk_runner=runner,
+            launcher_runner=forbidden_launcher,
+        ) == 0
+        detailed = capsys.readouterr().out
+    finally:
+        ghost.REPO_ROOT = original_repo_root
+
+    assert calls == [[str(mew_path), 'desk', '--json'], [str(mew_path), 'desk', '--json']]
+    assert 'mew-wisp resident cat' in minimal
+    assert 'resident state: coding' in minimal
+    assert _cat_speech_bubble_lines(minimal)
+    assert 'SP24b CLI live desk action' in ' '.join(_resident_panel_values(minimal, 'action'))
+    assert 'desk details:' not in minimal
+    assert 'active window:' not in minimal
+    assert 'launcher intents:' not in minimal
+    assert 'details:' in detailed
+    assert 'freshness:' in detailed
+    assert 'desk details:' in detailed
+    assert 'active window:' in detailed
+    assert 'launcher intents:' in detailed
+    assert 'sp24b-cli-live-ready' in detailed
+    assert 'desk-primary-action: mew code --task 40 (dry-run)' in detailed
+    assert DESK_FIXTURE_PATH.name not in minimal
+    assert DESK_FIXTURE_PATH.name not in detailed
+    assert '--desk-json' not in minimal
+    assert '--desk-json' not in detailed
+
+
+def test_cli_live_desk_human_cat_details_sanitizes_raw_grouped_counts(capsys, tmp_path: Path) -> None:
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    mew_path = repo_root / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    original_repo_root = ghost.REPO_ROOT
+    calls: list[list[str]] = []
+
+    def forbidden_launcher(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError('launcher runner must not be called for live desk proof')
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs['shell'] is False
+        payload = {
+            'fixture_name': 'sp24b-cli-live-desk',
+            'desk': {
+                'status': 'sp24b-cli-live-ready',
+                'details': {
+                    'current_task': {'title': 'SP24b hidden raw grouped detail'},
+                },
+                'pets': [{'name': 'mew-wisp', 'pet_state': 'coding', 'detail': 'SP24b CLI live desk status'}],
+                'primary_action': {
+                    'id': 'sp24b-cli-live-action',
+                    'label': 'SP24b CLI live desk action',
+                    'command': ['mew', 'code', '--task', '40'],
+                },
+            },
+        }
+        return _completed_process(stdout=json.dumps(payload), returncode=0)
+
+    ghost.REPO_ROOT = repo_root
+    try:
+        normalized = ghost.fetch_live_desk_status(runner=runner, mew_path=mew_path)
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--live-desk', '--details'],
+            live_desk_runner=runner,
+            launcher_runner=forbidden_launcher,
+        ) == 0
+    finally:
+        ghost.REPO_ROOT = original_repo_root
+
+    detailed = capsys.readouterr().out
+
+    assert calls == [[str(mew_path), 'desk', '--json'], [str(mew_path), 'desk', '--json']]
+    assert normalized['counts']['raw_grouped_details']['current_task']['title'] == 'SP24b hidden raw grouped detail'
+    assert 'desk: sp24b-cli-live-ready | counts:' in detailed
+    assert '"pet_states": {"coding": 1}' in detailed
+    assert '"pets_total": 1' in detailed
+    assert 'raw_grouped_details' not in detailed
+    assert 'SP24b hidden raw grouped detail' not in detailed
+
+
+def test_cli_live_desk_human_cat_failure_renders_structured_fallback(capsys, tmp_path: Path) -> None:
+    repo_root = tmp_path / 'repo'
+    repo_root.mkdir()
+    mew_path = repo_root / 'mew'
+    mew_path.write_text('#!/bin/sh\n', encoding='utf-8')
+    original_repo_root = ghost.REPO_ROOT
+    calls: list[list[str]] = []
+
+    def runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs['shell'] is False
+        return _completed_process(stderr='SP24b live desk read failed', returncode=23)
+
+    ghost.REPO_ROOT = repo_root
+    try:
+        assert ghost.main(
+            ['--fixture', str(FIXTURE_PATH), '--format', 'human', '--form', 'cat', '--live-desk', '--details'],
+            live_desk_runner=runner,
+        ) == 0
+    finally:
+        ghost.REPO_ROOT = original_repo_root
+
+    fallback = capsys.readouterr().out
+
+    assert calls == [[str(mew_path), 'desk', '--json']]
+    assert 'mew-wisp resident cat' in fallback
+    assert 'desk details:' in fallback
+    assert 'fallback' in fallback
+    assert 'live-desk-fallback' in fallback
+    assert 'nonzero_exit' in fallback
+    assert 'SP24b live desk read failed' in fallback
+    assert 'returncode' in fallback
+    assert '23' in fallback
+    assert DESK_FIXTURE_PATH.name not in fallback
+    assert '--desk-json' not in fallback
+
+
 def test_watch_live_desk_reruns_only_when_opted_in(capsys, tmp_path: Path) -> None:
     repo_root = tmp_path / 'repo'
     repo_root.mkdir()
