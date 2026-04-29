@@ -47,6 +47,218 @@ def test_acceptance_finish_blocker_accepts_complete_verified_checks():
     assert coerce_acceptance_checks(checks) == checks
 
 
+def test_acceptance_finish_blocker_rejects_stateful_output_relabel_only():
+    text = (
+        "Connect the speech bubble copy to live current state. "
+        "Ensure fixture output does not claim live state."
+    )
+    checks = [
+        {
+            "constraint": "speech bubble reflects live state",
+            "status": "verified",
+            "evidence": "tool #4 passed; asserted the live desk label appears in the speech bubble.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "stdout": "PASS: asserted live desk label appears in the speech bubble.",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "stateful output semantic contrast evidence missing" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_stateful_output_without_checks():
+    text = "Connect the speech bubble copy to live current state."
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True})
+
+    assert "stateful output semantic contrast evidence missing" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_stateful_output_contrast_evidence():
+    text = (
+        "Connect the speech bubble copy to live current state. "
+        "Ensure fixture output does not claim live state."
+    )
+    checks = [
+        {
+            "constraint": "speech bubble reflects live state",
+            "status": "verified",
+            "evidence": "tool #4 passed positive injected-state and negative fixture assertions.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "stdout": (
+                        "PASS positive injected state payload: adapter returned current state "
+                        "status=busy and the speech message changed to Busy.\n"
+                        "PASS negative fixture path: fixture output says local terminal and "
+                        "does not claim live state."
+                    ),
+                },
+            }
+        ]
+    }
+
+    assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session) == ""
+
+
+def test_acceptance_finish_blocker_rejects_stateful_output_contrast_claim_without_tool_output():
+    text = (
+        "Connect the speech bubble copy to live current state. "
+        "Ensure fixture output does not claim live state."
+    )
+    checks = [
+        {
+            "constraint": "speech bubble reflects live state",
+            "status": "verified",
+            "evidence": "tool #4 passed positive injected-state and negative fixture assertions.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "stdout": "PASS: asserted the live desk label appears in the speech bubble.",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "stateful output semantic contrast evidence missing" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_stateful_output_contrast_from_edit_summary():
+    text = (
+        "Connect the speech bubble copy to live current state. "
+        "Ensure fixture output does not claim live state."
+    )
+    checks = [
+        {
+            "constraint": "speech bubble reflects live state",
+            "status": "verified",
+            "evidence": "tool #4 passed positive injected-state and negative fixture assertions.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "edit_file",
+                "status": "completed",
+                "summary": "positive injected state and negative fixture assertions were added",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "stateful output semantic contrast evidence missing" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_stateful_output_contrast_from_command_parameter_only():
+    text = (
+        "Connect the speech bubble copy to live current state. "
+        "Ensure fixture output does not claim live state."
+    )
+    checks = [
+        {
+            "constraint": "speech bubble reflects live state",
+            "status": "verified",
+            "evidence": "tool #4 passed positive injected-state and negative fixture assertions.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "pytest -k 'positive injected state or negative fixture'"},
+                "result": {"exit_code": 0, "stdout": "1 passed"},
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "stateful output semantic contrast evidence missing" in blocker
+
+
+def test_acceptance_finish_blocker_does_not_escalate_plain_current_copy_replacement():
+    text = "Replace the current copy from Start to Begin. Ensure the output text updates."
+    checks = [
+        {
+            "constraint": "Replace the current copy from Start to Begin.",
+            "status": "verified",
+            "evidence": "tool #2 read the output text and found Begin.",
+        },
+        {
+            "constraint": "Ensure the output text updates.",
+            "status": "verified",
+            "evidence": "tool #2 read the output text and found Begin.",
+        }
+    ]
+
+    assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}) == ""
+
+
+def test_acceptance_finish_blocker_does_not_escalate_literal_current_status_title_copy():
+    text = 'Use "Current Status" as the title text in the UI. Ensure the output text updates.'
+    checks = [
+        {
+            "constraint": 'Use "Current Status" as the title text in the UI.',
+            "status": "verified",
+            "evidence": "tool #2 read the title text and found Current Status.",
+        },
+        {
+            "constraint": "Ensure the output text updates.",
+            "status": "verified",
+            "evidence": "tool #2 read the title text and found Current Status.",
+        },
+    ]
+
+    assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}) == ""
+
+
+def test_acceptance_finish_blocker_does_not_escalate_literal_state_title_copy():
+    text = 'Use "State" as the title text in the UI. Ensure the output text updates.'
+    checks = [
+        {
+            "constraint": 'Use "State" as the title text in the UI.',
+            "status": "verified",
+            "evidence": "tool #2 read the title text and found State.",
+        },
+        {
+            "constraint": "Ensure the output text updates.",
+            "status": "verified",
+            "evidence": "tool #2 read the title text and found State.",
+        },
+    ]
+
+    assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}) == ""
+
+
 def test_acceptance_finish_blocker_rejects_stale_runtime_artifact_before_fresh_verifier():
     text = "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run."
     checks = [
