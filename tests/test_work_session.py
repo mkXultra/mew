@@ -4560,6 +4560,43 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertEqual(resume["stale_runtime_artifact_risk"], {})
 
+    def test_work_session_resume_surfaces_final_verifier_state_transfer_gap(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Build Doom for a VM",
+            "goal": "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "node vm.js", "cwd": "/app"},
+                    "result": {
+                        "command": "node vm.js",
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "Program exited cleanly\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        gap = resume["final_verifier_state_transfer"]
+        self.assertEqual(gap["kind"], "final_verifier_state_transfer")
+        self.assertEqual(gap["artifacts"][0]["artifact"], "/tmp/frame.bmp")
+        self.assertEqual(gap["artifacts"][0]["source_tool_call_id"], 9)
+        text = format_work_session_resume(resume)
+        self.assertIn("final_verifier_state_transfer: final_verifier_state_transfer", text)
+        self.assertIn("final_verifier_artifact_missing: /tmp/frame.bmp after tool=#9", text)
+
     def test_work_session_resume_clears_verifier_failure_agenda_after_later_green_command(self):
         from mew.work_session import build_work_session_resume
 

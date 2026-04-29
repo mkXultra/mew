@@ -112,6 +112,33 @@ def test_acceptance_finish_blocker_allows_stale_runtime_artifact_after_cleanup()
     assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session) == ""
 
 
+def test_acceptance_finish_blocker_rejects_runtime_command_pass_without_artifact_proof():
+    text = "Run `node vm.js`; it will write /tmp/frame.bmp during the fresh VM run."
+    checks = [
+        {
+            "constraint": "node vm.js exits successfully",
+            "status": "verified",
+            "evidence": "Tool #3 ran node vm.js with exit_code=0.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 3,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js"},
+                "result": {"command": "node vm.js", "exit_code": 0, "stdout": "Program exited cleanly\n"},
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime final verifier artifact evidence missing" in blocker
+    assert "/tmp/frame.bmp" in blocker
+
+
 def test_implementation_contract_source_requirements_extract_provided_source_refs():
     text = (
         "I have provided /app/doomgeneric_mips, a MIPS elf file, along with doomgeneric/, "
