@@ -4707,6 +4707,160 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("long_dependency_strategy_blocker: compatibility_override_probe_missing", text)
         self.assertIn("compatibility/override flags", text)
 
+    def test_work_session_resume_flags_over_strict_source_archive_version_grounding(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler version 3.13.1 from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "wget -O /tmp/CompCert-v3.13.1.tar.gz "
+                            "https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz\n"
+                            "tar -xzf /tmp/CompCert-v3.13.1.tar.gz -C /tmp\n"
+                            "grep -R '3\\.13\\.1' /tmp/CompCert/VERSION || "
+                            "{ echo 'Could not ground version 3.13.1 in fetched source markers'; exit 3; }"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "wget -O /tmp/CompCert-v3.13.1.tar.gz "
+                            "https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz\n"
+                            "tar -xzf /tmp/CompCert-v3.13.1.tar.gz -C /tmp\n"
+                            "grep -R '3\\.13\\.1' /tmp/CompCert/VERSION || "
+                            "{ echo 'Could not ground version 3.13.1 in fetched source markers'; exit 3; }"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 3,
+                        "stdout": (
+                            "== source identity ==\n"
+                            "/tmp/CompCert\n"
+                            "VERSION\n"
+                            "version=3.13\n"
+                            "Could not ground version 3.13.1 in fetched source markers\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertIn("source_archive_version_grounding_too_strict", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: source_archive_version_grounding_too_strict", text)
+        self.assertIn("archive/tag", text)
+        self.assertIn("omits a patch suffix", text)
+
+    def test_work_session_resume_does_not_flag_source_archive_marker_without_grounding_failure(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler version 3.13.1 from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "wget -O /tmp/CompCert-v3.13.1.tar.gz "
+                            "https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "wget -O /tmp/CompCert-v3.13.1.tar.gz "
+                            "https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "source markers observed\nVERSION\nversion=3.13\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("source_archive_version_grounding_too_strict", codes)
+
+    def test_work_session_resume_does_not_flag_successful_source_archive_guard_command(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler version 3.13.1 from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "wget -O /tmp/CompCert-v3.13.1.tar.gz "
+                            "https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz\n"
+                            "tar -xzf /tmp/CompCert-v3.13.1.tar.gz -C /tmp\n"
+                            "grep -R '3\\.13\\.1' /tmp/CompCert/VERSION || "
+                            "{ echo 'Could not ground version 3.13.1 in fetched source markers'; exit 3; }"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "wget -O /tmp/CompCert-v3.13.1.tar.gz "
+                            "https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz\n"
+                            "tar -xzf /tmp/CompCert-v3.13.1.tar.gz -C /tmp\n"
+                            "grep -R '3\\.13\\.1' /tmp/CompCert/VERSION || "
+                            "{ echo 'Could not ground version 3.13.1 in fetched source markers'; exit 3; }"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "source identity ok\nCompCert-3.13.1/\nVERSION\nversion=3.13\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("source_archive_version_grounding_too_strict", codes)
+
     def test_work_session_resume_flags_version_pinned_source_toolchain_before_override(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -7454,6 +7608,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(recoverable_work_model_error("HTTP 500 backend unavailable"))
         self.assertTrue(recoverable_work_model_error("upstream returned 529"))
         self.assertTrue(recoverable_work_model_error("HTTP/1.1 502 Bad Gateway"))
+        self.assertTrue(recoverable_work_model_error("response did not contain assistant text"))
         self.assertFalse(recoverable_work_model_error("model returned invalid JSON"))
         self.assertFalse(recoverable_work_model_error("model returned invalid JSON at char 500"))
         self.assertFalse(recoverable_work_model_error("permission denied"))
@@ -35847,6 +36002,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("cheap source-provided compatibility/override flags", prompt)
         self.assertIn("prebuilt dependency plus override path", prompt)
         self.assertIn("version-pinned source-built dependency/toolchain install", prompt)
+        self.assertIn("versioned archive URL, tag/root directory, or tarball identity", prompt)
+        self.assertIn("do not abort just because internal files omit a patch suffix", prompt)
         self.assertIn("invalidates a toolchain/package path", prompt)
         self.assertIn("dependency-generation/configure target", prompt)
         self.assertIn("shortest explicit target that produces that artifact", prompt)

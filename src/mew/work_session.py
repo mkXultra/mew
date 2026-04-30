@@ -4179,6 +4179,25 @@ _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE = re.compile(
     r"\b(?:lib[A-Za-z0-9_.+-]+\.(?:a|so|dylib)|[A-Za-z0-9_./+-]*runtime[A-Za-z0-9_./+-]*\.(?:a|so|dylib))\b",
     re.IGNORECASE,
 )
+_LONG_DEPENDENCY_VERSION_TOKEN_RE = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b", re.IGNORECASE)
+_LONG_DEPENDENCY_SOURCE_VERSION_GROUNDING_FAILURE_MARKERS = (
+    "could not ground version",
+    "couldn't ground version",
+    "could not verify version",
+    "failed to ground version",
+)
+_LONG_DEPENDENCY_SOURCE_ARCHIVE_EVIDENCE_MARKERS = (
+    "archive/refs/tags",
+    "refs/tags",
+    ".tar.gz",
+    ".tar.xz",
+    ".tar.bz2",
+    "source archive",
+    "source tarball",
+    "tarball identity",
+    "source root",
+    "source identity",
+)
 
 
 def _make_invocation_prefix_is_wrapper(parts):
@@ -4380,6 +4399,57 @@ def _long_dependency_source_toolchain_before_override_blocker(calls, existing_bl
             "excerpt": clip_inline_text(command, 180),
         }
     return {}
+
+
+def _long_dependency_has_versioned_source_archive_evidence(text):
+    lowered = str(text or "").casefold()
+    if not _LONG_DEPENDENCY_VERSION_TOKEN_RE.search(str(text or "")):
+        return False
+    return any(marker in lowered for marker in _LONG_DEPENDENCY_SOURCE_ARCHIVE_EVIDENCE_MARKERS)
+
+
+def _long_dependency_source_version_grounding_blocker(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    exit_code = result.get("exit_code")
+    call_status = str(call.get("status") or "").casefold()
+    call_error = str(call.get("error") or "")
+    if call_status not in {"failed", "interrupted"} and exit_code in (None, 0) and not call_error:
+        return {}
+    text = _runtime_artifact_call_text(call)
+    observable_text = "\n".join(
+        str(value or "")
+        for value in (
+            result.get("stdout"),
+            result.get("stderr"),
+            result.get("error"),
+            call.get("error"),
+        )
+        if value
+    )
+    lowered_observable = observable_text.casefold()
+    if not any(marker in lowered_observable for marker in _LONG_DEPENDENCY_SOURCE_VERSION_GROUNDING_FAILURE_MARKERS):
+        return {}
+    if not _long_dependency_has_versioned_source_archive_evidence(text):
+        return {}
+    excerpt = ""
+    for raw_line in str(observable_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line_lower = line.casefold()
+        if any(marker in line_lower for marker in _LONG_DEPENDENCY_SOURCE_VERSION_GROUNDING_FAILURE_MARKERS):
+            excerpt = clip_inline_text(line, 180)
+            break
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = result.get("command") or parameters.get("command") or _runtime_artifact_call_text(call)
+    return {
+        "code": "source_archive_version_grounding_too_strict",
+        "source_tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "excerpt": excerpt or clip_inline_text(command, 180),
+    }
 
 
 def _long_dependency_artifact_refs(expected_artifacts):
@@ -4849,6 +4919,9 @@ def _long_dependency_strategy_blockers(call, expected_artifacts=None):
                 "excerpt": excerpt,
             }
         )
+    source_version_grounding = _long_dependency_source_version_grounding_blocker(call)
+    if source_version_grounding:
+        blockers.append(source_version_grounding)
     untargeted_make = _long_dependency_untargeted_make_blocker(call, expected_artifacts or [])
     if untargeted_make:
         blockers.append(untargeted_make)
@@ -4973,6 +5046,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "If prebuilt package-manager dependencies are available and a source-provided compatibility override is "
             "visible or likely, try that prebuilt dependency plus override path before starting version-pinned "
             "source-built dependency/toolchain installation. "
+            "For release archive/tag source builds, treat the versioned archive URL, tag/root directory, and "
+            "coarse internal VERSION markers as source identity evidence; do not abort solely because an "
+            "internal VERSION file omits a patch suffix that is already grounded by the archive/tag. "
             "If a compiler or toolchain can build a trivial binary but the linker reports a missing runtime "
             "library, install or configure the project runtime/library target before finish. If local smoke "
             "only works with custom runtime/library path flags, install or configure that runtime into the "
