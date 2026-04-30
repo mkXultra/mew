@@ -737,3 +737,21 @@ Done when:
 - a fixture terminal smoke render is inspected at the narrow resident width
 - no hidden monitoring, launcher execution, shell execution, broad refactors,
   live adapter changes, or core imports are introduced
+
+### SP39: mew-wisp Cat Right-Eye Height Repair
+
+Repair the remaining cat-form eye-height imbalance so the right eye no longer
+extends one row lower than the left eye.
+
+Done when:
+
+- the right eye and left eye have matching pixel height in the terminal cat
+  form
+- no lower right-eye extension remains below the balanced upper eyes
+- the nose/face structure, SP38 left-eye repair, and SP37 separated forelegs
+  remain visually intact
+- focused tests reject an extra lower right-eye row while preserving the
+  one-cell left-eye, lower-left tear-dot, and foreleg regression checks
+- a fixture terminal smoke render is inspected at the narrow resident width
+- no hidden monitoring, launcher execution, shell execution, broad refactors,
+  live adapter changes, or core imports are introduced

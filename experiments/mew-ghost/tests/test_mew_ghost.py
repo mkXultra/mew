@@ -1283,7 +1283,7 @@ CAT_REFERENCE_MASK = (
     '###..###..###.####....',
     '##...###..###..###....',
     '##...###..###..###....',
-    '###....##..##.###.....',
+    '###....##.....###.....',
     '.#####.##....###......',
     '...###......####......',
     '...###.......#####....',
@@ -1556,11 +1556,13 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     cat_mask = _cat_sprite_mask(cat)
     left_eye_segments = [row[5:8] for row in cat_mask[6:9]]
     right_eye_segments = [row[10:13] for row in cat_mask[6:9]]
+    lower_right_eye_segment = cat_mask[9][10:13]
     assert cat_mask[6][0:8] == '###..###'
     assert [row[0:8] for row in cat_mask[7:9]] == ['##...###'] * 2
     assert cat_mask[9][0:9] == '###....##'
     assert left_eye_segments == ['###'] * 3
     assert left_eye_segments == right_eye_segments
+    assert lower_right_eye_segment == '...'
     assert cat_mask[6][3:5] == '..'
     assert all(row[2:5] == '...' for row in cat_mask[7:9])
     assert cat_mask[9][3:7] == '....'
