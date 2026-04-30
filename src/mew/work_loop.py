@@ -26,6 +26,17 @@ from .patch_draft import (
     compile_patch_draft,
     compile_patch_draft_previews,
 )
+from .prompt_sections import (
+    CACHE_POLICY_CACHEABLE,
+    CACHE_POLICY_DYNAMIC,
+    CACHE_POLICY_SESSION,
+    PromptSection,
+    STABILITY_DYNAMIC,
+    STABILITY_SEMI_STATIC,
+    STABILITY_STATIC,
+    prompt_section_metrics,
+    render_prompt_sections,
+)
 from .reasoning_policy import (
     codex_reasoning_effort_scope,
     normalize_reasoning_effort,
@@ -6124,7 +6135,7 @@ def is_resident_loop_command(command):
     return is_resident_mew_loop_command(command)
 
 
-def build_work_think_prompt(context):
+def _build_work_think_prompt_legacy(context):
     return (
         "You are the THINK phase for mew work mode.\n"
         "Return only JSON. Do not use markdown.\n"
@@ -6206,6 +6217,227 @@ def build_work_think_prompt(context):
         f"Schema:\n{_work_action_schema_text()}\n\n"
         f"Context JSON:\n{json.dumps(context, ensure_ascii=False, indent=2)}"
     )
+
+
+_LONG_DEPENDENCY_PROFILE_START = "For long dependency/toolchain/source-build tasks,"
+_LONG_DEPENDENCY_PROFILE_END = "Then prove the final artifact exists and is executable/invokable before finish. "
+_RUNTIME_LINK_PROOF_START = "For compiler/toolchain tasks,"
+_RUNTIME_LINK_PROOF_END = (
+    "If runtime install reports a missing library artifact, build the shortest explicit runtime-library "
+    "target first, then retry install and the default-link smoke. "
+)
+_RECOVERY_BUDGET_START = "Do not restart package-manager or source-tree setup after a compatible toolchain path is found;"
+_RECOVERY_BUDGET_END = (
+    "For genuinely long prerequisite or source-build commands, set a bounded run_command timeout sized to "
+    "the remaining wall budget instead of repeatedly slicing the same build into default-timeout commands. "
+)
+
+
+def _extract_prompt_span(text, start, end):
+    start_index = text.find(start)
+    if start_index < 0:
+        return text, "", ""
+    end_index = text.find(end, start_index)
+    if end_index < 0:
+        return text, "", ""
+    end_index += len(end)
+    return text[:start_index], text[start_index:end_index], text[end_index:]
+
+
+def _remove_prompt_span(text, start, end):
+    before, span, after = _extract_prompt_span(text, start, end)
+    if not span:
+        return text, ""
+    return f"{before.rstrip()} {after.lstrip()}".strip(), span.strip()
+
+
+def _work_think_dynamic_failure_evidence_section(context):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    work_session = work_session if isinstance(work_session, dict) else {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    context_compaction = work_session.get("context_compaction") if isinstance(work_session.get("context_compaction"), dict) else {}
+    evidence = {
+        "prompt_context_mode": context_compaction.get("prompt_context_mode") or "full",
+        "has_failed_patch_repair": bool(resume.get("failed_patch_repair")),
+        "has_retry_context": bool(resume.get("retry_context")),
+        "has_verifier_failure_repair_agenda": bool(resume.get("verifier_failure_repair_agenda")),
+        "has_long_dependency_build_state": bool(resume.get("long_dependency_build_state")),
+        "has_stale_runtime_artifact_risk": bool(resume.get("stale_runtime_artifact_risk")),
+        "has_continuity": bool(resume.get("continuity")),
+    }
+    return (
+        "DynamicFailureEvidence\n"
+        "Use this small dynamic index as routing evidence before adding new generic prompt text. "
+        "If a relevant flag is true, inspect the matching work_session.resume object in Context JSON "
+        "and repair through the lowest durable layer first: detector/resume, profile/contract, tool/runtime, "
+        "then prompt section. Do not add another task-specific sentence when a structural detector or profile "
+        "would preserve the same lesson across tasks.\n"
+        f"Evidence index JSON:\n{json.dumps(evidence, ensure_ascii=False, sort_keys=True)}"
+    )
+
+
+def _work_think_compact_recovery_section(context):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    work_session = work_session if isinstance(work_session, dict) else {}
+    compaction = work_session.get("context_compaction") if isinstance(work_session.get("context_compaction"), dict) else {}
+    mode = compaction.get("prompt_context_mode") or "full"
+    return (
+        "CompactRecovery\n"
+        "When prompt context is compacted, use work_session.resume, recent_read_file_windows, "
+        "target_path_cached_window_observations, and working_memory as the reentry contract. "
+        "If the exact old text or verifier state is absent, do one narrow recovery read or remember the "
+        "specific blocker instead of guessing. If mode is compact_recovery, avoid broad rediscovery and "
+        "choose the smallest action that restores source, verifier, risk, or next-action state.\n"
+        f"Current prompt_context_mode: {mode}"
+    )
+
+
+def build_work_think_prompt_sections(context):
+    legacy_prompt = _build_work_think_prompt_legacy(context)
+    context_marker = "\n\nContext JSON:\n"
+    if context_marker in legacy_prompt:
+        prompt_before_context, context_json = legacy_prompt.split(context_marker, 1)
+    else:
+        prompt_before_context = legacy_prompt
+        context_json = json.dumps(context, ensure_ascii=False, indent=2)
+    schema_marker = "\nSchema:\n"
+    if schema_marker in prompt_before_context:
+        implementation_prompt, schema_text = prompt_before_context.rsplit(schema_marker, 1)
+    else:
+        implementation_prompt = prompt_before_context
+        schema_text = _work_action_schema_text()
+
+    before_long_dependency, long_dependency_profile, after_long_dependency = _extract_prompt_span(
+        implementation_prompt,
+        _LONG_DEPENDENCY_PROFILE_START,
+        _LONG_DEPENDENCY_PROFILE_END,
+    )
+    if not long_dependency_profile:
+        before_long_dependency = implementation_prompt
+        after_long_dependency = ""
+
+    long_dependency_profile, runtime_link_proof = _remove_prompt_span(
+        long_dependency_profile,
+        _RUNTIME_LINK_PROOF_START,
+        _RUNTIME_LINK_PROOF_END,
+    )
+    long_dependency_profile, recovery_budget = _remove_prompt_span(
+        long_dependency_profile,
+        _RECOVERY_BUDGET_START,
+        _RECOVERY_BUDGET_END,
+    )
+
+    sections = [
+        PromptSection(
+            id="implementation_lane_base",
+            version="v1",
+            title="ImplementationLaneBase",
+            content=before_long_dependency.strip(),
+            stability=STABILITY_STATIC,
+            cache_policy=CACHE_POLICY_CACHEABLE,
+            profile="implement",
+        )
+    ]
+    if long_dependency_profile:
+        sections.append(
+            PromptSection(
+                id="long_dependency_profile",
+                version="v1",
+                title="LongDependencyProfile",
+                content=long_dependency_profile.strip(),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="long_dependency",
+            )
+        )
+    if runtime_link_proof:
+        sections.append(
+            PromptSection(
+                id="runtime_link_proof",
+                version="v1",
+                title="RuntimeLinkProof",
+                content=runtime_link_proof.strip(),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="long_dependency",
+            )
+        )
+    if recovery_budget:
+        sections.append(
+            PromptSection(
+                id="recovery_budget",
+                version="v1",
+                title="RecoveryBudget",
+                content=recovery_budget.strip(),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="long_dependency",
+            )
+        )
+    if after_long_dependency.strip():
+        sections.append(
+            PromptSection(
+                id="implementation_lane_base_continuation",
+                version="v1",
+                title="ImplementationLaneBaseContinuation",
+                content=after_long_dependency.strip(),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement",
+            )
+        )
+    sections.extend(
+        [
+            PromptSection(
+                id="work_action_schema",
+                version="v1",
+                title="Schema",
+                content=f"Schema:\n{schema_text.strip()}",
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement",
+            ),
+            PromptSection(
+                id="compact_recovery",
+                version="v1",
+                title="CompactRecovery",
+                content=_work_think_compact_recovery_section(context),
+                stability=STABILITY_SEMI_STATIC,
+                cache_policy=CACHE_POLICY_SESSION,
+                profile="implement",
+            ),
+            PromptSection(
+                id="dynamic_failure_evidence",
+                version="v1",
+                title="DynamicFailureEvidence",
+                content=_work_think_dynamic_failure_evidence_section(context),
+                stability=STABILITY_DYNAMIC,
+                cache_policy=CACHE_POLICY_DYNAMIC,
+                profile="implement",
+            ),
+            PromptSection(
+                id="context_json",
+                version="v1",
+                title="Context JSON",
+                content=f"Context JSON:\n{context_json.strip()}",
+                stability=STABILITY_DYNAMIC,
+                cache_policy=CACHE_POLICY_DYNAMIC,
+                profile="implement",
+            ),
+        ]
+    )
+    return sections
+
+
+def build_work_think_prompt_bundle(context):
+    sections = build_work_think_prompt_sections(context)
+    prompt = render_prompt_sections(sections)
+    return prompt, prompt_section_metrics(sections)
+
+
+def build_work_think_prompt(context):
+    prompt, _metrics = build_work_think_prompt_bundle(context)
+    return prompt
 
 
 def build_work_write_ready_think_prompt(context):
@@ -7015,11 +7247,11 @@ def plan_work_model_turn(
     delta_progress = progress if progress_model_deltas else None
     think_delta = model_delta_progress(delta_progress, session.get("id"), "THINK", sink=capture_delta) if stream_model else None
     think_kwargs = {"on_text_delta": think_delta} if think_delta else {}
-    think_prompt = (
-        build_work_write_ready_think_prompt(write_ready_context)
-        if write_ready_context
-        else build_work_think_prompt(context)
-    )
+    think_prompt_section_metrics = {}
+    if write_ready_context:
+        think_prompt = build_work_write_ready_think_prompt(write_ready_context)
+    else:
+        think_prompt, think_prompt_section_metrics = build_work_think_prompt_bundle(context)
     think_prompt_static_chars = 0
     think_prompt_dynamic_chars = 0
     if write_ready_fast_path.get("active"):
@@ -7056,6 +7288,7 @@ def plan_work_model_turn(
             "prompt_chars": len(think_prompt),
             "timeout_seconds": think_timeout,
         },
+        "prompt_sections": {"think": think_prompt_section_metrics} if think_prompt_section_metrics else {},
         "reasoning_policy": reasoning_policy,
         "reasoning_effort": reasoning_policy.get("effort") or "",
         "prompt_context_mode": prompt_context_mode,

@@ -461,6 +461,84 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("recent_read_images_observations", prompt_text)
         self.assertIn("reuse that observation instead of re-reading", prompt_text)
 
+    def test_work_think_prompt_sections_split_long_dependency_profile(self):
+        task = {
+            "id": 1,
+            "title": "Build source toolchain",
+            "description": "Compile the final executable from source.",
+            "status": "todo",
+            "kind": "coding",
+        }
+        session = {
+            "id": 7,
+            "task_id": task["id"],
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        from mew.work_loop import build_work_model_context, build_work_think_prompt_bundle
+
+        context = build_work_model_context({"tasks": [task]}, session, task, "2026-04-17T00:01:00Z")
+        prompt, metrics = build_work_think_prompt_bundle(context)
+        section_ids = [section["id"] for section in metrics["sections"]]
+
+        self.assertIn("[section:implementation_lane_base", prompt)
+        self.assertIn("[section:long_dependency_profile", prompt)
+        self.assertIn("[section:runtime_link_proof", prompt)
+        self.assertIn("[section:recovery_budget", prompt)
+        self.assertIn("[section:dynamic_failure_evidence", prompt)
+        self.assertIn("[section:compact_recovery", prompt)
+        self.assertIn("[section:context_json", prompt)
+        self.assertIn("work_session.resume.long_dependency_build_state", prompt)
+        self.assertIn("default lookup path", prompt)
+        self.assertIn("bounded run_command timeout", prompt)
+        self.assertIn("DynamicFailureEvidence", prompt)
+        self.assertIn("Context JSON:", prompt)
+        self.assertIn("long_dependency_profile", section_ids)
+        self.assertIn("runtime_link_proof", section_ids)
+        self.assertIn("dynamic_failure_evidence", section_ids)
+        self.assertEqual(metrics["contract_version"], "prompt_sections_v1")
+        self.assertGreater(metrics["cacheable_prefix_chars"], 0)
+        self.assertGreater(metrics["dynamic_chars"], 0)
+
+    def test_work_think_prompt_section_metrics_include_cache_hints(self):
+        task = {
+            "id": 1,
+            "title": "Fix source build",
+            "description": "Repair the source build.",
+            "status": "todo",
+            "kind": "coding",
+        }
+        session = {
+            "id": 8,
+            "task_id": task["id"],
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        from mew.work_loop import build_work_model_context, build_work_think_prompt_bundle
+
+        context = build_work_model_context({"tasks": [task]}, session, task, "2026-04-17T00:01:00Z")
+        _prompt, metrics = build_work_think_prompt_bundle(context)
+        by_id = {section["id"]: section for section in metrics["sections"]}
+
+        self.assertEqual(by_id["implementation_lane_base"]["cache_hint"], "cacheable_prefix")
+        self.assertEqual(by_id["long_dependency_profile"]["cache_policy"], "cacheable")
+        self.assertEqual(by_id["dynamic_failure_evidence"]["cache_hint"], "dynamic")
+        self.assertEqual(by_id["context_json"]["cache_policy"], "dynamic")
+        for section in metrics["sections"]:
+            self.assertGreater(section["chars"], 0)
+            self.assertTrue(section["hash"].startswith("sha256:"))
+            self.assertIn("cache_hint", section)
+
     def test_work_session_effort_budget_counts_steps_duration_and_warnings(self):
         session = {
             "id": 1,
@@ -25167,6 +25245,12 @@ class WorkSessionTests(unittest.TestCase):
                 metrics = session["model_turns"][0].get("model_metrics") or {}
                 self.assertGreater(metrics.get("context_chars", 0), 0)
                 self.assertGreater(metrics.get("think", {}).get("prompt_chars", 0), 0)
+                section_metrics = metrics.get("prompt_sections", {}).get("think", {})
+                self.assertEqual(section_metrics.get("contract_version"), "prompt_sections_v1")
+                self.assertIn(
+                    "long_dependency_profile",
+                    [section["id"] for section in section_metrics.get("sections", [])],
+                )
                 self.assertGreaterEqual(metrics.get("think", {}).get("elapsed_seconds", -1), 0)
                 self.assertEqual(metrics.get("reasoning_effort"), "low")
                 self.assertEqual(metrics.get("reasoning_policy", {}).get("work_type"), "exploration")
