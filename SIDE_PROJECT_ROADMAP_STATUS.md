@@ -46,10 +46,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP33 mew-wisp Product-Named Entrypoint | `done` | Task #54/session #85 added `experiments/mew-ghost/mew_wisp.py` as the product-named Python entrypoint delegating to `ghost.main`; README usage now prefers the wisp name while `ghost.py` remains the compatibility implementation module. |
 | SP34 mew-wisp Resident-First Entrypoint Default | `done` | Task #55/session #86 made `mew_wisp.py` resident-first by default: omitted mode/form/watch with no `--output` starts the human cat foreground watch, while explicit options and `--output` compatibility remain intact. |
 | SP35 mew-wisp Resident-First Help and Copy | `done` | Task #56/session #87 updated CLI help, README first-screen copy, and HTML compatibility wording so `mew-wisp` is presented as the resident terminal surface while `ghost.py`/HTML remain compatibility paths. |
+| SP36 mew-wisp Explicit Compatibility Output | `blocked` | Task #57/session #88 stopped before the first edit because the requested `gpt-5.5` backend returned HTTP 429 usage_limit_reached, resetting at 2026-05-05 14:32:30 JST. |
 
 ## Active Focus
 
-Active side-project focus: **SP35 mew-wisp Resident-First Help and Copy is complete; the remaining forward-product cleanup is legacy HTML/ghost naming retirement, which is larger and should stay split into bounded slices**.
+Active side-project focus: **SP36 mew-wisp Explicit Compatibility Output is planned but blocked by the requested `gpt-5.5` usage limit until 2026-05-05 14:32:30 JST; no product edits landed for SP36**.
 
 Current target:
 
@@ -292,6 +293,12 @@ Current target:
   rescue edits remain `0`. During closeout, issue `#32` was opened because the
   `./mew work --report` file did not persist the final step report even though
   stdout printed the final finish report.
+- SP36 task `#57` did not reach product edits: after pulling latest
+  `origin/main`, the requested `gpt-5.5` model returned HTTP 429
+  `usage_limit_reached` before the first tool step, with reset time
+  `2026-05-05 14:32:30 JST`. The worktree stayed clean. Issue `#32` was updated
+  because the `--report` path again lacked the final model-error report while
+  stdout printed it.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -1019,9 +1026,8 @@ Current target:
 
 Choose the next side-project move:
 
-1. choose the next mew-wisp polish or cleanup slice after SP35, preferably
-   another small one-shot that improves the terminal resident experience or
-   retires legacy `ghost`/HTML surface area without broad UI/test coupling
+1. resume SP36 after the requested `gpt-5.5` quota resets, or continue only if
+   the operator explicitly approves a different implementation model
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for

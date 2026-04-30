@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "task_id": 57,
+  "session_id": 88,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP36 attempted to make product-named mew_wisp.py output files require explicit --format while preserving ghost.py historical HTML compatibility, but no product edits landed because the requested gpt-5.5 backend hit a usage limit before the first tool step.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP.md",
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/57-sp36-explicit-compat-output-blocked-model-quota.json"
+  ],
+  "tests_run": [
+    {
+      "command": "./mew work --oneshot --live --model gpt-5.5 ...",
+      "result": "blocked before first edit with HTTP 429 usage_limit_reached; reset at 2026-05-05 14:32:30 JST"
+    },
+    {
+      "command": "git status --short --branch",
+      "result": "worktree clean after failed attempt; branch ahead only due latest origin/main merge"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "gpt55_usage_limit_reached_before_first_step",
+  "repair_required": false,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-explicit-compat-output-report.json",
+    "stdout final report showed stop_reason=model_error and HTTP 429 usage_limit_reached",
+    "https://github.com/mkXultra/mew/issues/32#issuecomment-4348562389"
+  ],
+  "commit": "",
+  "notes": "No product files were edited and no product-code rescue edits were made. The user requested gpt-5.5 as the implementation model, so the operator did not switch to another model. The --report persistence issue was confirmed again after pulling latest origin/main and recorded on issue #32."
+}

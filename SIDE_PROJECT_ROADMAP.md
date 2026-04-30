@@ -682,3 +682,23 @@ Done when:
 - focused tests cover the help/README/HTML copy contract and existing behavior
 - no behavior is removed, no hidden monitoring, launcher execution, shell
   execution, broad refactors, or core imports are introduced
+
+### SP36: mew-wisp Explicit Compatibility Output
+
+Stop the product-named `mew_wisp.py` entrypoint from silently selecting HTML
+when an operator asks for an output file without choosing a format, while
+preserving historical `ghost.py` compatibility.
+
+Done when:
+
+- `mew_wisp.py --output PATH` requires an explicit machine-readable format such
+  as `--format html` or `--format state`
+- `ghost.py --output PATH` keeps the historical default HTML compatibility
+  behavior
+- `mew_wisp.py` no-output resident defaults, explicit HTML/state output,
+  explicit human output, fixture-terminal behavior, launcher safety, and
+  isolation constraints remain intact
+- README usage and focused tests describe the explicit compatibility-output
+  contract
+- no hidden monitoring, launcher execution, shell execution, broad refactors,
+  or core imports are introduced
