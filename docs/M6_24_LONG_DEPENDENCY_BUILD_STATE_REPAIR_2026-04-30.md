@@ -268,6 +268,48 @@ Next validation is resource-normalized proof_5 for `compile-compcert` with
 sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
 remains paused.
 
+## v1.1 Malformed JSON Plan Recovery
+
+The v1.0 resource-normalized proof is recorded in:
+
+- `docs/M6_24_RECOVERY_BUDGET_COMPILE_COMPCERT_PROOF_5_2026-05-01.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-recovery-budget-compile-compcert-5attempts-seq-20260501-0055/result.json`
+
+The proof reached `2/3` valid completed trials before the frozen `5/5` close
+target became impossible. The failed valid trial did not exercise
+long-dependency build behavior: the first model turn returned a malformed JSON
+plan and `mew work` stopped with `stop_reason=model_error`.
+
+The repair is:
+
+`work_oneshot_malformed_json_plan_recovery_missing`
+
+Changes:
+
+- one-shot work treats backend `failed to parse JSON plan` as a recoverable
+  transient model error;
+- generic `model returned invalid JSON` remains non-recoverable;
+- existing one-shot continue-after-model-error behavior handles the retry.
+
+Focused validation:
+
+```text
+UV_CACHE_DIR=/tmp/uv-cache uv run pytest --no-testmon tests/test_work_session.py -k 'recoverable_work_model_error or continues_after_recoverable_model_error or does_not_continue_after_recoverable_model_error' -q
+UV_CACHE_DIR=/tmp/uv-cache uv run ruff check src/mew/commands.py tests/test_work_session.py
+```
+
+Result:
+
+- focused tests: `3 passed`
+- ruff: passed
+- broader work-session regression: `826 passed`, one multiprocessing warning,
+  `67 subtests passed`
+- `codex-ultra` review session `019ddf49-e29d-7140-bd17-24c9d889c0a8`:
+  `APPROVE`
+
+Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
+Broad measurement and proof_5 remain paused.
+
 ## v0.8 Source Archive Identity / Empty Response Recovery Repair
 
 The v0.7 speed rerun is recorded in:

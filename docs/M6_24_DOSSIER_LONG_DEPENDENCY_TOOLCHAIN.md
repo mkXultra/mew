@@ -20,18 +20,20 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> tool/runtime -> long_dependency_final_recovery_budget_after_failed_validation -> compile-compcert proof_5
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> loop_recovery -> work_oneshot_malformed_json_plan_recovery -> compile-compcert speed_1
 ```
 
 Broad measurement remains paused. The OAuth-refresh proof rerun validated the
 proof-infrastructure fix but missed the `5/5` close target after a recoverable
 runtime-link failure consumed the remaining wall/model budget. The tool/runtime
 recovery-budget repair passed its one-trial same-shape speed proof at `1/1`.
-The next score action is a resource-normalized five-trial proof for
-`compile-compcert` with sequential `-k 5 -n 1` and refreshable
-`~/.codex/auth.json`. Before another code repair after that proof, read this
-dossier and decide whether the next fix is a new blocker, a repeated older
-blocker, or prompt/profile accretion.
+The resource-normalized proof then reached `2/3` valid completed trials before
+the close target became impossible; the failed valid trial stopped at step 1 on
+`failed to parse JSON plan`, before task work ran. The next score action is a
+one-trial same-shape speed proof after the bounded one-shot malformed JSON plan
+recovery repair. Before another code repair after that proof, read this dossier
+and decide whether the next fix is a new blocker, a repeated older blocker, or
+prompt/profile accretion.
 
 ## Repair Timeline
 
@@ -50,7 +52,8 @@ blocker, or prompt/profile accretion.
 | v0.8 source archive identity / empty response recovery | Accept archive/tag/root identity when internal markers are coarse; recover empty assistant response. | detector/resume + recovery + THINK guidance | Speed `1/1`; proof `4/5`; next failure timed-out artifact proof calibration. |
 | v0.9 timed-out artifact proof calibration | Do not mark required final artifacts proven from timed-out or nonzero commands. | instrumentation/report | Speed `1/1`; first proof_5 invalidated by auth expiry; rerun pending after OAuth refresh repair. |
 | proof infra OAuth refresh | Refresh ChatGPT OAuth tokens from legacy/Codex auth shapes and retry one 401. | proof infrastructure | Auth-expiry failure removed; same-shape proof reached valid completed trials `1/2`; next failure final recovery budget. |
-| v1.0 final recovery-budget reserve | Preserve recovery wall budget for long build commands that include final validation smoke. | tool/runtime | Speed `1/1`; proof_5 pending. |
+| v1.0 final recovery-budget reserve | Preserve recovery wall budget for long build commands that include final validation smoke. | tool/runtime | Speed `1/1`; proof `2/3`; next failure malformed JSON plan recovery. |
+| v1.1 malformed JSON plan recovery | Treat backend `failed to parse JSON plan` as a recoverable one-shot transient model error. | loop recovery | Implemented; speed `1/1` pending. |
 
 ## Pattern Readout
 
@@ -88,6 +91,11 @@ blocker, or prompt/profile accretion.
   finished cleanly, built `/tmp/CompCert/ccomp`, installed default runtime
   support, ran a default-path smoke, and the external verifier passed. Escalate
   to resource-normalized proof_5 before any next repair or broad measurement.
+- The v1.0 resource-normalized proof miss is not another long-dependency
+  sequencing rule. The failed valid trial stopped before task work because a
+  structured model response was malformed and one-shot treated the parser error
+  as terminal. Keep the fix in loop recovery, not long-dependency prompt
+  guidance.
 
 ## Preflight Before Next Repair
 

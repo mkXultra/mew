@@ -6002,6 +6002,7 @@ def recoverable_work_model_error(error):
             "response did not contain assistant text",
             "response without assistant text",
             "no assistant text",
+            "failed to parse json plan",
             "request timed out",
             "timed out",
             "timeout",

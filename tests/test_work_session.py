@@ -8033,6 +8033,11 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(recoverable_work_model_error("upstream returned 529"))
         self.assertTrue(recoverable_work_model_error("HTTP/1.1 502 Bad Gateway"))
         self.assertTrue(recoverable_work_model_error("response did not contain assistant text"))
+        self.assertTrue(
+            recoverable_work_model_error(
+                "failed to parse JSON plan: Expecting ',' delimiter: line 70 column 835"
+            )
+        )
         self.assertFalse(recoverable_work_model_error("model returned invalid JSON"))
         self.assertFalse(recoverable_work_model_error("model returned invalid JSON at char 500"))
         self.assertFalse(recoverable_work_model_error("permission denied"))

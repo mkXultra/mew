@@ -175,8 +175,11 @@ M6.24 resume condition:
   reached v1.0: default runtime path, runtime install target, source-archive
   identity, timed-out artifact-proof calibration, OAuth refresh, and final
   recovery-budget reserve. The v1.0 recovery-budget speed proof passed `1/1`
-  in `29m 25s` with refreshable `~/.codex/auth.json`. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> tool/runtime -> long_dependency_final_recovery_budget_after_failed_validation proof_5 -> compile-compcert -k5 -n1`.
+  in `29m 25s` with refreshable `~/.codex/auth.json`. The resource-normalized
+  proof then reached `2/3` valid completed trials before the `5/5` close target
+  became impossible; the failed valid trial stopped at step 1 on malformed JSON
+  plan parsing, before task work ran. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> loop_recovery -> work_oneshot_malformed_json_plan_recovery speed_1 -> compile-compcert`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
