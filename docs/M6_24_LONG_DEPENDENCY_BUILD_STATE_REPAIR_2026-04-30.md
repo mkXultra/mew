@@ -301,6 +301,42 @@ report/resume cleanup evidence, not a blocker for the selected score repair.
 Next validation is resource-normalized proof_5 for the same shape:
 `compile-compcert -k 5 -n 1`.
 
+## v0.5 Resource-Normalized Proof
+
+The v0.5 resource-normalized proof improved the selected shape but did not
+reach the close gate:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-prebuilt-override-compile-compcert-5attempts-seq-20260430-1230/2026-04-30__12-30-26/result.json
+```
+
+Result:
+
+- score: `4/5`
+- runner errors: `0`
+- Harbor mean: `0.800`
+- total runtime: `2h 11m 31s`
+- frozen Codex target: `5/5`
+
+Four trials passed the external verifier. The failed trial built `ccomp` and
+found a local `libcompcert.a`, but its local smoke used a custom `-stdlib`
+runtime path. The external verifier used the default `ccomp` invocation and
+failed with:
+
+```text
+/usr/bin/ld: cannot find -lcompcert: No such file or directory
+```
+
+Next bounded repair:
+
+`long_dependency_default_runtime_link_path_contract`
+
+For compiler/toolchain source-build tasks, local smoke proof must exercise the
+same default runtime/library lookup path that the external verifier or normal
+user invocation will use. Custom runtime path flags are useful diagnostics, but
+they are not sufficient close evidence unless the task explicitly requires that
+interface.
+
 ## v0.4 Repair
 
 `long_dependency_runtime_link_library_contract`
