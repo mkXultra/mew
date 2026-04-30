@@ -46,11 +46,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP33 mew-wisp Product-Named Entrypoint | `done` | Task #54/session #85 added `experiments/mew-ghost/mew_wisp.py` as the product-named Python entrypoint delegating to `ghost.main`; README usage now prefers the wisp name while `ghost.py` remains the compatibility implementation module. |
 | SP34 mew-wisp Resident-First Entrypoint Default | `done` | Task #55/session #86 made `mew_wisp.py` resident-first by default: omitted mode/form/watch with no `--output` starts the human cat foreground watch, while explicit options and `--output` compatibility remain intact. |
 | SP35 mew-wisp Resident-First Help and Copy | `done` | Task #56/session #87 updated CLI help, README first-screen copy, and HTML compatibility wording so `mew-wisp` is presented as the resident terminal surface while `ghost.py`/HTML remain compatibility paths. |
-| SP36 mew-wisp Explicit Compatibility Output | `blocked` | Task #57/session #88 stopped before the first edit on `gpt-5.5` quota. After the user reported quota reset, task #58/session #89 reached 13 work steps but was killed before product edits landed because the operator misread the new nested `--report` shape as step 0. |
+| SP36 mew-wisp Explicit Compatibility Output | `done` | Task #60/session #91 landed practical after cleaning up stale sessions #89/#90: product-named `mew_wisp.py --output` now requires explicit `--format html` or `--format state`, while direct `ghost.py --output` keeps historical HTML compatibility. |
 
 ## Active Focus
 
-Active side-project focus: **SP36 mew-wisp Explicit Compatibility Output is still blocked; after quota reset, the retry reached 13 work steps but no product edits landed before the operator killed it after misreading the nested `--report` shape**.
+Active side-project focus: **SP36 mew-wisp Explicit Compatibility Output is done; choose the next terminal-first `mew-wisp` milestone before reconnecting to deeper mew state**.
 
 Current target:
 
@@ -309,6 +309,15 @@ Current target:
   stayed clean and rescue edits remain `0`. Issue `#33` now records the real
   implementation-lane polish finding: live/report status should expose nested
   progress clearly enough that operators do not misclassify active work.
+- SP36 final retry task `#60` / session `#91` landed practical after the
+  operator explicitly closed stale sessions `#89` and `#90`. `mew_wisp.py
+  --output` now errors unless `--format html` or `--format state` is provided,
+  direct `ghost.py --output` preserves historical HTML compatibility, README
+  usage is explicit, and focused tests cover rejection, explicit HTML/state,
+  and compatibility paths. Mew authored the product patch with rescue edits
+  `0`; verifier passed (`55 passed`), `git diff --check` passed, reject/HTML
+  compatibility smoke checks passed, and issue `#34` records the reusable
+  session cleanup polish finding.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -1036,9 +1045,8 @@ Current target:
 
 Choose the next side-project move:
 
-1. resume SP36 with the corrected `.work_report` progress check, and continue
-   using issue `#33` as implementation-lane polish evidence for report/live
-   status clarity
+1. define the next mew-wisp milestone after SP36, keeping terminal-first
+   resident polish ahead of deeper mew state reconnection
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for

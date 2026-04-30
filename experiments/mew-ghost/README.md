@@ -78,10 +78,10 @@ Start the product-named resident cat HUD with omitted mode/form/watch intent. Th
 UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py
 ```
 
-Render deterministic local HTML from the fixture with explicit `--output`. This keeps the historical HTML default and never launches `mew`:
+Render deterministic local HTML from the fixture with explicit `--format html --output`. Product-named `mew_wisp.py` output files require explicit `--format html` or `--format state`; historical direct `ghost.py --output` users keep the compatibility HTML default. This never launches `mew`:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --output /tmp/mew-ghost.html
+UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format html --output /tmp/mew-ghost.html
 ```
 
 Print three bounded foreground watch records as newline-delimited JSON:

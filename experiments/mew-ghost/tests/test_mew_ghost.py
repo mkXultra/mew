@@ -133,20 +133,93 @@ def test_product_named_entrypoint_omitted_mode_form_and_watch_defaults_to_reside
     assert '"record_type"' not in output
 
 
-def test_product_named_entrypoint_output_keeps_historical_html_default(capsys, tmp_path: Path) -> None:
+def test_product_named_entrypoint_output_requires_explicit_format(capsys, tmp_path: Path) -> None:
     output_path = tmp_path / 'mew-wisp.html'
     original_argv = sys.argv[:]
     calls: list[list[str]] = []
 
     def forbidden_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        raise AssertionError('live desk runner must not be called for explicit output default')
+        raise AssertionError('live desk runner must not be called for rejected output default')
 
     sys.argv = [str(WISP_PATH), '--fixture', str(FIXTURE_PATH), '--output', str(output_path)]
+    try:
+        try:
+            ghost.main(None, live_desk_runner=forbidden_runner)
+        except SystemExit as exc:
+            exit_code = exc.code
+        else:
+            raise AssertionError('mew_wisp.py --output without --format should fail')
+    finally:
+        sys.argv = original_argv
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert calls == []
+    assert captured.out == ''
+    assert 'mew_wisp.py --output requires explicit --format html or --format state' in captured.err
+    assert not output_path.exists()
+
+
+def test_product_named_entrypoint_output_accepts_explicit_html_format(capsys, tmp_path: Path) -> None:
+    output_path = tmp_path / 'mew-wisp.html'
+    original_argv = sys.argv[:]
+    calls: list[list[str]] = []
+
+    def forbidden_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        raise AssertionError('live desk runner must not be called for explicit html output')
+
+    sys.argv = [str(WISP_PATH), '--fixture', str(FIXTURE_PATH), '--format', 'html', '--output', str(output_path)]
     try:
         assert ghost.main(None, live_desk_runner=forbidden_runner) == 0
     finally:
         sys.argv = original_argv
+
+    rendered = output_path.read_text(encoding='utf-8')
+
+    assert calls == []
+    assert capsys.readouterr().out == ''
+    assert '<!doctype html>' in rendered
+    assert '<title>mew-wisp resident state (ghost.py compatibility render)</title>' in rendered
+    assert '<h2>Resident state (ghost.py compatibility)</h2>' in rendered
+    assert 'mew-wisp resident cat' not in rendered
+
+
+def test_product_named_entrypoint_output_accepts_explicit_state_format(capsys, tmp_path: Path) -> None:
+    output_path = tmp_path / 'mew-wisp.json'
+    original_argv = sys.argv[:]
+    calls: list[list[str]] = []
+
+    def forbidden_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        raise AssertionError('live desk runner must not be called for explicit state output')
+
+    sys.argv = [str(WISP_PATH), '--fixture', str(FIXTURE_PATH), '--format', 'state', '--output', str(output_path)]
+    try:
+        assert ghost.main(None, live_desk_runner=forbidden_runner) == 0
+    finally:
+        sys.argv = original_argv
+
+    rendered = output_path.read_text(encoding='utf-8')
+
+    assert calls == []
+    assert capsys.readouterr().out == ''
+    assert '"schema_version": "mew-ghost.sp18.v1"' in rendered
+    assert '<!doctype html>' not in rendered
+    assert 'mew-wisp resident cat' not in rendered
+
+
+def test_compatibility_entrypoint_output_keeps_historical_html_default(capsys, tmp_path: Path) -> None:
+    output_path = tmp_path / 'ghost.html'
+    calls: list[list[str]] = []
+
+    def forbidden_runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        raise AssertionError('live desk runner must not be called for compatibility output default')
+
+    assert ghost.main(['--fixture', str(FIXTURE_PATH), '--output', str(output_path)], live_desk_runner=forbidden_runner) == 0
 
     rendered = output_path.read_text(encoding='utf-8')
 
@@ -1871,14 +1944,14 @@ def test_readme_usage_prefers_product_named_uv_run_python_commands() -> None:
     assert '# mew-wisp resident terminal' in readme
     assert '`mew_wisp.py` is the normal product-named resident terminal entrypoint' in normalized_readme
     assert '`ghost.py` remains the historical compatibility implementation module' in normalized_readme
-    assert 'explicit `--output` preserves the compatibility HTML/state render flow' in normalized_readme
+    assert 'Product-named `mew_wisp.py` output files require explicit `--format html` or `--format state`' in normalized_readme
     assert '`ghost.py`: the historical standalone compatibility implementation module retained for direct `ghost.py` users.' in readme
 
     usage_lines = [line.strip() for line in readme.splitlines() if 'experiments/mew-ghost/mew_wisp.py' in line]
 
     assert usage_lines == [
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py',
-        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --output /tmp/mew-ghost.html',
+        'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format html --output /tmp/mew-ghost.html',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format state --watch-count 3 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --wisp --watch-count 2 --interval 0.5',
         'UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --format human --watch-count 2 --interval 0.5',

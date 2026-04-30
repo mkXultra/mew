@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "task_id": 60,
+  "session_id": 91,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP36 made product-named mew_wisp.py output files require explicit --format html or --format state while preserving direct ghost.py --output HTML compatibility.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 332,
+  "read_turns_before_edit": 4,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/60-sp36-explicit-compat-output-practical.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "55 passed in 5.90s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --fixture experiments/mew-ghost/fixtures/sample_ghost_state.json --output /tmp/mew-wisp-sp36-reject.html",
+      "result": "expected exit 2; no output file created; error requires explicit --format html or --format state"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --fixture experiments/mew-ghost/fixtures/sample_ghost_state.json --format html --output /tmp/mew-wisp-sp36.html",
+      "result": "passed; HTML compatibility render created"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/ghost.py --fixture experiments/mew-ghost/fixtures/sample_ghost_state.json --output /tmp/mew-ghost-sp36-compat.html",
+      "result": "passed; direct ghost.py compatibility HTML default preserved"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "stopped_session_remained_active_until_explicit_close",
+  "repair_required": true,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-explicit-compat-output-retry3-report.json",
+    "https://github.com/mkXultra/mew/issues/33",
+    "https://github.com/mkXultra/mew/issues/34",
+    "focused verifier passed: 55 tests",
+    "reject, explicit HTML, and direct ghost.py compatibility smoke checks passed"
+  ],
+  "commit": "",
+  "notes": "Mew authored the product patch without product-code rescue edits. The product slice is complete; issue #33 records report/live nested-progress visibility, and issue #34 records that stop-session plus failed retry cleanup required explicit close-session."
+}

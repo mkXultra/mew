@@ -1435,7 +1435,10 @@ def main(
         argv is None and bool(sys.argv) and Path(sys.argv[0]).stem in {'mew_wisp', 'mew-wisp'}
     )
     resident_entrypoint_default = invoked_as_wisp_entrypoint and args.output is None
+    product_entrypoint_output = invoked_as_wisp_entrypoint and args.output is not None
 
+    if product_entrypoint_output and args.format is None:
+        parser.error('mew_wisp.py --output requires explicit --format html or --format state')
     if args.format is None:
         args.format = 'human' if args.wisp or resident_entrypoint_default else 'html'
     if args.form is None:
