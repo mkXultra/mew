@@ -4146,6 +4146,18 @@ _LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE = re.compile(
     r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:-ignore|--ignore|allow-unsupported|override)",
     re.IGNORECASE,
 )
+_LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE = re.compile(
+    r"(?:use[-_]external[-_][A-Za-z0-9_.+-]+|"
+    r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:external|use[-_]external|system[-_]|prebuilt)|"
+    r"\b(?:external|system|prebuilt)\s+(?:dependency|dependencies|library|libraries|package|packages)\b)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_PACKAGE_MANAGER_PREBUILT_RE = re.compile(
+    r"\b(?:apt(?:-get)?\s+install|apt-cache\s+(?:policy|search)|apt\s+(?:show|install)|"
+    r"dnf\s+(?:install|info|search)|yum\s+(?:install|info|search)|apk\s+(?:add|info|search)|"
+    r"brew\s+(?:install|info|search)|pacman\s+-S|zypper\s+(?:install|info|search)|pkg\s+install)\b",
+    re.IGNORECASE,
+)
 _LONG_DEPENDENCY_VERSION_PINNED_SOURCE_TOOLCHAIN_RE = re.compile(
     r"\bopam\s+install\b[^\n;&|]*"
     r"(?:[A-Za-z0-9][A-Za-z0-9_.+-]*[.=<>~!]+\d+\.\d+|[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+)",
@@ -4354,6 +4366,18 @@ def _long_dependency_has_configure_override_attempt(call):
         return False
     text = _runtime_artifact_call_text(call)
     return bool(_LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE.search(text))
+
+
+def _long_dependency_has_external_compatibility_branch_evidence(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    return bool(_LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE.search(_runtime_artifact_call_text(call)))
+
+
+def _long_dependency_uses_prebuilt_package_manager_dependency(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    return bool(_LONG_DEPENDENCY_PACKAGE_MANAGER_PREBUILT_RE.search(_runtime_artifact_call_text(call)))
 
 
 def _long_dependency_uses_version_pinned_source_toolchain(call):
@@ -4999,6 +5023,59 @@ def _long_dependency_runtime_install_before_library_blocker(calls, expected_arti
     return blocker
 
 
+def _long_dependency_build_call_timed_out(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    if "build_attempted" not in _long_dependency_call_stages(call):
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("timed_out"):
+        return True
+    return _long_dependency_incomplete_reason(call) in {"timeout", "tool_timeout"}
+
+
+def _long_dependency_compatibility_branch_budget_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    prebuilt_dependency_call = {}
+    external_branch_evidence_call = {}
+    serial_probe_count = 0
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if not external_branch_evidence_call and _long_dependency_has_external_compatibility_branch_evidence(call):
+            external_branch_evidence_call = call
+        if (
+            prebuilt_dependency_call
+            and external_branch_evidence_call
+            and _long_dependency_has_external_compatibility_branch_evidence(call)
+            and _long_dependency_build_call_timed_out(call)
+            and serial_probe_count >= 2
+        ):
+            command = _long_dependency_call_command_text(call) or _runtime_artifact_call_text(call)
+            return {
+                "code": "compatibility_branch_budget_contract_missing",
+                "layer": "profile_contract",
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "excerpt": clip_inline_text(command, 180),
+                "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id"),
+                "external_branch_tool_call_id": external_branch_evidence_call.get("id"),
+            }
+        stages = set(_long_dependency_call_stages(call))
+        if stages & {"configured", "dependencies_generated", "build_attempted", "package_manager_setup"}:
+            serial_probe_count += 1
+            continue
+        if _long_dependency_strategy_blockers(call):
+            serial_probe_count += 1
+    return {}
+
+
 def _long_dependency_task_text(task, session=None):
     task = task if isinstance(task, dict) else {}
     session = session if isinstance(session, dict) else {}
@@ -5217,6 +5294,18 @@ def build_long_dependency_build_state(task, calls, session=None):
             strategy_blockers.append(runtime_install_before_library)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
+    compatibility_branch_budget = _long_dependency_compatibility_branch_budget_blocker(
+        calls,
+        missing,
+    )
+    if compatibility_branch_budget:
+        key = (
+            compatibility_branch_budget.get("code"),
+            compatibility_branch_budget.get("source_tool_call_id"),
+            compatibility_branch_budget.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(compatibility_branch_budget)
     if not progress and not proven and not strategy_blockers:
         return {}
     latest_command = ""
@@ -5240,7 +5329,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
             "If prebuilt package-manager dependencies are available and a source-provided compatibility override is "
             "visible or likely, try that prebuilt dependency plus override path before starting version-pinned "
-            "source-built dependency/toolchain installation. "
+            "source-built dependency/toolchain installation; once source help or configure exposes an external/prebuilt "
+            "compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final "
+            "artifact build instead of serially probing weaker branches. "
             "For release archive/tag source builds, treat the versioned archive URL, tag/root directory, and "
             "coarse internal VERSION markers as source identity evidence; do not abort solely because an "
             "internal VERSION file omits a patch suffix that is already grounded by the archive/tag. "

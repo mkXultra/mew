@@ -234,16 +234,47 @@ probes consumed most of the wall budget; the final long build was capped to
 `702.927s`, timed out, and `/tmp/CompCert/ccomp` was missing when the external
 verifier ran.
 
-The next bounded generic repair is:
+The bounded generic repair is:
 
 `long_dependency_compatibility_branch_budget_contract`
 
-Layer: profile/contract. The repair should consolidate long dependency
-strategy rather than append another narrow THINK sentence. The intended
-contract is to combine source-provided compatibility flags and prebuilt
-external dependency packages early when a version-tolerant source-build route
-is exposed, then reserve enough wall budget for the selected long build branch
-and final artifact proof.
+Layer: profile/contract. The repair consolidates long dependency strategy
+rather than appending another narrow THINK sentence. It detects the generic
+failure shape where a source-build task has:
+
+- prebuilt package-manager dependency evidence;
+- source-exposed external/prebuilt compatibility branch evidence;
+- serial setup/probe churn before the winning branch;
+- a timed-out external-branch build; and
+- required final artifacts still missing or unproven.
+
+Changes:
+
+- `work_session.resume.long_dependency_build_state.strategy_blockers` now
+  surfaces `compatibility_branch_budget_contract_missing` with
+  `layer=profile_contract`;
+- the blocker is suppressed when a later strict final-artifact proof exists;
+- ignore-only compatibility probes do not count as external/prebuilt branch
+  evidence;
+- resume `suggested_next` and THINK guidance tell the model to commit early to
+  one coherent external/prebuilt dependency branch and reserve wall budget for
+  final artifact build/proof.
+
+Focused validation:
+
+```text
+uv run pytest --no-testmon tests/test_work_session.py -k 'late_external_branch_budget or branch_budget_for_ignore_only or version_pinned_source_toolchain_before_override or missing_compatibility_override_probe or source_toolchain_before_later_override_attempt or work_think_prompt_guides_independent_reads_to_batch' -q
+uv run pytest --no-testmon tests/test_work_session.py -k 'long_dependency or compatibility_override or runtime_install or default_runtime_link_path or source_archive_version_grounding or artifact_proof' -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result:
+
+- focused branch-budget tests: `7 passed`
+- broader long-dependency tests: `18 passed, 22 subtests passed`
+- ruff: passed
+- codex-ultra review session `019de01e-2b4f-72b1-b74d-87ab30174dcf`:
+  `APPROVED`
 
 Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
 Broad measurement and proof_5 remain paused.

@@ -20,7 +20,7 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract -> compile-compcert speed_1
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract speed_1 -> compile-compcert
 ```
 
 Broad measurement remains paused. The OAuth-refresh proof rerun validated the
@@ -41,9 +41,9 @@ before the close target became impossible. The failed valid trial repeated the
 winning external-Flocq strategy too late: serial compatibility probes consumed
 the wall budget, then the final `-use-external-Flocq` build was capped and
 timed out before `/tmp/CompCert/ccomp` existed. This is now a profile/contract
-consolidation point, not another narrow inline prompt clause. The next repair
-is `long_dependency_compatibility_branch_budget_contract`, followed by
-`compile-compcert` speed_1.
+consolidation point, not another narrow inline prompt clause. The
+`long_dependency_compatibility_branch_budget_contract` repair is implemented;
+the next action is the one-trial same-shape `compile-compcert` speed proof.
 
 ## Repair Timeline
 
@@ -65,7 +65,7 @@ is `long_dependency_compatibility_branch_budget_contract`, followed by
 | v1.0 final recovery-budget reserve | Preserve recovery wall budget for long build commands that include final validation smoke. | tool/runtime | Speed `1/1`; proof `2/3`; next failure malformed JSON plan recovery. |
 | v1.1 malformed JSON plan recovery | Treat backend `failed to parse JSON plan` as a recoverable one-shot transient model error. | loop recovery | Speed `1/1`; proof `1/2`; next failure timeout-ceiling full-context recovery. |
 | v1.2 timeout-ceiling compact recovery | Use compact recovery context when wall-clock pressure reduces model timeout. | model context budgeting | Speed `1/1`; proof `2/3`; next failure compatibility branch budget. |
-| v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | proof `2/3`; next action is speed_1 after repair. |
+| v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | Implemented; speed_1 pending. |
 
 ## Pattern Readout
 
@@ -73,6 +73,12 @@ is `long_dependency_compatibility_branch_budget_contract`, followed by
   detector/resume state with targeted guidance.
 - The repeated long-dependency chain is now dominated by ordering and
   proof-boundary contracts.
+- v1.3 keeps the repair in the existing implementation profile: resume state
+  surfaces `compatibility_branch_budget_contract_missing` from generic evidence
+  (prebuilt package-manager dependencies, source-exposed external/prebuilt
+  branch, serial probe churn, timed-out external-branch build, missing final
+  artifacts) and guidance stays bounded to branch commitment plus wall-budget
+  reserve.
 - Prompt guidance is accumulating in the same surface. If the next failure is
   another narrow sequencing rule, evaluate a `LongDependencyProfile` or prompt
   section registry before adding another sentence.

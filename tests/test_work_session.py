@@ -5124,6 +5124,276 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
 
+    def test_work_session_resume_flags_late_external_branch_budget_timeout(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get update && apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get update && apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "Setting up coq 8.18.0\nSetting up libcoq-flocq\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure --help | grep -E 'external|ignore'",
+                    },
+                    "result": {
+                        "command": "./configure --help | grep -E 'external|ignore'",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "  -ignore-coq-version\n  -use-external-Flocq\n  -use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Configuration succeeded.\n"
+                            "COQC flocq/Calc/Bracket.v\n"
+                            "Error: The variable Z_div_mod_eq was not found\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "COQC backend/Asmgenproof0.v\ncommand timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        budget_blocker = next(
+            item for item in blockers if item.get("code") == "compatibility_branch_budget_contract_missing"
+        )
+
+        self.assertEqual(budget_blocker["layer"], "profile_contract")
+        self.assertEqual(budget_blocker["prebuilt_dependency_tool_call_id"], 2)
+        self.assertEqual(budget_blocker["external_branch_tool_call_id"], 3)
+        self.assertEqual(budget_blocker["source_tool_call_id"], 5)
+
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: compatibility_branch_budget_contract_missing", text)
+        self.assertIn("external/prebuilt compatibility branch", text)
+        self.assertIn("one coherent branch", text)
+        self.assertIn("reserve enough wall budget", text)
+
+    def test_work_session_resume_clears_late_external_branch_budget_after_artifact_proof(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-use-external-Flocq\n-use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure x86_64-linux && make depend"},
+                    "result": {
+                        "command": "./configure x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Error: bundled dependency incompatibility\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "command timed out before final artifact proof\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                    },
+                    "result": {
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "CompCert C compiler version 3.13\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("compatibility_branch_budget_contract_missing", codes)
+
+    def test_work_session_resume_does_not_flag_branch_budget_for_ignore_only_timeout(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq"},
+                    "result": {"command": "apt-get install -y coq", "cwd": "/tmp/CompCert", "exit_code": 0},
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-ignore-coq-version\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure -ignore-coq-version x86_64-linux"},
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -j\"$(nproc)\" ccomp"},
+                    "result": {
+                        "command": "make -j\"$(nproc)\" ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "command timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("compatibility_branch_budget_contract_missing", codes)
+
     def test_work_session_resume_flags_long_dependency_missing_runtime_link_library(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
