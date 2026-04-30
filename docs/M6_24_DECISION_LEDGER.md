@@ -136,41 +136,23 @@ direction.
 | 2026-04-30 | Implement v0.7 runtime-install target repair. | `docs/M6_24_DEFAULT_RUNTIME_LINK_PATH_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` showed the v0.6 repair moved behavior in the intended direction but `make -C runtime install` failed before `libcompcert.a` existed. The new generic blocker `runtime_install_before_runtime_library_build` is implemented in `src/mew/work_session.py`, THINK guidance is updated in `src/mew/work_loop.py`, focused runtime/long-dependency tests plus ruff passed, and codex-ultra review session `019ddd2b-8895-7771-b617-ef75359c2e7a` approved after review/fix rounds. | Run one-trial same-shape `compile-compcert` speed proof. Do not resume broad measurement or proof_5 until this speed proof moves the failure shape or passes. | speed_rerun_pending |
 | 2026-04-30 | v0.7 same-shape speed rerun exposed earlier source-identity and empty-response blockers. | `docs/M6_24_RUNTIME_INSTALL_TARGET_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-install-target-compile-compcert-1attempt-20260430-1559/2026-04-30__16-07-36/result.json`: one trial, no runner errors, reward `0.0`, runtime `7m 48s`. The run did not reach runtime install; it fetched the versioned `v3.13.1` release archive but aborted because internal source markers did not repeat the patch suffix, then one-shot stopped on `response did not contain assistant text`. | Continue improvement phase. Next bounded repair is `long_dependency_source_archive_identity_and_empty_response_recovery_contract`, then rerun `compile-compcert` speed_1 before proof_5 or broad measurement. | active |
 | 2026-04-30 | Implement v0.8 source-archive identity and empty-response recovery repair. | `docs/M6_24_RUNTIME_INSTALL_TARGET_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` showed the model over-constrained source identity to internal marker text and lost recovery on a transient empty model response. Resume now surfaces `source_archive_version_grounding_too_strict`, THINK/suggested-next guidance accepts archive/tag/root identity as patch-level source evidence, and one-shot treats `response did not contain assistant text` as recoverable. Focused work-session/recovery tests plus ruff passed; codex-ultra requested a false-positive fix, which is now covered by a successful guard-command regression test. | Run one-trial same-shape `compile-compcert` speed proof. Do not resume broad measurement or proof_5 until this speed proof moves the failure shape or passes. | speed_rerun_pending |
+| 2026-04-30 | v0.8 same-shape speed rerun passed. | `docs/M6_24_SOURCE_IDENTITY_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-identity-compile-compcert-1attempt-20260430-1736/result.json`: one trial, no runner errors, reward `1.0`, runtime `24m 23s`. The run accepted the `v3.13.1` archive/tag/root identity despite internal `VERSION=3.13`, recovered past the earlier source-identity blocker, built `/tmp/CompCert/ccomp`, installed runtime support into the default path, and passed all three external verifier checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`. If that proof misses `5/5`, read `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before any next repair. | proof_5_pending |
 
 ## Current Mode
 
 `improvement_phase`
 
 The selected `long_dependency_toolchain_build_strategy_contract` speed rerun
-confirmed the post-SR-016 gap. The v0 build-state progress contract plus
-pre-rerun review follow-up improved continuity but the follow-up speed rerun
-still missed `/tmp/CompCert/ccomp` by wall time. The v0.1 rerun then exposed a
-wall-clock/tool-ceiling gap and an untargeted full-build choice for a specific
-final artifact. The v0.2 repair passed a same-shape speed proof. A five-parallel
-proof timed out all trials and is treated as resource-contention harness
-evidence. A `-k 1 -n 5` probe created only one trial and then hit an auth quota.
-The valid `-k 5 -n 1` resource-normalized proof for v0.2 reached `1/2` before
-the close target `5/5` became impossible. The v0.3 compatibility override
-ordering repair passed its same-shape speed rerun at `1/1`, but its
-resource-normalized proof reached only `2/3` valid completed trials before the
-close target became impossible. The v0.4 runtime link library repair passed its
-same-shape speed rerun at `1/1`, but its resource-normalized proof failed on
-the first valid completed trial because the model source-built version-pinned
-OPAM dependencies instead of trying prebuilt dependencies plus source override
-first. The v0.5 prebuilt dependency override precedence repair passed its
-same-shape speed rerun at `1/1`, but resource-normalized proof reached only
-`4/5` against the frozen target `5/5`. The remaining failed trial used a custom
-runtime path for local proof while external verification used the default
-runtime/link path. The v0.6 default runtime link path repair changed behavior
-in the intended direction, but its speed proof failed because runtime install
-ran before the runtime library artifact existed. The v0.7 runtime-install target
-repair is implemented, but its speed proof failed before reaching runtime
-install because the model over-constrained source identity to internal patch
-markers and one-shot stopped on a transient empty model response. The v0.8
-source-archive identity / empty-response recovery repair is implemented; broad
-measurement remains paused until its same-shape speed proof moves the failure
-shape or passes.
+confirmed the post-SR-016 gap. Multiple bounded repairs improved continuity,
+toolchain ordering, wall-clock targeting, runtime link proof, default runtime
+install, source identity, and transient backend recovery. The v0.8
+source-archive identity / empty-response recovery repair passed its same-shape
+speed proof at `1/1`: mew accepted the archive/tag/root identity, built
+`/tmp/CompCert/ccomp`, installed runtime support into the default path, and
+passed all external verifier checks. Broad measurement remains paused until a
+resource-normalized proof reaches the close target or records a new selected
+gap.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_source_archive_identity_and_empty_response_recovery_contract speed_1 -> compile-compcert`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_source_archive_identity_and_empty_response_recovery_contract proof_5 -> compile-compcert -k 5 -n 1`

@@ -20,13 +20,14 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_source_archive_identity_and_empty_response_recovery_contract speed_1 -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_source_archive_identity_and_empty_response_recovery_contract proof_5 -> compile-compcert
 ```
 
-Broad measurement remains paused. The next score action is a one-trial
-same-shape speed proof for `compile-compcert`. Before another code repair after
-that proof, read this dossier and decide whether the next fix is a new blocker,
-a repeated older blocker, or prompt/profile accretion.
+Broad measurement remains paused. The next score action is a
+resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1`.
+Before another code repair after that proof, read this dossier and decide
+whether the next fix is a new blocker, a repeated older blocker, or
+prompt/profile accretion.
 
 ## Repair Timeline
 
@@ -42,7 +43,7 @@ a repeated older blocker, or prompt/profile accretion.
 | v0.5 prebuilt dependency override precedence | Prefer prebuilt dependencies plus source override before source-building older dependencies. | detector/resume + THINK guidance | Speed `1/1`; proof `4/5`; next failure default runtime path. |
 | v0.6 default runtime link path | Treat custom `-stdlib`/`-L`/env runtime proof as diagnostic until default path proof passes. | detector/resume + THINK guidance | Speed `0/1`; behavior moved to runtime install missing library. |
 | v0.7 runtime install target | Build shortest explicit runtime-library target before install/default-link smoke. | detector/resume + THINK guidance | Speed `0/1`; failure moved earlier to source archive identity + empty response. |
-| v0.8 source archive identity / empty response recovery | Accept archive/tag/root identity when internal markers are coarse; recover empty assistant response. | detector/resume + recovery + THINK guidance | Implemented; speed rerun pending. |
+| v0.8 source archive identity / empty response recovery | Accept archive/tag/root identity when internal markers are coarse; recover empty assistant response. | detector/resume + recovery + THINK guidance | Speed `1/1`; external verifier passed; proof_5 pending. |
 
 ## Pattern Readout
 
@@ -55,6 +56,10 @@ a repeated older blocker, or prompt/profile accretion.
   section registry before adding another sentence.
 - Resource normalization matters. Parallel proof failures can be harness
   artifacts for CPU-heavy dependency builds.
+- The v0.8 speed proof patched bundled Flocq locally for Coq 8.18
+  compatibility. That is useful task-solving evidence while score passes, but
+  a proof miss in the same family should run this dossier preflight before more
+  narrow guidance is added.
 
 ## Preflight Before Next Repair
 
