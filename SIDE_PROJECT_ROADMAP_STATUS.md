@@ -47,10 +47,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP34 mew-wisp Resident-First Entrypoint Default | `done` | Task #55/session #86 made `mew_wisp.py` resident-first by default: omitted mode/form/watch with no `--output` starts the human cat foreground watch, while explicit options and `--output` compatibility remain intact. |
 | SP35 mew-wisp Resident-First Help and Copy | `done` | Task #56/session #87 updated CLI help, README first-screen copy, and HTML compatibility wording so `mew-wisp` is presented as the resident terminal surface while `ghost.py`/HTML remain compatibility paths. |
 | SP36 mew-wisp Explicit Compatibility Output | `done` | Task #60/session #91 landed practical after cleaning up stale sessions #89/#90: product-named `mew_wisp.py --output` now requires explicit `--format html` or `--format state`, while direct `ghost.py --output` keeps historical HTML compatibility. |
+| SP37 mew-wisp Cat Sprite Eye and Foreleg Polish | `done` | Task #61/session #92 improved the left eye but fused the front legs; reviewer rejected that visual result. Task #62/session #93 repaired only the foreleg rows into two separated strokes, preserved the left-eye improvement, and added focused regression tests. Issue #35 records the verifier/visual-acceptance polish finding. |
 
 ## Active Focus
 
-Active side-project focus: **SP36 mew-wisp Explicit Compatibility Output is done; choose the next terminal-first `mew-wisp` milestone before reconnecting to deeper mew state**.
+Active side-project focus: **SP37 mew-wisp Cat Sprite Eye and Foreleg Polish is done; choose the next terminal-first `mew-wisp` milestone before reconnecting to deeper mew state**.
 
 Current target:
 
@@ -318,6 +319,15 @@ Current target:
   `0`; verifier passed (`55 passed`), `git diff --check` passed, reject/HTML
   compatibility smoke checks passed, and issue `#34` records the reusable
   session cleanup polish finding.
+- SP37 task `#61` / session `#92` first improved the cat's left eye but made
+  the front legs read as one fused center block; the operator rejected that
+  visual result without product-code rescue. SP37 repair task `#62` / session
+  `#93` kept the left-eye improvement and refined only the front-leg mask rows
+  into two separated narrow strokes, while focused tests now reject both the
+  old three-bar pattern and the fused-block regression. The focused verifier
+  passed (`55 passed`), `git diff --check` passed, fixture terminal smoke was
+  inspected at `MEW_GHOST_TERMINAL_WIDTH=50`, rescue edits remain `0`, and
+  issue `#35` records the reusable verifier/visual-acceptance polish finding.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`

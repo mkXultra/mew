@@ -702,3 +702,21 @@ Done when:
   contract
 - no hidden monitoring, launcher execution, shell execution, broad refactors,
   or core imports are introduced
+
+### SP37: mew-wisp Cat Sprite Eye and Foreleg Polish
+
+Tighten only the cat terminal sprite details that hurt the `cat.png` likeness,
+without changing the resident surface, HUD, speech, live adapter, or launch
+behavior.
+
+Done when:
+
+- the left eye reads as a narrow vertical pixel mark instead of blending into
+  the left face outline
+- the front legs read as two separated narrow strokes instead of three bars or
+  one fused center block
+- focused tests reject the old three-bar leg pattern and the fused-block
+  regression while preserving the existing reference-mask similarity contract
+- a fixture terminal smoke render is inspected at the narrow resident width
+- no hidden monitoring, launcher execution, shell execution, broad refactors,
+  live adapter changes, or core imports are introduced

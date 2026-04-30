@@ -1280,19 +1280,19 @@ CAT_REFERENCE_MASK = (
     '.##..#######..##......',
     '.##...######..##......',
     '.##...........##......',
-    '###.##....###.####....',
-    '##..##....###..###....',
-    '##..##....###..###....',
-    '###.##.##..##.###.....',
+    '###..#....###.####....',
+    '##...#....###..###....',
+    '##...#....###..###....',
+    '###..#.##..##.###.....',
     '.#####.##....###......',
     '...###......####......',
     '...###.......#####....',
     '....##........#####...',
     '....##.........####...',
-    '....##.##.##....###...',
-    '....##.##.##.....####.',
-    '....##.##.##.....####.',
-    '....##.##.##.....##.##',
+    '....##.#..#.....###...',
+    '....##.#..#......####.',
+    '....##.#..#......####.',
+    '....##.#..#......##.##',
     '...#########....###.##',
     '...##.#####....###..##',
     '...#############...##.',
@@ -1553,6 +1553,15 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert 'active window:' in details
     assert 'launcher intents:' in details
     assert _cat_sprite_similarity(cat) >= 0.90
+    cat_mask = _cat_sprite_mask(cat)
+    assert cat_mask[6][0:6] == '###..#'
+    assert all(row[3:6] == '..#' for row in cat_mask[7:10])
+    assert all(row[4:6] != '##' for row in cat_mask[6:10])
+    foreleg_rows = cat_mask[15:19]
+    foreleg_segments = [row[6:11] for row in foreleg_rows]
+    assert all('.##.##.##' not in row for row in foreleg_rows)
+    assert all(segment != '.####' for segment in foreleg_segments)
+    assert foreleg_segments == ['.#..#'] * 4
     assert _resident_panel_values(implicit, 'marker') == ['*']
     assert cat.count('resident marker: *') == 1
     assert 'resident marker: *' in cat
