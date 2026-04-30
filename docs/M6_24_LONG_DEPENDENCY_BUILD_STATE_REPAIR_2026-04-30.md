@@ -252,6 +252,57 @@ Result:
 Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
 Broad measurement and proof_5 remain paused.
 
+## v0.9 Timed-Out Artifact Proof Calibration
+
+The v0.8 resource-normalized proof is recorded in:
+
+- `docs/M6_24_SOURCE_IDENTITY_COMPILE_COMPCERT_PROOF_5_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-identity-compile-compcert-5attempts-seq-20260430-1808/result.json`
+
+The proof scored `4/5` with runner errors `0`, below the frozen Codex target
+`5/5`. The failed trial did not reproduce source identity or empty-response
+failure. It timed out during a final `make -j10 ccomp` after patching local
+Flocq compatibility, and the external verifier failed because
+`/tmp/CompCert/ccomp` did not exist.
+
+The repair is:
+
+`long_dependency_timed_out_artifact_proof_calibration`
+
+Changes:
+
+- long-dependency final-artifact proof now requires a completed command with
+  `result.exit_code == 0`;
+- timed-out commands can no longer mark expected final artifacts as `proven`;
+- successful but non-evidential soft probes such as
+  `ls -l /tmp/CompCert/ccomp 2>/dev/null || true` no longer prove the final
+  artifact from command text alone;
+- strict command-only executable probes such as
+  `test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version` still count
+  when the command exits `0`;
+- masked output proofs and post-proof mutation commands, including pipe/`||`
+  probes, real newline continuations, `rm`/`find -delete`, and cwd-relative
+  artifact removal, do not count as proof;
+- timed-out final builds therefore preserve `missing_artifacts` and
+  `incomplete_reason=tool_timeout` for reentry instead of falsely closing the
+  artifact boundary.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'long_dependency or timed_out_call or soft_probe_before_timeout or masked_test_probe or masked_output_probe or strict_command_only' --no-testmon -q
+uv run ruff check src/mew/work_session.py tests/test_work_session.py
+```
+
+Result:
+
+- focused work-session tests: `8 passed`, `22 subtests passed`
+- ruff: passed
+- codex-ultra review: approved (`019dde2f-4a27-70b0-9e42-ab5943914f8e`)
+
+Next validation is a one-trial same-shape speed proof for `compile-compcert`.
+Broad measurement and proof_5 remain paused.
+
 ## v0.3 Repair
 
 `long_dependency_toolchain_compatibility_override_order_contract`

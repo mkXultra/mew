@@ -4463,6 +4463,187 @@ def _long_dependency_artifact_refs(expected_artifacts):
     return refs
 
 
+def _long_dependency_call_output_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    running_output = call.get("running_output") if isinstance(call.get("running_output"), dict) else {}
+    parts = [
+        call.get("error") or "",
+        result.get("stdout") or "",
+        result.get("stderr") or "",
+        result.get("stdout_tail") or "",
+        result.get("stderr_tail") or "",
+        running_output.get("stdout") or "",
+        running_output.get("stderr") or "",
+    ]
+    return "\n".join(str(part) for part in parts if part)
+
+
+def _long_dependency_call_command_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    return str(result.get("command") or parameters.get("command") or "")
+
+
+def _long_dependency_call_cwd(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    return str(result.get("cwd") or parameters.get("cwd") or "")
+
+
+def _long_dependency_artifact_command_refs(artifact, cwd=""):
+    artifact_text = str(artifact or "").strip()
+    refs = [artifact_text] if artifact_text else []
+    cwd_text = str(cwd or "").strip()
+    artifact_path = Path(artifact_text)
+    if artifact_path.is_absolute() and cwd_text and str(Path(cwd_text)) == str(artifact_path.parent):
+        name = artifact_path.name.strip()
+        if name and name not in refs:
+            refs.append(name)
+    return refs
+
+
+def _long_dependency_segment_strictly_proves_artifact(segment, artifact_text, test_x_pattern, bracket_x_pattern):
+    segment_lower = str(segment or "").casefold()
+    artifact_lower = str(artifact_text or "").casefold()
+    if artifact_lower not in segment_lower:
+        return False
+    if any(mask in segment_lower for mask in ("||", "2>/dev/null", ">/dev/null")):
+        return False
+    if re.search(test_x_pattern, segment) or re.search(bracket_x_pattern, segment):
+        return True
+    return _long_dependency_segment_invokes_artifact(segment, [artifact_text]) and any(
+        marker in segment_lower for marker in ("-version", "--version", " -v", "-help", "--help")
+    )
+
+
+def _long_dependency_segment_may_mutate_artifact(segment):
+    text = str(segment or "").casefold()
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    command_names = {Path(str(part or "")).name.casefold() for part in parts}
+    if command_names & {"rm", "unlink", "rmdir", "mv", "shred", "truncate"}:
+        return True
+    if "-delete" in text:
+        return True
+    if "-exec" in command_names and command_names & {"rm", "unlink", "rmdir", "mv", "shred", "truncate"}:
+        return True
+    return False
+
+
+def _long_dependency_command_surface_allows_artifact_proof(command, artifact, cwd=""):
+    command = str(command or "")
+    artifact_text = str(artifact or "").strip()
+    artifact_lower = artifact_text.casefold()
+    artifact_refs = [ref.casefold() for ref in _long_dependency_artifact_command_refs(artifact_text, cwd)]
+    if not command or not artifact_lower or not any(ref and ref in command.casefold() for ref in artifact_refs):
+        return True
+    if "\n" in command or "\r" in command:
+        return False
+    command_lower = command.casefold()
+    if (
+        "||" in command_lower
+        or "|" in command_lower
+        or ";" in command_lower
+        or "/dev/null" in command_lower
+        or re.search(r"(?<!&)&(?!&)", command_lower)
+        or re.search(
+            r"(?:^|[\s;&|])(?:if|then|fi|while|until|do|done|for|case|esac|select)(?:$|[\s;&|])",
+            command_lower,
+        )
+        or re.search(r"(?:^|[\s;&|])!(?:$|[\s;&|])", command_lower)
+    ):
+        return False
+    escaped_artifact = re.escape(artifact_text)
+    test_x_pattern = rf"(?:^|[\s;&|])test\s+-x\s+['\"]?{escaped_artifact}['\"]?(?:$|[\s;&|])"
+    bracket_x_pattern = rf"(?:^|[\s;&|])\[\s+-x\s+['\"]?{escaped_artifact}['\"]?\s+\]"
+    saw_artifact_reference = False
+    for segment in split_unquoted_shell_command_segments(command):
+        segment_lower = segment.casefold()
+        segment_has_artifact_ref = any(ref and ref in segment_lower for ref in artifact_refs)
+        if segment_has_artifact_ref and _long_dependency_segment_may_mutate_artifact(segment):
+            return False
+        if _long_dependency_segment_strictly_proves_artifact(
+            segment,
+            artifact_text,
+            test_x_pattern,
+            bracket_x_pattern,
+        ):
+            saw_artifact_reference = True
+            continue
+        if saw_artifact_reference:
+            return False
+        if segment_has_artifact_ref:
+            saw_artifact_reference = True
+    return True
+
+
+def _long_dependency_command_strictly_proves_artifact(call, artifact):
+    raw_command = _long_dependency_call_command_text(call)
+    if "\n" in raw_command or "\r" in raw_command:
+        return False
+    command = re.sub(r"\\\r?\n\s*", " ", raw_command)
+    artifact_text = str(artifact or "").strip()
+    artifact_lower = artifact_text.casefold()
+    if not command or not artifact_lower or artifact_lower not in command.casefold():
+        return False
+    artifact_refs = [ref.casefold() for ref in _long_dependency_artifact_command_refs(artifact_text, _long_dependency_call_cwd(call))]
+    if not _long_dependency_command_surface_allows_artifact_proof(
+        command,
+        artifact_text,
+        _long_dependency_call_cwd(call),
+    ):
+        return False
+    escaped_artifact = re.escape(artifact_text)
+    test_x_pattern = rf"(?:^|[\s;&|])test\s+-x\s+['\"]?{escaped_artifact}['\"]?(?:$|[\s;&|])"
+    bracket_x_pattern = rf"(?:^|[\s;&|])\[\s+-x\s+['\"]?{escaped_artifact}['\"]?\s+\]"
+    for raw_line in str(command or "").splitlines():
+        line = raw_line.strip()
+        line_lower = line.casefold()
+        if artifact_lower not in line_lower:
+            continue
+        if (
+            "||" in line_lower
+            or "|" in line_lower
+            or ";" in line_lower
+            or re.search(r"(?<!&)&(?!&)", line_lower)
+            or re.search(
+                r"(?:^|[\s;&|])(?:if|then|fi|while|until|do|done|for|case|esac|select)(?:$|[\s;&|])",
+                line_lower,
+            )
+            or re.search(r"(?:^|[\s;&|])!(?:$|[\s;&|])", line_lower)
+        ):
+            continue
+        saw_proof_segment = False
+        for segment in split_unquoted_shell_command_segments(line):
+            segment_lower = segment.casefold()
+            segment_proves_artifact = _long_dependency_segment_strictly_proves_artifact(
+                segment,
+                artifact_text,
+                test_x_pattern,
+                bracket_x_pattern,
+            )
+            if saw_proof_segment and not segment_proves_artifact:
+                return False
+            if artifact_lower not in segment_lower and not (
+                saw_proof_segment and any(ref and ref in segment_lower for ref in artifact_refs)
+            ):
+                continue
+            if not segment_proves_artifact:
+                return False
+            saw_proof_segment = True
+        if saw_proof_segment:
+            return True
+    return False
+
+
 def _long_dependency_invoked_command_token(parts):
     index = 0
     while index < len(parts or []):
@@ -4837,16 +5018,30 @@ def _long_dependency_task_text(task, session=None):
 def _long_dependency_artifact_proven_by_call(call, artifact):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return False
+    if str(call.get("status") or "").casefold() != "completed":
+        return False
     result = call.get("result") if isinstance(call.get("result"), dict) else {}
-    if result.get("exit_code") not in (None, 0):
+    if result.get("timed_out"):
         return False
-    text = _runtime_artifact_call_text(call).casefold()
+    if result.get("exit_code") != 0:
+        return False
+    output_text = _long_dependency_call_output_text(call).casefold()
     artifact_lower = str(artifact or "").casefold()
-    if not artifact_lower or artifact_lower not in text:
+    if not artifact_lower:
         return False
-    if any(marker in text for marker in ("does not exist", "missing", "no such file", "not found")):
+    if not _long_dependency_command_surface_allows_artifact_proof(
+        _long_dependency_call_command_text(call),
+        artifact,
+        _long_dependency_call_cwd(call),
+    ):
         return False
-    return any(marker in text for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS)
+    if any(marker in output_text for marker in ("does not exist", "missing", "no such file", "not found")):
+        return False
+    if artifact_lower in output_text and any(
+        marker in output_text for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS
+    ):
+        return True
+    return _long_dependency_command_strictly_proves_artifact(call, artifact)
 
 
 def _long_dependency_call_stages(call):

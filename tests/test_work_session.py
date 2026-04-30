@@ -5896,6 +5896,281 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertNotIn("untargeted_full_project_build_for_specific_artifact", codes)
 
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_timed_out_call(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make -j10 ccomp && "
+                            "test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -version"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make -j10 ccomp && "
+                            "test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -version"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": (
+                            "== rebuild ccomp after patch ==\n"
+                            "command timed out before /tmp/CompCert/ccomp was created\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        state = resume["long_dependency_build_state"]
+
+        self.assertEqual(state["expected_artifacts"][0]["status"], "missing_or_unproven")
+        self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
+        self.assertEqual(state["incomplete_reason"], "tool_timeout")
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_missing_artifact: /tmp/CompCert/ccomp", text)
+
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_soft_probe_before_timeout(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "ls -l /tmp/CompCert/ccomp 2>/dev/null || true",
+                    },
+                    "result": {
+                        "command": "ls -l /tmp/CompCert/ccomp 2>/dev/null || true",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "",
+                        "stderr": "",
+                    },
+                },
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j10 ccomp && test -x /tmp/CompCert/ccomp",
+                    },
+                    "result": {
+                        "command": "make -j10 ccomp && test -x /tmp/CompCert/ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "command timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        state = build_work_session_resume(session)["long_dependency_build_state"]
+
+        self.assertEqual(state["expected_artifacts"][0]["status"], "missing_or_unproven")
+        self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
+        self.assertEqual(state["incomplete_reason"], "tool_timeout")
+
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_masked_test_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        commands = [
+            "test -x /tmp/CompCert/ccomp || true",
+            "[ -x /tmp/CompCert/ccomp ] || true",
+            "test -x /tmp/CompCert/ccomp 2> /dev/null || true",
+            "test -x /tmp/CompCert/ccomp || echo absent",
+            "[ -x /tmp/CompCert/ccomp ] || echo absent",
+            "if test -x /tmp/CompCert/ccomp; then :; fi",
+            "! test -x /tmp/CompCert/ccomp",
+            "test -x /tmp/CompCert/ccomp | true",
+            "[ -x /tmp/CompCert/ccomp ] | true",
+            "test -x /tmp/CompCert/ccomp & true",
+            "while test -x /tmp/CompCert/ccomp\ndo\n  :\ndone",
+            "until test -x /tmp/CompCert/ccomp\ndo\n  :\ndone",
+            "test -x /tmp/CompCert/ccomp \\\n|| true",
+            "test -x /tmp/CompCert/ccomp\ntrue",
+            "test -x /tmp/CompCert/ccomp && rm -f /tmp/CompCert/ccomp",
+            "test -x /tmp/CompCert/ccomp && rm -f ccomp",
+            "test -x /tmp/CompCert/ccomp && rm -rf /tmp/CompCert",
+        ]
+
+        for command in commands:
+            with self.subTest(command=command):
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Compile CompCert",
+                    "goal": (
+                        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+                    ),
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 4,
+                            "tool": "run_command",
+                            "status": "completed",
+                            "parameters": {"cwd": "/tmp/CompCert", "command": command},
+                            "result": {
+                                "command": command,
+                                "cwd": "/tmp/CompCert",
+                                "exit_code": 0,
+                                "stdout": "",
+                                "stderr": "",
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                state = build_work_session_resume(session)["long_dependency_build_state"]
+
+                statuses = [
+                    item.get("status")
+                    for item in (state.get("expected_artifacts") or [])
+                    if isinstance(item, dict)
+                ]
+                self.assertNotIn("proven", statuses)
+
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_masked_output_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        cases = [
+            (
+                "stat -c '%F %n' /tmp/CompCert/ccomp | cat",
+                "regular file /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "stat -c '%F %n' /tmp/CompCert/ccomp && rm -f ccomp",
+                "regular file /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "find /tmp/CompCert/ccomp -maxdepth 0 -printf 'regular file %p\\n' -delete",
+                "regular file /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "test -x /tmp/CompCert/ccomp || true",
+                "test -x /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "test -x /tmp/CompCert/ccomp \\\n&& /tmp/CompCert/ccomp -version",
+                "CompCert C compiler version 3.13\n",
+            ),
+        ]
+
+        for command, stdout in cases:
+            with self.subTest(command=command):
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Compile CompCert",
+                    "goal": (
+                        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+                    ),
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 4,
+                            "tool": "run_command",
+                            "status": "completed",
+                            "parameters": {"cwd": "/tmp/CompCert", "command": command},
+                            "result": {
+                                "command": command,
+                                "cwd": "/tmp/CompCert",
+                                "exit_code": 0,
+                                "stdout": stdout,
+                                "stderr": "",
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                state = build_work_session_resume(session)["long_dependency_build_state"]
+
+                statuses = [
+                    item.get("status")
+                    for item in (state.get("expected_artifacts") or [])
+                    if isinstance(item, dict)
+                ]
+                self.assertNotIn("proven", statuses)
+
+    def test_work_session_resume_accepts_strict_command_only_long_dependency_artifact_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                    },
+                    "result": {
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "CompCert C compiler version 3.13\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        state = build_work_session_resume(session)["long_dependency_build_state"]
+
+        self.assertEqual(state["expected_artifacts"][0]["status"], "proven")
+        self.assertEqual(state["missing_artifacts"], [])
+
     def test_work_session_resume_omits_long_dependency_state_before_progress(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
