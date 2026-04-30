@@ -160,9 +160,13 @@ M6.24 resume condition:
   became impossible; the third trial was cancelled intentionally. The failed
   valid trial selected heavy OPAM alternate-toolchain construction after a
   distro Coq version mismatch instead of first trying cheap source-provided
-  compatibility/override configure paths. Current
+  compatibility/override configure paths. The v0.3 compatibility override
+  ordering repair passed speed_1 at `1/1` in `28m 4s`: it inspected configure
+  help, tried `./configure -ignore-coq-version`, then moved to compatible OPAM
+  Coq `8.16.1`, built `/tmp/CompCert/ccomp`, and passed all three verifier
+  checks. Current
   selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_toolchain_compatibility_override_order_contract -> compile-compcert speed_1`.
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_toolchain_compatibility_override_order_contract proof_5 -> compile-compcert -k5 -n1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -602,8 +606,9 @@ M6.24 resume condition:
   contention. A `-k 1 -n 5` probe created only one trial and hit auth quota, so
   the valid resource-normalized proof was rerun with `-k 5 -n 1` and
   `auth.plus.json`. It reached `1/2` completed valid trials before the frozen
-  `5/5` close target became impossible. Next action is a bounded generic
-  repair for source-build toolchain compatibility override ordering.
+  `5/5` close target became impossible. The v0.3 compatibility override
+  ordering repair passed speed_1 at `1/1`. Next action is a resource-normalized
+  five-trial `compile-compcert` proof with `-k 5 -n 1` and `auth.plus.json`.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
   now treats an `edit_file` action carrying an `edits` list and no scalar

@@ -184,6 +184,29 @@ Result:
 Next validation remains a one-trial same-shape speed rerun for
 `compile-compcert`.
 
+## v0.3 Speed Rerun
+
+The v0.3 same-shape speed rerun passed:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-override-compile-compcert-1attempt-20260430-0843/2026-04-30__08-43-13/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `28m 4s`
+- external verifier: `3 passed`
+
+The run inspected configure help and the Coq version rejection, tried
+`./configure -ignore-coq-version`, then moved to a compatible OPAM Coq `8.16.1`
+path, built `/tmp/CompCert/ccomp`, installed runtime libraries, and passed the
+external verifier.
+
+Next validation is resource-normalized proof_5 for the same shape:
+`compile-compcert -k 5 -n 1`.
+
 ## v0.2 Speed Rerun
 
 The v0.2 same-shape speed rerun passed:
