@@ -127,6 +127,7 @@ direction.
 | 2026-04-30 | v0.5 same-shape speed rerun passed. | `docs/M6_24_PREBUILT_OVERRIDE_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-prebuilt-override-compile-compcert-1attempt-20260430-1211/2026-04-30__12-10-22/result.json`: one trial, no runner errors, reward `1.0`, runtime `14m 29s`. The run used prebuilt distro dependencies plus source compatibility overrides, built `ccomp`, built/installed the runtime library, and passed all three external verifier checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`; do not resume broad measurement first. | proof_5_pending |
 | 2026-04-30 | v0.5 resource-normalized proof improved but stayed below target. | `docs/M6_24_PREBUILT_OVERRIDE_COMPILE_COMPCERT_PROOF_5_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-prebuilt-override-compile-compcert-5attempts-seq-20260430-1230/2026-04-30__12-30-26/result.json`: `compile-compcert` scored `4/5` with runner errors 0 against frozen Codex target `5/5`. The failed trial built `ccomp` but proved it only with a custom `-stdlib` runtime path; external verifier default invocation failed with `cannot find -lcompcert`. | Continue improvement phase. Next bounded repair is `long_dependency_default_runtime_link_path_contract`, then run `compile-compcert` speed_1 before any proof_5 or broad measurement. | active |
 | 2026-04-30 | Implement v0.6 default runtime link path repair. | `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md`: long-dependency resume state now surfaces `default_runtime_link_path_unproven` when compiler/toolchain smoke proof uses custom runtime/library lookup flags, suppresses it after later default compile/link proof, and THINK guidance requires default-path proof before finish. Focused work-session tests, ruff, gap-ledger validation, `git diff --check`, and codex-ultra review session `019ddcf2-f949-7201-937f-e679fa67ad5e` passed. | Run a one-trial same-shape speed proof for `compile-compcert`; do not run proof_5 or broad measurement first. | speed_rerun_pending |
+| 2026-04-30 | v0.6 same-shape speed rerun failed with a narrower runtime-install blocker. | `docs/M6_24_DEFAULT_RUNTIME_LINK_PATH_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-default-runtime-link-path-compile-compcert-1attempt-20260430-1508/2026-04-30__15-07-47/result.json`: one trial, no runner errors, reward `0.0`, runtime `30m 25s`. The run built `ccomp` and attempted default runtime install, but `make -C runtime install` failed with `install: cannot stat 'libcompcert.a'`. | Continue improvement phase. Next bounded repair is `long_dependency_runtime_install_requires_runtime_target_contract`, then rerun `compile-compcert` speed_1 before proof_5 or broad measurement. | active |
 
 ## Current Mode
 
@@ -152,9 +153,11 @@ first. The v0.5 prebuilt dependency override precedence repair passed its
 same-shape speed rerun at `1/1`, but resource-normalized proof reached only
 `4/5` against the frozen target `5/5`. The remaining failed trial used a custom
 runtime path for local proof while external verification used the default
-runtime/link path. The v0.6 default runtime link path repair is implemented.
-Broad measurement remains paused until the same-shape speed proof is recorded.
+runtime/link path. The v0.6 default runtime link path repair changed behavior
+in the intended direction, but its speed proof failed because runtime install
+ran before the runtime library artifact existed. Broad measurement remains
+paused until this same-shape failure is repaired or explicitly deferred.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_default_runtime_link_path_contract speed_1 -> compile-compcert`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_runtime_install_requires_runtime_target_contract speed_1 -> compile-compcert`

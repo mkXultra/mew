@@ -376,6 +376,38 @@ compile-compcert
 
 Do not run proof_5 or broad measurement before the speed proof.
 
+## v0.6 Speed Rerun
+
+The v0.6 same-shape speed rerun failed:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-default-runtime-link-path-compile-compcert-1attempt-20260430-1508/2026-04-30__15-07-47/result.json
+```
+
+Result:
+
+- score: `0/1`
+- runner errors: `0`
+- runtime: `30m 25s`
+
+The run did not repeat the previous custom `-stdlib` close mistake. It built
+`/tmp/CompCert/ccomp`, observed the default `-lcompcert` link failure, and
+attempted to install runtime support. The install failed because the runtime
+library artifact had not been built first:
+
+```text
+install: cannot stat 'libcompcert.a': No such file or directory
+```
+
+Next bounded repair:
+
+`long_dependency_runtime_install_requires_runtime_target_contract`
+
+For compiler/toolchain source-build tasks, if runtime install fails because the
+runtime library artifact is absent, the next action should build the shortest
+explicit runtime-library target before retrying install and the default
+compile/link smoke.
+
 ## v0.4 Repair
 
 `long_dependency_runtime_link_library_contract`
