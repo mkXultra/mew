@@ -47,6 +47,29 @@ def test_product_named_mew_wisp_entrypoint_delegates_to_ghost_main_without_cli_d
     assert Path(mew_wisp.main.__code__.co_filename).resolve() == GHOST_PATH
 
 
+def test_cli_help_presents_mew_wisp_resident_entrypoint_and_compatibility(capsys) -> None:
+    original_argv = sys.argv[:]
+    sys.argv = [str(WISP_PATH), '--help']
+    try:
+        try:
+            ghost.main(None)
+        except SystemExit as exc:
+            assert exc.code == 0
+        else:
+            raise AssertionError('--help should exit through argparse')
+    finally:
+        sys.argv = original_argv
+
+    help_text = capsys.readouterr().out
+    normalized_help = ' '.join(help_text.split())
+
+    assert 'Run the mew-wisp resident terminal' in normalized_help
+    assert 'ghost.py remains the compatibility implementation' in normalized_help
+    assert 'explicit --output keeps compatibility HTML/state flows' in normalized_help
+    assert 'normal mew-wisp resident human cat foreground watch preset' in normalized_help
+    assert 'Render the SP18 mew-ghost watch-mode shell' not in normalized_help
+
+
 def test_product_named_entrypoint_omitted_mode_form_and_watch_defaults_to_resident(capsys, tmp_path: Path) -> None:
     repo_root = tmp_path / 'repo'
     repo_root.mkdir()
@@ -130,6 +153,8 @@ def test_product_named_entrypoint_output_keeps_historical_html_default(capsys, t
     assert calls == []
     assert capsys.readouterr().out == ''
     assert '<!doctype html>' in rendered
+    assert '<title>mew-wisp resident state (ghost.py compatibility render)</title>' in rendered
+    assert '<h2>Resident state (ghost.py compatibility)</h2>' in rendered
     assert 'mew-wisp resident cat' not in rendered
 
 
@@ -983,7 +1008,8 @@ def test_cli_writes_local_html_and_state_from_fixture(tmp_path: Path) -> None:
     state = json.loads(state_output.read_text(encoding='utf-8'))
 
     assert html.startswith('<!doctype html>')
-    assert '<title>mew-ghost SP18 watch mode</title>' in html
+    assert '<title>mew-wisp resident state (ghost.py compatibility render)</title>' in html
+    assert '<h2>Resident state (ghost.py compatibility)</h2>' in html
     assert 'single render' in html
     assert 'refresh 0' in html
     assert 'refresh 1' in html
@@ -1840,6 +1866,14 @@ def test_human_cat_watch_count_prints_cat_form_surface(capsys) -> None:
 
 def test_readme_usage_prefers_product_named_uv_run_python_commands() -> None:
     readme = README_PATH.read_text(encoding='utf-8')
+    normalized_readme = ' '.join(readme.split())
+
+    assert '# mew-wisp resident terminal' in readme
+    assert '`mew_wisp.py` is the normal product-named resident terminal entrypoint' in normalized_readme
+    assert '`ghost.py` remains the historical compatibility implementation module' in normalized_readme
+    assert 'explicit `--output` preserves the compatibility HTML/state render flow' in normalized_readme
+    assert '`ghost.py`: the historical standalone compatibility implementation module retained for direct `ghost.py` users.' in readme
+
     usage_lines = [line.strip() for line in readme.splitlines() if 'experiments/mew-ghost/mew_wisp.py' in line]
 
     assert usage_lines == [
@@ -1897,8 +1931,9 @@ def test_source_stays_isolated_from_core_mew_and_live_state() -> None:
     assert 'render_terminal_human' in source
     assert "SCHEMA_VERSION = 'mew-ghost.sp18.v1'" in source
     assert 'Standalone SP18 mew-ghost foreground watch-mode shell' in source
-    assert "description='Render the SP18 mew-ghost watch-mode shell'" in source
-    assert '<title>mew-ghost SP18 watch mode</title>' in source
+    assert "description='Run the mew-wisp resident terminal; ghost.py remains the compatibility implementation'" in source
+    assert '<title>mew-wisp resident state (ghost.py compatibility render)</title>' in source
+    assert '<h2>Resident state (ghost.py compatibility)</h2>' in source
     assert 'mew-ghost.sp17.v1' not in source
     assert 'sample_desk_view.json' in source
     assert "'desk', '--json'" in source

@@ -855,7 +855,7 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             '<html lang=' + chr(39) + 'en' + chr(39) + '>',
             '  <head>',
             '    <meta charset=' + chr(39) + 'utf-8' + chr(39) + '>',
-            '    <title>mew-ghost SP18 watch mode</title>',
+            '    <title>mew-wisp resident state (ghost.py compatibility render)</title>',
             '    <style>',
             '      body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 2rem; background: #111827; color: #f9fafb; }',
             '      main { max-width: 780px; }',
@@ -870,7 +870,7 @@ def render_local_html(state: Mapping[str, Any]) -> str:
             '    <main>',
             '      <h1>' + escape(ghost['name']) + '</h1>',
             '      <section>',
-            '        <h2>Ghost state</h2>',
+            '        <h2>Resident state (ghost.py compatibility)</h2>',
             '        <p><strong>Mood:</strong> ' + escape(ghost['mood']) + '</p>',
             '        <p><strong>Focus:</strong> ' + escape(ghost['focus']) + '</p>',
             '        <p>' + escape(ghost['message']) + '</p>',
@@ -1413,15 +1413,15 @@ def main(
     clock: Clock = utc_now_iso,
     platform_name: str | None = None,
 ) -> int:
-    parser = argparse.ArgumentParser(description='Render the SP18 mew-ghost watch-mode shell')
+    parser = argparse.ArgumentParser(description='Run the mew-wisp resident terminal; ghost.py remains the compatibility implementation')
     parser.add_argument('--fixture', default=str(DEFAULT_FIXTURE), help='local JSON fixture to render')
-    parser.add_argument('--desk-json', help='static mew desk JSON-style fixture to bridge into ghost state')
+    parser.add_argument('--desk-json', help='static mew desk JSON-style fixture to bridge into resident state')
     parser.add_argument('--live-desk', action='store_true', help='explicitly opt into repo-local live desk JSON state')
     parser.add_argument('--fixture-terminal', action='store_true', help='render the deterministic fixture terminal instead of the default repo-local live desk terminal')
-    parser.add_argument('--output', help='write rendered output to this path')
-    parser.add_argument('--format', choices=('html', 'state', 'human'), default=None, help='render format; defaults to html unless --wisp sets human')
-    parser.add_argument('--form', choices=TERMINAL_FORMS, default=None, help='terminal form for --format human; defaults to default unless --wisp sets cat')
-    parser.add_argument('--wisp', action='store_true', help='start the live human cat foreground watch preset; explicit --format/--form choices and --watch-count still win')
+    parser.add_argument('--output', help='write rendered output to this path; explicit --output keeps compatibility HTML/state flows')
+    parser.add_argument('--format', choices=('html', 'state', 'human'), default=None, help='render format; mew-wisp resident terminal defaults to human, compatibility flows default to html')
+    parser.add_argument('--form', choices=TERMINAL_FORMS, default=None, help='terminal form for --format human; mew-wisp resident terminal defaults to cat')
+    parser.add_argument('--wisp', action='store_true', help='start the normal mew-wisp resident human cat foreground watch preset; explicit --format/--form choices and --watch-count still win')
     parser.add_argument('--details', action='store_true', help='include diagnostic details in --format human output')
     parser.add_argument('--refresh-count', type=int, default=DEFAULT_REFRESH_COUNT, help='single-render snapshot count, clamped locally')
     parser.add_argument('--watch', action='store_true', help='run foreground watch until KeyboardInterrupt')

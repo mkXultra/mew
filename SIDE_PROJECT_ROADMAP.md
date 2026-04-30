@@ -664,3 +664,21 @@ Done when:
   existing launcher/isolation safety constraints
 - no hidden monitoring, launcher execution, shell execution, broad refactors,
   or core imports are introduced
+
+### SP35: mew-wisp Resident-First Help and Copy
+
+Make the visible operator-facing copy match the product direction: `mew-wisp` is
+the resident terminal surface, while `ghost.py` and HTML remain compatibility
+paths until a later removal/rename slice.
+
+Done when:
+
+- CLI help describes `mew-wisp` as the resident terminal and `ghost.py` as the
+  compatibility implementation
+- README title and first screen copy lead with the resident terminal entrypoint
+  instead of old SP18/SP26 milestone wording
+- HTML title/heading wording is compatibility-framed without removing the HTML
+  render path
+- focused tests cover the help/README/HTML copy contract and existing behavior
+- no behavior is removed, no hidden monitoring, launcher execution, shell
+  execution, broad refactors, or core imports are introduced

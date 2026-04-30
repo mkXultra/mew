@@ -1,13 +1,13 @@
-# mew-wisp SP26 default live human terminal
+# mew-wisp resident terminal
 
-`mew_wisp.py` is the product-named Python entrypoint for the isolated `mew-wisp` side project; `ghost.py` remains the historical implementation module for compatibility. SP26 makes the normal user-facing human terminal/cat path prefer foreground repo-local live desk state by default, while `--fixture-terminal` keeps deterministic fixture display available for tests, docs, and smoke proof. Machine-readable `state`/`html` surfaces keep their explicit `--live-desk` opt-in, `--desk-json` remains fixture-only, direct launcher execution stays behind `--execute-launchers`, and desk `primary_action` is always surfaced as a dry-run intent.
+`mew_wisp.py` is the normal product-named resident terminal entrypoint for the isolated `mew-wisp` side project; `ghost.py` remains the historical compatibility implementation module. The default user-facing human terminal/cat path prefers foreground repo-local live desk state, while `--fixture-terminal` keeps deterministic fixture display available for tests, docs, and smoke proof. Machine-readable `state`/`html` surfaces keep their explicit `--live-desk` opt-in, explicit `--output` preserves the compatibility HTML/state render flow, `--desk-json` remains fixture-only, direct launcher execution stays behind `--execute-launchers`, and desk `primary_action` is always surfaced as a dry-run intent.
 
 The shell does not import core mew code, read live `.mew` state for machine-readable `state`/`html` renders unless `--live-desk` is provided, run a hidden desk command, capture the screen, monitor hidden activity, use the network, or package a native app. Default human/cat live reads are foreground repo-local `./mew desk --json` reads and can be replaced with deterministic fixture display by passing `--fixture-terminal`.
 
 ## What this slice provides
 
-- `mew_wisp.py`: the product-named Python entrypoint for operators; it delegates to `ghost.py` without duplicating CLI logic.
-- `ghost.py`: the historical standalone implementation module retained for compatibility.
+- `mew_wisp.py`: the normal product-named resident terminal entrypoint for operators; it delegates to `ghost.py` without duplicating CLI logic.
+- `ghost.py`: the historical standalone compatibility implementation module retained for direct `ghost.py` users.
 - `fixtures/sample_ghost_state.json`: deterministic input for ghost state, active-window classification, presence classification, and local HTML rendering.
 - `fixtures/sample_desk_view.json`: deterministic desk view-model input for `--desk-json` status/counts/details/primary_action rendering.
 - `tests/test_mew_ghost.py`: focused tests for fixture rendering, foreground watch output, repeated HTML rewrites, explicit live-probe fallbacks, launcher dry-run/execution gating, desk fixture mapping, isolation, and README usage.

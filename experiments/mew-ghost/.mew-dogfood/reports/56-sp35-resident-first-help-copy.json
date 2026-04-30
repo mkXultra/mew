@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "task_id": 56,
+  "session_id": 87,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP35 updated mew-wisp help and first-screen copy so the product-facing path reads as a resident terminal surface, while ghost.py and HTML remain compatibility paths.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP.md",
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/README.md",
+    "experiments/mew-ghost/ghost.py",
+    "experiments/mew-ghost/tests/test_mew_ghost.py",
+    "experiments/mew-ghost/.mew-dogfood/reports/56-sp35-resident-first-help-copy.json"
+  ],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "52 passed in 8.62s"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --help",
+      "result": "help presents mew-wisp as the resident terminal and ghost.py as the compatibility implementation"
+    },
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run python experiments/mew-ghost/mew_wisp.py --fixture experiments/mew-ghost/fixtures/sample_ghost_state.json --output /tmp/mew-wisp-sp35.html",
+      "result": "explicit HTML compatibility output rendered with mew-wisp resident compatibility title and heading"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "work_report_path_did_not_persist_final_step_report",
+  "repair_required": true,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-help-copy-oneshot-report.json",
+    "https://github.com/mkXultra/mew/issues/32",
+    "focused verifier passed: 52 tests",
+    "help and explicit HTML compatibility smoke outputs inspected"
+  ],
+  "commit": "",
+  "notes": "Mew authored the product copy/help/test changes without product-code rescue edits. The product slice is complete, but the --report closeout path remained resume/context-shaped with no final steps while stdout printed the final finish report; issue #32 records that implementation-lane recovery problem."
+}

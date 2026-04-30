@@ -45,10 +45,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP32 mew-wisp Launch Preset | `done` | Task #53/session #84 added `--wisp` as the named resident preset: omitted options default to live human cat foreground watch, while explicit format/form/watch-count and fixture-terminal behavior remain intact. |
 | SP33 mew-wisp Product-Named Entrypoint | `done` | Task #54/session #85 added `experiments/mew-ghost/mew_wisp.py` as the product-named Python entrypoint delegating to `ghost.main`; README usage now prefers the wisp name while `ghost.py` remains the compatibility implementation module. |
 | SP34 mew-wisp Resident-First Entrypoint Default | `done` | Task #55/session #86 made `mew_wisp.py` resident-first by default: omitted mode/form/watch with no `--output` starts the human cat foreground watch, while explicit options and `--output` compatibility remain intact. |
+| SP35 mew-wisp Resident-First Help and Copy | `done` | Task #56/session #87 updated CLI help, README first-screen copy, and HTML compatibility wording so `mew-wisp` is presented as the resident terminal surface while `ghost.py`/HTML remain compatibility paths. |
 
 ## Active Focus
 
-Active side-project focus: **SP34 mew-wisp Resident-First Entrypoint Default is complete; the remaining forward-product cleanup is legacy HTML/ghost naming retirement, which is larger and should stay split into bounded slices**.
+Active side-project focus: **SP35 mew-wisp Resident-First Help and Copy is complete; the remaining forward-product cleanup is legacy HTML/ghost naming retirement, which is larger and should stay split into bounded slices**.
 
 Current target:
 
@@ -283,6 +284,14 @@ Current target:
   preserved, with `--output` keeping the historical HTML default. The focused
   verifier passed (`51 passed`), `git diff --check` passed, bounded resident
   and explicit HTML smoke outputs were inspected, and rescue edits remain `0`.
+- SP35 task `#56` landed practical from one-shot session `#87`: CLI help,
+  README first-screen copy, and HTML title/heading copy now present
+  `mew-wisp` as the resident terminal surface while framing `ghost.py` and HTML
+  as compatibility paths. The focused verifier passed (`52 passed`), `git diff
+  --check` passed, help and explicit HTML smoke outputs were inspected, and
+  rescue edits remain `0`. During closeout, issue `#32` was opened because the
+  `./mew work --report` file did not persist the final step report even though
+  stdout printed the final finish report.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -1010,7 +1019,7 @@ Current target:
 
 Choose the next side-project move:
 
-1. choose the next mew-wisp polish or cleanup slice after SP34, preferably
+1. choose the next mew-wisp polish or cleanup slice after SP35, preferably
    another small one-shot that improves the terminal resident experience or
    retires legacy `ghost`/HTML surface area without broad UI/test coupling
 2. keep state/JSON output as the machine-readable proof path while preserving
