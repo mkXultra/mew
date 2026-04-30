@@ -4548,6 +4548,260 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("expected_artifacts=/tmp/frame.bmp", text)
         self.assertIn("verifier_failure_runtime_tools: readelf, nm, objdump, addr2line", text)
 
+    def test_work_session_resume_surfaces_long_dependency_build_state(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "opam install -y coq.8.16.1 coq-flocq"},
+                    "result": {"command": "opam install -y coq.8.16.1 coq-flocq", "exit_code": 0},
+                },
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "make depend && timeout 120 make -j4 ccomp", "cwd": "/tmp/CompCert"},
+                    "result": {
+                        "command": "make depend && timeout 120 make -j4 ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": (
+                            "SOURCE_ARCHIVE_ROOT=CompCert-3.13.1\n"
+                            "opam switch compcert-ocaml-system\n"
+                            "make depend\n.depend generated\n"
+                            "Error: Can't find file ./Axioms.v\n"
+                            "MAKE_FAILED_OR_TIMEOUT exit=124\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 10,
+                    "tool": "run_command",
+                    "status": "running",
+                    "parameters": {"command": "make depend && make -j2 ccomp", "cwd": "/tmp/CompCert"},
+                    "result": {
+                        "command": "make depend && make -j2 ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                    },
+                    "running_output": {"stdout": "COQC backend/Asmgenproof0.v\nCOQC x86/Asmgenproof1.v\n"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        state = resume["long_dependency_build_state"]
+
+        self.assertEqual(state["kind"], "long_dependency_build_state")
+        self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
+        self.assertEqual(state["latest_build_tool_call_id"], 10)
+        self.assertEqual(state["latest_build_status"], "running")
+        self.assertEqual(state["incomplete_reason"], "running")
+        self.assertIn("dependencies_generated", [item["stage"] for item in state["progress"]])
+        self.assertIn("build_attempted", [item["stage"] for item in state["progress"]])
+        self.assertEqual(state["strategy_blockers"][0]["code"], "dependency_generation_order_issue")
+
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_build_state: long_dependency_build_state", text)
+        self.assertIn("long_dependency_missing_artifact: /tmp/CompCert/ccomp", text)
+        self.assertIn("long_dependency_incomplete_reason: running", text)
+        self.assertIn("long_dependency_latest_build_status: running", text)
+        self.assertIn("long_dependency_strategy_blocker: dependency_generation_order_issue", text)
+        self.assertIn("long_dependency_next: resume the existing source tree/toolchain state", text)
+
+    def test_work_session_resume_flags_untargeted_full_make_for_specific_long_artifact(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "running",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j\"$(nproc)\"",
+                    },
+                    "running_output": {"stdout": "COQC lib/Maps.v\n"},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        state = resume["long_dependency_build_state"]
+        codes = [item["code"] for item in state["strategy_blockers"]]
+
+        self.assertIn("untargeted_full_project_build_for_specific_artifact", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_dependency_strategy_blocker: untargeted_full_project_build_for_specific_artifact",
+            text,
+        )
+
+    def test_work_session_resume_flags_missing_compatibility_override_probe(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure x86_64-linux && make -j2 ccomp",
+                    },
+                    "result": {
+                        "command": "./configure x86_64-linux && make -j2 ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("toolchain_version_constraint_mismatch", codes)
+        self.assertIn("compatibility_override_probe_missing", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: compatibility_override_probe_missing", text)
+        self.assertIn("compatibility/override flags", text)
+
+    def test_work_session_resume_flags_chained_untargeted_full_make_for_specific_long_artifact(self):
+        from mew.work_session import build_work_session_resume
+
+        commands = [
+            'cd /tmp/CompCert && make -j"$(nproc)"',
+            'make depend && make -j"$(nproc)"',
+            'timeout 120 make -j"$(nproc)"',
+            "make -j2 CCOMP=/tmp/CompCert/ccomp",
+            "make all",
+        ]
+
+        for command in commands:
+            with self.subTest(command=command):
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Compile CompCert",
+                    "goal": (
+                        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+                    ),
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 8,
+                            "tool": "run_command",
+                            "status": "running",
+                            "parameters": {
+                                "cwd": "/tmp/CompCert",
+                                "command": command,
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                resume = build_work_session_resume(session)
+                codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+                self.assertIn("untargeted_full_project_build_for_specific_artifact", codes)
+
+    def test_work_session_resume_accepts_chained_artifact_target_make_for_specific_long_artifact(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "running",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make depend && timeout 120 make -j2 ccomp",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertNotIn("untargeted_full_project_build_for_specific_artifact", codes)
+
+    def test_work_session_resume_omits_long_dependency_state_before_progress(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+
+        self.assertEqual(resume["long_dependency_build_state"], {})
+        self.assertNotIn("long_dependency_build_state:", format_work_session_resume(resume))
+
     def test_work_session_resume_surfaces_stale_runtime_artifact_risk(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -5661,6 +5915,100 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertLess(timeout, 60.0)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_oneshot_caps_run_command_timeout_to_fit_wall_budget(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "run a long bounded command",
+                    "action": {
+                        "type": "run_command",
+                        "command": "echo ok",
+                        "timeout": 1800,
+                    },
+                }
+                observed_parameters = {}
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    self.assertEqual(tool, "run_command")
+                    observed_parameters.update(parameters)
+                    return {
+                        "command": parameters["command"],
+                        "exit_code": 0,
+                        "stdout": "ok\n",
+                        "stderr": "",
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            "Run a bounded command.",
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-shell",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "5",
+                                            "--max-wall-seconds",
+                                            "20",
+                                            "--max-steps",
+                                            "1",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertIn("wall_timeout_ceiling", observed_parameters)
+                self.assertEqual(observed_parameters["wall_timeout_ceiling"]["requested_timeout_seconds"], 1800.0)
+                self.assertLess(observed_parameters["timeout"], 20.0)
+                self.assertGreaterEqual(observed_parameters["timeout"], 1.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_run_command_for_work_streaming_kills_process_group_on_timeout(self):
+        from mew.work_session import run_command_for_work
+
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "work-runner-grandchild-survived.txt"
+            child_code = (
+                "import pathlib, time; "
+                "time.sleep(0.7); "
+                f"pathlib.Path({str(marker)!r}).write_text('alive', encoding='utf-8')"
+            )
+            parent_code = (
+                "import subprocess, sys, time; "
+                f"subprocess.Popen([sys.executable, '-c', {child_code!r}]); "
+                "time.sleep(10)"
+            )
+            command = shlex.join([sys.executable, "-c", parent_code])
+
+            result = run_command_for_work(command, cwd=tmp, timeout=0.2, on_output=lambda _name, _chunk: None)
+            time.sleep(1.0)
+
+            self.assertTrue(result["timed_out"])
+            self.assertFalse(marker.exists())
 
     def test_work_oneshot_writes_partial_report_before_model_turn(self):
         old_cwd = os.getcwd()
@@ -34528,6 +34876,20 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
         self.assertIn("expected dimensions/resolution, reference similarity", prompt)
+        self.assertIn("For long dependency/toolchain/source-build tasks", prompt)
+        self.assertIn("work_session.resume.long_dependency_build_state", prompt)
+        self.assertIn("Prerequisite installation, configure, dependency generation", prompt)
+        self.assertIn("required final executable/artifact is missing", prompt)
+        self.assertIn("Before installing a distro toolchain", prompt)
+        self.assertIn("version constraints", prompt)
+        self.assertIn("cheap source-provided compatibility/override flags", prompt)
+        self.assertIn("invalidates a toolchain/package path", prompt)
+        self.assertIn("dependency-generation/configure target", prompt)
+        self.assertIn("shortest explicit target that produces that artifact", prompt)
+        self.assertIn("over full project, proof, doc, test, or all-target builds", prompt)
+        self.assertIn("set a bounded run_command timeout", prompt)
+        self.assertIn("optional run_tests/run_command timeout seconds", prompt)
+        self.assertIn("Do not restart package-manager or source-tree setup", prompt)
         self.assertIn("For model/checkpoint/tokenizer inference, sampling, or continuation tasks", prompt)
         self.assertIn("printed N tokens", prompt)
         self.assertIn("reference/golden/oracle continuation", prompt)
@@ -34569,6 +34931,12 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("prefer a module-level command unless you have confirmed the exact class and method name", prompt)
         self.assertIn("Do not use run_tests to invoke resident mew loops", prompt)
         self.assertIn("run_command executes top-level shell operators", prompt)
+        self.assertIn("capabilities.allowed_write_roots constrain native write_file/edit_file/edit_file_hunks tools", prompt)
+        self.assertIn("not by themselves a reason to wait when shell is explicitly allowed", prompt)
+        self.assertIn("localhost daemons, system users, package or service config, ports", prompt)
+        self.assertIn("exact verifier-visible paths such as /git, /srv, /var, /run, or /etc", prompt)
+        self.assertIn("instead of waiting solely for more native write roots", prompt)
+        self.assertIn("do not substitute a /tmp-only implementation", prompt)
         self.assertIn("Do not use run_command to invoke resident mew loops", prompt)
         self.assertIn("printed Next CLI controls", prompt)
         self.assertIn("Before finishing an implementation task that touched user-facing surfaces", prompt)
@@ -34594,6 +34962,34 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("literal fixed-string", prompt)
         self.assertIn("use batch for OR searches", prompt)
 
+    def test_work_act_prompt_preserves_shell_authorized_system_service_commands(self):
+        from mew.work_loop import build_work_act_prompt
+
+        context = {
+            "capabilities": {
+                "allow_shell": True,
+                "allowed_write_roots": [".", "/usr/local/bin", "/tmp"],
+            },
+            "work_session": {
+                "goal": "Set up git@localhost:/git/project and Nginx HTTPS on localhost:8443.",
+            },
+        }
+        decision_plan = {
+            "summary": "configure real services",
+            "action": {
+                "type": "run_command",
+                "command": "mkdir -p /git /srv && /usr/sbin/sshd && nginx",
+            },
+        }
+
+        prompt = build_work_act_prompt(context, decision_plan)
+
+        self.assertIn("capabilities.allow_shell is true", prompt)
+        self.assertIn("do not convert that shell command to wait solely because native allowed_write_roots exclude those paths", prompt)
+        self.assertIn("allowed_write_roots constrain native write_file/edit_file/edit_file_hunks tools", prompt)
+        self.assertIn("Preserve the run_command when it is bounded and exact-interface oriented", prompt)
+        self.assertIn("still reject resident mew loop commands", prompt)
+
     def test_work_model_search_text_defaults_are_bounded(self):
         from mew.work_loop import work_tool_parameters_from_action
 
@@ -34606,6 +35002,27 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertEqual(explicit["max_matches"], 50)
         self.assertEqual(explicit["context_lines"], 5)
+
+    def test_work_model_preserves_bounded_run_command_timeout(self):
+        from mew.work_loop import normalize_work_model_action, work_tool_parameters_from_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "run_command",
+                    "command": "make -j2 ccomp",
+                    "timeout": "900",
+                }
+            }
+        )
+
+        self.assertEqual(action["timeout"], "900")
+        params = work_tool_parameters_from_action(action, allow_shell=True, default_cwd="/tmp/CompCert")
+        self.assertEqual(params["timeout"], 900.0)
+        self.assertEqual(params["cwd"], "/tmp/CompCert")
+
+        invalid = work_tool_parameters_from_action({"type": "run_command", "command": "make", "timeout": "soon"})
+        self.assertNotIn("timeout", invalid)
 
     def test_work_model_splits_pipe_search_text_queries(self):
         from mew.work_loop import normalize_work_model_action
@@ -37535,6 +37952,11 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(
             work_finish_blocker_allows_continue(
                 "finish blocked: model inference output quality evidence ungrounded"
+            )
+        )
+        self.assertTrue(
+            work_finish_blocker_allows_continue(
+                "finish blocked: model inference oracle provenance ungrounded"
             )
         )
         self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))

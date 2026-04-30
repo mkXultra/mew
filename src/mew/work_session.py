@@ -5,7 +5,12 @@ from pathlib import Path
 import re
 import shlex
 
-from .acceptance import coerce_acceptance_checks, implementation_contract_source_requirements
+from .acceptance import (
+    coerce_acceptance_checks,
+    implementation_contract_source_requirements,
+    is_long_dependency_toolchain_build_task,
+    long_dependency_final_artifacts,
+)
 from .cli_command import mew_command, mew_executable
 from .data_tools import analyze_table
 from .read_tools import (
@@ -2191,8 +2196,15 @@ def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=
 
 def run_command_for_work(command, cwd=".", timeout=300, on_output=None, use_shell=False):
     if on_output:
-        return run_command_record_streaming(command, cwd=cwd, timeout=timeout, on_output=on_output, use_shell=use_shell)
-    return run_command_record(command, cwd=cwd, timeout=timeout, use_shell=use_shell)
+        return run_command_record_streaming(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            on_output=on_output,
+            use_shell=use_shell,
+            kill_process_group=True,
+        )
+    return run_command_record(command, cwd=cwd, timeout=timeout, use_shell=use_shell, kill_process_group=True)
 
 
 def first_unquoted_shell_operator_span(command):
@@ -3830,6 +3842,7 @@ def _runtime_artifact_call_text(call):
         return ""
     result = call.get("result") if isinstance(call.get("result"), dict) else {}
     parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    running_output = call.get("running_output") if isinstance(call.get("running_output"), dict) else {}
     parts = [
         call.get("summary") or "",
         call.get("error") or "",
@@ -3837,6 +3850,8 @@ def _runtime_artifact_call_text(call):
         result.get("command") or "",
         result.get("stdout") or "",
         result.get("stderr") or "",
+        running_output.get("stdout") or "",
+        running_output.get("stderr") or "",
         result.get("summary") or "",
     ]
     return "\n".join(str(part) for part in parts if part)
@@ -4044,6 +4059,421 @@ def build_final_verifier_state_transfer(task, calls, session=None):
             "run the exact final verifier-shaped command from the final cwd, wait for each expected runtime artifact, "
             "record artifact proof in acceptance_checks, then clean stale artifacts only if the external verifier "
             "is expected to create them fresh"
+        ),
+    }
+
+
+_LONG_DEPENDENCY_STAGE_MARKERS = (
+    ("package_manager_setup", ("apt-get", "pip install", "opam install", "npm install", "cargo install")),
+    ("source_tree_prepared", ("download", "extract", "tar -x", "source tree", "source_archive_root")),
+    ("toolchain_selected", ("opam switch", "coq ", "ocaml", "tool versions", "compiler")),
+    ("configured", ("./configure", "cmake", "makefile.config", "config.status")),
+    ("dependencies_generated", ("make depend", ".depend", "dependency file", "analyzing coq dependencies")),
+    ("build_attempted", ("make -j", "make ccomp", "cargo build", "cmake --build", "npm run build")),
+)
+_LONG_DEPENDENCY_INCOMPLETE_MARKERS = (
+    "make_failed_or_timeout",
+    "not_enough_time_to_build",
+    "opam_still_running",
+    "prereqs_not_ready",
+    "timeout",
+)
+_LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS = (
+    "-version",
+    "executable",
+    "exists=true",
+    "functional smoke",
+    "ls -l",
+    "regular file",
+    "smoke_ok",
+    "test -x",
+)
+_LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS = (
+    (
+        "toolchain_version_constraint_mismatch",
+        (
+            "requires a version",
+            "too old",
+            "too new",
+            "version mismatch",
+            "required version",
+        ),
+    ),
+    (
+        "package_source_or_name_mismatch",
+        (
+            "no package named",
+            "unable to locate package",
+            "package not found",
+        ),
+    ),
+    (
+        "preinstalled_tool_conflict",
+        (
+            "preinstalled",
+            "installation aborted",
+            "bypass this safety check",
+        ),
+    ),
+    (
+        "dependency_generation_order_issue",
+        (
+            "can't find file ./",
+            "cannot find file ./",
+            "no rule to make target",
+        ),
+    ),
+)
+_LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS = (
+    "configure --help",
+    "./configure --help",
+    "--help |",
+    "-ignore",
+    "--ignore",
+    "compatib",
+    "override",
+    "allow-unsupported",
+)
+
+
+def _make_invocation_prefix_is_wrapper(parts):
+    index = 0
+    while index < len(parts):
+        token = str(parts[index] or "")
+        name = Path(token).name.casefold()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+            index += 1
+            continue
+        if name in {"command", "time"}:
+            index += 1
+            continue
+        if name in {"timeout", "gtimeout"}:
+            index += 1
+            while index < len(parts):
+                option = str(parts[index] or "")
+                if option == "--":
+                    index += 1
+                    break
+                if option in {"-s", "--signal", "-k", "--kill-after"} and index + 1 < len(parts):
+                    index += 2
+                    continue
+                if option.startswith("-"):
+                    index += 1
+                    continue
+                index += 1
+                break
+            continue
+        if name == "env":
+            index += 1
+            while index < len(parts):
+                env_token = str(parts[index] or "")
+                if env_token == "--":
+                    index += 1
+                    break
+                if env_token in {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"} and index + 1 < len(
+                    parts
+                ):
+                    index += 2
+                    continue
+                if env_token.startswith("-") or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", env_token):
+                    index += 1
+                    continue
+                break
+            continue
+        return False
+    return True
+
+
+def _long_dependency_make_token_index(parts):
+    for index, token in enumerate(parts or []):
+        if Path(str(token or "")).name.casefold() == "make" and _make_invocation_prefix_is_wrapper(parts[:index]):
+            return index
+    return None
+
+
+def _make_explicit_targets(parts):
+    targets = []
+    index = 1
+    while index < len(parts):
+        token = str(parts[index] or "")
+        if token == "--":
+            targets.extend(part for part in parts[index + 1 :] if part)
+            break
+        if token.startswith("-"):
+            option_name = token.split("=", 1)[0]
+            if option_name in {"-C", "-f", "-I", "-j", "-l", "-O", "-W", "--directory", "--file", "--jobs"}:
+                if "=" not in token and index + 1 < len(parts) and not str(parts[index + 1] or "").startswith("-"):
+                    index += 2
+                    continue
+            index += 1
+            continue
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+            index += 1
+            continue
+        targets.append(token)
+        index += 1
+    return targets
+
+
+_LONG_DEPENDENCY_FULL_PROJECT_MAKE_TARGETS = {
+    "all",
+    "build",
+    "check",
+    "doc",
+    "docs",
+    "html",
+    "install",
+    "proof",
+    "proofs",
+    "test",
+    "tests",
+    "world",
+}
+
+
+def _long_dependency_make_invocations(command):
+    invocations = []
+    for segment in split_unquoted_shell_command_segments(command):
+        segment = str(segment or "").strip()
+        if not segment:
+            continue
+        try:
+            parts = shlex.split(segment, posix=True)
+        except ValueError:
+            parts = segment.split()
+        make_index = _long_dependency_make_token_index(parts)
+        if make_index is None:
+            continue
+        invocation_parts = parts[make_index:]
+        if invocation_parts:
+            invocations.append(shlex.join(invocation_parts))
+    return invocations
+
+
+def _long_dependency_untargeted_make_blocker(call, expected_artifacts):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = result.get("command") or parameters.get("command") or ""
+    if not command:
+        return {}
+    artifact_names = {
+        Path(str(artifact or "")).name.casefold()
+        for artifact in expected_artifacts or []
+        if Path(str(artifact or "")).name
+    }
+    for invocation in _long_dependency_make_invocations(command):
+        try:
+            parts = shlex.split(invocation, posix=True) if invocation else []
+        except ValueError:
+            parts = invocation.split()
+        if not parts or parts[0] != "make":
+            continue
+        explicit_targets = _make_explicit_targets(parts)
+        target_names = {Path(str(target or "")).name.casefold() for target in explicit_targets}
+        if explicit_targets and any(name and name in target_names for name in artifact_names):
+            continue
+        if explicit_targets and not all(target.casefold() in _LONG_DEPENDENCY_FULL_PROJECT_MAKE_TARGETS for target in explicit_targets):
+            continue
+        return {
+            "code": "untargeted_full_project_build_for_specific_artifact",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": clip_inline_text(invocation, 180),
+        }
+    return {}
+
+
+def _long_dependency_task_text(task, session=None):
+    task = task if isinstance(task, dict) else {}
+    session = session if isinstance(session, dict) else {}
+    return "\n".join(
+        str(value or "")
+        for value in (
+            task.get("title"),
+            task.get("description"),
+            task.get("notes"),
+            session.get("title"),
+            session.get("goal"),
+        )
+        if value
+    )
+
+
+def _long_dependency_artifact_proven_by_call(call, artifact):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("exit_code") not in (None, 0):
+        return False
+    text = _runtime_artifact_call_text(call).casefold()
+    artifact_lower = str(artifact or "").casefold()
+    if not artifact_lower or artifact_lower not in text:
+        return False
+    if any(marker in text for marker in ("does not exist", "missing", "no such file", "not found")):
+        return False
+    return any(marker in text for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS)
+
+
+def _long_dependency_call_stages(call):
+    text = _runtime_artifact_call_text(call).casefold()
+    stages = []
+    for stage, markers in _LONG_DEPENDENCY_STAGE_MARKERS:
+        if any(marker in text for marker in markers):
+            stages.append(stage)
+    return stages
+
+
+def _long_dependency_incomplete_reason(call):
+    text = _runtime_artifact_call_text(call).casefold()
+    for marker in _LONG_DEPENDENCY_INCOMPLETE_MARKERS:
+        if marker in text:
+            return marker
+    if str(call.get("status") or "").casefold() in {"running", "interrupted"}:
+        return str(call.get("status") or "").casefold()
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("timed_out"):
+        return "tool_timeout"
+    return ""
+
+
+def _long_dependency_strategy_blockers(call, expected_artifacts=None):
+    if not isinstance(call, dict):
+        return []
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    blockers = []
+    for code, markers in _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS:
+        if not any(marker in lowered for marker in markers):
+            continue
+        excerpt = ""
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line_lower = line.casefold()
+            if any(marker in line_lower for marker in markers):
+                excerpt = clip_inline_text(line, 180)
+                break
+        blockers.append(
+            {
+                "code": code,
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "excerpt": excerpt,
+            }
+        )
+    if (
+        any(marker in lowered for marker in ("requires a version", "unsupported", "version mismatch"))
+        and any(marker in lowered for marker in ("./configure", " configure ", "testing coq", "testing "))
+        and not any(marker in lowered for marker in _LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS)
+    ):
+        excerpt = ""
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line_lower = line.casefold()
+            if any(marker in line_lower for marker in ("requires a version", "unsupported", "version mismatch")):
+                excerpt = clip_inline_text(line, 180)
+                break
+        blockers.append(
+            {
+                "code": "compatibility_override_probe_missing",
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "excerpt": excerpt,
+            }
+        )
+    untargeted_make = _long_dependency_untargeted_make_blocker(call, expected_artifacts or [])
+    if untargeted_make:
+        blockers.append(untargeted_make)
+    return blockers
+
+
+def build_long_dependency_build_state(task, calls, session=None):
+    task_text = _long_dependency_task_text(task, session=session)
+    if not is_long_dependency_toolchain_build_task(task_text):
+        return {}
+    expected_artifacts = long_dependency_final_artifacts(task_text)
+    if not expected_artifacts:
+        return {}
+    progress = []
+    seen_stages = set()
+    latest_build_call = {}
+    latest_incomplete_reason = ""
+    strategy_blockers = []
+    seen_strategy_blockers = set()
+    artifact_status = {
+        artifact: {"path": artifact, "status": "missing_or_unproven", "source_tool_call_id": None}
+        for artifact in expected_artifacts
+    }
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
+            continue
+        stages = _long_dependency_call_stages(call)
+        for stage in stages:
+            if stage in seen_stages:
+                continue
+            seen_stages.add(stage)
+            progress.append(
+                {
+                    "stage": stage,
+                    "source_tool_call_id": call.get("id"),
+                    "tool": call.get("tool") or "",
+                    "status": call_status,
+                }
+            )
+        if "build_attempted" in stages:
+            latest_build_call = call
+        incomplete_reason = _long_dependency_incomplete_reason(call)
+        if incomplete_reason:
+            latest_incomplete_reason = incomplete_reason
+        for blocker in _long_dependency_strategy_blockers(call, expected_artifacts):
+            key = (blocker.get("code"), blocker.get("source_tool_call_id"), blocker.get("excerpt"))
+            if key in seen_strategy_blockers:
+                continue
+            seen_strategy_blockers.add(key)
+            strategy_blockers.append(blocker)
+        if call_status != "completed":
+            continue
+        for artifact in expected_artifacts:
+            if _long_dependency_artifact_proven_by_call(call, artifact):
+                artifact_status[artifact] = {
+                    "path": artifact,
+                    "status": "proven",
+                    "source_tool_call_id": call.get("id"),
+                }
+    proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
+    missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
+    if not progress and not proven and not strategy_blockers:
+        return {}
+    latest_command = ""
+    if latest_build_call:
+        result = latest_build_call.get("result") if isinstance(latest_build_call.get("result"), dict) else {}
+        parameters = latest_build_call.get("parameters") if isinstance(latest_build_call.get("parameters"), dict) else {}
+        latest_command = result.get("command") or parameters.get("command") or ""
+    return {
+        "kind": "long_dependency_build_state",
+        "progress": progress[-6:],
+        "expected_artifacts": list(artifact_status.values())[:6],
+        "missing_artifacts": missing[:6],
+        "latest_build_tool_call_id": latest_build_call.get("id") if latest_build_call else None,
+        "latest_build_status": str(latest_build_call.get("status") or "") if latest_build_call else "",
+        "latest_build_command": clip_inline_text(latest_command, 500),
+        "incomplete_reason": latest_incomplete_reason,
+        "strategy_blockers": strategy_blockers[-6:],
+        "suggested_next": (
+            "resume the existing source tree/toolchain state; do not restart package or source setup after a "
+            "compatible path is found. If a configure step rejects an installed dependency version, inspect or try "
+            "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
+            "Do not retry invalidated toolchain/package paths. Allocate remaining wall budget to the shortest "
+            "idempotent continuation command that produces the missing final artifact, then prove it exists and "
+            "is executable/invokable."
         ),
     }
 
@@ -8392,6 +8822,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
     stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
     final_verifier_state_transfer = build_final_verifier_state_transfer(task, calls, session=session)
+    long_dependency_build_state = build_long_dependency_build_state(task, calls, session=session)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -8476,6 +8907,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "stale_runtime_artifact_risk": stale_runtime_artifact_risk,
         "final_verifier_state_transfer": final_verifier_state_transfer,
+        "long_dependency_build_state": long_dependency_build_state,
         "failed_patch_repair": failed_patch_repair,
         "broad_rollback_slice_repair": broad_rollback_slice_repair,
         "retry_context": retry_context,
@@ -8720,6 +9152,40 @@ def format_work_session_resume(resume):
             )
         if final_verifier_state_transfer.get("suggested_next"):
             lines.append(f"final_verifier_next: {final_verifier_state_transfer.get('suggested_next')}")
+    long_dependency_build_state = resume.get("long_dependency_build_state") or {}
+    if long_dependency_build_state:
+        lines.append(f"long_dependency_build_state: {long_dependency_build_state.get('kind')}")
+        progress = [
+            str(item.get("stage") or "")
+            for item in (long_dependency_build_state.get("progress") or [])
+            if isinstance(item, dict) and item.get("stage")
+        ]
+        if progress:
+            lines.append("long_dependency_progress: " + ", ".join(progress))
+        for item in (long_dependency_build_state.get("missing_artifacts") or [])[:3]:
+            lines.append(
+                "long_dependency_missing_artifact: "
+                f"{item.get('path')} status={item.get('status') or 'missing_or_unproven'}"
+            )
+        if long_dependency_build_state.get("incomplete_reason"):
+            lines.append(f"long_dependency_incomplete_reason: {long_dependency_build_state.get('incomplete_reason')}")
+        if long_dependency_build_state.get("latest_build_status"):
+            lines.append(f"long_dependency_latest_build_status: {long_dependency_build_state.get('latest_build_status')}")
+        for item in (long_dependency_build_state.get("strategy_blockers") or [])[:4]:
+            code = item.get("code") or "unknown"
+            excerpt = item.get("excerpt") or ""
+            source_tool = item.get("source_tool_call_id")
+            suffix = f" tool=#{source_tool}" if source_tool is not None else ""
+            lines.append(
+                "long_dependency_strategy_blocker: "
+                + code
+                + suffix
+                + (f" excerpt={excerpt}" if excerpt else "")
+            )
+        if long_dependency_build_state.get("latest_build_command"):
+            lines.append(f"long_dependency_latest_build: {long_dependency_build_state.get('latest_build_command')}")
+        if long_dependency_build_state.get("suggested_next"):
+            lines.append(f"long_dependency_next: {long_dependency_build_state.get('suggested_next')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)

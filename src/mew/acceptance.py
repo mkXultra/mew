@@ -39,6 +39,7 @@ _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _WHITESPACE_RE = re.compile(r"\s+")
 _TOOL_ID_RE = re.compile(r"\btool(?:\s+call)?\s*#?\s*(\d+)\b", re.IGNORECASE)
 _RUNTIME_TMP_ARTIFACT_RE = re.compile(r"(/tmp/[A-Za-z0-9._/@%+=:,\-]+)")
+_ABSOLUTE_PATH_RE = re.compile(r"(/[A-Za-z0-9._/@%+=:,\-]+(?:/[A-Za-z0-9._/@%+=:,\-]+)*)")
 
 _WRITE_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 _GROUNDING_TOOLS = {
@@ -141,6 +142,67 @@ _RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS = (
     "screen size",
     "similarity",
     "ssim",
+)
+
+_LONG_DEPENDENCY_BUILD_ACTION_MARKERS = (
+    "build",
+    "compile ",
+    "compiled ",
+    "compiling ",
+    "configure",
+    "from source",
+    "install",
+    "make ",
+    "freshly built",
+)
+_LONG_DEPENDENCY_BUILD_DOMAIN_MARKERS = (
+    "apt-get",
+    "cargo",
+    "cmake",
+    "compiler",
+    "dependency",
+    "dependencies",
+    "make ",
+    "maven",
+    "npm",
+    "ocaml",
+    "opam",
+    "package",
+    "pip",
+    "source",
+    "toolchain",
+)
+_LONG_DEPENDENCY_ARTIFACT_CONTEXT_MARKERS = (
+    "artifact",
+    "binary",
+    "created",
+    "ensure",
+    "executable",
+    "exists",
+    "functional",
+    "invoked",
+    "invokable",
+    "output",
+    "produce",
+    "through",
+    "version",
+)
+_LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS = (
+    "-version",
+    "executable",
+    "exists=true",
+    "functional smoke",
+    "invoked",
+    "ls -l",
+    "regular file",
+    "smoke_ok",
+    "test -x",
+)
+_LONG_DEPENDENCY_ARTIFACT_NEGATIVE_MARKERS = (
+    "does not exist",
+    "missing",
+    "no such file",
+    "not found",
 )
 
 _STATEFUL_OUTPUT_STATE_MARKERS = (
@@ -459,7 +521,9 @@ _MODEL_INFERENCE_ORACLE_MARKERS = (
     "argmax token",
     "arg-max match",
     "all matched",
+    "candidate_equals_reference",
     "expected continuation",
+    "expected_continuation",
     "expected output",
     "golden",
     "ground truth",
@@ -474,6 +538,7 @@ _MODEL_INFERENCE_ORACLE_MARKERS = (
     "reference comparison",
     "reference implementation match",
     "reference model match",
+    "reference_output",
     "same tokens",
     "token id match",
     "token ids match",
@@ -482,6 +547,9 @@ _MODEL_INFERENCE_ORACLE_MARKERS = (
 )
 _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS = (
     "all matched",
+    "candidate_equals_reference true",
+    "candidate_equals_reference yes",
+    "candidate_equals_reference 1",
     "equal",
     "match",
     "matched",
@@ -489,6 +557,115 @@ _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS = (
     "passed",
     "same",
     "within tolerance",
+)
+_MODEL_INFERENCE_CANDIDATE_EQUALS_RE = re.compile(
+    r"\bcandidate_equals_reference\b\s*[:=]?\s*(?P<value>[A-Za-z0-9_+-]+)?",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_ORACLE_FALSE_VALUE_RE = re.compile(
+    r"\b(?:"
+    r"all[_\s-]*matched|arg[-\s]?max(?:\s+token)?(?:\s+ids?)?\s+match|"
+    r"candidate_equals_reference|equal|equals|logits?\s+match|match(?:es|ed)?|"
+    r"matched\s+reference|matches\s+reference|oracle\s+match|pass(?:ed)?|"
+    r"python\s+reference\s+match|reference\s+comparison|reference\s+implementation\s+match|"
+    r"reference\s+model\s+match|same|token(?:\s+ids?)?\s+match|"
+    r"top-1(?:\s+token(?:\s+ids?)?)?\s+match"
+    r")\b\s*(?::|=|\bis\b)?\s*"
+    r"(?:false\b|no\s+match\b|(?:0|no)\b(?!\s+(?:differences?|errors?|failures?|mismatches?)))",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_ZERO_NEGATIVE_COUNT_RE = re.compile(
+    r"\b(?:0|no)\s+(?:differences?|errors?|failures?|mismatches?)\b",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_SELF_DERIVED_ORACLE_PATTERNS = (
+    re.compile(r"\bstandard[-\s]?libm\s+reference\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:candidate|current|same)\s+(?:implementation|program|source)\b"
+        r".{0,120}\b(?:reference|oracle)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\b(?:reference|oracle)\b.{0,120}"
+        r"\b(?:candidate|current|same)\s+(?:implementation|program|source)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+_MODEL_INFERENCE_EPHEMERAL_ORACLE_PATH_RE = re.compile(
+    r"/tmp/[^\s'\";|&<>]*(?:expected|golden|oracle|ref|reference|truth)[^\s'\";|&<>]*"
+    r"\.(?:c|cc|cpp|cxx|h|hpp|py|rs|go|js|ts|sh|txt|json)\b",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE = (
+    r"(?P<path>[^'\"\s;|&<>]*(?:expected|golden|oracle|ref|reference|truth)[^'\"\s;|&<>]*"
+    r"\.(?:c|cc|cpp|cxx|h|hpp|py|rs|go|js|ts|sh|txt|json))"
+)
+_MODEL_INFERENCE_GENERATED_ORACLE_TARGET_RE = (
+    re.compile(
+        r"\bcat\s*>\s*['\"]?" + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE + r"\b.*?<<",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"<<\s*['\"]?[A-Za-z0-9_+-]+['\"]?.{0,240}>\s*['\"]?"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\btee\s+['\"]?" + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE + r"\b.{0,240}<<",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"<<\s*['\"]?[A-Za-z0-9_+-]+['\"]?.{0,240}\|\s*tee\s+['\"]?"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\bopen\s*\(\s*['\"]"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"['\"]\s*,\s*['\"][^'\"]*w[^'\"]*['\"][^)]*\)"
+        r".{0,240}\bwrite\s*\(",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\bPath\s*\(\s*['\"]"
+        + _MODEL_INFERENCE_ORACLE_SOURCE_PATH_RE
+        + r"['\"]\s*\).{0,120}\bwrite_text\s*\(",
+        re.IGNORECASE | re.DOTALL,
+    ),
+)
+_MODEL_INFERENCE_TASK_REFERENCE_COPY_RE = (
+    re.compile(
+        r"(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+        r"open\s*\(\s*['\"](?P<src>(?:/tests/|tests/)[^'\"]*)['\"][^)]*\)"
+        r"\s*\.read\s*\(\).*?"
+        r"open\s*\(\s*['\"](?P<dst>[^'\"]+)['\"]\s*,\s*['\"][^'\"]*w[^'\"]*['\"][^)]*\)"
+        r"\s*\.write\s*\(\s*(?P=var)\s*\)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:^|[;&|(\n]\s*)cp\s+['\"]?(?P<src>(?:/tests/|tests/)[^'\"\s]+)['\"]?"
+        r"\s+['\"]?(?P<dst>[^'\"\s]+)['\"]?",
+        re.IGNORECASE,
+    ),
+)
+_MODEL_INFERENCE_OPEN_READ_WRITE_RE = re.compile(
+    r"\bopen\s*\(\s*['\"](?P<src>[^'\"]+\.(?:c|cc|cpp|cxx|py|rs|go))['\"][^)]*\)"
+    r"\s*\.read\s*\(\).*?"
+    r"\bopen\s*\(\s*['\"](?P<dst>[^'\"]*(?:expected|golden|oracle|ref|reference|truth)[^'\"]*)['\"]",
+    re.IGNORECASE | re.DOTALL,
+)
+_MODEL_INFERENCE_COPY_TO_REF_RE = re.compile(
+    r"(?:^|[;&|(\n]\s*)"
+    r"(?:cp|copy)\s+['\"]?(?P<src>[^'\"\s]+\.(?:c|cc|cpp|cxx|py|rs|go))['\"]?"
+    r"\s+['\"]?(?P<dst>[^'\"\s]*(?:expected|golden|oracle|ref|reference|truth)[^'\"\s]*)['\"]?",
+    re.IGNORECASE,
+)
+_MODEL_INFERENCE_CAT_TO_REF_RE = re.compile(
+    r"(?:^|[;&|(\n]\s*)cat\s+['\"]?(?P<src>[^'\"\s]+\.(?:c|cc|cpp|cxx|py|rs|go))['\"]?"
+    r"\s*>\s*['\"]?(?P<dst>[^'\"\s]*(?:expected|golden|oracle|ref|reference|truth)[^'\"\s]*)['\"]?",
+    re.IGNORECASE,
 )
 _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS = (
     "assertionerror",
@@ -502,6 +679,7 @@ _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS = (
     "not equal",
     "not found",
     "not match",
+    "no match",
     "timed out",
     "timeout",
     "wrong",
@@ -974,6 +1152,98 @@ def _runtime_visual_artifact_quality_blocker(
         "nonzero pixels, valid headers, or self-consistent dimensions are not enough; "
         "cite a completed grounding tool whose output checks expected dimensions, "
         "reference similarity, or exact stdout/boot markers"
+    )
+
+
+def is_long_dependency_toolchain_build_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not any(marker in lowered for marker in _LONG_DEPENDENCY_BUILD_ACTION_MARKERS):
+        return False
+    return any(marker in lowered for marker in _LONG_DEPENDENCY_BUILD_DOMAIN_MARKERS)
+
+
+def _path_context(text: str, start: int, end: int, *, radius: int = 80) -> str:
+    return text[max(0, start - radius) : min(len(text), end + radius)]
+
+
+def long_dependency_final_artifacts(text: object, *, limit: int = 6) -> list[str]:
+    value = str(text or "")
+    if not is_long_dependency_toolchain_build_task(value):
+        return []
+    artifacts: list[str] = []
+    for match in _ABSOLUTE_PATH_RE.finditer(value):
+        path = str(match.group(1) or "").rstrip("`'\".,;:)")
+        if not path or path.endswith("/"):
+            continue
+        context = _path_context(value, match.start(), match.end()).casefold()
+        if re.search(r"\b(?:under|inside|within|in)\s+" + re.escape(path.casefold()) + r"\b", context):
+            continue
+        if not any(marker in context for marker in _LONG_DEPENDENCY_ARTIFACT_CONTEXT_MARKERS):
+            continue
+        if path not in artifacts:
+            artifacts.append(path)
+        if len(artifacts) >= limit:
+            break
+    return artifacts
+
+
+def _long_dependency_artifact_proved_by_text(text: object, artifact: str) -> bool:
+    lowered = str(text or "").casefold()
+    artifact_lower = str(artifact or "").casefold()
+    if not artifact_lower or artifact_lower not in lowered:
+        return False
+    if any(marker in lowered for marker in _LONG_DEPENDENCY_ARTIFACT_NEGATIVE_MARKERS):
+        return False
+    return any(marker in lowered for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS)
+
+
+def _has_long_dependency_artifact_evidence(evidence: object, session: object, artifact: str) -> bool:
+    if not _long_dependency_artifact_proved_by_text(evidence, artifact):
+        return False
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        result_text = _tool_call_result_text(call)
+        if not result_text:
+            continue
+        command_and_result = "\n".join(part for part in (_tool_call_external_command_text(call), result_text) if part)
+        if _long_dependency_artifact_proved_by_text(command_and_result, artifact):
+            return True
+    return False
+
+
+def _long_dependency_build_artifact_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    artifacts = long_dependency_final_artifacts(task_description)
+    if not artifacts:
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return (
+            "long dependency/toolchain final artifact evidence missing: source-build "
+            "tasks must cite completed tool output proving the required final executable "
+            "or artifact exists, is invokable/executable, or passed a smoke command"
+        )
+    missing = [
+        artifact
+        for artifact in artifacts
+        if not any(_has_long_dependency_artifact_evidence(check.get("evidence"), session, artifact) for check in verified_checks)
+    ]
+    if not missing:
+        return ""
+    return (
+        "long dependency/toolchain final artifact evidence ungrounded: prerequisite "
+        "installation, configure, dependency generation, or partial build progress is "
+        "not completion; cite a completed tool proving "
+        f"{', '.join(missing[:3])} exists and is executable/invokable"
     )
 
 
@@ -1686,9 +1956,21 @@ def _has_model_inference_oracle_success_clause(text: object) -> bool:
         lowered = clause.casefold()
         if not any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_MARKERS):
             continue
-        if not any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS):
+        candidate_equals = _MODEL_INFERENCE_CANDIDATE_EQUALS_RE.search(lowered)
+        if candidate_equals:
+            value = str(candidate_equals.group("value") or "").casefold()
+            if value and value not in {"1", "pass", "passed", "true", "yes"}:
+                continue
+            if not value and "candidate_equals_reference true" not in lowered:
+                continue
+        if _MODEL_INFERENCE_ORACLE_FALSE_VALUE_RE.search(lowered):
             continue
-        if any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS):
+        has_success_marker = any(marker in lowered for marker in _MODEL_INFERENCE_ORACLE_SUCCESS_MARKERS)
+        has_zero_negative_count = bool(_MODEL_INFERENCE_ZERO_NEGATIVE_COUNT_RE.search(lowered))
+        if not has_success_marker and not has_zero_negative_count:
+            continue
+        failure_text = _MODEL_INFERENCE_ZERO_NEGATIVE_COUNT_RE.sub("", lowered)
+        if any(marker in failure_text for marker in _MODEL_INFERENCE_ORACLE_FAILURE_MARKERS):
             continue
         if _model_inference_clause_has_failed_ratio(lowered):
             continue
@@ -1696,12 +1978,156 @@ def _has_model_inference_oracle_success_clause(text: object) -> bool:
     return False
 
 
+def _model_inference_reference_path(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").casefold()
+    if not normalized:
+        return False
+    basename = normalized.rsplit("/", 1)[-1]
+    if "/tests/" in normalized or normalized.startswith("tests/"):
+        return True
+    return any(marker in basename for marker in ("expected", "golden", "oracle", "reference", "truth"))
+
+
+def _model_inference_candidate_source_path(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").casefold()
+    if not normalized:
+        return False
+    return not _model_inference_reference_path(normalized)
+
+
+def _has_model_inference_self_derived_path_operation(text: object) -> bool:
+    value = str(text or "")
+    for pattern in (
+        _MODEL_INFERENCE_OPEN_READ_WRITE_RE,
+        _MODEL_INFERENCE_COPY_TO_REF_RE,
+        _MODEL_INFERENCE_CAT_TO_REF_RE,
+    ):
+        for match in pattern.finditer(value):
+            src = match.group("src")
+            if _model_inference_candidate_source_path(src):
+                return True
+    return False
+
+
+def _has_model_inference_self_derived_oracle(text: object) -> bool:
+    value = str(text or "")
+    if not value.strip():
+        return False
+    if any(pattern.search(value) for pattern in _MODEL_INFERENCE_SELF_DERIVED_ORACLE_PATTERNS):
+        return True
+    return _has_model_inference_self_derived_path_operation(value)
+
+
+def _normalize_model_inference_path(path: object) -> str:
+    return str(path or "").strip().strip("'\"").replace("\\", "/").casefold()
+
+
+def _model_inference_task_reference_copy_allowance(text: object) -> tuple[set[str], list[tuple[int, int]]]:
+    value = str(text or "")
+    destinations: set[str] = set()
+    spans: list[tuple[int, int]] = []
+    for pattern in _MODEL_INFERENCE_TASK_REFERENCE_COPY_RE:
+        for match in pattern.finditer(value):
+            src = match.group("src") or ""
+            dst = match.group("dst") or ""
+            if not src or not dst:
+                continue
+            if not _model_inference_reference_path(src):
+                continue
+            destinations.add(_normalize_model_inference_path(dst))
+            spans.append(match.span())
+    return destinations, spans
+
+
+def _without_spans(value: str, spans: list[tuple[int, int]]) -> str:
+    if not spans:
+        return value
+    chars = list(value)
+    for start, end in spans:
+        for index in range(max(0, start), min(len(chars), end)):
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _model_inference_generated_oracle_targets(text: object) -> list[str]:
+    value = str(text or "")
+    targets: list[str] = []
+    for pattern in _MODEL_INFERENCE_GENERATED_ORACLE_TARGET_RE:
+        for match in pattern.finditer(value):
+            path = _normalize_model_inference_path(match.group("path"))
+            if path:
+                targets.append(path)
+    return targets
+
+
+def _has_model_inference_ephemeral_oracle_source(text: object) -> bool:
+    value = str(text or "")
+    if not value.strip():
+        return False
+    allowed_destinations, allowed_spans = _model_inference_task_reference_copy_allowance(value)
+    for match in _MODEL_INFERENCE_EPHEMERAL_ORACLE_PATH_RE.finditer(value):
+        if _normalize_model_inference_path(match.group(0)) not in allowed_destinations:
+            return True
+    scan_value = _without_spans(value, allowed_spans)
+    if _model_inference_generated_oracle_targets(scan_value):
+        return True
+    return False
+
+
+def _model_inference_generated_oracle_blocker_text() -> str:
+    return (
+        "model inference oracle provenance ungrounded: an oracle/reference source "
+        "generated in the current work session or under /tmp is not independent "
+        "model-output evidence; cite a task-provided, external, golden, or hidden "
+        "verifier-derived reference/expected-continuation check"
+    )
+
+
+def _model_inference_self_derived_oracle_blocker(evidence: object, session: object) -> str:
+    if not _has_model_inference_oracle_success_clause(evidence):
+        return ""
+    if _has_model_inference_ephemeral_oracle_source(evidence):
+        return _model_inference_generated_oracle_blocker_text()
+    if _has_model_inference_self_derived_oracle(evidence):
+        return (
+            "model inference oracle provenance ungrounded: a reference/oracle built from "
+            "the current candidate implementation or same source is not independent; cite "
+            "a completed tool using a task-provided, external, golden, or independently "
+            "derived reference/expected-continuation check"
+        )
+    for tool_id in _evidence_tool_ids(evidence):
+        call = _tool_call_by_id(session, tool_id)
+        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        result_text = _tool_call_result_text(call)
+        if not _has_model_inference_oracle_success_clause(result_text):
+            continue
+        if _has_model_inference_ephemeral_oracle_source(_tool_call_text(call)):
+            return _model_inference_generated_oracle_blocker_text()
+        if _has_model_inference_self_derived_oracle(_tool_call_text(call)):
+            return (
+                "model inference oracle provenance ungrounded: a reference/oracle built from "
+                "the current candidate implementation or same source is not independent; cite "
+                "a completed tool using a task-provided, external, golden, or independently "
+                "derived reference/expected-continuation check"
+            )
+    return ""
+
+
 def _has_model_inference_output_quality_evidence(evidence: object, session: object) -> bool:
     if not _has_model_inference_oracle_success_clause(evidence):
+        return False
+    if _has_model_inference_ephemeral_oracle_source(evidence):
+        return False
+    if _has_model_inference_self_derived_oracle(evidence):
         return False
     for tool_id in _evidence_tool_ids(evidence):
         call = _tool_call_by_id(session, tool_id)
         if not call or call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if _has_model_inference_ephemeral_oracle_source(_tool_call_text(call)):
+            continue
+        if _has_model_inference_self_derived_oracle(_tool_call_text(call)):
             continue
         if _has_model_inference_oracle_success_clause(_tool_call_result_text(call)):
             return True
@@ -1733,6 +2159,10 @@ def _model_inference_output_quality_blocker(
     for check in inference_checks:
         if _has_model_inference_output_quality_evidence(check.get("evidence"), session):
             return ""
+    for check in inference_checks:
+        blocker = _model_inference_self_derived_oracle_blocker(check.get("evidence"), session)
+        if blocker:
+            return blocker
     return (
         "model inference output quality evidence ungrounded: compile success, "
         "byte-size checks, CLI shape, and token-count smoke output are not enough; "
@@ -1944,6 +2374,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker
+    long_dependency_blocker = _long_dependency_build_artifact_blocker(task_description, checks, session)
+    if long_dependency_blocker:
+        return long_dependency_blocker
     stateful_output_blocker = _stateful_output_semantic_contrast_blocker(task_description, checks, session)
     if stateful_output_blocker:
         return stateful_output_blocker

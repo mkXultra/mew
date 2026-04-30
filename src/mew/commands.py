@@ -335,6 +335,9 @@ RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS = 0.5
 RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
 WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS = 5.0
+WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS = 2.0
+WORK_WALL_MIN_TOOL_TIMEOUT_SECONDS = 1.0
+WORK_DEFAULT_TOOL_TIMEOUT_SECONDS = 300.0
 APPROVAL_MODE_ACCEPT_EDITS = "accept-edits"
 APPROVAL_MODES = ("default", APPROVAL_MODE_ACCEPT_EDITS)
 
@@ -3540,6 +3543,7 @@ def work_finish_blocker_allows_continue(finished_note):
             "numeric artifact quality evidence",
             "query-only hidden-model",
             "model inference output quality evidence",
+            "model inference oracle provenance",
         )
     )
 
@@ -6036,6 +6040,57 @@ def _auto_detect_work_verify_command(args, options, session, task):
     return inferred
 
 
+def _positive_float_or_none(value):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def apply_work_tool_wall_timeout_ceiling(action_type, parameters, *, max_wall_seconds, run_started_at):
+    if action_type not in {"run_command", "run_tests"} or max_wall_seconds is None:
+        return {}
+    elapsed = time.monotonic() - run_started_at
+    remaining = max_wall_seconds - elapsed
+    available = remaining - WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS
+    ceiling = {
+        "elapsed_seconds": round(elapsed, 3),
+        "remaining_seconds": round(max(0.0, remaining), 3),
+        "available_tool_timeout_seconds": round(max(0.0, available), 3),
+        "reserve_seconds": WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS,
+    }
+    if available < WORK_WALL_MIN_TOOL_TIMEOUT_SECONDS:
+        ceiling.update(
+            {
+                "blocked": True,
+                "reason": "not enough wall-clock budget remains for a bounded tool call",
+            }
+        )
+        return ceiling
+
+    requested_timeout = _positive_float_or_none(parameters.get("timeout"))
+    effective_timeout = requested_timeout or WORK_DEFAULT_TOOL_TIMEOUT_SECONDS
+    if effective_timeout <= available:
+        return {}
+
+    capped_timeout = max(WORK_WALL_MIN_TOOL_TIMEOUT_SECONDS, available)
+    parameters["timeout"] = round(capped_timeout, 3)
+    ceiling.update(
+        {
+            "blocked": False,
+            "requested_timeout_seconds": requested_timeout,
+            "default_timeout_seconds": None if requested_timeout is not None else WORK_DEFAULT_TOOL_TIMEOUT_SECONDS,
+            "capped_timeout_seconds": parameters["timeout"],
+            "reason": "tool timeout capped to fit remaining wall-clock budget",
+        }
+    )
+    parameters["wall_timeout_ceiling"] = ceiling
+    return ceiling
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -7101,6 +7156,67 @@ def cmd_work_ai(args):
             if index < max_steps:
                 continue
             report["stop_reason"] = "paired_test_steer"
+            break
+        wall_tool_timeout = apply_work_tool_wall_timeout_ceiling(
+            action_type,
+            parameters,
+            max_wall_seconds=max_wall_seconds,
+            run_started_at=run_started_at,
+        )
+        if wall_tool_timeout.get("blocked"):
+            reason = wall_tool_timeout.get("reason") or "not enough wall-clock budget remains for a tool call"
+            blocked_action = dict(action)
+            blocked_action.update(parameters)
+            blocked_action["type"] = action_type
+            with state_lock():
+                state = load_state()
+                turn = update_work_model_turn_plan(
+                    state,
+                    session_id,
+                    planning_turn_id,
+                    planned.get("decision_plan") or {},
+                    planned.get("action_plan") or {},
+                    {"type": "wait", "reason": reason, "blocked_action": blocked_action},
+                    model_metrics=planned.get("model_metrics"),
+                )
+                turn = finish_work_model_turn(state, session_id, planning_turn_id, error=reason)
+                record_active_work_todo_executor_lifecycle(
+                    state,
+                    session_id,
+                    "yielded",
+                    model_turn=turn,
+                    reason=reason,
+                )
+                save_state(state)
+            report["wall_timeout"] = wall_tool_timeout
+            step = {
+                "index": index,
+                "status": "blocked",
+                "action": {"type": "wait", "reason": reason, "blocked_action": blocked_action},
+                "model_turn": turn,
+                "summary": reason,
+                "wall_timeout": wall_tool_timeout,
+            }
+            report["steps"].append(step)
+            report["stop_reason"] = "wall_timeout"
+            if getattr(args, "live", False):
+                with state_lock():
+                    state = load_state()
+                    session = find_work_session(state, session_id)
+                    task = work_session_task(state, session)
+                resume = build_work_session_resume(session, task=task, state=state)
+                write_work_follow_snapshot(args, report, session, task, resume, step=step)
+                live_cells_seen = print_work_live_step_output(
+                    args,
+                    index,
+                    step,
+                    resume,
+                    session,
+                    task,
+                    live_cells_seen,
+                )
+            if progress:
+                progress(f"step #{index}: wall-clock budget exhausted before tool execution")
             break
         with state_lock():
             state = load_state()

@@ -4,10 +4,12 @@ from mew.acceptance import (
     exact_command_example_requirements,
     extract_acceptance_constraints,
     implementation_contract_source_requirements,
+    is_long_dependency_toolchain_build_task,
     is_model_inference_output_task,
     is_numeric_artifact_task,
     is_query_only_hidden_model_task,
     is_runtime_visual_artifact_task,
+    long_dependency_final_artifacts,
 )
 
 
@@ -881,6 +883,134 @@ def test_model_inference_output_task_classifier_covers_checkpoint_sampling():
     assert not is_model_inference_output_task("Read token weights from weights.csv and generate output.json.")
 
 
+def test_long_dependency_toolchain_build_classifier_extracts_final_artifact():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+
+    assert is_long_dependency_toolchain_build_task(text)
+    assert long_dependency_final_artifacts(text) == ["/tmp/CompCert/ccomp"]
+    assert not is_long_dependency_toolchain_build_task("Update docs about compiler options.")
+
+
+def test_acceptance_finish_blocker_rejects_long_dependency_partial_build_progress():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert build prerequisites and dependency generation completed.",
+            "status": "verified",
+            "evidence": "Tool #7 installed opam Coq 8.16.1 and ran make depend.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 7,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "coqc 8.16.1\nmake depend completed\nmake ccomp timed out\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+    assert "/tmp/CompCert/ccomp" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_long_dependency_final_artifact_evidence():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Tool #9 built from source and ran /tmp/CompCert/ccomp -version; SMOKE_OK.",
+        },
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Tool #9: ls -l /tmp/CompCert/ccomp; /tmp/CompCert/ccomp -version; SMOKE_OK.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "-rwxr-xr-x /tmp/CompCert/ccomp\nCompCert version 3.13\nSMOKE_OK\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+
+
+def test_acceptance_finish_blocker_accepts_long_dependency_artifact_proof_in_command_with_clean_stdout():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Tool #9 completed the build and ran /tmp/CompCert/ccomp -version successfully.",
+        },
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Tool #9 ran /tmp/CompCert/ccomp -version successfully.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version"},
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "CompCert C compiler, version 3.13.1\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+
+
 def test_acceptance_finish_blocker_rejects_model_inference_smoke_only_output():
     text = (
         "I have downloaded the gpt-2 weights stored as a TF .ckpt. Write me a dependency-free C file "
@@ -975,6 +1105,542 @@ def test_acceptance_finish_blocker_accepts_model_inference_reference_output_evid
     )
 
 
+def test_acceptance_finish_blocker_accepts_model_inference_candidate_reference_flag_when_independent():
+    text = (
+        "I have downloaded model weights stored as a TF .ckpt. Write a compact C sampler "
+        "that uses vocab.bpe and continues the output for the next 20 tokens."
+    )
+    checks = [
+        {
+            "constraint": "Continue the output under the model's argmax tokens.",
+            "status": "verified",
+            "evidence": "Tool #5 candidate_equals_reference True and expected_continuation passed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 5,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": "python3 /tests/reference_check.py /app/a.out"},
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_candidate_derived_reference():
+    text = (
+        "I have downloaded model weights stored as a TF .ckpt. Write a compact C sampler "
+        "that uses vocab.bpe and continues the output for the next 20 tokens."
+    )
+    checks = [
+        {
+            "constraint": "Continue the output under the model's argmax tokens.",
+            "status": "verified",
+            "evidence": "Tool #16 candidate_equals_reference True and expected_continuation passed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 16,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "python3 - <<'PY'\n"
+                        "s=open('sampler.c').read()\n"
+                        "open('/tmp/sampler_ref.c','w').write(s[:100] + s[100:])\n"
+                        "PY\n"
+                        "gcc /tmp/sampler_ref.c -o /tmp/ref\n"
+                    )
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+    assert "not independent" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_candidate_copied_reference():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #9 candidate_equals_reference True and expected_continuation passed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": "cp sampler.c /tmp/sampler_ref.c && gcc /tmp/sampler_ref.c -o /tmp/ref"
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_candidate_copied_golden_reference():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the golden model.",
+            "status": "verified",
+            "evidence": "Tool #11 candidate_equals_reference True and expected_continuation passed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 11,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "cat sampler.c > /tmp/golden_model.c"},
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_tmp_generated_oracle_source():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches an argmax oracle.",
+            "status": "verified",
+            "evidence": (
+                "Tool #20 TOP1_TOKEN_ID_ORACLE count=20; "
+                "TOKEN_ID_DECODE_MATCH_CANDIDATE True; "
+                "top-1 token ids match 20/20, 0 mismatches; "
+                "FINAL_TOKEN_ID_EQUIVALENCE_OK prompts=4 independent_oracle_ids=20."
+            ),
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 20,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "cat > /tmp/oracle_gpt2.c <<'C'\n"
+                        "/* model-written oracle source */\n"
+                        "C\n"
+                        "gcc /tmp/oracle_gpt2.c -o /tmp/oracle_gpt2\n"
+                    )
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": (
+                        "TOP1_TOKEN_ID_ORACLE count=20\n"
+                        "TOKEN_ID_DECODE_MATCH_CANDIDATE True\n"
+                        "top-1 token ids match 20/20, 0 mismatches\n"
+                        "FINAL_TOKEN_ID_EQUIVALENCE_OK prompts=4 independent_oracle_ids=20\n"
+                    ),
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+    assert "generated in the current work session" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_tmp_oracle_reuse():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches an argmax oracle.",
+            "status": "verified",
+            "evidence": "Tool #21 top-1 token ids match 20/20, 0 mismatches.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 21,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": "gcc /tmp/oracle_gpt2.c -o /tmp/oracle && /tmp/oracle model.bin vocab.bpe"
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "top-1 token ids match 20/20, 0 mismatches\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_mixed_tests_and_tmp_oracle():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #22 candidate_equals_reference True and expected_continuation passed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 22,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "python3 /tests/reference_check.py /app/a.out\n"
+                        "cat > /tmp/oracle_gpt2.c <<'C'\n"
+                        "/* unrelated model-written oracle */\n"
+                        "C\n"
+                        "gcc /tmp/oracle_gpt2.c -o /tmp/oracle_gpt2\n"
+                    )
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_overwritten_tests_copy_destination():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #25 candidate_equals_reference True and expected_continuation passed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 25,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "s=open('/tests/reference_model.c').read()\n"
+                        "open('/tmp/reference_model.c','w').write(s)\n"
+                        "open('/tmp/reference_model.c','w').write('/* generated replacement */')\n"
+                    )
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_cwd_generated_oracle_heredoc():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches an argmax oracle.",
+            "status": "verified",
+            "evidence": "Tool #23 top-1 token ids match 20/20, 0 mismatches.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 23,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "cat <<'C' > oracle_gpt2.c\n"
+                        "/* model-written oracle source */\n"
+                        "C\n"
+                        "gcc oracle_gpt2.c -o oracle_gpt2\n"
+                    )
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "top-1 token ids match 20/20, 0 mismatches\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_cwd_generated_oracle_pipe_tee():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches an argmax oracle.",
+            "status": "verified",
+            "evidence": "Tool #26 top-1 token ids match 20/20, 0 mismatches.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 26,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": "cat <<'C' | tee oracle_gpt2.c\n/* model-written oracle source */\nC\n"
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "top-1 token ids match 20/20, 0 mismatches\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_cwd_generated_oracle_tee():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches an argmax oracle.",
+            "status": "verified",
+            "evidence": "Tool #24 top-1 token ids match 20/20, 0 mismatches.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 24,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": "tee oracle_gpt2.c <<'C'\n/* model-written oracle source */\nC\n"
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "top-1 token ids match 20/20, 0 mismatches\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_self_derived_evidence_text():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": (
+                "Tool #12 standard-libm reference candidate_equals_reference True "
+                "and expected_continuation passed."
+            ),
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 12,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference oracle provenance ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_model_inference_task_provided_reference_source():
+    text = (
+        "Load checkpoint model.bin and tokenizer vocab.bpe, then print the generated "
+        "token continuation from the model."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #10 candidate_equals_reference True and expected_continuation passed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 10,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "python3 - <<'PY'\n"
+                        "s=open('/tests/reference_model.c').read()\n"
+                        "open('/tmp/reference_model.c','w').write(s)\n"
+                        "PY\n"
+                        "gcc /tmp/reference_model.c -o /tmp/ref\n"
+                    )
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference True\nexpected_continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
 def test_acceptance_finish_blocker_rejects_model_inference_weak_or_failed_reference_text():
     text = (
         "Load a GPT model from model.bin and vocab.bpe, then sample the next token "
@@ -1008,6 +1674,184 @@ def test_acceptance_finish_blocker_rejects_model_inference_weak_or_failed_refere
     )
 
     assert "model inference output quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_failed_boolean_oracle_text():
+    text = (
+        "Load a GPT model from model.bin and vocab.bpe, then sample the next token "
+        "and print the generated continuation."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #8 candidate_equals_reference 0 and top-1 token ids match: 0.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 8,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "candidate_equals_reference: no\ntop-1 token ids match: 0\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference output quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_model_inference_reference_no_match_text():
+    text = (
+        "Load a GPT model from model.bin and vocab.bpe, then sample the next token "
+        "and print the generated continuation."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #15 matches reference: no.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 15,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "reference comparison: no match\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "model inference output quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_model_inference_success_with_zero_mismatches():
+    text = (
+        "Load a GPT model from model.bin and vocab.bpe, then sample the next token "
+        "and print the generated continuation."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #13 top-1 token ids match 20/20, 0 mismatches.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 13,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "top-1 token ids match 20/20, 0 mismatches\nexpected continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_accepts_model_inference_success_with_zero_failures():
+    text = (
+        "Load a GPT model from model.bin and vocab.bpe, then sample the next token "
+        "and print the generated continuation."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #14 all matched, 0 failures.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 14,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "all matched, no failures\nexpected continuation passed\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
+
+
+def test_acceptance_finish_blocker_accepts_model_inference_reference_with_no_differences():
+    text = (
+        "Load a GPT model from model.bin and vocab.bpe, then sample the next token "
+        "and print the generated continuation."
+    )
+    checks = [
+        {
+            "constraint": "Generated token continuation matches the reference model.",
+            "status": "verified",
+            "evidence": "Tool #16 reference comparison: 0 differences.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 16,
+                "tool": "run_tests",
+                "status": "completed",
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "reference comparison: no differences\nreference comparison: no errors\n",
+                },
+            }
+        ]
+    }
+
+    assert (
+        acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session=session,
+        )
+        == ""
+    )
 
 
 def test_acceptance_finish_blocker_rejects_model_inference_oracle_marker_from_command_parameter_only():

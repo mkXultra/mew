@@ -57,7 +57,7 @@ is tracked below.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON for future parity gates. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
-| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; artifact-handoff repair closed, but aggregate/current gaps remain above threshold, so select the next gap class. |
+| 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; Batch 6 `gpt2-codegolf` and `git-multibranch` same-shape repairs reached Codex targets, but adjusted aggregate gap remains above threshold. Next selected class is long dependency/toolchain build strategy. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -132,6 +132,41 @@ M6.24 resume condition:
   follow `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` and record gap state in
   `proof-artifacts/m6_24_gap_ledger.jsonl`.
 - Current controller mode: `improvement_phase`.
+- Latest controller checkpoint on 2026-04-30:
+  `gpt2-codegolf` and `git-multibranch` both reached their frozen Codex
+  targets after same-shape repairs, so Batch 6 is now near parity for the
+  measured slice. The adjusted aggregate remains above the `>20pp` improvement
+  threshold, so broad measurement stays paused. `compile-compcert` speed_1 on
+  current head confirmed the post-SR-016 gap is long dependency/toolchain build
+  strategy, not `/tmp` permission. The v0 long dependency build-state progress
+  contract plus review follow-up improved continuity but the follow-up speed
+  rerun still missed `/tmp/CompCert/ccomp` by wall time after entering the real
+  `make -j2 ccomp` proof build. The v0.1 rerun exposed that running tool calls
+  could outlive `mew work --max-wall-seconds` and that the model could choose a
+  full project/proof `make -j"$(nproc)"` despite a specific final artifact
+  requirement. The v0.2 repair now caps work tools to the remaining wall clock,
+  kills timed-out work commands by process group, and surfaces bare/chained/
+  wrapped/full-project/variable-assignment `make` forms that do not name the
+  required artifact as an explicit target. Codex-ultra re-review approved the
+  repair. The v0.2 same-shape speed proof passed `compile-compcert` at `1/1`
+  with no runner errors in `25m 38s`. A five-parallel proof then scored `0/5`
+  because all trials hit `mew work` `wall_timeout`; this is recorded as
+  resource-contention harness evidence, not a mew-core repair trigger. A
+  follow-up note: a `-k 1 -n 5` probe created only one trial and then failed
+  immediately with `/Users/mk/.codex/auth.json` `HTTP 429`, so it is not proof
+  evidence. The valid sequential proof shape is `-k 5 -n 1` with a
+  non-quota-limited auth file. The valid `-k 5 -n 1` proof attempt using
+  `auth.plus.json` reached `1/2` on completed trials before the `5/5` target
+  became impossible; the third trial was cancelled intentionally. The failed
+  valid trial selected heavy OPAM alternate-toolchain construction after a
+  distro Coq version mismatch instead of first trying cheap source-provided
+  compatibility/override configure paths. The v0.3 compatibility override
+  ordering repair passed speed_1 at `1/1` in `28m 4s`: it inspected configure
+  help, tried `./configure -ignore-coq-version`, then moved to compatible OPAM
+  Coq `8.16.1`, built `/tmp/CompCert/ccomp`, and passed all three verifier
+  checks. Current
+  selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_toolchain_compatibility_override_order_contract proof_5 -> compile-compcert -k5 -n1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -544,6 +579,36 @@ M6.24 resume condition:
   reached 10 work steps touching `/tmp/CompCert` and ended as `wall_timeout`,
   not immediate permission wait. The remaining `compile-compcert` gap is
   task-solving / long-build strategy.
+- M6.24 post Batch 6 selected-gap speed rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-toolchain-compile-compcert-1attempt-20260430-0317/result.json`
+  scored `0/1` with errors 0 and runtime `31m 02s`. The `/tmp` permission
+  blocker did not recur: mew reached `/tmp/CompCert`, opam Coq `8.16.1`,
+  `make depend`, and the real `make ccomp` path. The verifier still failed
+  because `/tmp/CompCert/ccomp` was missing. The selected next repair is
+  `long_dependency_build_state_progress_contract`; v0 is implemented in
+  `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md` and is awaiting
+  same-shape `compile-compcert` speed rerun.
+- M6.24 `compile-compcert` v0/v0.1 follow-up work is recorded in
+  `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md`.
+  The v0 follow-up rerun improved continuity but still missed
+  `/tmp/CompCert/ccomp` by wall time. The v0.1 rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-dep-v01-compile-compcert-1attempt-20260430-0509/result.json`
+  is diagnostic rather than score evidence because the operator cancelled a
+  runaway full `make -j"$(nproc)"` build after the wall-clock window. v0.2 now
+  caps `run_command`/`run_tests` to remaining `mew work` wall budget, kills
+  timed-out work commands by process group, and surfaces untargeted full-project
+  or variable-assignment `make` builds for specific-artifact long dependency
+  tasks. The v0.2 speed rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-1attempt-20260430-0615/2026-04-30__06-14-47/result.json`
+  passed `1/1` with no runner errors. The five-parallel proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-5attempts-20260430-0644/2026-04-30__06-44-04/result.json`
+  scored `0/5` only after all trials hit wall timeout under parallel Coq build
+  contention. A `-k 1 -n 5` probe created only one trial and hit auth quota, so
+  the valid resource-normalized proof was rerun with `-k 5 -n 1` and
+  `auth.plus.json`. It reached `1/2` completed valid trials before the frozen
+  `5/5` close target became impossible. The v0.3 compatibility override
+  ordering repair passed speed_1 at `1/1`. Next action is a resource-normalized
+  five-trial `compile-compcert` proof with `-k 5 -n 1` and `auth.plus.json`.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
   now treats an `edit_file` action carrying an `edits` list and no scalar

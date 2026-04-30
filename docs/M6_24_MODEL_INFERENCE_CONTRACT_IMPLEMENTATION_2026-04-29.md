@@ -145,3 +145,117 @@ Next proof:
 ```text
 gpt2-codegolf after model_inference_complex_reasoning_policy v0.2
 ```
+
+## v0.3 Oracle Provenance Guard
+
+The v0.2 high-effort rerun confirmed that checkpoint/tokenizer/model-inference
+tasks now use high reasoning effort, but reward stayed `0/1`. The session made
+four finish attempts with acceptance evidence that cited a "standard-libm
+reference" or `candidate_equals_reference True`; each finish was blocked and
+the run eventually hit `wall_timeout`.
+
+The blocker was correct to keep the session open: the referenced verifier was
+not independent. It built a temporary reference from the current candidate
+source, then compared the candidate against that derived source. This proves
+internal consistency, not GPT/model equivalence.
+
+Generic repair:
+
+- model-inference oracle evidence now recognizes common
+  `candidate_equals_reference` / `expected_continuation` result formats when
+  they come from completed tool output;
+- evidence is rejected when the cited tool builds a reference/oracle from the
+  current candidate implementation, same source, or a lightly modified copy,
+  including shell-copy variants such as `cp candidate.c ref.c` and
+  `cat candidate.c > golden_model.c`;
+- self-derived provenance markers in the acceptance evidence text are rejected
+  even if the cited tool output only reports a generic comparison success;
+- task-provided/external reference sources such as files under `tests/` or
+  names containing `reference`, `oracle`, or `golden` remain valid provenance
+  when the completed tool output proves the comparison passed;
+- failed oracle booleans or zero-valued match lines such as
+  `candidate_equals_reference 0`, `candidate_equals_reference: no`, or
+  `top-1 token ids match: 0` are rejected instead of being accepted because
+  they contain the words `equal` or `match`;
+- failed reference wording such as `matches reference: no` or
+  `reference comparison: no match` is rejected;
+- success wording such as `top-1 token ids match 20/20, 0 mismatches` or
+  `all matched, 0 failures` remains valid evidence;
+- zero-negative reference comparison wording such as
+  `reference comparison: no differences` or `reference comparison: no errors`
+  is valid success evidence;
+- the finish-block message now names the provenance problem directly instead
+  of only saying the evidence is ungrounded;
+- THINK guidance tells the work model that candidate-derived references are
+  not independent evidence.
+
+Validation:
+
+```text
+uv run pytest tests/test_acceptance.py -k 'model_inference' --no-testmon -q
+16 passed, 67 deselected
+
+uv run ruff check src/mew/acceptance.py src/mew/work_loop.py tests/test_acceptance.py
+All checks passed
+```
+
+Review:
+
+```text
+codex-ultra session 019dd9ce-ed96-7331-9ab5-fa5a8fe9c7d4
+STATUS: APPROVE
+```
+
+Next proof:
+
+```text
+gpt2-codegolf after model_inference_oracle_provenance_guard v0.3
+```
+
+## v0.4 Generated Oracle Provenance Guard
+
+The v0.3 speed rerun blocked acceptance of candidate-derived oracle evidence,
+but the work loop then generated `/tmp/oracle_gpt2.c` as a second model
+implementation and used that model-written oracle to claim top-1 token-id
+equivalence. The generated oracle matched the candidate, but both produced the
+wrong hidden continuation.
+
+Generic repair:
+
+- model-inference oracle evidence now rejects `/tmp/...oracle/reference/golden`
+  source paths as ephemeral work-session oracles;
+- shell/Python source-generation patterns such as `cat > /tmp/oracle.c <<...`,
+  `tee /tmp/reference.py`, and `Path('/tmp/golden.py').write_text(...)` are not
+  independent model-output evidence;
+- task-provided references under `tests/` or `/tests/` remain valid, even if
+  copied into `/tmp` for compilation;
+- finish-block continuation treats `model inference oracle provenance` blockers
+  as repairable, so the loop can continue instead of returning control;
+- THINK guidance explicitly says not to repeat finish with the same blocked
+  model-inference evidence or model-generated oracle source.
+
+Validation:
+
+```text
+uv run pytest tests/test_acceptance.py -k 'model_inference' --no-testmon -q
+23 passed, 67 deselected
+
+uv run pytest tests/test_work_session.py -k 'finish_blocker_allows_acceptance_repair_continuation or model_inference_handoff_without_task_done' --no-testmon -q
+3 passed, 784 deselected
+
+uv run ruff check src/mew/acceptance.py src/mew/commands.py src/mew/work_loop.py tests/test_acceptance.py tests/test_work_session.py
+All checks passed
+```
+
+Review:
+
+```text
+codex-ultra session 019dda07-d1b5-77c0-ba85-5d052abbfa60
+STATUS: APPROVE
+```
+
+Next proof:
+
+```text
+gpt2-codegolf after model_inference_generated_oracle_provenance_guard v0.4
+```
