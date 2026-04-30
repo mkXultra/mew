@@ -300,8 +300,15 @@ Result:
 - ruff: passed
 - codex-ultra review: approved (`019dde2f-4a27-70b0-9e42-ab5943914f8e`)
 
-Next validation is a one-trial same-shape speed proof for `compile-compcert`.
-Broad measurement and proof_5 remain paused.
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_ARTIFACT_PROOF_CALIBRATION_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-artifact-proof-calibration-compile-compcert-1attempt-20260430-2102/result.json
+```
+
+Next validation is resource-normalized proof_5 for `compile-compcert`.
+Broad measurement remains paused.
 
 ## v0.3 Repair
 

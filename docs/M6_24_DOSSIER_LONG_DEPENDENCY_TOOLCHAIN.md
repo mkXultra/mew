@@ -20,12 +20,13 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_timed_out_artifact_proof_calibration speed_1 -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> instrumentation/report -> long_dependency_timed_out_artifact_proof_calibration proof_5 -> compile-compcert
 ```
 
 Broad measurement remains paused. The next score action is a
-one-trial same-shape speed proof for `compile-compcert`. Before another code
-repair after that proof, read this dossier and decide whether the next fix is a
+resource-normalized proof_5 for `compile-compcert` using `-k 5 -n 1` and
+`auth.plus.json`. Before another code repair after that proof, read this dossier
+and decide whether the next fix is a
 new blocker, a repeated older blocker, or prompt/profile accretion.
 
 ## Repair Timeline
@@ -43,7 +44,7 @@ new blocker, a repeated older blocker, or prompt/profile accretion.
 | v0.6 default runtime link path | Treat custom `-stdlib`/`-L`/env runtime proof as diagnostic until default path proof passes. | detector/resume + THINK guidance | Speed `0/1`; behavior moved to runtime install missing library. |
 | v0.7 runtime install target | Build shortest explicit runtime-library target before install/default-link smoke. | detector/resume + THINK guidance | Speed `0/1`; failure moved earlier to source archive identity + empty response. |
 | v0.8 source archive identity / empty response recovery | Accept archive/tag/root identity when internal markers are coarse; recover empty assistant response. | detector/resume + recovery + THINK guidance | Speed `1/1`; proof `4/5`; next failure timed-out artifact proof calibration. |
-| v0.9 timed-out artifact proof calibration | Do not mark required final artifacts proven from timed-out or nonzero commands. | instrumentation/report | Implemented; speed rerun pending. |
+| v0.9 timed-out artifact proof calibration | Do not mark required final artifacts proven from timed-out or nonzero commands. | instrumentation/report | Speed `1/1`; proof `5` pending. |
 
 ## Pattern Readout
 
@@ -64,6 +65,10 @@ new blocker, a repeated older blocker, or prompt/profile accretion.
   prompt rule: `long_dependency_build_state` marked `/tmp/CompCert/ccomp` as
   proven after a timed-out build even though the external verifier found it
   missing.
+- The v0.9 speed rerun passed external verification, but the internal final
+  finish remained conservatively blocked with stale `missing_or_unproven`
+  long-dependency state. Treat this as finish-ergonomics evidence, not a reason
+  to skip the resource-normalized proof.
 
 ## Preflight Before Next Repair
 

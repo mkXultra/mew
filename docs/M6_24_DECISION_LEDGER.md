@@ -139,6 +139,7 @@ direction.
 | 2026-04-30 | v0.8 same-shape speed rerun passed. | `docs/M6_24_SOURCE_IDENTITY_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-identity-compile-compcert-1attempt-20260430-1736/result.json`: one trial, no runner errors, reward `1.0`, runtime `24m 23s`. The run accepted the `v3.13.1` archive/tag/root identity despite internal `VERSION=3.13`, recovered past the earlier source-identity blocker, built `/tmp/CompCert/ccomp`, installed runtime support into the default path, and passed all three external verifier checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`. If that proof misses `5/5`, read `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before any next repair. | proof_5_pending |
 | 2026-04-30 | v0.8 resource-normalized proof improved but stayed below target. | `docs/M6_24_SOURCE_IDENTITY_COMPILE_COMPCERT_PROOF_5_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-identity-compile-compcert-5attempts-seq-20260430-1808/result.json`: `compile-compcert` scored `4/5` with runner errors `0` against frozen Codex target `5/5`. The failed trial timed out during `make -j10 ccomp` after a local Flocq compatibility patch; external verifier failed because `/tmp/CompCert/ccomp` did not exist. Dossier preflight and codex-ultra session `019dde0c-5719-7af1-b488-5b929e6c95af` classified this as report/resume artifact-proof calibration, not a new Flocq-specific prompt rule. | Continue improvement phase. Next bounded repair is `long_dependency_timed_out_artifact_proof_calibration`, then run `compile-compcert` speed_1 before proof_5 or broad measurement. | active |
 | 2026-04-30 | Implement v0.9 timed-out artifact proof calibration. | `src/mew/work_session.py` now requires long-dependency artifact proof to come from a completed command with `result.exit_code == 0` and no timeout. Timed-out final builds, non-evidential soft probes such as `ls ... 2>/dev/null || true`, masked output proofs, and post-proof artifact mutation commands can no longer mark required artifacts as proven, while strict command-only executable probes still count. Focused work-session tests, ruff, gap-ledger validation, `git diff --check`, and codex-ultra review session `019dde2f-4a27-70b0-9e42-ab5943914f8e` passed. | Run one-trial same-shape `compile-compcert` speed proof. Do not resume broad measurement or proof_5 until this speed proof moves the failure shape or passes. | speed_rerun_pending |
+| 2026-04-30 | v0.9 same-shape speed rerun passed. | `docs/M6_24_ARTIFACT_PROOF_CALIBRATION_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-artifact-proof-calibration-compile-compcert-1attempt-20260430-2102/result.json`: one trial, no runner errors, reward `1.0`, runtime `15m 57s`. External verifier passed all three checks. Residual signal: internal `finish` remained conservatively blocked because `long_dependency_build_state` still reported `/tmp/CompCert/ccomp` as `missing_or_unproven`, but the external score gate passed. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`; keep broad measurement paused. | proof_5_pending |
 
 ## Current Mode
 
@@ -153,9 +154,10 @@ speed proof at `1/1`, but its resource-normalized proof reached only `4/5`
 against the frozen target `5/5`. The failed trial was a report/resume
 calibration miss: a timed-out final build was allowed to mark
 `/tmp/CompCert/ccomp` as proven even though the external verifier found it
-missing. The v0.9 timed-out artifact proof calibration repair is implemented.
-Broad measurement remains paused until a same-shape rerun is recorded.
+missing. The v0.9 timed-out artifact proof calibration repair is implemented
+and its same-shape speed rerun passed at `1/1`. Broad measurement remains
+paused until resource-normalized proof_5 is recorded.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> instrumentation/report -> long_dependency_timed_out_artifact_proof_calibration speed_1 -> compile-compcert`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> instrumentation/report -> long_dependency_timed_out_artifact_proof_calibration proof_5 -> compile-compcert`
