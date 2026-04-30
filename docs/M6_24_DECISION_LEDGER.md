@@ -121,6 +121,7 @@ direction.
 | 2026-04-30 | v0.3 same-shape speed rerun passed. | `docs/M6_24_COMPAT_OVERRIDE_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-override-compile-compcert-1attempt-20260430-0843/2026-04-30__08-43-13/result.json`: one trial, no runner errors, reward `1.0`, runtime `28m 4s`. The run inspected configure help, observed the Coq version rejection, tried `./configure -ignore-coq-version`, then moved to compatible OPAM Coq `8.16.1`, built `/tmp/CompCert/ccomp`, installed runtime libraries, and passed all three external verifier checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`; do not resume broad measurement first. | proof_5_pending |
 | 2026-04-30 | v0.3 resource-normalized proof rejected the selected close gate. | `docs/M6_24_COMPAT_OVERRIDE_COMPILE_COMPCERT_PROOF_5_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-override-compile-compcert-5attempts-seq-20260430-0915/2026-04-30__09-15-21/result.json`: sequential proof was stopped after valid completed trials reached `2/3`; runner errors at stop were from the intentional fourth-trial cancellation; the frozen `5/5` close target became impossible after one valid failure. The failed valid trial built `/tmp/CompCert/ccomp` but the external verifier failed with `/usr/bin/ld: cannot find -lcompcert`. | Continue improvement phase. Next bounded repair is `long_dependency_runtime_link_library_contract`, then run `compile-compcert` speed_1 before any proof_5 or broad measurement. | active |
 | 2026-04-30 | Implement v0.4 runtime link library repair. | `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md`: long-dependency resume state now surfaces `runtime_link_library_missing` for source-build/toolchain link failures such as `cannot find -l...`; THINK guidance now says compiler/toolchain tasks require runtime/library link proof, not only a trivial return-only smoke. Focused work-session tests and ruff passed. | Run a one-trial same-shape speed proof for `compile-compcert`; do not run proof_5 or broad measurement first. | speed_rerun_pending |
+| 2026-04-30 | v0.4 same-shape speed rerun passed. | `docs/M6_24_RUNTIME_LINK_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-1attempt-20260430-1050/2026-04-30__10-49-08/result.json`: one trial, no runner errors, reward `1.0`, runtime `22m 3s`. The run built `ccomp`, built and installed the runtime library, verified `/tmp/CompCert/ccomp` by compiling/linking/running a C smoke program, and passed all three external verifier checks. The earlier `20260430-1024` attempt has no `result.json` and is not score evidence. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`; do not resume broad measurement first. | proof_5_pending |
 
 ## Current Mode
 
@@ -139,9 +140,9 @@ the close target `5/5` became impossible. The v0.3 compatibility override
 ordering repair passed its same-shape speed rerun at `1/1`, but its
 resource-normalized proof reached only `2/3` valid completed trials before the
 close target became impossible. The v0.4 runtime link library repair is
-implemented. Broad measurement remains paused until its same-shape speed rerun
-is recorded.
+implemented and passed its same-shape speed rerun at `1/1`. Broad measurement
+remains paused until its resource-normalized five-trial proof is recorded.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_runtime_link_library_contract speed_1 -> compile-compcert`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_runtime_link_library_contract proof_5 -> compile-compcert -k5 -n1`

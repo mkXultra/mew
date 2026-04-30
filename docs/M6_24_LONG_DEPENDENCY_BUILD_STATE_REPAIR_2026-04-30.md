@@ -247,6 +247,33 @@ Result:
 Next validation remains a one-trial same-shape speed rerun for
 `compile-compcert`.
 
+## v0.4 Speed Rerun
+
+The v0.4 same-shape speed rerun passed:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-1attempt-20260430-1050/2026-04-30__10-49-08/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `22m 3s`
+- external verifier: `3 passed`
+
+The run built `ccomp`, built and installed the runtime library, verified
+`/tmp/CompCert/ccomp` by compiling, linking, and running a C smoke program, and
+passed all external verifier checks, including the prior failing `-lcompcert`
+link path.
+
+The earlier speed attempt at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-1attempt-20260430-1024`
+has no Harbor `result.json` and is not score evidence.
+
+Next validation is resource-normalized proof_5 for the same shape:
+`compile-compcert -k 5 -n 1`.
+
 ## v0.2 Speed Rerun
 
 The v0.2 same-shape speed rerun passed:
