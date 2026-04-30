@@ -1,7 +1,12 @@
 import json
+import io
 import os
 import socket
+import tempfile
 import unittest
+import urllib.error
+import urllib.parse
+from pathlib import Path
 from unittest.mock import patch
 
 from mew.codex_api import (
@@ -11,6 +16,7 @@ from mew.codex_api import (
     extract_response_refusal,
     extract_sse_text,
     extract_sse_response_parts,
+    load_codex_oauth,
     sse_text_delta,
 )
 from mew.errors import CodexApiError, CodexRefusalError
@@ -215,6 +221,240 @@ class CodexApiTests(unittest.TestCase):
                 "detail": "high",
             },
         )
+
+    def test_call_codex_web_api_refreshes_expired_legacy_auth_before_request(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            auth_path = Path(temp_dir) / "auth.json"
+            auth_path.write_text(
+                json.dumps(
+                    {
+                        "type": "oauth",
+                        "access": "old-access",
+                        "refresh": "old-refresh",
+                        "expires": 0,
+                        "accountId": "acct",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            auth = load_codex_oauth(auth_path)
+            seen = []
+
+            def fake_urlopen(request, timeout):
+                seen.append((request.full_url, request.get_header("Authorization")))
+                if request.full_url == "https://auth.example/token":
+                    content_type = request.get_header("Content-type") or request.get_header("Content-Type")
+                    self.assertEqual(content_type, "application/x-www-form-urlencoded")
+                    refresh_body = urllib.parse.parse_qs(request.data.decode("utf-8"))
+                    self.assertEqual(refresh_body["refresh_token"], ["old-refresh"])
+                    return FakeUrlopenResponse(
+                        [
+                            json.dumps(
+                                {
+                                    "access_token": "new-access",
+                                    "refresh_token": "new-refresh",
+                                    "id_token": "new-id",
+                                }
+                            ).encode("utf-8")
+                        ],
+                        headers={"content-type": "application/json"},
+                    )
+                self.assertEqual(request.get_header("Authorization"), "Bearer new-access")
+                return FakeUrlopenResponse(
+                    [json.dumps({"output_text": "ok"}).encode("utf-8")],
+                    headers={"content-type": "application/json"},
+                )
+
+            with patch.dict(os.environ, {"CODEX_REFRESH_TOKEN_URL_OVERRIDE": "https://auth.example/token"}):
+                with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+                    text = call_codex_web_api(
+                        auth,
+                        "prompt",
+                        "model",
+                        "https://example.invalid",
+                        10,
+                    )
+
+            self.assertEqual(text, "ok")
+            self.assertEqual(
+                [url for url, _header in seen],
+                ["https://auth.example/token", "https://example.invalid/responses"],
+            )
+            refreshed = json.loads(auth_path.read_text(encoding="utf-8"))
+            self.assertEqual(refreshed["access"], "new-access")
+            self.assertEqual(refreshed["refresh"], "new-refresh")
+            self.assertEqual(auth["access_token"], "new-access")
+            self.assertEqual(auth["refresh_token"], "new-refresh")
+
+    def test_call_codex_web_api_refreshes_and_retries_after_401(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            auth_path = Path(temp_dir) / "auth.json"
+            auth_path.write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "chatgpt",
+                        "tokens": {
+                            "id_token": "old-id",
+                            "access_token": "old-access",
+                            "refresh_token": "old-refresh",
+                            "account_id": "acct",
+                        },
+                        "last_refresh": "2026-04-30T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            auth = load_codex_oauth(auth_path)
+            response_auth_headers = []
+
+            def fake_urlopen(request, timeout):
+                if request.full_url == "https://auth.example/token":
+                    content_type = request.get_header("Content-type") or request.get_header("Content-Type")
+                    self.assertEqual(content_type, "application/x-www-form-urlencoded")
+                    refresh_body = urllib.parse.parse_qs(request.data.decode("utf-8"))
+                    self.assertEqual(refresh_body["refresh_token"], ["old-refresh"])
+                    return FakeUrlopenResponse(
+                        [
+                            json.dumps(
+                                {
+                                    "access_token": "new-access",
+                                    "refresh_token": "new-refresh",
+                                    "id_token": "new-id",
+                                }
+                            ).encode("utf-8")
+                        ],
+                        headers={"content-type": "application/json"},
+                    )
+                response_auth_headers.append(request.get_header("Authorization"))
+                if request.get_header("Authorization") == "Bearer old-access":
+                    raise urllib.error.HTTPError(
+                        request.full_url,
+                        401,
+                        "Unauthorized",
+                        hdrs=None,
+                        fp=io.BytesIO(b'{"detail":"token_expired"}'),
+                    )
+                return FakeUrlopenResponse(
+                    [json.dumps({"output_text": "ok"}).encode("utf-8")],
+                    headers={"content-type": "application/json"},
+                )
+
+            with patch.dict(os.environ, {"CODEX_REFRESH_TOKEN_URL_OVERRIDE": "https://auth.example/token"}):
+                with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+                    text = call_codex_web_api(
+                        auth,
+                        "prompt",
+                        "model",
+                        "https://example.invalid",
+                        10,
+                    )
+
+            self.assertEqual(text, "ok")
+            self.assertEqual(response_auth_headers, ["Bearer old-access", "Bearer new-access"])
+            refreshed = json.loads(auth_path.read_text(encoding="utf-8"))
+            self.assertEqual(refreshed["tokens"]["id_token"], "new-id")
+            self.assertEqual(refreshed["tokens"]["access_token"], "new-access")
+            self.assertEqual(refreshed["tokens"]["refresh_token"], "new-refresh")
+            self.assertRegex(refreshed["last_refresh"], r"^\d{4}-\d{2}-\d{2}T")
+            self.assertEqual(auth["access_token"], "new-access")
+
+    def test_call_codex_web_api_rejects_refresh_response_without_access_token(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            auth_path = Path(temp_dir) / "auth.json"
+            auth_path.write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "chatgpt",
+                        "tokens": {
+                            "id_token": "old-id",
+                            "access_token": "old-access",
+                            "refresh_token": "old-refresh",
+                            "account_id": "acct",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            auth = load_codex_oauth(auth_path)
+
+            def fake_urlopen(request, timeout):
+                if request.full_url == "https://auth.example/token":
+                    return FakeUrlopenResponse(
+                        [json.dumps({"refresh_token": "new-refresh"}).encode("utf-8")],
+                        headers={"content-type": "application/json"},
+                    )
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    401,
+                    "Unauthorized",
+                    hdrs=None,
+                    fp=io.BytesIO(b'{"detail":"token_expired"}'),
+                )
+
+            with patch.dict(os.environ, {"CODEX_REFRESH_TOKEN_URL_OVERRIDE": "https://auth.example/token"}):
+                with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+                    with self.assertRaisesRegex(CodexApiError, "HTTP 401"):
+                        call_codex_web_api(
+                            auth,
+                            "prompt",
+                            "model",
+                            "https://example.invalid",
+                            10,
+                        )
+
+            unchanged = json.loads(auth_path.read_text(encoding="utf-8"))
+            self.assertEqual(unchanged["tokens"]["access_token"], "old-access")
+
+    def test_call_codex_web_api_converts_second_401_after_refresh_to_codex_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            auth_path = Path(temp_dir) / "auth.json"
+            auth_path.write_text(
+                json.dumps(
+                    {
+                        "auth_mode": "chatgpt",
+                        "tokens": {
+                            "id_token": "old-id",
+                            "access_token": "old-access",
+                            "refresh_token": "old-refresh",
+                            "account_id": "acct",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            auth = load_codex_oauth(auth_path)
+
+            def fake_urlopen(request, timeout):
+                if request.full_url == "https://auth.example/token":
+                    return FakeUrlopenResponse(
+                        [
+                            json.dumps(
+                                {
+                                    "access_token": "new-access",
+                                    "refresh_token": "new-refresh",
+                                }
+                            ).encode("utf-8")
+                        ],
+                        headers={"content-type": "application/json"},
+                    )
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    401,
+                    "Unauthorized",
+                    hdrs=None,
+                    fp=io.BytesIO(b'{"detail":"still_expired"}'),
+                )
+
+            with patch.dict(os.environ, {"CODEX_REFRESH_TOKEN_URL_OVERRIDE": "https://auth.example/token"}):
+                with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+                    with self.assertRaisesRegex(CodexApiError, "HTTP 401"):
+                        call_codex_web_api(
+                            auth,
+                            "prompt",
+                            "model",
+                            "https://example.invalid",
+                            10,
+                        )
 
     def test_call_codex_web_api_raises_refusal_for_streamed_refusal_only(self):
         response = FakeUrlopenResponse(

@@ -20,14 +20,15 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> instrumentation/report -> long_dependency_timed_out_artifact_proof_calibration proof_5 -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> proof-infra -> Codex OAuth refresh validation -> rerun long_dependency_timed_out_artifact_proof_calibration proof_5 -> compile-compcert
 ```
 
 Broad measurement remains paused. The next score action is a
-resource-normalized proof_5 for `compile-compcert` using `-k 5 -n 1` and
-`auth.plus.json`. Before another code repair after that proof, read this dossier
-and decide whether the next fix is a
-new blocker, a repeated older blocker, or prompt/profile accretion.
+resource-normalized proof_5 for `compile-compcert` using `-k 5 -n 1` after
+Codex OAuth refresh is validated. Use refreshable `~/.codex/auth.json` rather
+than expiring `auth.plus.json`. Before another code repair after that proof,
+read this dossier and decide whether the next fix is a new blocker, a repeated
+older blocker, or prompt/profile accretion.
 
 ## Repair Timeline
 
@@ -44,7 +45,7 @@ new blocker, a repeated older blocker, or prompt/profile accretion.
 | v0.6 default runtime link path | Treat custom `-stdlib`/`-L`/env runtime proof as diagnostic until default path proof passes. | detector/resume + THINK guidance | Speed `0/1`; behavior moved to runtime install missing library. |
 | v0.7 runtime install target | Build shortest explicit runtime-library target before install/default-link smoke. | detector/resume + THINK guidance | Speed `0/1`; failure moved earlier to source archive identity + empty response. |
 | v0.8 source archive identity / empty response recovery | Accept archive/tag/root identity when internal markers are coarse; recover empty assistant response. | detector/resume + recovery + THINK guidance | Speed `1/1`; proof `4/5`; next failure timed-out artifact proof calibration. |
-| v0.9 timed-out artifact proof calibration | Do not mark required final artifacts proven from timed-out or nonzero commands. | instrumentation/report | Speed `1/1`; proof `5` pending. |
+| v0.9 timed-out artifact proof calibration | Do not mark required final artifacts proven from timed-out or nonzero commands. | instrumentation/report | Speed `1/1`; first proof_5 invalidated by auth expiry; rerun pending after OAuth refresh repair. |
 
 ## Pattern Readout
 
@@ -69,6 +70,10 @@ new blocker, a repeated older blocker, or prompt/profile accretion.
   finish remained conservatively blocked with stale `missing_or_unproven`
   long-dependency state. Treat this as finish-ergonomics evidence, not a reason
   to skip the resource-normalized proof.
+- The first v0.9 resource-normalized proof_5 is not clean score evidence:
+  `auth.plus.json` expired mid-run and four trials hit `HTTP 401 token_expired`.
+  Treat this as proof-infrastructure evidence. Rerun the same shape after Codex
+  OAuth refresh is validated before selecting another mew-core repair.
 
 ## Preflight Before Next Repair
 
