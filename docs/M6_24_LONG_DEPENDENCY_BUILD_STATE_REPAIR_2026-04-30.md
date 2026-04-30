@@ -202,6 +202,56 @@ Result:
 Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
 Broad measurement and proof_5 remain paused.
 
+## v0.8 Source Archive Identity / Empty Response Recovery Repair
+
+The v0.7 speed rerun is recorded in:
+
+- `docs/M6_24_RUNTIME_INSTALL_TARGET_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-install-target-compile-compcert-1attempt-20260430-1559/2026-04-30__16-07-36/result.json`
+
+The run scored `0/1` with runner errors `0`, but it did not reach the runtime
+install target blocker. It failed earlier:
+
+- setup fetched the versioned `v3.13.1` release archive, then aborted because
+  internal source markers did not repeat the exact patch suffix;
+- `/tmp/CompCert/ccomp` remained missing;
+- the next one-shot model turn failed with `response did not contain assistant
+  text`, preventing recovery.
+
+The bounded generic repair is:
+
+`long_dependency_source_archive_identity_and_empty_response_recovery_contract`
+
+Changes:
+
+- work-session resume now surfaces
+  `source_archive_version_grounding_too_strict` when a long dependency source
+  build aborts because internal source markers omit an already archive/tag
+  grounded patch-level version;
+- long-dependency suggested-next text tells the model to treat versioned
+  archive URL, tag/root directory, and coarse internal VERSION markers as source
+  identity evidence instead of aborting solely on a missing patch suffix;
+- THINK guidance carries the same source identity rule for release archive/tag
+  builds;
+- one-shot work now treats `response did not contain assistant text` as a
+  recoverable transient model backend error, consistent with timeout/5xx
+  recovery.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'source_archive or recoverable_work_model_error or work_think_prompt_guides_independent_reads_to_batch or runtime_install_before_runtime_library or default_runtime_link or long_dependency' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py src/mew/commands.py tests/test_work_session.py
+```
+
+Result:
+
+- focused work-session/recovery tests: `10 passed`
+- ruff: passed
+
+Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
+Broad measurement and proof_5 remain paused.
+
 ## v0.3 Repair
 
 `long_dependency_toolchain_compatibility_override_order_contract`
