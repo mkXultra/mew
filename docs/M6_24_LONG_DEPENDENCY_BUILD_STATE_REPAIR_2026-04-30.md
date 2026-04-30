@@ -249,9 +249,24 @@ Result:
 - `codex-ultra` review session `019ddeed-31bf-7373-a6f8-b417b0865203`:
   `APPROVE` after the recovery-command re-reservation regressions were added
 
-Next validation is a one-trial same-shape speed rerun for `compile-compcert`
-with refreshable `~/.codex/auth.json`. Broad measurement and proof_5 remain
-paused.
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_RECOVERY_BUDGET_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-recovery-budget-compile-compcert-1attempt-20260501-0018/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `29m 25s`
+- work-session stop reason: `finish`
+- external verifier: `3 passed`
+
+Next validation is resource-normalized proof_5 for `compile-compcert` with
+sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
+remains paused.
 
 ## v0.8 Source Archive Identity / Empty Response Recovery Repair
 

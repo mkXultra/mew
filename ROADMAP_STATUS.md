@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-04-29
+Last updated: 2026-05-01
 
 This file is the compact operational roadmap dashboard. It is intentionally
 short enough to survive context compression and long-session reentry.
@@ -132,7 +132,7 @@ M6.24 resume condition:
   follow `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` and record gap state in
   `proof-artifacts/m6_24_gap_ledger.jsonl`.
 - Current controller mode: `improvement_phase`.
-- Latest controller checkpoint on 2026-04-30:
+- Latest controller checkpoint on 2026-05-01:
   `gpt2-codegolf` and `git-multibranch` both reached their frozen Codex
   targets after same-shape repairs, so Batch 6 is now near parity for the
   measured slice. The adjusted aggregate remains above the `>20pp` improvement
@@ -171,12 +171,12 @@ M6.24 resume condition:
   runtime/library linking. The v0.4 runtime link library repair is implemented:
   long-dependency resume state surfaces `runtime_link_library_missing`, and
   compiler/toolchain THINK guidance now requires runtime/library link proof
-  instead of only a trivial return-only smoke. The v0.4 runtime-link speed proof
-  passed `1/1` in `22m 3s`: it built `ccomp`, built and installed the runtime
-  library, verified `/tmp/CompCert/ccomp` by compiling/linking/running a C
-  smoke program, and passed all three external verifier checks. Current
-  selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_runtime_link_library_contract proof_5 -> compile-compcert -k5 -n1`.
+  instead of only a trivial return-only smoke. Later long-dependency repairs
+  reached v1.0: default runtime path, runtime install target, source-archive
+  identity, timed-out artifact-proof calibration, OAuth refresh, and final
+  recovery-budget reserve. The v1.0 recovery-budget speed proof passed `1/1`
+  in `29m 25s` with refreshable `~/.codex/auth.json`. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> tool/runtime -> long_dependency_final_recovery_budget_after_failed_validation proof_5 -> compile-compcert -k5 -n1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
