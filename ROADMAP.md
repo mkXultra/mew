@@ -1409,6 +1409,14 @@ Target:
   reentry, diagnosis, and repair loops
 - show that repeated work benefits from previous classified failures and repair
   history instead of starting cold each time
+- connect the provider-neutral prompt section registry to provider-specific
+  cache transport only after M6.24 scoring repairs settle:
+  - keep M6.24 section ids, hashes, stability, cache policy, and cache hints as
+    the source of truth
+  - add Codex / Claude / OpenAI cache-control adapters behind a default-off
+    feature flag
+  - measure cache on/off as a separate latency/cost/replay experiment, not as
+    part of the M6.24 score-gap repair path
 - compare not only score, but also recovery quality, auditability, user burden,
   repair reuse, and context-compression resilience
 
@@ -1416,6 +1424,11 @@ Done when:
 
 - mew remains at or above the Codex Terminal-Bench aggregate target after at
   least one additional repair cycle
+- provider-specific prompt cache transport is implemented without changing the
+  default non-cache scoring path, and replay/prompt-equivalence proof shows that
+  cache-enabled transport does not alter task semantics
+- cache-on/cache-off evidence records latency, token/cost, prompt-section
+  hashes, and any score delta for at least one representative coding loop
 - at least three previously failed or below-target tasks improve through
   mew-native memory/diagnosis/reentry rather than one-off supervisor rescue
 - a resident-advantage report shows where mew is equal to Codex, where it is

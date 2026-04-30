@@ -58,7 +58,7 @@ is tracked below.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`; mew reached 17/35 vs Codex target 20/35 with repair rerun evidence. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`; grounded edit-scope repair improved `overfull-hbox` to 3/5. |
 | 6.24 Broad Terminal-Bench Parity Campaign | `in_progress` | Improvement phase active; Batch 6 `gpt2-codegolf` and `git-multibranch` same-shape repairs reached Codex targets, but adjusted aggregate gap remains above threshold. Next selected class is long dependency/toolchain build strategy. |
-| 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair makes it preferable to inhabit. |
+| 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit; provider-specific cache remains after M6.24, not inside the current score-repair path. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision on 2026-04-27 while Terminal-Bench compatibility/debugging is added first; existing M7 signal work is preserved. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
@@ -187,8 +187,14 @@ M6.24 resume condition:
   proof_5 missed at `2/3` valid completed trials. The failed valid trial found
   the correct external-Flocq compatibility branch too late; serial probes
   consumed most wall budget, then the final build was capped and timed out
-  before `/tmp/CompCert/ccomp` existed. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract speed_1 -> compile-compcert`.
+  before `/tmp/CompCert/ccomp` existed. The compatibility-branch budget
+  same-shape speed proof then passed at `1/1`, and commit `446b6ee` added the
+  provider-neutral prompt section registry v1 so long-dependency prompt growth
+  is tracked by section id, hash, stability, cache policy, and cache hint.
+  Provider-specific Codex / Claude / OpenAI cache-control transport is
+  intentionally deferred to M6.25 and must stay off the M6.24 default scoring
+  path. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> prompt_section_registry_v1 recorded -> long_dependency_compatibility_branch_budget_contract proof_5 -> compile-compcert`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -2269,7 +2275,7 @@ Planned future milestones:
 | M6.10 | Explorer D1 / read-only exploration reducer | Only if M6.8 or M6.8.5 evidence shows read-only exploration churn is a measured blocker again | M6.10 follow-up or M6.8.5 helper slice | No |
 | M6.11 | Full concurrent / streaming executor | After selector/curriculum proof shows measured idle or concurrency pain while loop attribution is stable | Later execution milestone | No |
 | M6.11 | MemoryExplore protocol full freeze/replay and agentization | Keep read-only provider for now; full agentization waits until a second planner will not obscure loop failures | M10 or later memory/explorer milestone | No |
-| M6.11 | Provider-specific prompt caching | Only when provider telemetry shows cache/latency as a direct blocker | M6.13 or later acceleration slice | No |
+| M6.11 / M6.24 | Provider-specific prompt cache transport | Provider-neutral prompt section registry is now present, but provider-specific Codex / Claude / OpenAI cache control should wait until M6.24 score-gap repair settles; implement behind a default-off flag and evaluate cache on/off separately. | M6.25 Codex-Plus Resident Advantage | No |
 | M6.12 | Governance/evaluator/adversarial wiring | First use M6.12 as read-only selector input in M6.8.5; automatic governance wiring needs a later explicit safety milestone | M6.8.5 read-only, later governance milestone | No |
 | Resident architecture | Codex-grade implementation lane hardening | After M6.13 emits enough lane-attempt telemetry to identify implementation-lane bottlenecks | M6.16 | No |
 | Resident architecture | Resident meta loop / lane chooser | After M6.13 lane boundaries and M6.16 implementation-lane reliability are proven | M6.17 | No |
@@ -2340,33 +2346,34 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.20 closed -> M6.21 registry done -> M6.22 curated subset parity`
+`M6.24 improvement_phase -> compile-compcert same-shape proof_5 -> decide close/next repair from decision ledger`
 
 Acceptable near-term work:
 
-- define the M6.22 curated subset directly from
-  `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`
-  (done in `docs/data/terminal_bench_m6_22_curated_subset.json`)
 - keep `mew work --oneshot` as the implementation path and preserve the
   no-Terminal-Bench-specific-solver constraint
-- run `filter-js-from-html`, `sanitize-git-repo`, `gcode-to-text`,
-  `overfull-hbox`, and `extract-elf`; reuse the M6.20 current-head artifacts
-  for `cancel-async-tasks` and `fix-code-vulnerability` as positive controls
-- classify below-target tasks through M6.18, then choose the next generic
-  implementation-lane repair from cited benchmark evidence
+- run the resource-normalized `compile-compcert` proof_5 shape recorded in
+  `docs/M6_24_DECISION_LEDGER.md`: sequential `-k 5 -n 1` with refreshable
+  `~/.codex/auth.json`
+- if proof_5 misses the frozen `5/5` close target, read
+  `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before selecting any next
+  repair, and update `proof-artifacts/m6_24_gap_ledger.jsonl`
+- keep future prompt changes inside named sections or structural
+  profile/contract code; do not append more inline long-dependency THINK text
+- defer provider-specific prompt cache transport to M6.25; M6.24 may record
+  provider-neutral section metrics only
 
 Non-goals for the next session:
 
 - adding a Terminal-Bench-specific solver path or benchmark-only core command
 - treating Terminal-Bench as a separate architecture instead of a measurement
   harness for generic `mew work`
-- broad prompt tuning before instruction ingestion and failure classification
-  are proven
-- resuming M7 inbound signal work before M6.22 is addressed or explicitly
+- broad prompt tuning outside the section/profile contract
+- resuming M7 inbound signal work before M6.24 is closed or explicitly
   reprioritized
 - full concurrent executor
 - memory explore agentization
-- provider-specific prompt caching
+- provider-specific prompt caching on the default scoring path
 - broad work-loop or work-session refactors without a recorded structural
   signal
 - treating diagnosis output as automatic permission to perform structural
@@ -2376,6 +2383,11 @@ Non-goals for the next session:
 
 Latest roadmap/status validation:
 
+- M6.24 prompt section registry v1 is recorded in commit `446b6ee`.
+  Normal work THINK prompts now emit section ids, hashes, stability,
+  cache policy, cache hint, and per-section size metrics. This is
+  provider-neutral only; provider-specific cache-control transport is deferred
+  to M6.25 and must be evaluated separately from M6.24 score repairs.
 - M6.20 fixed terminal gate is closed. Current-head mew runs matched the
   frozen Codex target on both fixed tasks with Harbor errors 0:
   `terminal-bench/cancel-async-tasks` 5/5
