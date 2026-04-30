@@ -147,6 +147,7 @@ direction.
 | 2026-05-01 | v1.0 recovery-budget same-shape speed rerun passed. | `docs/M6_24_RECOVERY_BUDGET_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-recovery-budget-compile-compcert-1attempt-20260501-0018/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `29m 25s`. `mew work` finished after 20 steps, built `/tmp/CompCert/ccomp`, installed default runtime support, ran default-path compile/link/run smoke, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
 | 2026-05-01 | v1.0 resource-normalized proof_5 missed because of malformed JSON plan recovery. | `docs/M6_24_RECOVERY_BUDGET_COMPILE_COMPCERT_PROOF_5_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-recovery-budget-compile-compcert-5attempts-seq-20260501-0055/result.json`: sequential proof was stopped after valid completed trials reached `2/3`; the fourth trial was intentionally cancelled after the frozen `5/5` close target became impossible. The failed valid trial did not run task work; it stopped at step 1 with `failed to parse JSON plan: Expecting ',' delimiter...`. | Continue improvement phase. Next bounded repair is `work_oneshot_malformed_json_plan_recovery_missing` in loop recovery, then run `compile-compcert` speed_1 before proof_5 or broad measurement. | active |
 | 2026-05-01 | Implement malformed JSON plan one-shot recovery. | `src/mew/commands.py`: `recoverable_work_model_error()` now treats backend `failed to parse JSON plan` as a recoverable one-shot transient model error, while generic `model returned invalid JSON` remains non-recoverable. Focused validation passed: `pytest --no-testmon tests/test_work_session.py -k 'recoverable_work_model_error or continues_after_recoverable_model_error or does_not_continue_after_recoverable_model_error' -q` (`3 passed`), broader `tests/test_work_session.py` regression passed (`826 passed`, one warning), ruff passed, and `codex-ultra` review session `019ddf49-e29d-7140-bd17-24c9d889c0a8` approved. | Run one-trial same-shape `compile-compcert` speed proof with refreshable `~/.codex/auth.json`; do not resume broad measurement first. | speed_rerun_pending |
+| 2026-05-01 | malformed-JSON recovery same-shape speed rerun passed. | `docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-1attempt-20260501-0152/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `25m 37s`. `mew work` finished after 8 steps, built `/tmp/CompCert/ccomp`, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
 
 ## Current Mode
 
@@ -170,8 +171,9 @@ recoverable runtime-link failure consumed the remaining wall/model budget. The
 tool/runtime recovery-budget reserve for long build validation commands passed
 its same-shape speed proof at `1/1`, but the resource-normalized proof missed
 after a malformed structured JSON plan stopped one valid trial before task work.
-The current repair is one-shot malformed JSON plan recovery.
+The one-shot malformed JSON plan recovery repair passed its same-shape speed
+proof at `1/1`.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> loop_recovery -> work_oneshot_malformed_json_plan_recovery -> compile-compcert speed_1`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> loop_recovery -> work_oneshot_malformed_json_plan_recovery -> compile-compcert proof_5`

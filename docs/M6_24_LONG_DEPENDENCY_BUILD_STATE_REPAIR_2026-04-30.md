@@ -199,8 +199,24 @@ Result:
 - codex-ultra review session `019ddd2b-8895-7771-b617-ef75359c2e7a`:
   `APPROVED` after two review/fix rounds
 
-Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
-Broad measurement and proof_5 remain paused.
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-1attempt-20260501-0152/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `25m 37s`
+- work-session stop reason: `finish`
+- external verifier: `3 passed`
+
+Next validation is resource-normalized proof_5 for `compile-compcert` with
+sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
+remains paused.
 
 ## v1.0 Final Recovery-Budget Reserve
 

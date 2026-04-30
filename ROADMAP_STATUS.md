@@ -178,8 +178,9 @@ M6.24 resume condition:
   in `29m 25s` with refreshable `~/.codex/auth.json`. The resource-normalized
   proof then reached `2/3` valid completed trials before the `5/5` close target
   became impossible; the failed valid trial stopped at step 1 on malformed JSON
-  plan parsing, before task work ran. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> loop_recovery -> work_oneshot_malformed_json_plan_recovery speed_1 -> compile-compcert`.
+  plan parsing, before task work ran. The malformed JSON plan recovery repair
+  then passed speed_1 at `1/1` in `25m 37s`. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> loop_recovery -> work_oneshot_malformed_json_plan_recovery proof_5 -> compile-compcert -k5 -n1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
