@@ -144,6 +144,64 @@ Result:
 Next validation remains a one-trial same-shape speed rerun for
 `compile-compcert`.
 
+## v0.7 Runtime Install Target Repair
+
+The v0.6 speed rerun is recorded in:
+
+- `docs/M6_24_DEFAULT_RUNTIME_LINK_PATH_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-default-runtime-link-path-compile-compcert-1attempt-20260430-1508/2026-04-30__15-07-47/result.json`
+
+The failure shape improved but did not score:
+
+- mew built `/tmp/CompCert/ccomp`;
+- mew did not accept a custom `-stdlib` smoke proof as completion;
+- mew attempted default runtime install;
+- `make -C runtime install` failed because `libcompcert.a` had not been built;
+- the session then exhausted wall/model budget before default-link proof.
+
+The bounded generic repair is:
+
+`long_dependency_runtime_install_requires_runtime_target_contract`
+
+Changes:
+
+- work-session resume now surfaces
+  `runtime_install_before_runtime_library_build` when an install error line
+  itself names a missing runtime library artifact such as `libcompcert.a`;
+- the blocker is cleared if a later successful command builds or installs that
+  runtime library, or if a later default compile/link smoke proof passes;
+- after a later successful runtime-library build/install clears one blocker,
+  scanning continues so a second later missing-library install failure remains
+  visible;
+- quiet successful exact runtime install retries clear the blocker even when
+  their output omits copied library names. This is parsed through make targets
+  and `cwd`/`-C runtime`, so unrelated targets such as `uninstall` do not clear
+  the blocker;
+- long-dependency suggested-next text now tells the model to build the shortest
+  explicit runtime-library target first, then retry install and default-link
+  smoke;
+- THINK guidance includes the same rule for compiler/toolchain source-build
+  tasks.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'runtime_install_before_runtime_library or default_runtime_link or custom_runtime_path or missing_runtime_link_library or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'long_dependency or runtime_install_before_runtime_library or runtime_link_library or default_runtime' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result:
+
+- focused runtime-install/default-link tests: `11 passed`
+- broader long-dependency focused tests: `5 passed`
+- ruff: passed
+- codex-ultra review session `019ddd2b-8895-7771-b617-ef75359c2e7a`:
+  `APPROVED` after two review/fix rounds
+
+Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
+Broad measurement and proof_5 remain paused.
+
 ## v0.3 Repair
 
 `long_dependency_toolchain_compatibility_override_order_contract`

@@ -5072,6 +5072,341 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("custom runtime/library path flags", text)
         self.assertIn("default lookup path", text)
 
+    def test_work_session_resume_flags_runtime_install_before_runtime_library_build(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -C runtime install",
+                    },
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "make: Entering directory '/tmp/CompCert/runtime'\n",
+                        "stderr": (
+                            "install: cannot stat 'libcompcert.a': No such file or directory\n"
+                            "make: *** [Makefile:142: install] Error 1\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("runtime_install_before_runtime_library_build", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_dependency_strategy_blocker: runtime_install_before_runtime_library_build",
+            text,
+        )
+        self.assertIn("shortest explicit runtime-library target", text)
+
+    def test_work_session_resume_clears_runtime_install_before_library_after_target_build(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime install"},
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                },
+                {
+                    "id": 32,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime libcompcert.a"},
+                    "result": {
+                        "command": "make -C runtime libcompcert.a",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "AR libcompcert.a\nRANLIB libcompcert.a\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("runtime_install_before_runtime_library_build", codes)
+
+    def test_work_session_resume_ignores_unrelated_missing_file_during_runtime_install(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime install libcompcert.a"},
+                    "result": {
+                        "command": "make -C runtime install libcompcert.a",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "target library is libcompcert.a\n",
+                        "stderr": "install: cannot stat 'README.runtime': No such file or directory\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("runtime_install_before_runtime_library_build", codes)
+
+    def test_work_session_resume_keeps_later_runtime_install_missing_library_after_first_clear(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/Toolchain", "command": "make -C runtime install"},
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/Toolchain",
+                        "exit_code": 2,
+                        "stderr": "install: cannot stat 'libfoo.a': No such file or directory\n",
+                    },
+                },
+                {
+                    "id": 32,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/Toolchain", "command": "make -C runtime libfoo.a"},
+                    "result": {
+                        "command": "make -C runtime libfoo.a",
+                        "cwd": "/tmp/Toolchain",
+                        "exit_code": 0,
+                        "stdout": "AR libfoo.a\n",
+                    },
+                },
+                {
+                    "id": 33,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/Toolchain", "command": "make -C runtime install"},
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/Toolchain",
+                        "exit_code": 2,
+                        "stderr": "install: cannot stat 'libbar.a': No such file or directory\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        runtime_blockers = [
+            item for item in blockers if item.get("code") == "runtime_install_before_runtime_library_build"
+        ]
+
+        self.assertEqual(len(runtime_blockers), 1)
+        self.assertIn("libbar.a", runtime_blockers[0]["excerpt"])
+
+    def test_work_session_resume_clears_runtime_install_before_library_after_quiet_install_retry(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime install"},
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                },
+                {
+                    "id": 32,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime install"},
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "install complete\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("runtime_install_before_runtime_library_build", codes)
+
+    def test_work_session_resume_clears_quiet_runtime_cwd_make_install_retry(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert/runtime", "command": "make install"},
+                    "result": {
+                        "command": "make install",
+                        "cwd": "/tmp/CompCert/runtime",
+                        "exit_code": 2,
+                        "stderr": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                },
+                {
+                    "id": 32,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert/runtime", "command": "make install"},
+                    "result": {
+                        "command": "make install",
+                        "cwd": "/tmp/CompCert/runtime",
+                        "exit_code": 0,
+                        "stdout": "install complete\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("runtime_install_before_runtime_library_build", codes)
+
+    def test_work_session_resume_does_not_clear_runtime_install_failure_after_uninstall(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime install"},
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                },
+                {
+                    "id": 32,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime uninstall"},
+                    "result": {
+                        "command": "make -C runtime uninstall",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "uninstall complete\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertIn("runtime_install_before_runtime_library_build", codes)
+
     def test_work_session_resume_accepts_default_runtime_link_proof_after_custom_path_probe(self):
         from mew.work_session import build_work_session_resume
 
@@ -35520,6 +35855,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("project's runtime/library target", prompt)
         self.assertIn("custom runtime/library flags", prompt)
         self.assertIn("rerun the same compile/link smoke without those custom path flags", prompt)
+        self.assertIn("build the shortest explicit runtime-library target first", prompt)
         self.assertIn("set a bounded run_command timeout", prompt)
         self.assertIn("optional run_tests/run_command timeout seconds", prompt)
         self.assertIn("Do not restart package-manager or source-tree setup", prompt)

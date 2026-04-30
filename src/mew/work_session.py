@@ -4175,6 +4175,10 @@ _LONG_DEPENDENCY_SOURCE_SMOKE_RE = re.compile(
 )
 _LONG_DEPENDENCY_OUTPUT_FLAG_RE = re.compile(r"(?:^|\s)-o(?:\s|=)")
 _LONG_DEPENDENCY_SOURCE_SMOKE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".s", ".S"}
+_LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE = re.compile(
+    r"\b(?:lib[A-Za-z0-9_.+-]+\.(?:a|so|dylib)|[A-Za-z0-9_./+-]*runtime[A-Za-z0-9_./+-]*\.(?:a|so|dylib))\b",
+    re.IGNORECASE,
+)
 
 
 def _make_invocation_prefix_is_wrapper(parts):
@@ -4603,6 +4607,147 @@ def _long_dependency_default_runtime_link_path_blocker(calls, expected_artifacts
     return custom_smoke
 
 
+def _long_dependency_runtime_install_missing_library_failure(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return {}
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    if "install" not in lowered:
+        return {}
+    if not any(marker in lowered for marker in ("cannot stat", "no such file", "not found", "missing")):
+        return {}
+    excerpt = ""
+    artifact_match = None
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line_lower = line.casefold()
+        if any(marker in line_lower for marker in ("cannot stat", "no such file", "not found", "missing")):
+            line_artifact_match = _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE.search(line)
+            if line_artifact_match:
+                artifact_match = line_artifact_match
+                excerpt = clip_inline_text(line, 180)
+                break
+    if not artifact_match:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = result.get("command") or parameters.get("command") or _runtime_artifact_call_text(call)
+    return {
+        "code": "runtime_install_before_runtime_library_build",
+        "source_tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "excerpt": excerpt or clip_inline_text(command, 180),
+        "missing_runtime_library": artifact_match.group(0) if artifact_match else "",
+    }
+
+
+def _long_dependency_make_runtime_directory(parts, cwd):
+    cwd_name = Path(str(cwd or "")).name.casefold()
+    if cwd_name == "runtime":
+        return True
+    index = 1
+    while index < len(parts or []):
+        token = str(parts[index] or "")
+        if token in {"-C", "--directory"} and index + 1 < len(parts):
+            if Path(str(parts[index + 1] or "")).name.casefold() == "runtime":
+                return True
+            index += 2
+            continue
+        if token.startswith("-C") and len(token) > 2:
+            if Path(token[2:]).name.casefold() == "runtime":
+                return True
+        if token.startswith("--directory="):
+            if Path(token.split("=", 1)[1]).name.casefold() == "runtime":
+                return True
+        index += 1
+    return False
+
+
+def _long_dependency_make_invocation_is_runtime_install_retry(invocation, cwd):
+    try:
+        parts = shlex.split(str(invocation or ""), posix=True)
+    except ValueError:
+        parts = str(invocation or "").split()
+    if not parts or Path(str(parts[0] or "")).name.casefold() != "make":
+        return False
+    targets = {str(target or "").casefold() for target in _make_explicit_targets(parts)}
+    if "install-runtime" in targets:
+        return True
+    if targets == {"install"} and _long_dependency_make_runtime_directory(parts, cwd):
+        return True
+    return False
+
+
+def _long_dependency_call_runs_runtime_install_retry(call):
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(result.get("command") or parameters.get("command") or "")
+    cwd = result.get("cwd") or parameters.get("cwd") or ""
+    for invocation in _long_dependency_make_invocations(command):
+        if _long_dependency_make_invocation_is_runtime_install_retry(invocation, cwd):
+            return True
+    return False
+
+
+def _long_dependency_runtime_library_or_install_proven_by_call(call, missing_library):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    if str(call.get("status") or "").casefold() != "completed":
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("exit_code") != 0:
+        return False
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    if any(marker in lowered for marker in ("cannot stat", "no such file", "not found", "missing")):
+        return False
+    library = str(missing_library or "").strip()
+    if library and _long_dependency_call_runs_runtime_install_retry(call):
+        return True
+    if library:
+        library_name = Path(library).name.casefold()
+        if library.casefold() not in lowered and library_name not in lowered:
+            return False
+    elif "runtime" not in lowered:
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "make",
+            "install",
+            "ar ",
+            "ranlib",
+            "built",
+            "copy",
+            "cp ",
+            "ls ",
+            "stat ",
+            "test -",
+        )
+    )
+
+
+def _long_dependency_runtime_install_before_library_blocker(calls, expected_artifacts):
+    blocker = {}
+    missing_library = ""
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            return {}
+        if blocker and _long_dependency_runtime_library_or_install_proven_by_call(call, missing_library):
+            blocker = {}
+            missing_library = ""
+            continue
+        failure = _long_dependency_runtime_install_missing_library_failure(call)
+        if failure:
+            blocker = failure
+            missing_library = str(failure.get("missing_runtime_library") or "")
+    return blocker
+
+
 def _long_dependency_task_text(task, session=None):
     task = task if isinstance(task, dict) else {}
     session = session if isinstance(session, dict) else {}
@@ -4790,6 +4935,18 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(default_runtime_link_path)
+    runtime_install_before_library = _long_dependency_runtime_install_before_library_blocker(
+        calls,
+        expected_artifacts,
+    )
+    if runtime_install_before_library:
+        key = (
+            runtime_install_before_library.get("code"),
+            runtime_install_before_library.get("source_tool_call_id"),
+            runtime_install_before_library.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(runtime_install_before_library)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
     if not progress and not proven and not strategy_blockers:
@@ -4819,7 +4976,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "If a compiler or toolchain can build a trivial binary but the linker reports a missing runtime "
             "library, install or configure the project runtime/library target before finish. If local smoke "
             "only works with custom runtime/library path flags, install or configure that runtime into the "
-            "default lookup path and rerun a default invocation proof before finish. Do not retry "
+            "default lookup path and rerun a default invocation proof before finish. If runtime install reports "
+            "a missing library artifact, build the shortest explicit runtime-library target first, then retry "
+            "install and the default-link smoke. Do not retry "
             "invalidated toolchain/package paths. Allocate remaining wall budget to the shortest idempotent "
             "continuation command that produces the missing final artifact, then prove it exists and is "
             "executable/invokable."
