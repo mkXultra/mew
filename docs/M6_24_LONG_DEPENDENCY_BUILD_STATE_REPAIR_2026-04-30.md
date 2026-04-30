@@ -274,6 +274,33 @@ and mismatch-then-install-then-later-override ordering.
 
 Next validation is a one-trial same-shape speed proof for `compile-compcert`.
 
+## v0.5 Speed Rerun
+
+The v0.5 same-shape speed rerun passed:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-prebuilt-override-compile-compcert-1attempt-20260430-1211/2026-04-30__12-10-22/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `14m 29s`
+- external verifier: `3 passed`
+
+The run used prebuilt distro OCaml/Coq/Flocq/Menhir dependencies, inspected the
+CompCert configure mismatch, configured through source compatibility flags,
+built the explicit `ccomp` target, built and installed the runtime library, and
+passed the external verifier.
+
+Residual calibration signal: the final report still listed stale
+`long_dependency_build_state.missing_artifacts` after success. This is
+report/resume cleanup evidence, not a blocker for the selected score repair.
+
+Next validation is resource-normalized proof_5 for the same shape:
+`compile-compcert -k 5 -n 1`.
+
 ## v0.4 Repair
 
 `long_dependency_runtime_link_library_contract`

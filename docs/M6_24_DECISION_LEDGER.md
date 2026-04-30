@@ -124,6 +124,7 @@ direction.
 | 2026-04-30 | v0.4 same-shape speed rerun passed. | `docs/M6_24_RUNTIME_LINK_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-1attempt-20260430-1050/2026-04-30__10-49-08/result.json`: one trial, no runner errors, reward `1.0`, runtime `22m 3s`. The run built `ccomp`, built and installed the runtime library, verified `/tmp/CompCert/ccomp` by compiling/linking/running a C smoke program, and passed all three external verifier checks. The earlier `20260430-1024` attempt has no `result.json` and is not score evidence. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`; do not resume broad measurement first. | proof_5_pending |
 | 2026-04-30 | v0.4 resource-normalized proof rejected the selected close gate. | `docs/M6_24_RUNTIME_LINK_COMPILE_COMPCERT_PROOF_5_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-5attempts-seq-20260430-1119/2026-04-30__11-19-01/result.json`: sequential proof was stopped after valid completed trials reached `0/1`; trial 2 was intentionally cancelled after the frozen `5/5` close target became impossible. The failed valid trial did not reproduce the runtime-link miss; it spent the wall/model budget building version-pinned OPAM Coq/Flocq dependencies after `compatibility_override_probe_missing` was already visible, leaving `/tmp/CompCert/ccomp` missing. | Continue improvement phase. Next bounded repair is `long_dependency_prebuilt_dependency_override_precedence_contract`, then run `compile-compcert` speed_1 before any proof_5 or broad measurement. | active |
 | 2026-04-30 | Implement v0.5 prebuilt dependency override precedence repair. | `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md`: long-dependency resume state now surfaces `version_pinned_source_toolchain_before_compatibility_override` when a version-pinned source-built dependency/toolchain install starts while `compatibility_override_probe_missing` remains unresolved; THINK guidance now prefers available prebuilt package-manager dependencies plus source compatibility override before source-building an older dependency/toolchain. Focused work-session tests, ruff, gap-ledger validation, and `git diff --check` passed. | Run a one-trial same-shape speed proof for `compile-compcert`; do not run proof_5 or broad measurement first. | speed_rerun_pending |
+| 2026-04-30 | v0.5 same-shape speed rerun passed. | `docs/M6_24_PREBUILT_OVERRIDE_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-prebuilt-override-compile-compcert-1attempt-20260430-1211/2026-04-30__12-10-22/result.json`: one trial, no runner errors, reward `1.0`, runtime `14m 29s`. The run used prebuilt distro dependencies plus source compatibility overrides, built `ccomp`, built/installed the runtime library, and passed all three external verifier checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`; do not resume broad measurement first. | proof_5_pending |
 
 ## Current Mode
 
@@ -145,9 +146,10 @@ close target became impossible. The v0.4 runtime link library repair passed its
 same-shape speed rerun at `1/1`, but its resource-normalized proof failed on
 the first valid completed trial because the model source-built version-pinned
 OPAM dependencies instead of trying prebuilt dependencies plus source override
-first. The v0.5 prebuilt dependency override precedence repair is implemented.
-Broad measurement remains paused until its same-shape speed rerun is recorded.
+first. The v0.5 prebuilt dependency override precedence repair passed its
+same-shape speed rerun at `1/1`. Broad measurement remains paused until the
+resource-normalized same-shape proof is recorded.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_prebuilt_dependency_override_precedence_contract speed_1 -> compile-compcert`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_prebuilt_dependency_override_precedence_contract proof_5 -> compile-compcert -k 5 -n 1`
