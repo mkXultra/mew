@@ -720,3 +720,20 @@ Done when:
 - a fixture terminal smoke render is inspected at the narrow resident width
 - no hidden monitoring, launcher execution, shell execution, broad refactors,
   live adapter changes, or core imports are introduced
+
+### SP38: mew-wisp Cat Left-Eye Balance Repair
+
+Repair the remaining cat-form eye imbalance so the left eye no longer reads as
+a small tear or vertical drip.
+
+Done when:
+
+- the left eye and right eye have matching pixel weight in the terminal cat
+  form
+- the left eye has clear spacing from the left face outline
+- no isolated lower pixel remains directly below the left eye
+- focused tests reject the one-cell left-eye regression and the lower-dot tear
+  regression while preserving SP37 foreleg checks
+- a fixture terminal smoke render is inspected at the narrow resident width
+- no hidden monitoring, launcher execution, shell execution, broad refactors,
+  live adapter changes, or core imports are introduced

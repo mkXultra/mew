@@ -48,10 +48,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP35 mew-wisp Resident-First Help and Copy | `done` | Task #56/session #87 updated CLI help, README first-screen copy, and HTML compatibility wording so `mew-wisp` is presented as the resident terminal surface while `ghost.py`/HTML remain compatibility paths. |
 | SP36 mew-wisp Explicit Compatibility Output | `done` | Task #60/session #91 landed practical after cleaning up stale sessions #89/#90: product-named `mew_wisp.py --output` now requires explicit `--format html` or `--format state`, while direct `ghost.py --output` keeps historical HTML compatibility. |
 | SP37 mew-wisp Cat Sprite Eye and Foreleg Polish | `done` | Task #61/session #92 improved the left eye but fused the front legs; reviewer rejected that visual result. Task #62/session #93 repaired only the foreleg rows into two separated strokes, preserved the left-eye improvement, and added focused regression tests. Issue #35 records the verifier/visual-acceptance polish finding. |
+| SP38 mew-wisp Cat Left-Eye Balance Repair | `done` | Task #63/session #94 made the upper left eye match the right eye but left a lower isolated dot; reviewer rejected that visual result. Task #64/session #95 removed the lower tear-like dot, preserved the balanced eye width and SP37 forelegs, and added focused regression tests. Issue #35 was updated with the repeated visual-acceptance evidence. |
 
 ## Active Focus
 
-Active side-project focus: **SP37 mew-wisp Cat Sprite Eye and Foreleg Polish is done; choose the next terminal-first `mew-wisp` milestone before reconnecting to deeper mew state**.
+Active side-project focus: **SP38 mew-wisp Cat Left-Eye Balance Repair is done; choose the next terminal-first `mew-wisp` milestone before reconnecting to deeper mew state**.
 
 Current target:
 
@@ -328,6 +329,16 @@ Current target:
   passed (`55 passed`), `git diff --check` passed, fixture terminal smoke was
   inspected at `MEW_GHOST_TERMINAL_WIDTH=50`, rescue edits remain `0`, and
   issue `#35` records the reusable verifier/visual-acceptance polish finding.
+- SP38 task `#63` / session `#94` made the upper left eye three cells wide like
+  the right eye, but reviewer smoke inspection still found a lower isolated
+  left-eye dot that could read as a tear. SP38 repair task `#64` / session
+  `#95` removed that lower dot by opening the row below the left eye while
+  preserving the balanced upper eyes, nose, face outline, SP37 forelegs,
+  centered layout, speech bubble, HUD, live/fixture behavior, launcher safety,
+  and terminal width behavior. The focused verifier passed (`55 passed`),
+  `git diff --check` passed, fixture terminal smoke was inspected at
+  `MEW_GHOST_TERMINAL_WIDTH=50`, rescue edits remain `0`, and issue `#35` was
+  updated with the repeated visual-acceptance evidence.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`

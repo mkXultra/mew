@@ -1280,10 +1280,10 @@ CAT_REFERENCE_MASK = (
     '.##..#######..##......',
     '.##...######..##......',
     '.##...........##......',
-    '###..#....###.####....',
-    '##...#....###..###....',
-    '##...#....###..###....',
-    '###..#.##..##.###.....',
+    '###..###..###.####....',
+    '##...###..###..###....',
+    '##...###..###..###....',
+    '###....##..##.###.....',
     '.#####.##....###......',
     '...###......####......',
     '...###.......#####....',
@@ -1554,8 +1554,16 @@ def test_terminal_human_default_form_is_compact_and_details_are_opt_in(monkeypat
     assert 'launcher intents:' in details
     assert _cat_sprite_similarity(cat) >= 0.90
     cat_mask = _cat_sprite_mask(cat)
-    assert cat_mask[6][0:6] == '###..#'
-    assert all(row[3:6] == '..#' for row in cat_mask[7:10])
+    left_eye_segments = [row[5:8] for row in cat_mask[6:9]]
+    right_eye_segments = [row[10:13] for row in cat_mask[6:9]]
+    assert cat_mask[6][0:8] == '###..###'
+    assert [row[0:8] for row in cat_mask[7:9]] == ['##...###'] * 2
+    assert cat_mask[9][0:9] == '###....##'
+    assert left_eye_segments == ['###'] * 3
+    assert left_eye_segments == right_eye_segments
+    assert cat_mask[6][3:5] == '..'
+    assert all(row[2:5] == '...' for row in cat_mask[7:9])
+    assert cat_mask[9][3:7] == '....'
     assert all(row[4:6] != '##' for row in cat_mask[6:10])
     foreleg_rows = cat_mask[15:19]
     foreleg_segments = [row[6:11] for row in foreleg_rows]
