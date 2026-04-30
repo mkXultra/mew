@@ -150,6 +150,7 @@ direction.
 | 2026-05-01 | malformed-JSON recovery same-shape speed rerun passed. | `docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-1attempt-20260501-0152/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `25m 37s`. `mew work` finished after 8 steps, built `/tmp/CompCert/ccomp`, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
 | 2026-05-01 | malformed-JSON recovery proof_5 missed on low-wall full-context recovery. | `docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-5attempts-seq-20260501-0220/result.json`: sequential proof was stopped after valid completed trials reached `1/2`; the third trial was intentionally cancelled after the frozen `5/5` close target became impossible. The failed valid trial reached the known runtime-link/runtime-install recovery path, then read `runtime/Makefile` and hit repeated model planning timeouts under shrinking wall-clock ceilings while still using full prompt context. | Continue improvement phase. Next bounded repair is `work_timeout_ceiling_full_context_recovery_prompt` in model-context budgeting, then run `compile-compcert` speed_1 before proof_5 or broad measurement. | active |
 | 2026-05-01 | Implement timeout-ceiling compact recovery. | `src/mew/work_loop.py` now maps the default `full` prompt context to `compact_recovery` when `plan_work_model_turn()` runs under `timeout_ceiling=True`; `tests/test_work_session.py` pins that low-wall planning records compact recovery context. Focused validation passed: compact-recovery tests `2 passed`, `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and `codex-ultra` review session `019ddfa4-889a-7d72-a789-239af7ce2a2b` approved. | Run one-trial same-shape `compile-compcert` speed proof with refreshable `~/.codex/auth.json`; do not resume broad measurement first. | speed_rerun_pending |
+| 2026-05-01 | timeout-ceiling compact recovery same-shape speed rerun passed. | `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-1attempt-20260501-0332/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `16m 55s`. `mew work` finished after 9 steps, built `/tmp/CompCert/ccomp`, installed default runtime support, ran default-path compile/link/run smoke, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
 
 ## Current Mode
 
@@ -177,9 +178,10 @@ The one-shot malformed JSON plan recovery repair passed its same-shape speed
 proof at `1/1`, but its resource-normalized proof missed at `1/2` valid
 completed trials. The failed trial repeated the known runtime-library recovery
 path but lost the remaining budget to full-context model timeouts under a
-wall-clock timeout ceiling. The timeout-ceiling compact recovery repair is now
-implemented and awaiting a one-trial same-shape speed proof.
+wall-clock timeout ceiling. The timeout-ceiling compact recovery repair passed
+its same-shape speed proof at `1/1`, so the next step is the
+resource-normalized close proof for the same shape.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> model_context_budgeting -> work_timeout_ceiling_full_context_recovery_prompt -> compile-compcert speed_1`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> model_context_budgeting -> work_timeout_ceiling_full_context_recovery_prompt -> compile-compcert proof_5`
