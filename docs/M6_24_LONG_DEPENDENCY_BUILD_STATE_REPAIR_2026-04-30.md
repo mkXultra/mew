@@ -218,6 +218,36 @@ Next validation is resource-normalized proof_5 for `compile-compcert` with
 sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
 remains paused.
 
+## v1.3 Compatibility Branch Budget Contract
+
+The v1.2 timeout-ceiling compact-recovery resource-normalized proof is recorded
+in:
+
+- `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-5attempts-seq-20260501-0356/result.json`
+
+The proof reached `2/3` valid completed trials before the frozen `5/5` close
+target became impossible. The failed valid trial did not repeat full-context
+model timeout or runtime-link recovery. It found the correct
+`-use-external-Flocq` compatibility branch, but only after serial compatibility
+probes consumed most of the wall budget; the final long build was capped to
+`702.927s`, timed out, and `/tmp/CompCert/ccomp` was missing when the external
+verifier ran.
+
+The next bounded generic repair is:
+
+`long_dependency_compatibility_branch_budget_contract`
+
+Layer: profile/contract. The repair should consolidate long dependency
+strategy rather than append another narrow THINK sentence. The intended
+contract is to combine source-provided compatibility flags and prebuilt
+external dependency packages early when a version-tolerant source-build route
+is exposed, then reserve enough wall budget for the selected long build branch
+and final artifact proof.
+
+Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
+Broad measurement and proof_5 remain paused.
+
 ## v1.2 Timeout-Ceiling Compact Recovery Repair
 
 The malformed-JSON recovery proof_5 is recorded in:

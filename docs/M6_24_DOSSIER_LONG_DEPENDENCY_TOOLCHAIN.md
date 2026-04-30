@@ -20,7 +20,7 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> model_context_budgeting -> work_timeout_ceiling_full_context_recovery_prompt -> compile-compcert proof_5
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract -> compile-compcert speed_1
 ```
 
 Broad measurement remains paused. The OAuth-refresh proof rerun validated the
@@ -35,11 +35,15 @@ The next proof_5 reached `1/2` valid completed trials before the close target
 became impossible. The failed valid trial reached the known runtime-library
 recovery path, then burned the remaining recovery budget on full-context model
 timeouts under a wall-clock timeout ceiling. The generic timeout-ceiling
-`compact_recovery` repair passed its same-shape speed proof at `1/1`. The next
-score action is the resource-normalized proof_5 for the same shape. Before
-another code repair after that proof, read this dossier and decide whether the
-next fix is a new blocker, a repeated older blocker, or prompt/profile
-accretion.
+`compact_recovery` repair passed its same-shape speed proof at `1/1`. The
+following resource-normalized proof reached `2/3` valid completed trials
+before the close target became impossible. The failed valid trial repeated the
+winning external-Flocq strategy too late: serial compatibility probes consumed
+the wall budget, then the final `-use-external-Flocq` build was capped and
+timed out before `/tmp/CompCert/ccomp` existed. This is now a profile/contract
+consolidation point, not another narrow inline prompt clause. The next repair
+is `long_dependency_compatibility_branch_budget_contract`, followed by
+`compile-compcert` speed_1.
 
 ## Repair Timeline
 
@@ -60,7 +64,8 @@ accretion.
 | proof infra OAuth refresh | Refresh ChatGPT OAuth tokens from legacy/Codex auth shapes and retry one 401. | proof infrastructure | Auth-expiry failure removed; same-shape proof reached valid completed trials `1/2`; next failure final recovery budget. |
 | v1.0 final recovery-budget reserve | Preserve recovery wall budget for long build commands that include final validation smoke. | tool/runtime | Speed `1/1`; proof `2/3`; next failure malformed JSON plan recovery. |
 | v1.1 malformed JSON plan recovery | Treat backend `failed to parse JSON plan` as a recoverable one-shot transient model error. | loop recovery | Speed `1/1`; proof `1/2`; next failure timeout-ceiling full-context recovery. |
-| v1.2 timeout-ceiling compact recovery | Use compact recovery context when wall-clock pressure reduces model timeout. | model context budgeting | Speed `1/1`; proof_5 pending. |
+| v1.2 timeout-ceiling compact recovery | Use compact recovery context when wall-clock pressure reduces model timeout. | model context budgeting | Speed `1/1`; proof `2/3`; next failure compatibility branch budget. |
+| v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | proof `2/3`; next action is speed_1 after repair. |
 
 ## Pattern Readout
 
@@ -114,6 +119,12 @@ accretion.
   work` finished cleanly after 9 steps, installed default runtime support, ran
   a default-path smoke, and the external verifier passed. Escalate to
   resource-normalized proof_5 before another repair or broad measurement.
+- The v1.2 resource-normalized proof miss is not another compact-recovery or
+  runtime-link regression. Two valid trials passed; the failed trial found the
+  right `-use-external-Flocq` branch but only after serially spending most of
+  the wall budget on weaker compatibility probes. This should be repaired as a
+  long-dependency profile/contract budget issue, not by appending another
+  task-local prompt sentence.
 
 ## Preflight Before Next Repair
 

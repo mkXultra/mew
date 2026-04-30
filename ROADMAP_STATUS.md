@@ -183,9 +183,12 @@ M6.24 resume condition:
   missed at `1/2` valid completed trials when the failed trial reached the known
   runtime-library recovery path and then spent the low remaining wall budget on
   full-context model timeouts. The timeout-ceiling compact recovery repair
-  passed its same-shape speed proof at `1/1` in `16m 55s`. Current selected
-  chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> model_context_budgeting -> work_timeout_ceiling_full_context_recovery_prompt proof_5 -> compile-compcert`.
+  passed its same-shape speed proof at `1/1` in `16m 55s`, but the following
+  proof_5 missed at `2/3` valid completed trials. The failed valid trial found
+  the correct external-Flocq compatibility branch too late; serial probes
+  consumed most wall budget, then the final build was capped and timed out
+  before `/tmp/CompCert/ccomp` existed. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract speed_1 -> compile-compcert`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the

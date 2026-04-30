@@ -67,6 +67,7 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-01 | timeout-ceiling compact recovery proof_5 missed on compatibility branch budget. | `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-5attempts-seq-20260501-0356/result.json`: sequential proof was stopped after valid completed trials reached `2/3`; the fourth trial was intentionally cancelled after the frozen `5/5` close target became impossible. The failed valid trial reached the correct `-use-external-Flocq` branch, but only after serial compatibility probes consumed most of the wall budget; the final long build was capped to `702.927s`, timed out, and `/tmp/CompCert/ccomp` was missing. | Continue improvement phase. Next bounded repair is `long_dependency_compatibility_branch_budget_contract` in profile/contract; implement it generically, then run `compile-compcert` speed_1 before any proof_5 or broad measurement. | active |
 | 2026-04-30 | Adopt gap-class repair dossiers before further repeated repair cycles. | The `compile-compcert` long-dependency chain reached v0.8 through repeated detector plus THINK-guidance repairs. User review identified that task-local history is not enough; M6.24 needs gap-class memory so context compression does not pick the next repair from only the latest failure. `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` now requires gap-class dossiers after repeated cycles. | Maintain `docs/M6_24_REPAIR_DOSSIER_INDEX.md`; read `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before any next long-dependency/toolchain repair. The current v0.8 speed rerun may proceed, but any subsequent repair must pass the dossier preflight. | active |
 | 2026-04-29 | Enter M6.24 improvement phase; stop new broad measurement for now. | `docs/M6_24_GAP_BASELINE_2026-04-29.md`: measured subset is mew 92/210 = 43.8% vs Codex 156/210 = 74.3%, gap -30.5 pp; Batch 2, 3, 4, 5, and partial Batch 6 all exceed the `> 20 pp` improvement threshold. | Classify Batch 1-6 measured failures, pick one generic gap class, repair it, and rerun the same failed shape before continuing `gpt2-codegolf` or any new broad-measurement task. | active |
 | 2026-04-29 | Select first gap class: `hard_task_implementation_strategy_contract_retention`. | `docs/M6_24_GAP_CLASS_PLAN_2026-04-29.md` and `proof-artifacts/m6_24_gap_ledger.jsonl`: many major losses remain after lower-level timeout, permission, artifact, and verifier-grounding repairs; repeated failures look like weak task decomposition, contract retention, source grounding, and verifier-driven repair on hard implementation tasks. | Produce a reference-backed design by inspecting mew evidence plus `references/fresh-cli/codex`, `docs/ADOPT_FROM_REFERENCES.md`, and `docs/REVIEW_2026-04-20_MISSING_PATTERNS_SURVEY.md`; implement the smallest generic work-session repair; rerun `make-doom-for-mips` or `make-mips-interpreter` same shape. | active |
@@ -179,9 +180,12 @@ proof at `1/1`, but its resource-normalized proof missed at `1/2` valid
 completed trials. The failed trial repeated the known runtime-library recovery
 path but lost the remaining budget to full-context model timeouts under a
 wall-clock timeout ceiling. The timeout-ceiling compact recovery repair passed
-its same-shape speed proof at `1/1`, so the next step is the
-resource-normalized close proof for the same shape.
+its same-shape speed proof at `1/1`, but its resource-normalized proof missed
+at `2/3` valid completed trials. The failed valid trial found the correct
+`-use-external-Flocq` branch but only after serial compatibility probes
+consumed most of the wall budget, leaving the final long build capped and
+timed out before `/tmp/CompCert/ccomp` existed.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> model_context_budgeting -> work_timeout_ceiling_full_context_recovery_prompt -> compile-compcert proof_5`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract -> compile-compcert speed_1`
