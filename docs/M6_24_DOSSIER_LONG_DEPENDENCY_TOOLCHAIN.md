@@ -20,15 +20,17 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> proof-infra -> Codex OAuth refresh validation -> rerun long_dependency_timed_out_artifact_proof_calibration proof_5 -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> tool/runtime -> long_dependency_final_recovery_budget_after_failed_validation -> compile-compcert speed_1
 ```
 
-Broad measurement remains paused. The next score action is a
-resource-normalized proof_5 for `compile-compcert` using `-k 5 -n 1` after
-Codex OAuth refresh is validated. Use refreshable `~/.codex/auth.json` rather
-than expiring `auth.plus.json`. Before another code repair after that proof,
-read this dossier and decide whether the next fix is a new blocker, a repeated
-older blocker, or prompt/profile accretion.
+Broad measurement remains paused. The OAuth-refresh proof rerun validated the
+proof-infrastructure fix but missed the `5/5` close target after a recoverable
+runtime-link failure consumed the remaining wall/model budget. The next score
+action is a one-trial same-shape speed proof for `compile-compcert` after the
+tool/runtime recovery-budget repair. Use refreshable `~/.codex/auth.json`.
+Before another code repair after that proof, read this dossier and decide
+whether the next fix is a new blocker, a repeated older blocker, or
+prompt/profile accretion.
 
 ## Repair Timeline
 
@@ -46,6 +48,8 @@ older blocker, or prompt/profile accretion.
 | v0.7 runtime install target | Build shortest explicit runtime-library target before install/default-link smoke. | detector/resume + THINK guidance | Speed `0/1`; failure moved earlier to source archive identity + empty response. |
 | v0.8 source archive identity / empty response recovery | Accept archive/tag/root identity when internal markers are coarse; recover empty assistant response. | detector/resume + recovery + THINK guidance | Speed `1/1`; proof `4/5`; next failure timed-out artifact proof calibration. |
 | v0.9 timed-out artifact proof calibration | Do not mark required final artifacts proven from timed-out or nonzero commands. | instrumentation/report | Speed `1/1`; first proof_5 invalidated by auth expiry; rerun pending after OAuth refresh repair. |
+| proof infra OAuth refresh | Refresh ChatGPT OAuth tokens from legacy/Codex auth shapes and retry one 401. | proof infrastructure | Auth-expiry failure removed; same-shape proof reached valid completed trials `1/2`; next failure final recovery budget. |
+| v1.0 final recovery-budget reserve | Preserve recovery wall budget for long build commands that include final validation smoke. | tool/runtime | Implemented; speed `1/1` pending. |
 
 ## Pattern Readout
 
@@ -74,6 +78,11 @@ older blocker, or prompt/profile accretion.
   `auth.plus.json` expired mid-run and four trials hit `HTTP 401 token_expired`.
   Treat this as proof-infrastructure evidence. Rerun the same shape after Codex
   OAuth refresh is validated before selecting another mew-core repair.
+- The OAuth-refresh proof rerun is clean auth evidence: no `token_expired`
+  recurrence. The failed valid trial repeated the runtime-link class, but the
+  differentiator was exhausted recovery budget, not missing runtime-link policy:
+  a passing contrast trial used the already-known runtime-library build/install
+  recovery route successfully.
 
 ## Preflight Before Next Repair
 

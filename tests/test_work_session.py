@@ -7378,6 +7378,155 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_reserves_recovery_budget_for_long_build_validation_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "run a long source build and final smoke",
+                    "action": {
+                        "type": "run_command",
+                        "command": "cd /tmp/CompCert\nmake -j4 ccomp\n/tmp/CompCert/ccomp -version\n/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke",
+                        "timeout": 1800,
+                    },
+                }
+                observed_parameters = {}
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    self.assertEqual(tool, "run_command")
+                    observed_parameters.update(parameters)
+                    return {
+                        "command": parameters["command"],
+                        "exit_code": 0,
+                        "stdout": "The CompCert C verified compiler\n",
+                        "stderr": "",
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            "Under /tmp/CompCert, build the CompCert compiler from source and verify it works.",
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-shell",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "5",
+                                            "--max-wall-seconds",
+                                            "120",
+                                            "--max-steps",
+                                            "1",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertIn("wall_timeout_ceiling", observed_parameters)
+                self.assertEqual(
+                    observed_parameters["wall_timeout_ceiling"]["reserve_seconds"],
+                    commands.WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS,
+                )
+                self.assertLess(observed_parameters["timeout"], 90.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_long_build_recovery_command_can_spend_reserved_budget_after_linker_failure(self):
+        task = {
+            "title": "Build CompCert compiler",
+            "description": "Build the compiler from source and verify the runtime link path.",
+        }
+        session = {
+            "tool_calls": [
+                {
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {
+                        "exit_code": 2,
+                        "stderr": "/usr/bin/ld: cannot find -lcompcert: No such file or directory\nlinker command failed\n",
+                    },
+                }
+            ]
+        }
+        parameters = {
+            "timeout": 600,
+            "command": (
+                "cd /tmp/CompCert\n"
+                "make -C runtime libcompcert.a\n"
+                "make install\n"
+                "/tmp/CompCert/ccomp -version\n"
+                "/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke"
+            ),
+        }
+
+        self.assertEqual(
+            commands.work_tool_recovery_reserve_seconds(
+                "run_command",
+                parameters,
+                task=task,
+                session=session,
+            ),
+            0.0,
+        )
+
+    def test_long_build_recovery_command_can_spend_reserved_budget_after_runtime_install_failure(self):
+        task = {
+            "title": "Build CompCert compiler",
+            "description": "Build the compiler from source and verify the runtime install path.",
+        }
+        session = {
+            "tool_calls": [
+                {
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {
+                        "exit_code": 2,
+                        "stdout": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                }
+            ]
+        }
+        parameters = {
+            "timeout": 600,
+            "command": (
+                "cd /tmp/CompCert\n"
+                "make -C runtime libcompcert.a\n"
+                "make install\n"
+                "/tmp/CompCert/ccomp -version\n"
+                "/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke"
+            ),
+        }
+
+        self.assertEqual(
+            commands.work_tool_recovery_reserve_seconds(
+                "run_command",
+                parameters,
+                task=task,
+                session=session,
+            ),
+            0.0,
+        )
+
     def test_run_command_for_work_streaming_kills_process_group_on_timeout(self):
         from mew.work_session import run_command_for_work
 

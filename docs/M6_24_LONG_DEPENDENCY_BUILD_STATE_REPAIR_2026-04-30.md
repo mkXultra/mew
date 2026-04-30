@@ -202,6 +202,57 @@ Result:
 Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
 Broad measurement and proof_5 remain paused.
 
+## v1.0 Final Recovery-Budget Reserve
+
+The OAuth-refresh proof rerun is recorded in:
+
+- `docs/M6_24_OAUTH_REFRESH_COMPILE_COMPCERT_PROOF_5_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-oauth-refresh-compile-compcert-5attempts-seq-20260430-2256/result.json`
+
+The proof infrastructure repair worked: no `HTTP 401 token_expired` recurrence
+was observed with refreshable `~/.codex/auth.json`. The close gate still missed:
+
+- valid completed trials reached `1/2`;
+- the failed valid trial built `/tmp/CompCert/ccomp`;
+- default functional smoke failed with `/usr/bin/ld: cannot find -lcompcert`;
+- the session then had only `14.873s` wall time left, leaving no useful model
+  recovery turn to run the already-known runtime-library build/install path.
+
+The bounded generic repair is:
+
+`long_dependency_final_recovery_budget_after_failed_validation`
+
+Changes:
+
+- `mew work` now detects long dependency/toolchain build commands with long
+  timeouts and final validation smoke markers;
+- those commands reserve `60s` of wall budget before execution rather than only
+  the normal `2s` tool reserve;
+- if a recent runtime-link/runtime-install blocker is already visible, the
+  follow-up recovery command can spend that reserved budget instead of being
+  re-reserved and blocked;
+- ordinary short tool calls keep the old timeout behavior.
+
+Focused validation:
+
+```text
+UV_CACHE_DIR=/tmp/uv-cache uv run pytest --no-testmon tests/test_work_session.py -k 'wall_budget or wall_timeout or long_build_validation_command' -q
+UV_CACHE_DIR=/tmp/uv-cache uv run ruff check src/mew/commands.py tests/test_work_session.py
+```
+
+Result:
+
+- focused wall-budget tests: `8 passed`
+- ruff: passed
+- broader regression (`tests/test_work_session.py`, `tests/test_codex_api.py`,
+  `tests/test_model_backends.py`): `858 passed`, one multiprocessing warning
+- `codex-ultra` review session `019ddeed-31bf-7373-a6f8-b417b0865203`:
+  `APPROVE` after the recovery-command re-reservation regressions were added
+
+Next validation is a one-trial same-shape speed rerun for `compile-compcert`
+with refreshable `~/.codex/auth.json`. Broad measurement and proof_5 remain
+paused.
+
 ## v0.8 Source Archive Identity / Empty Response Recovery Repair
 
 The v0.7 speed rerun is recorded in:
