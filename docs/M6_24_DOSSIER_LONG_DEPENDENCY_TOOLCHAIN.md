@@ -42,8 +42,9 @@ winning external-Flocq strategy too late: serial compatibility probes consumed
 the wall budget, then the final `-use-external-Flocq` build was capped and
 timed out before `/tmp/CompCert/ccomp` existed. This is now a profile/contract
 consolidation point, not another narrow inline prompt clause. The
-`long_dependency_compatibility_branch_budget_contract` repair is implemented;
-the next action is the one-trial same-shape `compile-compcert` speed proof.
+`long_dependency_compatibility_branch_budget_contract` repair passed its
+one-trial same-shape speed proof at `1/1`; the next action is the
+resource-normalized `compile-compcert` proof_5.
 
 ## Repair Timeline
 
@@ -65,7 +66,7 @@ the next action is the one-trial same-shape `compile-compcert` speed proof.
 | v1.0 final recovery-budget reserve | Preserve recovery wall budget for long build commands that include final validation smoke. | tool/runtime | Speed `1/1`; proof `2/3`; next failure malformed JSON plan recovery. |
 | v1.1 malformed JSON plan recovery | Treat backend `failed to parse JSON plan` as a recoverable one-shot transient model error. | loop recovery | Speed `1/1`; proof `1/2`; next failure timeout-ceiling full-context recovery. |
 | v1.2 timeout-ceiling compact recovery | Use compact recovery context when wall-clock pressure reduces model timeout. | model context budgeting | Speed `1/1`; proof `2/3`; next failure compatibility branch budget. |
-| v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | Implemented; speed_1 pending. |
+| v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | Speed `1/1`; proof_5 pending. |
 
 ## Pattern Readout
 
@@ -131,6 +132,11 @@ the next action is the one-trial same-shape `compile-compcert` speed proof.
   the wall budget on weaker compatibility probes. This should be repaired as a
   long-dependency profile/contract budget issue, not by appending another
   task-local prompt sentence.
+- The v1.3 compatibility-branch budget speed proof passed `1/1`: `mew work`
+  finished after 7 steps, built `/tmp/CompCert/ccomp`, installed default
+  runtime support, ran a default-path smoke, and the external verifier passed.
+  Escalate to resource-normalized proof_5 before another repair or broad
+  measurement.
 
 ## Preflight Before Next Repair
 

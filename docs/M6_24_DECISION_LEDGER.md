@@ -67,6 +67,7 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-01 | v1.3 compatibility-branch budget same-shape speed rerun passed. | `docs/M6_24_COMPAT_BRANCH_BUDGET_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-branch-budget-compile-compcert-1attempt-20260501-0545/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `19m 26s`. `mew work` finished after 7 steps, built `/tmp/CompCert/ccomp`, installed default runtime support, ran default-path compile/link/run smoke, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
 | 2026-05-01 | Implement v1.3 compatibility branch budget contract. | `src/mew/work_session.py` now surfaces `compatibility_branch_budget_contract_missing` when a long dependency/source-build task has prebuilt package-manager dependencies, source-exposed external/prebuilt compatibility branch evidence, serial setup/probe churn, a timed-out external-branch build, and missing final artifacts. `src/mew/work_loop.py` and resume `suggested_next` now tell the model to commit early to one coherent external/prebuilt branch and reserve wall budget for final artifact build/proof. Focused long-dependency tests, ruff, and codex-ultra review session `019de01e-2b4f-72b1-b74d-87ab30174dcf` passed. | Run one-trial same-shape `compile-compcert` speed proof with refreshable `~/.codex/auth.json`; do not resume proof_5 or broad measurement first. | speed_rerun_pending |
 | 2026-05-01 | timeout-ceiling compact recovery proof_5 missed on compatibility branch budget. | `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-5attempts-seq-20260501-0356/result.json`: sequential proof was stopped after valid completed trials reached `2/3`; the fourth trial was intentionally cancelled after the frozen `5/5` close target became impossible. The failed valid trial reached the correct `-use-external-Flocq` branch, but only after serial compatibility probes consumed most of the wall budget; the final long build was capped to `702.927s`, timed out, and `/tmp/CompCert/ccomp` was missing. | Continue improvement phase. Next bounded repair is `long_dependency_compatibility_branch_budget_contract` in profile/contract; implement it generically, then run `compile-compcert` speed_1 before any proof_5 or broad measurement. | active |
 | 2026-04-30 | Adopt gap-class repair dossiers before further repeated repair cycles. | The `compile-compcert` long-dependency chain reached v0.8 through repeated detector plus THINK-guidance repairs. User review identified that task-local history is not enough; M6.24 needs gap-class memory so context compression does not pick the next repair from only the latest failure. `docs/M6_24_GAP_IMPROVEMENT_LOOP.md` now requires gap-class dossiers after repeated cycles. | Maintain `docs/M6_24_REPAIR_DOSSIER_INDEX.md`; read `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before any next long-dependency/toolchain repair. The current v0.8 speed rerun may proceed, but any subsequent repair must pass the dossier preflight. | active |
@@ -186,8 +187,12 @@ at `2/3` valid completed trials. The failed valid trial found the correct
 `-use-external-Flocq` branch but only after serial compatibility probes
 consumed most of the wall budget, leaving the final long build capped and
 timed out before `/tmp/CompCert/ccomp` existed. The v1.3 compatibility branch
-budget contract is implemented and awaiting same-shape speed validation.
+budget contract passed its same-shape speed proof at `1/1`: the run finished
+after 7 steps, built `/tmp/CompCert/ccomp`, installed default runtime support,
+ran a default-path compile/link/run smoke, and the external verifier passed.
+Escalate to resource-normalized proof_5 before another repair or broad
+measurement.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract speed_1 -> compile-compcert`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract proof_5 -> compile-compcert`

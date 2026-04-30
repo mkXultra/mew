@@ -276,8 +276,30 @@ Result:
 - codex-ultra review session `019de01e-2b4f-72b1-b74d-87ab30174dcf`:
   `APPROVED`
 
-Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
-Broad measurement and proof_5 remain paused.
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_COMPAT_BRANCH_BUDGET_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-branch-budget-compile-compcert-1attempt-20260501-0545/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `19m 26s`
+- work-session stop reason: `finish`
+- work-session steps: `7`
+- external verifier: `3 passed`
+
+The run installed the missing Menhir API dev package, used the existing
+CompCert source tree, configured and built with the coherent compatibility branch,
+built `/tmp/CompCert/ccomp`, installed runtime support into the default path,
+and passed the default compile/link/run smoke plus external verifier.
+
+Next validation is resource-normalized proof_5 for `compile-compcert` with
+sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
+remains paused.
 
 ## v1.2 Timeout-Ceiling Compact Recovery Repair
 
