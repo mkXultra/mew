@@ -168,7 +168,7 @@ Changes:
 Focused validation:
 
 ```text
-uv run pytest tests/test_work_session.py -k 'long_dependency or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'long_dependency or source_toolchain or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
 uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
 jq empty proof-artifacts/m6_24_gap_ledger.jsonl
 git diff --check
@@ -203,6 +203,242 @@ The run inspected configure help and the Coq version rejection, tried
 `./configure -ignore-coq-version`, then moved to a compatible OPAM Coq `8.16.1`
 path, built `/tmp/CompCert/ccomp`, installed runtime libraries, and passed the
 external verifier.
+
+Next validation is resource-normalized proof_5 for the same shape:
+`compile-compcert -k 5 -n 1`.
+
+## v0.4 Resource-Normalized Proof
+
+The v0.4 resource-normalized proof rejected the close gate:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-5attempts-seq-20260430-1119/2026-04-30__11-19-01/result.json
+```
+
+Result:
+
+- valid completed trials before stop: `1`
+- score on valid completed trials: `0/1`
+- runner/cancel errors at stop: `1` from intentional trial 2 cancellation
+- failed trial: `compile-compcert__mhwxWgK`
+
+Failure shape:
+
+- the trial grounded CompCert `3.13.1`;
+- it observed distro Coq candidate `8.18` and source version rejection;
+- `compatibility_override_probe_missing` was visible in reentry;
+- it then chose a version-pinned source-built OPAM dependency route
+  (`coq.8.16.1` / `coq-flocq`) instead of trying the prebuilt dependency plus
+  source override path first;
+- the session exhausted wall/model budget with `/tmp/CompCert/ccomp` missing.
+
+## v0.5 Repair
+
+`long_dependency_prebuilt_dependency_override_precedence_contract`
+
+Changes:
+
+- long-dependency resume state now surfaces
+  `version_pinned_source_toolchain_before_compatibility_override` when
+  `compatibility_override_probe_missing` remains unresolved and the session
+  starts a version-pinned source-built dependency/toolchain install;
+- long-dependency next guidance now says that if prebuilt package-manager
+  dependencies are available and a source compatibility override is visible or
+  likely, the model should try that prebuilt dependency plus override path
+  before version-pinned source-built dependency/toolchain installation;
+- THINK guidance carries the same ordering contract.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'long_dependency or source_toolchain or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+jq empty proof-artifacts/m6_24_gap_ledger.jsonl
+git diff --check
+```
+
+Result:
+
+- focused work-session tests: `8 passed`
+- ruff: passed
+- gap ledger JSON: valid
+- diff whitespace: clean
+
+`codex-ultra` review session `019ddc51-b48e-7ac0-a742-4aee99e2a5c4` found
+two pre-commit risks: the first detector was whole-history rather than
+order-sensitive, and its source-toolchain regex was too broad. The follow-up
+restricts the detector to OPAM version-pinned source dependency installs and
+only flags installs that occur after `compatibility_override_probe_missing` and
+before the first configure override attempt. Tests cover install-before-mismatch
+and mismatch-then-install-then-later-override ordering.
+
+Next validation is a one-trial same-shape speed proof for `compile-compcert`.
+
+## v0.5 Speed Rerun
+
+The v0.5 same-shape speed rerun passed:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-prebuilt-override-compile-compcert-1attempt-20260430-1211/2026-04-30__12-10-22/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `14m 29s`
+- external verifier: `3 passed`
+
+The run used prebuilt distro OCaml/Coq/Flocq/Menhir dependencies, inspected the
+CompCert configure mismatch, configured through source compatibility flags,
+built the explicit `ccomp` target, built and installed the runtime library, and
+passed the external verifier.
+
+Residual calibration signal: the final report still listed stale
+`long_dependency_build_state.missing_artifacts` after success. This is
+report/resume cleanup evidence, not a blocker for the selected score repair.
+
+Next validation is resource-normalized proof_5 for the same shape:
+`compile-compcert -k 5 -n 1`.
+
+## v0.5 Resource-Normalized Proof
+
+The v0.5 resource-normalized proof improved the selected shape but did not
+reach the close gate:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-prebuilt-override-compile-compcert-5attempts-seq-20260430-1230/2026-04-30__12-30-26/result.json
+```
+
+Result:
+
+- score: `4/5`
+- runner errors: `0`
+- Harbor mean: `0.800`
+- total runtime: `2h 11m 31s`
+- frozen Codex target: `5/5`
+
+Four trials passed the external verifier. The failed trial built `ccomp` and
+found a local `libcompcert.a`, but its local smoke used a custom `-stdlib`
+runtime path. The external verifier used the default `ccomp` invocation and
+failed with:
+
+```text
+/usr/bin/ld: cannot find -lcompcert: No such file or directory
+```
+
+Next bounded repair:
+
+`long_dependency_default_runtime_link_path_contract`
+
+For compiler/toolchain source-build tasks, local smoke proof must exercise the
+same default runtime/library lookup path that the external verifier or normal
+user invocation will use. Custom runtime path flags are useful diagnostics, but
+they are not sufficient close evidence unless the task explicitly requires that
+interface.
+
+## v0.6 Repair
+
+`long_dependency_default_runtime_link_path_contract`
+
+The v0.5 resource-normalized proof reached `4/5`; the remaining failed trial
+used a custom `-stdlib` runtime path for local smoke proof while the external
+verifier invoked `/tmp/CompCert/ccomp` without that custom path.
+
+Changes:
+
+- long-dependency resume state now surfaces
+  `default_runtime_link_path_unproven` when a compiler/toolchain compile/link
+  smoke passes only with custom runtime/library lookup flags such as `-stdlib`,
+  `-L`, `LD_LIBRARY_PATH`, or `LIBRARY_PATH`;
+- the blocker is suppressed when a later completed command proves the same
+  compiler/toolchain artifact with a default compile/link smoke;
+- long-dependency next guidance and the THINK prompt now require installing or
+  configuring runtime support into the default lookup path and rerunning the
+  smoke without custom path flags before finish.
+
+Validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'custom_runtime_path or default_runtime_link or nearby_gcc_smoke or exported_runtime_path or quoted_source or later_runtime_path_export or long_dependency or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result: focused tests passed (`10 passed, 798 deselected`) and ruff passed.
+codex-ultra review session `019ddcf2-f949-7201-937f-e679fa67ad5e` approved
+after two edge-case fix rounds.
+
+Next validation is a same-shape speed proof for:
+
+```text
+compile-compcert
+```
+
+Do not run proof_5 or broad measurement before the speed proof.
+
+## v0.4 Repair
+
+`long_dependency_runtime_link_library_contract`
+
+Resource-normalized `compile-compcert` proof after v0.3 reached `2/3` valid
+completed trials before the `5/5` close target became impossible. The failed
+completed trial built `/tmp/CompCert/ccomp` and completed a local smoke, but the
+external verifier failed because the compiler could not link against its runtime
+library:
+
+```text
+/usr/bin/ld: cannot find -lcompcert: No such file or directory
+ccomp: error: linker command failed with exit code 1
+```
+
+Changes:
+
+- long-dependency resume state now surfaces `runtime_link_library_missing` for
+  source-build/toolchain link failures such as `cannot find -l...`;
+- long-dependency next guidance now says missing runtime/link-library failures
+  require installing or configuring the project runtime/library target before
+  finish;
+- THINK guidance now says a trivial return-only smoke is not enough for
+  compiler/toolchain tasks with runtime or standard-library link requirements.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'long_dependency or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result:
+
+- focused work-session tests: `4 passed`
+- ruff: passed
+
+Next validation remains a one-trial same-shape speed rerun for
+`compile-compcert`.
+
+## v0.4 Speed Rerun
+
+The v0.4 same-shape speed rerun passed:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-1attempt-20260430-1050/2026-04-30__10-49-08/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `22m 3s`
+- external verifier: `3 passed`
+
+The run built `ccomp`, built and installed the runtime library, verified
+`/tmp/CompCert/ccomp` by compiling, linking, and running a C smoke program, and
+passed all external verifier checks, including the prior failing `-lcompcert`
+link path.
+
+The earlier speed attempt at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-1attempt-20260430-1024`
+has no Harbor `result.json` and is not score evidence.
 
 Next validation is resource-normalized proof_5 for the same shape:
 `compile-compcert -k 5 -n 1`.

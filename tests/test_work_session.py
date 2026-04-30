@@ -4699,13 +4699,640 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
 
         self.assertIn("toolchain_version_constraint_mismatch", codes)
         self.assertIn("compatibility_override_probe_missing", codes)
         text = format_work_session_resume(resume)
         self.assertIn("long_dependency_strategy_blocker: compatibility_override_probe_missing", text)
         self.assertIn("compatibility/override flags", text)
+
+    def test_work_session_resume_flags_version_pinned_source_toolchain_before_override(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure x86_64-linux && apt-cache policy coq",
+                    },
+                    "result": {
+                        "command": "./configure x86_64-linux && apt-cache policy coq",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                            "coq:\n  Installed: (none)\n  Candidate: 8.18.0+dfsg-1build2\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1 coq-flocq menhir ocamlfind",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1 coq-flocq menhir ocamlfind",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "stdout": "-> retrieved coq.8.16.1\nCOQ_USE_DUNE= make -j9\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("compatibility_override_probe_missing", codes)
+        self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_dependency_strategy_blocker: version_pinned_source_toolchain_before_compatibility_override",
+            text,
+        )
+        self.assertIn("version-pinned source-built dependency/toolchain", text)
+
+    def test_work_session_resume_does_not_flag_source_toolchain_after_override_attempt(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Testing Menhir... Error: cannot determine the location of the Menhir API library.\n",
+                    },
+                },
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1 coq-flocq menhir ocamlfind",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1 coq-flocq menhir ocamlfind",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "stdout": "-> retrieved coq.8.16.1\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertNotIn("version_pinned_source_toolchain_before_compatibility_override", codes)
+
+    def test_work_session_resume_does_not_flag_source_toolchain_before_mismatch(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1 coq-flocq",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1 coq-flocq",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-> retrieved coq.8.16.1\n",
+                    },
+                },
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("compatibility_override_probe_missing", codes)
+        self.assertNotIn("version_pinned_source_toolchain_before_compatibility_override", codes)
+
+    def test_work_session_resume_flags_source_toolchain_before_later_override_attempt(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1 coq-flocq",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1 coq-flocq",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "stdout": "-> retrieved coq.8.16.1\n",
+                    },
+                },
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "Configuration succeeded.\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
+
+    def test_work_session_resume_flags_long_dependency_missing_runtime_link_library(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 19,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j2 ccomp runtime && /tmp/CompCert/ccomp positive_probe.c -o positive_probe",
+                    },
+                    "result": {
+                        "command": "make -j2 ccomp runtime && /tmp/CompCert/ccomp positive_probe.c -o positive_probe",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "CCOMP /tmp/CompCert/ccomp\n",
+                        "stderr": (
+                            "/usr/bin/ld: cannot find -lcompcert: No such file or directory\n"
+                            "ccomp: error: linker command failed with exit code 1\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("runtime_link_library_missing", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: runtime_link_library_missing", text)
+        self.assertIn("runtime/library target", text)
+
+    def test_work_session_resume_flags_custom_runtime_path_smoke_without_default_link_proof(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make -j2 ccomp runtime && test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -version && "
+                            'stdlib_args=(-stdlib "$(dirname "$libcompcert")") && '
+                            '/tmp/CompCert/ccomp "${stdlib_args[@]}" /tmp/positive_probe.c -o /tmp/positive_probe'
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make -j2 ccomp runtime && test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -version && "
+                            'stdlib_args=(-stdlib "$(dirname "$libcompcert")") && '
+                            '/tmp/CompCert/ccomp "${stdlib_args[@]}" /tmp/positive_probe.c -o /tmp/positive_probe'
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": (
+                            "CCOMP /tmp/CompCert/ccomp\n"
+                            "CompCert C compiler version 3.13\n"
+                            "stdlib_args=-stdlib /tmp/CompCert/runtime\n"
+                            "positive probe ok\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("default_runtime_link_path_unproven", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: default_runtime_link_path_unproven", text)
+        self.assertIn("custom runtime/library path flags", text)
+        self.assertIn("default lookup path", text)
+
+    def test_work_session_resume_accepts_default_runtime_link_proof_after_custom_path_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make -j2 ccomp runtime && "
+                            'stdlib_args=(-stdlib "$(pwd)/runtime") && '
+                            '/tmp/CompCert/ccomp "${stdlib_args[@]}" /tmp/positive_probe.c -o /tmp/positive_probe'
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make -j2 ccomp runtime && "
+                            'stdlib_args=(-stdlib "$(pwd)/runtime") && '
+                            '/tmp/CompCert/ccomp "${stdlib_args[@]}" /tmp/positive_probe.c -o /tmp/positive_probe'
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "custom runtime smoke ok\n",
+                    },
+                },
+                {
+                    "id": 24,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make install-runtime && "
+                            "/tmp/CompCert/ccomp /tmp/positive_probe.c -o /tmp/positive_probe && "
+                            "/tmp/positive_probe"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make install-runtime && "
+                            "/tmp/CompCert/ccomp /tmp/positive_probe.c -o /tmp/positive_probe && "
+                            "/tmp/positive_probe"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "positive probe ok\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("default_runtime_link_path_unproven", codes)
+
+    def test_work_session_resume_does_not_treat_nearby_gcc_smoke_as_toolchain_default_proof(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make -j2 ccomp runtime && "
+                            'stdlib_args=(-stdlib "$(pwd)/runtime") && '
+                            '/tmp/CompCert/ccomp "${stdlib_args[@]}" /tmp/positive_probe.c -o /tmp/positive_probe'
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make -j2 ccomp runtime && "
+                            'stdlib_args=(-stdlib "$(pwd)/runtime") && '
+                            '/tmp/CompCert/ccomp "${stdlib_args[@]}" /tmp/positive_probe.c -o /tmp/positive_probe'
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "custom runtime smoke ok\n",
+                    },
+                },
+                {
+                    "id": 24,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j2 ccomp runtime && gcc /tmp/positive_probe.c -o /tmp/positive_probe",
+                    },
+                    "result": {
+                        "command": "make -j2 ccomp runtime && gcc /tmp/positive_probe.c -o /tmp/positive_probe",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "gcc probe ok\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("default_runtime_link_path_unproven", codes)
+
+    def test_work_session_resume_treats_exported_runtime_path_as_custom_smoke(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "export LIBRARY_PATH=/tmp/CompCert/runtime && "
+                            "/tmp/CompCert/ccomp /tmp/positive_probe.c -o /tmp/positive_probe"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "export LIBRARY_PATH=/tmp/CompCert/runtime && "
+                            "/tmp/CompCert/ccomp /tmp/positive_probe.c -o /tmp/positive_probe"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "runtime path probe ok\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("default_runtime_link_path_unproven", codes)
+
+    def test_work_session_resume_flags_custom_runtime_path_with_quoted_source(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            '/tmp/CompCert/ccomp -stdlib /tmp/CompCert/runtime '
+                            '"/tmp/positive probe.c" -o /tmp/positive_probe'
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            '/tmp/CompCert/ccomp -stdlib /tmp/CompCert/runtime '
+                            '"/tmp/positive probe.c" -o /tmp/positive_probe'
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "quoted custom smoke ok\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("default_runtime_link_path_unproven", codes)
+
+    def test_work_session_resume_accepts_default_smoke_before_later_runtime_path_export(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "/tmp/CompCert/ccomp /tmp/positive_probe.c -o /tmp/positive_probe && "
+                            "export LIBRARY_PATH=/tmp/CompCert/runtime"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "/tmp/CompCert/ccomp /tmp/positive_probe.c -o /tmp/positive_probe && "
+                            "export LIBRARY_PATH=/tmp/CompCert/runtime"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "default smoke ok\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("default_runtime_link_path_unproven", codes)
 
     def test_work_session_resume_flags_chained_untargeted_full_make_for_specific_long_artifact(self):
         from mew.work_session import build_work_session_resume
@@ -34883,10 +35510,16 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("Before installing a distro toolchain", prompt)
         self.assertIn("version constraints", prompt)
         self.assertIn("cheap source-provided compatibility/override flags", prompt)
+        self.assertIn("prebuilt dependency plus override path", prompt)
+        self.assertIn("version-pinned source-built dependency/toolchain install", prompt)
         self.assertIn("invalidates a toolchain/package path", prompt)
         self.assertIn("dependency-generation/configure target", prompt)
         self.assertIn("shortest explicit target that produces that artifact", prompt)
         self.assertIn("over full project, proof, doc, test, or all-target builds", prompt)
+        self.assertIn("runtime or standard-library link requirements", prompt)
+        self.assertIn("project's runtime/library target", prompt)
+        self.assertIn("custom runtime/library flags", prompt)
+        self.assertIn("rerun the same compile/link smoke without those custom path flags", prompt)
         self.assertIn("set a bounded run_command timeout", prompt)
         self.assertIn("optional run_tests/run_command timeout seconds", prompt)
         self.assertIn("Do not restart package-manager or source-tree setup", prompt)
