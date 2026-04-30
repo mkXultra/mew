@@ -4123,6 +4123,14 @@ _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS = (
             "no rule to make target",
         ),
     ),
+    (
+        "runtime_link_library_missing",
+        (
+            "cannot find -l",
+            "linker command failed",
+            "library not found",
+        ),
+    ),
 )
 _LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS = (
     "configure --help",
@@ -4471,9 +4479,11 @@ def build_long_dependency_build_state(task, calls, session=None):
             "resume the existing source tree/toolchain state; do not restart package or source setup after a "
             "compatible path is found. If a configure step rejects an installed dependency version, inspect or try "
             "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
-            "Do not retry invalidated toolchain/package paths. Allocate remaining wall budget to the shortest "
-            "idempotent continuation command that produces the missing final artifact, then prove it exists and "
-            "is executable/invokable."
+            "If a compiler or toolchain can build a trivial binary but the linker reports a missing runtime "
+            "library, install or configure the project runtime/library target before finish. Do not retry "
+            "invalidated toolchain/package paths. Allocate remaining wall budget to the shortest idempotent "
+            "continuation command that produces the missing final artifact, then prove it exists and is "
+            "executable/invokable."
         ),
     }
 

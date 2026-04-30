@@ -119,6 +119,8 @@ direction.
 | 2026-04-30 | Resource-normalized proof rejected the selected close gate. | `docs/M6_24_COMPILE_COMPCERT_RESOURCE_NORMALIZED_PARTIAL_PROOF_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-target-compile-compcert-5attempts-seq-20260430-0727/2026-04-30__07-26-40/result.json`: sequential proof was stopped after valid completed trials reached `1/2`; runner errors were 0 before stop; third trial was intentionally cancelled after the frozen `5/5` close target became impossible. The failed valid trial did not reproduce parallel contention; it spent budget on alternate OPAM toolchain construction after distro Coq version rejection instead of first trying cheap source-provided compatibility/override configure paths. | Continue improvement phase. Next bounded repair is `long_dependency_toolchain_compatibility_override_order_contract`, then run `compile-compcert` speed_1 before any proof_5 or broad measurement. | active |
 | 2026-04-30 | Implement v0.3 compatibility override ordering repair. | `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md`: long-dependency resume state now surfaces `compatibility_override_probe_missing` when configure rejects an installed dependency version and no cheap compatibility/help probe is visible; THINK guidance now prefers source-provided compatibility/override flags before constructing an alternate toolchain from scratch. Focused work-session tests, ruff, gap-ledger validation, and `git diff --check` passed. | Run a one-trial same-shape speed proof for `compile-compcert`; do not run proof_5 or broad measurement first. | speed_rerun_pending |
 | 2026-04-30 | v0.3 same-shape speed rerun passed. | `docs/M6_24_COMPAT_OVERRIDE_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-override-compile-compcert-1attempt-20260430-0843/2026-04-30__08-43-13/result.json`: one trial, no runner errors, reward `1.0`, runtime `28m 4s`. The run inspected configure help, observed the Coq version rejection, tried `./configure -ignore-coq-version`, then moved to compatible OPAM Coq `8.16.1`, built `/tmp/CompCert/ccomp`, installed runtime libraries, and passed all three external verifier checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` using `-k 5 -n 1` and `auth.plus.json`; do not resume broad measurement first. | proof_5_pending |
+| 2026-04-30 | v0.3 resource-normalized proof rejected the selected close gate. | `docs/M6_24_COMPAT_OVERRIDE_COMPILE_COMPCERT_PROOF_5_2026-04-30.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-override-compile-compcert-5attempts-seq-20260430-0915/2026-04-30__09-15-21/result.json`: sequential proof was stopped after valid completed trials reached `2/3`; runner errors at stop were from the intentional fourth-trial cancellation; the frozen `5/5` close target became impossible after one valid failure. The failed valid trial built `/tmp/CompCert/ccomp` but the external verifier failed with `/usr/bin/ld: cannot find -lcompcert`. | Continue improvement phase. Next bounded repair is `long_dependency_runtime_link_library_contract`, then run `compile-compcert` speed_1 before any proof_5 or broad measurement. | active |
+| 2026-04-30 | Implement v0.4 runtime link library repair. | `docs/M6_24_LONG_DEPENDENCY_BUILD_STATE_REPAIR_2026-04-30.md`: long-dependency resume state now surfaces `runtime_link_library_missing` for source-build/toolchain link failures such as `cannot find -l...`; THINK guidance now says compiler/toolchain tasks require runtime/library link proof, not only a trivial return-only smoke. Focused work-session tests and ruff passed. | Run a one-trial same-shape speed proof for `compile-compcert`; do not run proof_5 or broad measurement first. | speed_rerun_pending |
 
 ## Current Mode
 
@@ -132,11 +134,14 @@ wall-clock/tool-ceiling gap and an untargeted full-build choice for a specific
 final artifact. The v0.2 repair passed a same-shape speed proof. A five-parallel
 proof timed out all trials and is treated as resource-contention harness
 evidence. A `-k 1 -n 5` probe created only one trial and then hit an auth quota.
-The valid `-k 5 -n 1` resource-normalized proof reached `1/2` before the close
-target `5/5` became impossible. The v0.3 compatibility override ordering repair
-passed its same-shape speed rerun at `1/1`. Broad measurement remains paused
-until a resource-normalized five-trial proof is recorded.
+The valid `-k 5 -n 1` resource-normalized proof for v0.2 reached `1/2` before
+the close target `5/5` became impossible. The v0.3 compatibility override
+ordering repair passed its same-shape speed rerun at `1/1`, but its
+resource-normalized proof reached only `2/3` valid completed trials before the
+close target became impossible. The v0.4 runtime link library repair is
+implemented. Broad measurement remains paused until its same-shape speed rerun
+is recorded.
 
 Current selected next action:
 
-`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_toolchain_compatibility_override_order_contract proof_5 -> compile-compcert -k5 -n1`
+`M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_runtime_link_library_contract speed_1 -> compile-compcert`

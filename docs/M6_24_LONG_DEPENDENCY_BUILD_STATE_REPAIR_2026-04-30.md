@@ -207,6 +207,46 @@ external verifier.
 Next validation is resource-normalized proof_5 for the same shape:
 `compile-compcert -k 5 -n 1`.
 
+## v0.4 Repair
+
+`long_dependency_runtime_link_library_contract`
+
+Resource-normalized `compile-compcert` proof after v0.3 reached `2/3` valid
+completed trials before the `5/5` close target became impossible. The failed
+completed trial built `/tmp/CompCert/ccomp` and completed a local smoke, but the
+external verifier failed because the compiler could not link against its runtime
+library:
+
+```text
+/usr/bin/ld: cannot find -lcompcert: No such file or directory
+ccomp: error: linker command failed with exit code 1
+```
+
+Changes:
+
+- long-dependency resume state now surfaces `runtime_link_library_missing` for
+  source-build/toolchain link failures such as `cannot find -l...`;
+- long-dependency next guidance now says missing runtime/link-library failures
+  require installing or configuring the project runtime/library target before
+  finish;
+- THINK guidance now says a trivial return-only smoke is not enough for
+  compiler/toolchain tasks with runtime or standard-library link requirements.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'long_dependency or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result:
+
+- focused work-session tests: `4 passed`
+- ruff: passed
+
+Next validation remains a one-trial same-shape speed rerun for
+`compile-compcert`.
+
 ## v0.2 Speed Rerun
 
 The v0.2 same-shape speed rerun passed:

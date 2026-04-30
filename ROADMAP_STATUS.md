@@ -164,9 +164,16 @@ M6.24 resume condition:
   ordering repair passed speed_1 at `1/1` in `28m 4s`: it inspected configure
   help, tried `./configure -ignore-coq-version`, then moved to compatible OPAM
   Coq `8.16.1`, built `/tmp/CompCert/ccomp`, and passed all three verifier
-  checks. Current
+  checks. The resource-normalized `-k 5 -n 1` proof then reached `2/3` valid
+  completed trials before the `5/5` close target became impossible. The failed
+  valid trial built `/tmp/CompCert/ccomp` but the external verifier failed with
+  `/usr/bin/ld: cannot find -lcompcert`, meaning the local smoke did not prove
+  runtime/library linking. The v0.4 runtime link library repair is implemented:
+  long-dependency resume state surfaces `runtime_link_library_missing`, and
+  compiler/toolchain THINK guidance now requires runtime/library link proof
+  instead of only a trivial return-only smoke. Current
   selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_toolchain_compatibility_override_order_contract proof_5 -> compile-compcert -k5 -n1`.
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> implementation_profile/no_lane_change -> long_dependency_runtime_link_library_contract speed_1 -> compile-compcert`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -607,8 +614,12 @@ M6.24 resume condition:
   the valid resource-normalized proof was rerun with `-k 5 -n 1` and
   `auth.plus.json`. It reached `1/2` completed valid trials before the frozen
   `5/5` close target became impossible. The v0.3 compatibility override
-  ordering repair passed speed_1 at `1/1`. Next action is a resource-normalized
-  five-trial `compile-compcert` proof with `-k 5 -n 1` and `auth.plus.json`.
+  ordering repair passed speed_1 at `1/1`, then its resource-normalized proof
+  reached `2/3` valid completed trials before the frozen `5/5` close target
+  became impossible. The failed valid trial exposed missing runtime/library
+  link proof (`cannot find -lcompcert`). v0.4 runtime link library repair is
+  implemented. Next action is a one-trial `compile-compcert` speed proof for
+  that repair.
 - Closed M6.14 follow-on episode:
   SR-017 from side-project issue #20 is `repaired`. `normalize_work_model_action`
   now treats an `edit_file` action carrying an `edits` list and no scalar

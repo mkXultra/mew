@@ -4707,6 +4707,51 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("long_dependency_strategy_blocker: compatibility_override_probe_missing", text)
         self.assertIn("compatibility/override flags", text)
 
+    def test_work_session_resume_flags_long_dependency_missing_runtime_link_library(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 19,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j2 ccomp runtime && /tmp/CompCert/ccomp positive_probe.c -o positive_probe",
+                    },
+                    "result": {
+                        "command": "make -j2 ccomp runtime && /tmp/CompCert/ccomp positive_probe.c -o positive_probe",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "CCOMP /tmp/CompCert/ccomp\n",
+                        "stderr": (
+                            "/usr/bin/ld: cannot find -lcompcert: No such file or directory\n"
+                            "ccomp: error: linker command failed with exit code 1\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("runtime_link_library_missing", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: runtime_link_library_missing", text)
+        self.assertIn("runtime/library target", text)
+
     def test_work_session_resume_flags_chained_untargeted_full_make_for_specific_long_artifact(self):
         from mew.work_session import build_work_session_resume
 
@@ -34887,6 +34932,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("dependency-generation/configure target", prompt)
         self.assertIn("shortest explicit target that produces that artifact", prompt)
         self.assertIn("over full project, proof, doc, test, or all-target builds", prompt)
+        self.assertIn("runtime or standard-library link requirements", prompt)
+        self.assertIn("project's runtime/library target", prompt)
         self.assertIn("set a bounded run_command timeout", prompt)
         self.assertIn("optional run_tests/run_command timeout seconds", prompt)
         self.assertIn("Do not restart package-manager or source-tree setup", prompt)
