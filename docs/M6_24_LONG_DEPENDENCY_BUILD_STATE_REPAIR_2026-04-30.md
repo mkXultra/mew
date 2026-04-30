@@ -337,6 +337,45 @@ user invocation will use. Custom runtime path flags are useful diagnostics, but
 they are not sufficient close evidence unless the task explicitly requires that
 interface.
 
+## v0.6 Repair
+
+`long_dependency_default_runtime_link_path_contract`
+
+The v0.5 resource-normalized proof reached `4/5`; the remaining failed trial
+used a custom `-stdlib` runtime path for local smoke proof while the external
+verifier invoked `/tmp/CompCert/ccomp` without that custom path.
+
+Changes:
+
+- long-dependency resume state now surfaces
+  `default_runtime_link_path_unproven` when a compiler/toolchain compile/link
+  smoke passes only with custom runtime/library lookup flags such as `-stdlib`,
+  `-L`, `LD_LIBRARY_PATH`, or `LIBRARY_PATH`;
+- the blocker is suppressed when a later completed command proves the same
+  compiler/toolchain artifact with a default compile/link smoke;
+- long-dependency next guidance and the THINK prompt now require installing or
+  configuring runtime support into the default lookup path and rerunning the
+  smoke without custom path flags before finish.
+
+Validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'custom_runtime_path or default_runtime_link or nearby_gcc_smoke or exported_runtime_path or quoted_source or later_runtime_path_export or long_dependency or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result: focused tests passed (`10 passed, 798 deselected`) and ruff passed.
+codex-ultra review session `019ddcf2-f949-7201-937f-e679fa67ad5e` approved
+after two edge-case fix rounds.
+
+Next validation is a same-shape speed proof for:
+
+```text
+compile-compcert
+```
+
+Do not run proof_5 or broad measurement before the speed proof.
+
 ## v0.4 Repair
 
 `long_dependency_runtime_link_library_contract`

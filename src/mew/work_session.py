@@ -4155,6 +4155,26 @@ _LONG_DEPENDENCY_RETRIEVED_VERSIONED_SOURCE_TOOL_RE = re.compile(
     r"\bretrieved\s+[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+",
     re.IGNORECASE,
 )
+_LONG_DEPENDENCY_CUSTOM_RUNTIME_PATH_MARKERS = (
+    "-stdlib",
+    "${stdlib_args",
+    "$stdlib_args",
+    "stdlib_args=",
+    "stdlib_args=(",
+    "ld_library_path=",
+    "library_path=",
+    "dyld_library_path=",
+    "c_include_path=",
+    "cpath=",
+    "-Wl,-rpath",
+    " -L",
+    "\t-L",
+)
+_LONG_DEPENDENCY_SOURCE_SMOKE_RE = re.compile(
+    r"\.(?:c|cc|cpp|cxx|s|S)(?:\s|$)"
+)
+_LONG_DEPENDENCY_OUTPUT_FLAG_RE = re.compile(r"(?:^|\s)-o(?:\s|=)")
+_LONG_DEPENDENCY_SOURCE_SMOKE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".s", ".S"}
 
 
 def _make_invocation_prefix_is_wrapper(parts):
@@ -4358,6 +4378,231 @@ def _long_dependency_source_toolchain_before_override_blocker(calls, existing_bl
     return {}
 
 
+def _long_dependency_artifact_refs(expected_artifacts):
+    refs = []
+    for artifact in expected_artifacts or []:
+        artifact_text = str(artifact or "").strip()
+        name = Path(artifact_text).name.strip()
+        for ref in (artifact_text, name):
+            if ref and ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def _long_dependency_invoked_command_token(parts):
+    index = 0
+    while index < len(parts or []):
+        token = str(parts[index] or "")
+        name = Path(token).name.casefold()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+            index += 1
+            continue
+        if name == "command":
+            index += 1
+            continue
+        if name in {"timeout", "gtimeout"}:
+            index += 1
+            while index < len(parts):
+                option = str(parts[index] or "")
+                if option == "--":
+                    index += 1
+                    break
+                if option in {"-s", "--signal", "-k", "--kill-after"} and index + 1 < len(parts):
+                    index += 2
+                    continue
+                if option.startswith("-"):
+                    index += 1
+                    continue
+                index += 1
+                break
+            continue
+        if name == "env":
+            index += 1
+            while index < len(parts):
+                env_token = str(parts[index] or "")
+                if env_token == "--":
+                    index += 1
+                    break
+                if env_token in {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"} and index + 1 < len(
+                    parts
+                ):
+                    index += 2
+                    continue
+                if env_token.startswith("-") or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", env_token):
+                    index += 1
+                    continue
+                break
+            continue
+        return token
+    return ""
+
+
+def _long_dependency_segment_invokes_artifact(segment, artifact_refs):
+    segment = str(segment or "")
+    if not segment:
+        return False
+    try:
+        parts = shlex.split(segment, posix=True)
+    except ValueError:
+        parts = segment.split()
+    command_token = _long_dependency_invoked_command_token(parts)
+    if not command_token:
+        return False
+    command_path = str(command_token)
+    command_name = Path(command_path).name
+    for ref in artifact_refs or []:
+        ref = str(ref or "").strip()
+        if not ref:
+            continue
+        if "/" in ref and command_path == ref:
+            return True
+        if "/" not in ref and command_name == ref:
+            return True
+    return False
+
+
+def _long_dependency_segment_parts(segment):
+    try:
+        return shlex.split(str(segment or ""), posix=True)
+    except ValueError:
+        return str(segment or "").split()
+
+
+def _long_dependency_token_is_source_path(token):
+    token = str(token or "").strip()
+    if not token:
+        return False
+    if token.startswith("-"):
+        return False
+    suffix = Path(token).suffix
+    return suffix in _LONG_DEPENDENCY_SOURCE_SMOKE_SUFFIXES
+
+
+def _long_dependency_segment_is_compile_link_smoke(segment):
+    parts = _long_dependency_segment_parts(segment)
+    has_source = any(_long_dependency_token_is_source_path(token) for token in parts)
+    has_output = any(str(token or "").startswith("-o") for token in parts)
+    return bool(has_source and has_output)
+
+
+def _long_dependency_line_has_custom_runtime_path(line):
+    lowered = str(line or "").casefold()
+    return any(marker in lowered for marker in _LONG_DEPENDENCY_CUSTOM_RUNTIME_PATH_MARKERS)
+
+
+def _long_dependency_runtime_env_path_is_set(line):
+    lowered = str(line or "").casefold()
+    return bool(
+        re.search(
+            r"(?:^|[\s;&|])(?:export\s+|env\s+)?"
+            r"(?:ld_library_path|library_path|dyld_library_path|c_include_path|cpath)=",
+            lowered,
+        )
+    )
+
+
+def _long_dependency_runtime_env_path_is_exported(line):
+    lowered = str(line or "").casefold()
+    return bool(
+        re.search(
+            r"(?:^|[\s;&|])export\s+"
+            r"(?:ld_library_path|library_path|dyld_library_path|c_include_path|cpath)=",
+            lowered,
+        )
+    )
+
+
+def _long_dependency_runtime_env_path_is_unset(line):
+    lowered = str(line or "").casefold()
+    return bool(
+        re.search(
+            r"(?:^|[\s;&|])unset\s+.*"
+            r"(?:ld_library_path|library_path|dyld_library_path|c_include_path|cpath)",
+            lowered,
+        )
+    )
+
+
+def _long_dependency_smoke_entries(call, expected_artifacts):
+    artifact_refs = _long_dependency_artifact_refs(expected_artifacts)
+    if not artifact_refs:
+        return []
+    entries = []
+    custom_env_path_active = False
+    for raw_line in _runtime_artifact_call_text(call).splitlines():
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+        for segment in split_unquoted_shell_command_segments(line):
+            if _long_dependency_runtime_env_path_is_unset(segment):
+                custom_env_path_active = False
+            segment_env_path = _long_dependency_runtime_env_path_is_set(segment)
+            if not _long_dependency_segment_invokes_artifact(segment, artifact_refs):
+                if _long_dependency_runtime_env_path_is_exported(segment):
+                    custom_env_path_active = True
+                continue
+            if not _long_dependency_segment_is_compile_link_smoke(segment):
+                if _long_dependency_runtime_env_path_is_exported(segment):
+                    custom_env_path_active = True
+                continue
+            entries.append(
+                {
+                    "line": segment,
+                    "custom_runtime_path": bool(
+                        custom_env_path_active
+                        or segment_env_path
+                        or _long_dependency_line_has_custom_runtime_path(segment)
+                    ),
+                }
+            )
+            if _long_dependency_runtime_env_path_is_exported(segment):
+                custom_env_path_active = True
+    return entries
+
+
+def _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    if str(call.get("status") or "").casefold() != "completed":
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("exit_code") != 0:
+        return False
+    return any(not entry.get("custom_runtime_path") for entry in _long_dependency_smoke_entries(call, expected_artifacts))
+
+
+def _long_dependency_custom_runtime_smoke_line(call, expected_artifacts):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return ""
+    if str(call.get("status") or "").casefold() != "completed":
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("exit_code") != 0:
+        return ""
+    for entry in _long_dependency_smoke_entries(call, expected_artifacts):
+        if entry.get("custom_runtime_path"):
+            return str(entry.get("line") or "")
+    return ""
+
+
+def _long_dependency_default_runtime_link_path_blocker(calls, expected_artifacts):
+    custom_smoke = {}
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            return {}
+        custom_line = _long_dependency_custom_runtime_smoke_line(call, expected_artifacts)
+        if custom_line and not custom_smoke:
+            custom_smoke = {
+                "code": "default_runtime_link_path_unproven",
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "excerpt": clip_inline_text(custom_line, 180),
+            }
+    return custom_smoke
+
+
 def _long_dependency_task_text(task, session=None):
     task = task if isinstance(task, dict) else {}
     session = session if isinstance(session, dict) else {}
@@ -4533,6 +4778,18 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(source_toolchain_before_override)
+    default_runtime_link_path = _long_dependency_default_runtime_link_path_blocker(
+        calls,
+        expected_artifacts,
+    )
+    if default_runtime_link_path:
+        key = (
+            default_runtime_link_path.get("code"),
+            default_runtime_link_path.get("source_tool_call_id"),
+            default_runtime_link_path.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(default_runtime_link_path)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
     if not progress and not proven and not strategy_blockers:
@@ -4560,7 +4817,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "visible or likely, try that prebuilt dependency plus override path before starting version-pinned "
             "source-built dependency/toolchain installation. "
             "If a compiler or toolchain can build a trivial binary but the linker reports a missing runtime "
-            "library, install or configure the project runtime/library target before finish. Do not retry "
+            "library, install or configure the project runtime/library target before finish. If local smoke "
+            "only works with custom runtime/library path flags, install or configure that runtime into the "
+            "default lookup path and rerun a default invocation proof before finish. Do not retry "
             "invalidated toolchain/package paths. Allocate remaining wall budget to the shortest idempotent "
             "continuation command that produces the missing final artifact, then prove it exists and is "
             "executable/invokable."
