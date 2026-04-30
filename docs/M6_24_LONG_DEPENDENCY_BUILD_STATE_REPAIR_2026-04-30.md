@@ -218,6 +218,55 @@ Next validation is resource-normalized proof_5 for `compile-compcert` with
 sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
 remains paused.
 
+## v1.2 Timeout-Ceiling Compact Recovery Repair
+
+The malformed-JSON recovery proof_5 is recorded in:
+
+- `docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-5attempts-seq-20260501-0220/result.json`
+
+The close proof missed:
+
+- completed valid trials before stop: `2`
+- score on valid completed trials: `1/2`
+- cancelled trials: `1`
+- failed valid trial: `compile-compcert__gHMYo7H`
+
+The miss was not another missing runtime-link rule. The failed trial reached
+the known runtime-library recovery path and surfaced
+`runtime_install_before_runtime_library_build`, then read
+`/tmp/CompCert/runtime/Makefile`. The next model turns timed out under
+shrinking wall-clock ceilings while still using full prompt context.
+
+The bounded generic repair is:
+
+`work_timeout_ceiling_full_context_recovery_prompt`
+
+Changes:
+
+- `plan_work_model_turn()` now converts default `full` prompt context to
+  `compact_recovery` whenever wall-clock pressure sets
+  `timeout_ceiling=True`;
+- the change is generic model-context budgeting and does not inspect
+  Terminal-Bench, CompCert, command text, or failure strings.
+
+Focused validation:
+
+```text
+uv run pytest --no-testmon tests/test_work_session.py -k 'compact_recovery_under_wall_timeout_ceiling or compact_recovery_after_timeout_with_pending_steer' -q
+uv run ruff check src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result:
+
+- focused tests: `2 passed`
+- ruff: passed
+- codex-ultra review session `019ddfa4-889a-7d72-a789-239af7ce2a2b`:
+  `APPROVE`
+
+Next validation is a one-trial same-shape speed proof for `compile-compcert`
+with refreshable `~/.codex/auth.json`. Broad measurement remains paused.
+
 ## v1.0 Final Recovery-Budget Reserve
 
 The OAuth-refresh proof rerun is recorded in:

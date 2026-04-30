@@ -29,12 +29,16 @@ runtime-link failure consumed the remaining wall/model budget. The tool/runtime
 recovery-budget repair passed its one-trial same-shape speed proof at `1/1`.
 The resource-normalized proof then reached `2/3` valid completed trials before
 the close target became impossible; the failed valid trial stopped at step 1 on
-`failed to parse JSON plan`, before task work ran. The next score action is a
-one-trial same-shape speed proof after the bounded one-shot malformed JSON plan
-recovery repair. That speed proof passed at `1/1`. The next score action is a
-resource-normalized proof_5 with sequential `-k 5 -n 1`. Before another code
-repair after that proof, read this dossier and decide whether the next fix is a
-new blocker, a repeated older blocker, or prompt/profile accretion.
+`failed to parse JSON plan`, before task work ran. The bounded one-shot
+malformed JSON plan recovery repair passed its one-trial speed proof at `1/1`.
+The next proof_5 reached `1/2` valid completed trials before the close target
+became impossible. The failed valid trial reached the known runtime-library
+recovery path, then burned the remaining recovery budget on full-context model
+timeouts under a wall-clock timeout ceiling. The next score action is a
+one-trial same-shape speed proof after the generic timeout-ceiling
+`compact_recovery` repair. Before another code repair after that proof, read
+this dossier and decide whether the next fix is a new blocker, a repeated older
+blocker, or prompt/profile accretion.
 
 ## Repair Timeline
 
@@ -54,7 +58,8 @@ new blocker, a repeated older blocker, or prompt/profile accretion.
 | v0.9 timed-out artifact proof calibration | Do not mark required final artifacts proven from timed-out or nonzero commands. | instrumentation/report | Speed `1/1`; first proof_5 invalidated by auth expiry; rerun pending after OAuth refresh repair. |
 | proof infra OAuth refresh | Refresh ChatGPT OAuth tokens from legacy/Codex auth shapes and retry one 401. | proof infrastructure | Auth-expiry failure removed; same-shape proof reached valid completed trials `1/2`; next failure final recovery budget. |
 | v1.0 final recovery-budget reserve | Preserve recovery wall budget for long build commands that include final validation smoke. | tool/runtime | Speed `1/1`; proof `2/3`; next failure malformed JSON plan recovery. |
-| v1.1 malformed JSON plan recovery | Treat backend `failed to parse JSON plan` as a recoverable one-shot transient model error. | loop recovery | Speed `1/1`; proof_5 pending. |
+| v1.1 malformed JSON plan recovery | Treat backend `failed to parse JSON plan` as a recoverable one-shot transient model error. | loop recovery | Speed `1/1`; proof `1/2`; next failure timeout-ceiling full-context recovery. |
+| v1.2 timeout-ceiling compact recovery | Use compact recovery context when wall-clock pressure reduces model timeout. | model context budgeting | Proof `1/2`; failed trial had known runtime install blocker but repeated full-context model timeouts; speed rerun pending. |
 
 ## Pattern Readout
 
@@ -99,6 +104,11 @@ new blocker, a repeated older blocker, or prompt/profile accretion.
   guidance.
 - The v1.1 malformed-JSON recovery speed proof passed `1/1`, so return to
   proof_5 before another repair or broad measurement.
+- The v1.1 resource-normalized proof miss is not another runtime-link or
+  runtime-install prompt rule. The blocker was already visible as
+  `runtime_install_before_runtime_library_build`; the failure was that a
+  low-wall recovery turn used a ~193k char full prompt and timed out repeatedly.
+  Keep the v1.2 repair in model-context budgeting.
 
 ## Preflight Before Next Repair
 

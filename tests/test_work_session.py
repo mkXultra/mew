@@ -37914,6 +37914,78 @@ class WorkSessionTests(unittest.TestCase):
             2,
         )
 
+    def test_plan_work_model_turn_uses_compact_recovery_under_wall_timeout_ceiling(self):
+        from mew.work_loop import plan_work_model_turn
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Build a compiler from source and verify the default runtime link path.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "make -j10 ccomp"},
+                    "result": {
+                        "command": "make -j10 ccomp",
+                        "exit_code": 2,
+                        "stdout": "build output\n" * 2000,
+                        "stderr": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                    "summary": "runtime install failed after long build",
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "/tmp/CompCert/runtime/Makefile"},
+                    "result": {
+                        "path": "/tmp/CompCert/runtime/Makefile",
+                        "text": "runtime makefile\n" * 1000,
+                        "truncated": False,
+                    },
+                    "summary": "read runtime makefile",
+                },
+            ],
+            "model_turns": [],
+        }
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": [session]}
+        task = {
+            "id": 1,
+            "title": "Build CompCert compiler",
+            "description": "Build the CompCert compiler from source and verify /tmp/CompCert/ccomp.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+            return {"summary": "wait", "action": {"type": "wait", "reason": "need one bounded recovery command"}}
+
+        with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                timeout=30,
+                allowed_read_roots=["."],
+                allowed_write_roots=[],
+                allow_shell=True,
+                allow_verify=True,
+                act_mode="deterministic",
+                timeout_ceiling=True,
+            )
+
+        self.assertEqual(planned["model_metrics"]["prompt_context_mode"], "compact_recovery")
+        self.assertEqual(
+            planned["context"]["work_session"]["context_compaction"]["prompt_context_mode"],
+            "compact_recovery",
+        )
+
     def test_work_tool_call_for_model_keeps_full_explicit_line_window_in_full_prompt(self):
         from mew.work_loop import work_tool_call_for_model
 

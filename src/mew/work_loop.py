@@ -1827,6 +1827,12 @@ def _effective_prompt_context_mode(prompt_context_mode, resume, model_turns):
     return prompt_context_mode
 
 
+def _prompt_context_mode_for_wall_clock(prompt_context_mode, *, timeout_ceiling=False):
+    if timeout_ceiling and prompt_context_mode == "full":
+        return "compact_recovery"
+    return prompt_context_mode
+
+
 def build_work_model_context(
     state,
     session,
@@ -6966,6 +6972,10 @@ def plan_work_model_turn(
     prompt_context_mode = work_prompt_context_mode(
         reasoning_policy,
         compact_live=compact_live,
+    )
+    prompt_context_mode = _prompt_context_mode_for_wall_clock(
+        prompt_context_mode,
+        timeout_ceiling=timeout_ceiling,
     )
     context = build_work_model_context(
         state,

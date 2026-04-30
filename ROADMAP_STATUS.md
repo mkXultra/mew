@@ -179,8 +179,12 @@ M6.24 resume condition:
   proof then reached `2/3` valid completed trials before the `5/5` close target
   became impossible; the failed valid trial stopped at step 1 on malformed JSON
   plan parsing, before task work ran. The malformed JSON plan recovery repair
-  then passed speed_1 at `1/1` in `25m 37s`. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> loop_recovery -> work_oneshot_malformed_json_plan_recovery proof_5 -> compile-compcert -k5 -n1`.
+  then passed speed_1 at `1/1` in `25m 37s`, but its resource-normalized proof
+  missed at `1/2` valid completed trials when the failed trial reached the known
+  runtime-library recovery path and then spent the low remaining wall budget on
+  full-context model timeouts. The timeout-ceiling compact recovery repair is
+  implemented. Current selected chain:
+  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> model_context_budgeting -> work_timeout_ceiling_full_context_recovery_prompt speed_1 -> compile-compcert`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
