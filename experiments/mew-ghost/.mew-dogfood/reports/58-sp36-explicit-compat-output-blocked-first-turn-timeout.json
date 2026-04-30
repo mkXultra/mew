@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "task_id": 58,
+  "session_id": 89,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP36 retried the explicit compatibility-output cleanup after the user reported the gpt-5.5 quota reset, but no product edits landed because the first model turn stayed at step 0 beyond --model-timeout 300 and had to be killed.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": null,
+  "files_changed": [
+    "SIDE_PROJECT_ROADMAP_STATUS.md",
+    "experiments/mew-ghost/.mew-dogfood/reports/58-sp36-explicit-compat-output-blocked-first-turn-timeout.json"
+  ],
+  "tests_run": [
+    {
+      "command": "./mew work --oneshot --live --model gpt-5.5 --model-timeout 300 ...",
+      "result": "blocked before first edit; process stayed at step 0 for more than 15 minutes and was killed manually"
+    },
+    {
+      "command": "jq '{session_id, task_id, step_count: (.steps | length), stop_reason, error}' /tmp/mew-wisp-explicit-compat-output-retry-report.json",
+      "result": "session_id 89, task_id 58, step_count 0, stop_reason null, error null"
+    },
+    {
+      "command": "git status --short --branch",
+      "result": "worktree clean after killed attempt; no product files changed"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "first_turn_model_timeout_not_enforced_after_quota_reset",
+  "repair_required": true,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-explicit-compat-output-retry-report.json",
+    "https://github.com/mkXultra/mew/issues/33",
+    "worktree remained clean; no product-code rescue edits were made"
+  ],
+  "commit": "",
+  "notes": "This is an implementation-lane polish finding rather than a product-code failure. The operator stopped before writing product code because mew did not reach the first tool step and --model-timeout did not produce a structured model timeout closeout."
+}

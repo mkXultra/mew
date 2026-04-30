@@ -46,11 +46,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP33 mew-wisp Product-Named Entrypoint | `done` | Task #54/session #85 added `experiments/mew-ghost/mew_wisp.py` as the product-named Python entrypoint delegating to `ghost.main`; README usage now prefers the wisp name while `ghost.py` remains the compatibility implementation module. |
 | SP34 mew-wisp Resident-First Entrypoint Default | `done` | Task #55/session #86 made `mew_wisp.py` resident-first by default: omitted mode/form/watch with no `--output` starts the human cat foreground watch, while explicit options and `--output` compatibility remain intact. |
 | SP35 mew-wisp Resident-First Help and Copy | `done` | Task #56/session #87 updated CLI help, README first-screen copy, and HTML compatibility wording so `mew-wisp` is presented as the resident terminal surface while `ghost.py`/HTML remain compatibility paths. |
-| SP36 mew-wisp Explicit Compatibility Output | `blocked` | Task #57/session #88 stopped before the first edit because the requested `gpt-5.5` backend returned HTTP 429 usage_limit_reached, resetting at 2026-05-05 14:32:30 JST. |
+| SP36 mew-wisp Explicit Compatibility Output | `blocked` | Task #57/session #88 stopped before the first edit on `gpt-5.5` quota. After the user reported quota reset, task #58/session #89 also stopped before product edits because the first model turn stayed at step 0 beyond `--model-timeout 300` and had to be killed. |
 
 ## Active Focus
 
-Active side-project focus: **SP36 mew-wisp Explicit Compatibility Output is planned but blocked by the requested `gpt-5.5` usage limit until 2026-05-05 14:32:30 JST; no product edits landed for SP36**.
+Active side-project focus: **SP36 mew-wisp Explicit Compatibility Output is still blocked; after quota reset, the retry stayed at step 0 beyond `--model-timeout 300` and no product edits landed**.
 
 Current target:
 
@@ -299,6 +299,13 @@ Current target:
   `2026-05-05 14:32:30 JST`. The worktree stayed clean. Issue `#32` was updated
   because the `--report` path again lacked the final model-error report while
   stdout printed it.
+- SP36 retry task `#58` / session `#89` after the user reported quota reset did
+  not reach product edits either: the process stayed alive for more than 15
+  minutes at step `0` despite `--model-timeout 300`, produced no stdout, left
+  `/tmp/mew-wisp-explicit-compat-output-retry-report.json` with `steps` length
+  `0` and `stop_reason: null`, and had to be killed by the operator. The
+  worktree stayed clean and rescue edits remain `0`. Issue `#33` records this
+  timeout-boundary implementation-lane polish finding.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -1026,8 +1033,8 @@ Current target:
 
 Choose the next side-project move:
 
-1. resume SP36 after the requested `gpt-5.5` quota resets, or continue only if
-   the operator explicitly approves a different implementation model
+1. resume SP36 only after issue `#33` is resolved or the operator explicitly
+   approves a different implementation model / timeout strategy
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for
