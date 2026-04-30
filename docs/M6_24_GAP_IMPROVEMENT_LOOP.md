@@ -56,6 +56,44 @@ current resident cannot write this chain in one line, do not implement:
 M6.24 -> selected gap class -> architecture fit -> required next action -> same-shape rerun condition
 ```
 
+## Gap-Class Repair History Rule
+
+Before designing another repair for a gap class or task shape that has already
+had two or more repair/rerun cycles, build or refresh a compact gap-class
+dossier.
+
+The dossier is required before code changes when the next action affects the
+same gap class, task family, task shape, or a profile/prompt section that was
+created from that evidence. Task-specific histories are evidence sections
+inside the dossier, not the primary unit of memory. It must summarize:
+
+- chronological attempts and reruns;
+- observed failure shape for each attempt;
+- repair hypothesis and implemented layer;
+- whether the repair was detector/state, profile/contract, tool/runtime,
+  verifier/proof, or prompt-only guidance;
+- before/after score or failure-shape movement;
+- recurring patterns and explicitly rejected duplicate fixes;
+- current next action and the same-shape rerun condition.
+
+Use the dossier to answer this preflight before any next repair:
+
+```text
+1. Is this failure new, a repeat, or a narrower version of an older failure?
+2. Which previous repair already tried to address this gap or task shape?
+3. Why is the proposed fix not duplicating an earlier detector/prompt patch?
+4. What is the lowest durable layer for the fix?
+   instrumentation/report -> detector/resume state -> profile/contract ->
+   tool/runtime -> prompt section registry
+5. Does this indicate prompt/profile accretion rather than a new task blocker?
+```
+
+If a gap class has accumulated multiple detector plus THINK-guidance repairs
+without stable close-gate success, treat that as a process signal. Pause the
+next local repair long enough to decide whether the correct next action is
+profile/contract consolidation or a prompt section registry, not another
+one-off guidance line.
+
 ## Repair Close Rule
 
 A same-shape proof reaching the frozen Codex target closes only that selected
@@ -255,6 +293,8 @@ Recommended fields:
   "authoritative_lane": "tiny|implementation|research|routine|planning|unknown",
   "helper_lanes": ["deliberation"],
   "same_shape_key": "stable rerun shape",
+  "history_ref": "docs/M6_24_DOSSIER_<GAP_CLASS>.md",
+  "prior_repairs_considered": ["long_dependency_build_state_progress_contract", "long_dependency_wall_clock_and_targeted_artifact_build_contract"],
   "rerun_tier": "speed_1|speed_2|proof_5|batch",
   "rerun_reason": "why this trial count is enough",
   "same_shape_rerun_required": true,
@@ -275,6 +315,7 @@ On context compression or long-session reentry, read this file before selecting
 work. The next task must be one of:
 
 - classify a measured failure into the gap ledger
+- create or refresh the gap-class repair dossier before another repair cycle
 - add missing instrumentation for a selected gap
 - run the Architecture Fit Gate for a selected structural repair
 - repair exactly one selected gap class

@@ -336,6 +336,8 @@ RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
 WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS = 5.0
 WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS = 2.0
+WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS = 60.0
+WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS = 600.0
 WORK_WALL_MIN_TOOL_TIMEOUT_SECONDS = 1.0
 WORK_DEFAULT_TOOL_TIMEOUT_SECONDS = 300.0
 APPROVAL_MODE_ACCEPT_EDITS = "accept-edits"
@@ -6000,6 +6002,7 @@ def recoverable_work_model_error(error):
             "response did not contain assistant text",
             "response without assistant text",
             "no assistant text",
+            "failed to parse json plan",
             "request timed out",
             "timed out",
             "timeout",
@@ -6053,17 +6056,122 @@ def _positive_float_or_none(value):
     return parsed
 
 
-def apply_work_tool_wall_timeout_ceiling(action_type, parameters, *, max_wall_seconds, run_started_at):
+def _work_text_for_timeout_policy(task=None, session=None):
+    task = task if isinstance(task, dict) else {}
+    session = session if isinstance(session, dict) else {}
+    return "\n".join(
+        str(value or "")
+        for value in (
+            task.get("title"),
+            task.get("description"),
+            task.get("notes"),
+            session.get("title"),
+            session.get("goal"),
+        )
+        if value
+    )
+
+
+def _work_session_has_recent_long_dependency_recovery_blocker(session=None):
+    if not isinstance(session, dict):
+        return False
+    calls = session.get("tool_calls") or []
+    if not isinstance(calls, list):
+        return False
+    try:
+        recent_text = json.dumps(calls[-8:], sort_keys=True, default=str).casefold()
+    except (TypeError, ValueError):
+        recent_text = str(calls[-8:]).casefold()
+    if any(
+        marker in recent_text
+        for marker in (
+            "runtime_link_library_missing",
+            "runtime_install_before_runtime_library_build",
+            "default_runtime_link_path_unproven",
+            "cannot find -l",
+            "linker command failed",
+        )
+    ):
+        return True
+    return (
+        "install" in recent_text
+        and any(marker in recent_text for marker in ("cannot stat", "no such file", "not found", "missing"))
+        and any(marker in recent_text for marker in ("libcompcert", "runtime"))
+    )
+
+
+def work_tool_recovery_reserve_seconds(action_type, parameters, *, task=None, session=None):
+    if action_type not in {"run_command", "run_tests"}:
+        return 0.0
+    parameters = parameters if isinstance(parameters, dict) else {}
+    requested_timeout = _positive_float_or_none(parameters.get("timeout"))
+    effective_timeout = requested_timeout or WORK_DEFAULT_TOOL_TIMEOUT_SECONDS
+    if effective_timeout < WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS:
+        return 0.0
+    command = str(parameters.get("command") or "")
+    if not command:
+        return 0.0
+    if _work_session_has_recent_long_dependency_recovery_blocker(session):
+        return 0.0
+    context = f"{_work_text_for_timeout_policy(task=task, session=session)}\n{command}".casefold()
+    long_dependency_markers = (
+        "build",
+        "from source",
+        "configure",
+        "compiler",
+        "toolchain",
+        "dependency",
+        "runtime",
+    )
+    build_command_markers = (
+        "make ",
+        "cmake",
+        "cargo build",
+        "npm run build",
+        "pip install",
+        "opam ",
+    )
+    final_validation_markers = (
+        "smoke",
+        "-version",
+        "--version",
+        "test -x",
+        "compile",
+        "link",
+        "verif",
+    )
+    if not any(marker in context for marker in long_dependency_markers):
+        return 0.0
+    command_lower = command.casefold()
+    if not any(marker in command_lower for marker in build_command_markers):
+        return 0.0
+    if not any(marker in command_lower for marker in final_validation_markers):
+        return 0.0
+    return WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS
+
+
+def apply_work_tool_wall_timeout_ceiling(
+    action_type,
+    parameters,
+    *,
+    max_wall_seconds,
+    run_started_at,
+    recovery_reserve_seconds=0.0,
+):
     if action_type not in {"run_command", "run_tests"} or max_wall_seconds is None:
         return {}
     elapsed = time.monotonic() - run_started_at
     remaining = max_wall_seconds - elapsed
-    available = remaining - WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS
+    reserve_seconds = max(
+        WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS,
+        float(recovery_reserve_seconds or 0.0),
+    )
+    available = remaining - reserve_seconds
     ceiling = {
         "elapsed_seconds": round(elapsed, 3),
         "remaining_seconds": round(max(0.0, remaining), 3),
         "available_tool_timeout_seconds": round(max(0.0, available), 3),
-        "reserve_seconds": WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS,
+        "reserve_seconds": reserve_seconds,
     }
     if available < WORK_WALL_MIN_TOOL_TIMEOUT_SECONDS:
         ceiling.update(
@@ -7165,6 +7273,12 @@ def cmd_work_ai(args):
             parameters,
             max_wall_seconds=max_wall_seconds,
             run_started_at=run_started_at,
+            recovery_reserve_seconds=work_tool_recovery_reserve_seconds(
+                action_type,
+                parameters,
+                task=task,
+                session=session,
+            ),
         )
         if wall_tool_timeout.get("blocked"):
             reason = wall_tool_timeout.get("reason") or "not enough wall-clock budget remains for a tool call"

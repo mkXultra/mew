@@ -4146,6 +4146,18 @@ _LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE = re.compile(
     r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:-ignore|--ignore|allow-unsupported|override)",
     re.IGNORECASE,
 )
+_LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE = re.compile(
+    r"(?:use[-_]external[-_][A-Za-z0-9_.+-]+|"
+    r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:external|use[-_]external|system[-_]|prebuilt)|"
+    r"\b(?:external|system|prebuilt)\s+(?:dependency|dependencies|library|libraries|package|packages)\b)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_PACKAGE_MANAGER_PREBUILT_RE = re.compile(
+    r"\b(?:apt(?:-get)?\s+install|apt-cache\s+(?:policy|search)|apt\s+(?:show|install)|"
+    r"dnf\s+(?:install|info|search)|yum\s+(?:install|info|search)|apk\s+(?:add|info|search)|"
+    r"brew\s+(?:install|info|search)|pacman\s+-S|zypper\s+(?:install|info|search)|pkg\s+install)\b",
+    re.IGNORECASE,
+)
 _LONG_DEPENDENCY_VERSION_PINNED_SOURCE_TOOLCHAIN_RE = re.compile(
     r"\bopam\s+install\b[^\n;&|]*"
     r"(?:[A-Za-z0-9][A-Za-z0-9_.+-]*[.=<>~!]+\d+\.\d+|[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+)",
@@ -4356,6 +4368,18 @@ def _long_dependency_has_configure_override_attempt(call):
     return bool(_LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE.search(text))
 
 
+def _long_dependency_has_external_compatibility_branch_evidence(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    return bool(_LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE.search(_runtime_artifact_call_text(call)))
+
+
+def _long_dependency_uses_prebuilt_package_manager_dependency(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    return bool(_LONG_DEPENDENCY_PACKAGE_MANAGER_PREBUILT_RE.search(_runtime_artifact_call_text(call)))
+
+
 def _long_dependency_uses_version_pinned_source_toolchain(call):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return False
@@ -4461,6 +4485,187 @@ def _long_dependency_artifact_refs(expected_artifacts):
             if ref and ref not in refs:
                 refs.append(ref)
     return refs
+
+
+def _long_dependency_call_output_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    running_output = call.get("running_output") if isinstance(call.get("running_output"), dict) else {}
+    parts = [
+        call.get("error") or "",
+        result.get("stdout") or "",
+        result.get("stderr") or "",
+        result.get("stdout_tail") or "",
+        result.get("stderr_tail") or "",
+        running_output.get("stdout") or "",
+        running_output.get("stderr") or "",
+    ]
+    return "\n".join(str(part) for part in parts if part)
+
+
+def _long_dependency_call_command_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    return str(result.get("command") or parameters.get("command") or "")
+
+
+def _long_dependency_call_cwd(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    return str(result.get("cwd") or parameters.get("cwd") or "")
+
+
+def _long_dependency_artifact_command_refs(artifact, cwd=""):
+    artifact_text = str(artifact or "").strip()
+    refs = [artifact_text] if artifact_text else []
+    cwd_text = str(cwd or "").strip()
+    artifact_path = Path(artifact_text)
+    if artifact_path.is_absolute() and cwd_text and str(Path(cwd_text)) == str(artifact_path.parent):
+        name = artifact_path.name.strip()
+        if name and name not in refs:
+            refs.append(name)
+    return refs
+
+
+def _long_dependency_segment_strictly_proves_artifact(segment, artifact_text, test_x_pattern, bracket_x_pattern):
+    segment_lower = str(segment or "").casefold()
+    artifact_lower = str(artifact_text or "").casefold()
+    if artifact_lower not in segment_lower:
+        return False
+    if any(mask in segment_lower for mask in ("||", "2>/dev/null", ">/dev/null")):
+        return False
+    if re.search(test_x_pattern, segment) or re.search(bracket_x_pattern, segment):
+        return True
+    return _long_dependency_segment_invokes_artifact(segment, [artifact_text]) and any(
+        marker in segment_lower for marker in ("-version", "--version", " -v", "-help", "--help")
+    )
+
+
+def _long_dependency_segment_may_mutate_artifact(segment):
+    text = str(segment or "").casefold()
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    command_names = {Path(str(part or "")).name.casefold() for part in parts}
+    if command_names & {"rm", "unlink", "rmdir", "mv", "shred", "truncate"}:
+        return True
+    if "-delete" in text:
+        return True
+    if "-exec" in command_names and command_names & {"rm", "unlink", "rmdir", "mv", "shred", "truncate"}:
+        return True
+    return False
+
+
+def _long_dependency_command_surface_allows_artifact_proof(command, artifact, cwd=""):
+    command = str(command or "")
+    artifact_text = str(artifact or "").strip()
+    artifact_lower = artifact_text.casefold()
+    artifact_refs = [ref.casefold() for ref in _long_dependency_artifact_command_refs(artifact_text, cwd)]
+    if not command or not artifact_lower or not any(ref and ref in command.casefold() for ref in artifact_refs):
+        return True
+    if "\n" in command or "\r" in command:
+        return False
+    command_lower = command.casefold()
+    if (
+        "||" in command_lower
+        or "|" in command_lower
+        or ";" in command_lower
+        or "/dev/null" in command_lower
+        or re.search(r"(?<!&)&(?!&)", command_lower)
+        or re.search(
+            r"(?:^|[\s;&|])(?:if|then|fi|while|until|do|done|for|case|esac|select)(?:$|[\s;&|])",
+            command_lower,
+        )
+        or re.search(r"(?:^|[\s;&|])!(?:$|[\s;&|])", command_lower)
+    ):
+        return False
+    escaped_artifact = re.escape(artifact_text)
+    test_x_pattern = rf"(?:^|[\s;&|])test\s+-x\s+['\"]?{escaped_artifact}['\"]?(?:$|[\s;&|])"
+    bracket_x_pattern = rf"(?:^|[\s;&|])\[\s+-x\s+['\"]?{escaped_artifact}['\"]?\s+\]"
+    saw_artifact_reference = False
+    for segment in split_unquoted_shell_command_segments(command):
+        segment_lower = segment.casefold()
+        segment_has_artifact_ref = any(ref and ref in segment_lower for ref in artifact_refs)
+        if segment_has_artifact_ref and _long_dependency_segment_may_mutate_artifact(segment):
+            return False
+        if _long_dependency_segment_strictly_proves_artifact(
+            segment,
+            artifact_text,
+            test_x_pattern,
+            bracket_x_pattern,
+        ):
+            saw_artifact_reference = True
+            continue
+        if saw_artifact_reference:
+            return False
+        if segment_has_artifact_ref:
+            saw_artifact_reference = True
+    return True
+
+
+def _long_dependency_command_strictly_proves_artifact(call, artifact):
+    raw_command = _long_dependency_call_command_text(call)
+    if "\n" in raw_command or "\r" in raw_command:
+        return False
+    command = re.sub(r"\\\r?\n\s*", " ", raw_command)
+    artifact_text = str(artifact or "").strip()
+    artifact_lower = artifact_text.casefold()
+    if not command or not artifact_lower or artifact_lower not in command.casefold():
+        return False
+    artifact_refs = [ref.casefold() for ref in _long_dependency_artifact_command_refs(artifact_text, _long_dependency_call_cwd(call))]
+    if not _long_dependency_command_surface_allows_artifact_proof(
+        command,
+        artifact_text,
+        _long_dependency_call_cwd(call),
+    ):
+        return False
+    escaped_artifact = re.escape(artifact_text)
+    test_x_pattern = rf"(?:^|[\s;&|])test\s+-x\s+['\"]?{escaped_artifact}['\"]?(?:$|[\s;&|])"
+    bracket_x_pattern = rf"(?:^|[\s;&|])\[\s+-x\s+['\"]?{escaped_artifact}['\"]?\s+\]"
+    for raw_line in str(command or "").splitlines():
+        line = raw_line.strip()
+        line_lower = line.casefold()
+        if artifact_lower not in line_lower:
+            continue
+        if (
+            "||" in line_lower
+            or "|" in line_lower
+            or ";" in line_lower
+            or re.search(r"(?<!&)&(?!&)", line_lower)
+            or re.search(
+                r"(?:^|[\s;&|])(?:if|then|fi|while|until|do|done|for|case|esac|select)(?:$|[\s;&|])",
+                line_lower,
+            )
+            or re.search(r"(?:^|[\s;&|])!(?:$|[\s;&|])", line_lower)
+        ):
+            continue
+        saw_proof_segment = False
+        for segment in split_unquoted_shell_command_segments(line):
+            segment_lower = segment.casefold()
+            segment_proves_artifact = _long_dependency_segment_strictly_proves_artifact(
+                segment,
+                artifact_text,
+                test_x_pattern,
+                bracket_x_pattern,
+            )
+            if saw_proof_segment and not segment_proves_artifact:
+                return False
+            if artifact_lower not in segment_lower and not (
+                saw_proof_segment and any(ref and ref in segment_lower for ref in artifact_refs)
+            ):
+                continue
+            if not segment_proves_artifact:
+                return False
+            saw_proof_segment = True
+        if saw_proof_segment:
+            return True
+    return False
 
 
 def _long_dependency_invoked_command_token(parts):
@@ -4818,6 +5023,59 @@ def _long_dependency_runtime_install_before_library_blocker(calls, expected_arti
     return blocker
 
 
+def _long_dependency_build_call_timed_out(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    if "build_attempted" not in _long_dependency_call_stages(call):
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("timed_out"):
+        return True
+    return _long_dependency_incomplete_reason(call) in {"timeout", "tool_timeout"}
+
+
+def _long_dependency_compatibility_branch_budget_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    prebuilt_dependency_call = {}
+    external_branch_evidence_call = {}
+    serial_probe_count = 0
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if not external_branch_evidence_call and _long_dependency_has_external_compatibility_branch_evidence(call):
+            external_branch_evidence_call = call
+        if (
+            prebuilt_dependency_call
+            and external_branch_evidence_call
+            and _long_dependency_has_external_compatibility_branch_evidence(call)
+            and _long_dependency_build_call_timed_out(call)
+            and serial_probe_count >= 2
+        ):
+            command = _long_dependency_call_command_text(call) or _runtime_artifact_call_text(call)
+            return {
+                "code": "compatibility_branch_budget_contract_missing",
+                "layer": "profile_contract",
+                "source_tool_call_id": call.get("id"),
+                "tool": call.get("tool") or "",
+                "excerpt": clip_inline_text(command, 180),
+                "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id"),
+                "external_branch_tool_call_id": external_branch_evidence_call.get("id"),
+            }
+        stages = set(_long_dependency_call_stages(call))
+        if stages & {"configured", "dependencies_generated", "build_attempted", "package_manager_setup"}:
+            serial_probe_count += 1
+            continue
+        if _long_dependency_strategy_blockers(call):
+            serial_probe_count += 1
+    return {}
+
+
 def _long_dependency_task_text(task, session=None):
     task = task if isinstance(task, dict) else {}
     session = session if isinstance(session, dict) else {}
@@ -4837,16 +5095,30 @@ def _long_dependency_task_text(task, session=None):
 def _long_dependency_artifact_proven_by_call(call, artifact):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return False
+    if str(call.get("status") or "").casefold() != "completed":
+        return False
     result = call.get("result") if isinstance(call.get("result"), dict) else {}
-    if result.get("exit_code") not in (None, 0):
+    if result.get("timed_out"):
         return False
-    text = _runtime_artifact_call_text(call).casefold()
+    if result.get("exit_code") != 0:
+        return False
+    output_text = _long_dependency_call_output_text(call).casefold()
     artifact_lower = str(artifact or "").casefold()
-    if not artifact_lower or artifact_lower not in text:
+    if not artifact_lower:
         return False
-    if any(marker in text for marker in ("does not exist", "missing", "no such file", "not found")):
+    if not _long_dependency_command_surface_allows_artifact_proof(
+        _long_dependency_call_command_text(call),
+        artifact,
+        _long_dependency_call_cwd(call),
+    ):
         return False
-    return any(marker in text for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS)
+    if any(marker in output_text for marker in ("does not exist", "missing", "no such file", "not found")):
+        return False
+    if artifact_lower in output_text and any(
+        marker in output_text for marker in _LONG_DEPENDENCY_ARTIFACT_PROOF_MARKERS
+    ):
+        return True
+    return _long_dependency_command_strictly_proves_artifact(call, artifact)
 
 
 def _long_dependency_call_stages(call):
@@ -5022,6 +5294,18 @@ def build_long_dependency_build_state(task, calls, session=None):
             strategy_blockers.append(runtime_install_before_library)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
+    compatibility_branch_budget = _long_dependency_compatibility_branch_budget_blocker(
+        calls,
+        missing,
+    )
+    if compatibility_branch_budget:
+        key = (
+            compatibility_branch_budget.get("code"),
+            compatibility_branch_budget.get("source_tool_call_id"),
+            compatibility_branch_budget.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(compatibility_branch_budget)
     if not progress and not proven and not strategy_blockers:
         return {}
     latest_command = ""
@@ -5045,7 +5329,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
             "If prebuilt package-manager dependencies are available and a source-provided compatibility override is "
             "visible or likely, try that prebuilt dependency plus override path before starting version-pinned "
-            "source-built dependency/toolchain installation. "
+            "source-built dependency/toolchain installation; once source help or configure exposes an external/prebuilt "
+            "compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final "
+            "artifact build instead of serially probing weaker branches. "
             "For release archive/tag source builds, treat the versioned archive URL, tag/root directory, and "
             "coarse internal VERSION markers as source identity evidence; do not abort solely because an "
             "internal VERSION file omits a patch suffix that is already grounded by the archive/tag. "

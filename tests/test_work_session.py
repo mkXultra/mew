@@ -5124,6 +5124,276 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
 
+    def test_work_session_resume_flags_late_external_branch_budget_timeout(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get update && apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get update && apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "Setting up coq 8.18.0\nSetting up libcoq-flocq\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure --help | grep -E 'external|ignore'",
+                    },
+                    "result": {
+                        "command": "./configure --help | grep -E 'external|ignore'",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "  -ignore-coq-version\n  -use-external-Flocq\n  -use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Configuration succeeded.\n"
+                            "COQC flocq/Calc/Bracket.v\n"
+                            "Error: The variable Z_div_mod_eq was not found\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "COQC backend/Asmgenproof0.v\ncommand timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        budget_blocker = next(
+            item for item in blockers if item.get("code") == "compatibility_branch_budget_contract_missing"
+        )
+
+        self.assertEqual(budget_blocker["layer"], "profile_contract")
+        self.assertEqual(budget_blocker["prebuilt_dependency_tool_call_id"], 2)
+        self.assertEqual(budget_blocker["external_branch_tool_call_id"], 3)
+        self.assertEqual(budget_blocker["source_tool_call_id"], 5)
+
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: compatibility_branch_budget_contract_missing", text)
+        self.assertIn("external/prebuilt compatibility branch", text)
+        self.assertIn("one coherent branch", text)
+        self.assertIn("reserve enough wall budget", text)
+
+    def test_work_session_resume_clears_late_external_branch_budget_after_artifact_proof(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-use-external-Flocq\n-use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure x86_64-linux && make depend"},
+                    "result": {
+                        "command": "./configure x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Error: bundled dependency incompatibility\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j\"$(nproc)\" ccomp runtime"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "command timed out before final artifact proof\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                    },
+                    "result": {
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "CompCert C compiler version 3.13\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("compatibility_branch_budget_contract_missing", codes)
+
+    def test_work_session_resume_does_not_flag_branch_budget_for_ignore_only_timeout(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq"},
+                    "result": {"command": "apt-get install -y coq", "cwd": "/tmp/CompCert", "exit_code": 0},
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-ignore-coq-version\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure -ignore-coq-version x86_64-linux"},
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -j\"$(nproc)\" ccomp"},
+                    "result": {
+                        "command": "make -j\"$(nproc)\" ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "command timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("compatibility_branch_budget_contract_missing", codes)
+
     def test_work_session_resume_flags_long_dependency_missing_runtime_link_library(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -5895,6 +6165,281 @@ class WorkSessionTests(unittest.TestCase):
         codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
 
         self.assertNotIn("untargeted_full_project_build_for_specific_artifact", codes)
+
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_timed_out_call(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make -j10 ccomp && "
+                            "test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -version"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make -j10 ccomp && "
+                            "test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -version"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": (
+                            "== rebuild ccomp after patch ==\n"
+                            "command timed out before /tmp/CompCert/ccomp was created\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        state = resume["long_dependency_build_state"]
+
+        self.assertEqual(state["expected_artifacts"][0]["status"], "missing_or_unproven")
+        self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
+        self.assertEqual(state["incomplete_reason"], "tool_timeout")
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_missing_artifact: /tmp/CompCert/ccomp", text)
+
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_soft_probe_before_timeout(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "ls -l /tmp/CompCert/ccomp 2>/dev/null || true",
+                    },
+                    "result": {
+                        "command": "ls -l /tmp/CompCert/ccomp 2>/dev/null || true",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "",
+                        "stderr": "",
+                    },
+                },
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j10 ccomp && test -x /tmp/CompCert/ccomp",
+                    },
+                    "result": {
+                        "command": "make -j10 ccomp && test -x /tmp/CompCert/ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "command timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        state = build_work_session_resume(session)["long_dependency_build_state"]
+
+        self.assertEqual(state["expected_artifacts"][0]["status"], "missing_or_unproven")
+        self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
+        self.assertEqual(state["incomplete_reason"], "tool_timeout")
+
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_masked_test_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        commands = [
+            "test -x /tmp/CompCert/ccomp || true",
+            "[ -x /tmp/CompCert/ccomp ] || true",
+            "test -x /tmp/CompCert/ccomp 2> /dev/null || true",
+            "test -x /tmp/CompCert/ccomp || echo absent",
+            "[ -x /tmp/CompCert/ccomp ] || echo absent",
+            "if test -x /tmp/CompCert/ccomp; then :; fi",
+            "! test -x /tmp/CompCert/ccomp",
+            "test -x /tmp/CompCert/ccomp | true",
+            "[ -x /tmp/CompCert/ccomp ] | true",
+            "test -x /tmp/CompCert/ccomp & true",
+            "while test -x /tmp/CompCert/ccomp\ndo\n  :\ndone",
+            "until test -x /tmp/CompCert/ccomp\ndo\n  :\ndone",
+            "test -x /tmp/CompCert/ccomp \\\n|| true",
+            "test -x /tmp/CompCert/ccomp\ntrue",
+            "test -x /tmp/CompCert/ccomp && rm -f /tmp/CompCert/ccomp",
+            "test -x /tmp/CompCert/ccomp && rm -f ccomp",
+            "test -x /tmp/CompCert/ccomp && rm -rf /tmp/CompCert",
+        ]
+
+        for command in commands:
+            with self.subTest(command=command):
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Compile CompCert",
+                    "goal": (
+                        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+                    ),
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 4,
+                            "tool": "run_command",
+                            "status": "completed",
+                            "parameters": {"cwd": "/tmp/CompCert", "command": command},
+                            "result": {
+                                "command": command,
+                                "cwd": "/tmp/CompCert",
+                                "exit_code": 0,
+                                "stdout": "",
+                                "stderr": "",
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                state = build_work_session_resume(session)["long_dependency_build_state"]
+
+                statuses = [
+                    item.get("status")
+                    for item in (state.get("expected_artifacts") or [])
+                    if isinstance(item, dict)
+                ]
+                self.assertNotIn("proven", statuses)
+
+    def test_work_session_resume_does_not_prove_long_dependency_artifact_from_masked_output_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        cases = [
+            (
+                "stat -c '%F %n' /tmp/CompCert/ccomp | cat",
+                "regular file /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "stat -c '%F %n' /tmp/CompCert/ccomp && rm -f ccomp",
+                "regular file /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "find /tmp/CompCert/ccomp -maxdepth 0 -printf 'regular file %p\\n' -delete",
+                "regular file /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "test -x /tmp/CompCert/ccomp || true",
+                "test -x /tmp/CompCert/ccomp\n",
+            ),
+            (
+                "test -x /tmp/CompCert/ccomp \\\n&& /tmp/CompCert/ccomp -version",
+                "CompCert C compiler version 3.13\n",
+            ),
+        ]
+
+        for command, stdout in cases:
+            with self.subTest(command=command):
+                session = {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "title": "Compile CompCert",
+                    "goal": (
+                        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+                    ),
+                    "updated_at": "now",
+                    "tool_calls": [
+                        {
+                            "id": 4,
+                            "tool": "run_command",
+                            "status": "completed",
+                            "parameters": {"cwd": "/tmp/CompCert", "command": command},
+                            "result": {
+                                "command": command,
+                                "cwd": "/tmp/CompCert",
+                                "exit_code": 0,
+                                "stdout": stdout,
+                                "stderr": "",
+                            },
+                        },
+                    ],
+                    "model_turns": [],
+                }
+
+                state = build_work_session_resume(session)["long_dependency_build_state"]
+
+                statuses = [
+                    item.get("status")
+                    for item in (state.get("expected_artifacts") or [])
+                    if isinstance(item, dict)
+                ]
+                self.assertNotIn("proven", statuses)
+
+    def test_work_session_resume_accepts_strict_command_only_long_dependency_artifact_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile CompCert",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 9,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                    },
+                    "result": {
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "CompCert C compiler version 3.13\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        state = build_work_session_resume(session)["long_dependency_build_state"]
+
+        self.assertEqual(state["expected_artifacts"][0]["status"], "proven")
+        self.assertEqual(state["missing_artifacts"], [])
 
     def test_work_session_resume_omits_long_dependency_state_before_progress(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
@@ -7103,6 +7648,155 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_reserves_recovery_budget_for_long_build_validation_command(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_output = {
+                    "summary": "run a long source build and final smoke",
+                    "action": {
+                        "type": "run_command",
+                        "command": "cd /tmp/CompCert\nmake -j4 ccomp\n/tmp/CompCert/ccomp -version\n/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke",
+                        "timeout": 1800,
+                    },
+                }
+                observed_parameters = {}
+
+                def fake_execute(tool, parameters, allowed_read_roots, output_progress=None, model_context=None):
+                    self.assertEqual(tool, "run_command")
+                    observed_parameters.update(parameters)
+                    return {
+                        "command": parameters["command"],
+                        "exit_code": 0,
+                        "stdout": "The CompCert C verified compiler\n",
+                        "stderr": "",
+                    }
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", return_value=model_output):
+                        with patch("mew.commands.execute_work_tool_with_output", side_effect=fake_execute):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            "Under /tmp/CompCert, build the CompCert compiler from source and verify it works.",
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-shell",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "5",
+                                            "--max-wall-seconds",
+                                            "120",
+                                            "--max-steps",
+                                            "1",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 0)
+                self.assertIn("wall_timeout_ceiling", observed_parameters)
+                self.assertEqual(
+                    observed_parameters["wall_timeout_ceiling"]["reserve_seconds"],
+                    commands.WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS,
+                )
+                self.assertLess(observed_parameters["timeout"], 90.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_long_build_recovery_command_can_spend_reserved_budget_after_linker_failure(self):
+        task = {
+            "title": "Build CompCert compiler",
+            "description": "Build the compiler from source and verify the runtime link path.",
+        }
+        session = {
+            "tool_calls": [
+                {
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {
+                        "exit_code": 2,
+                        "stderr": "/usr/bin/ld: cannot find -lcompcert: No such file or directory\nlinker command failed\n",
+                    },
+                }
+            ]
+        }
+        parameters = {
+            "timeout": 600,
+            "command": (
+                "cd /tmp/CompCert\n"
+                "make -C runtime libcompcert.a\n"
+                "make install\n"
+                "/tmp/CompCert/ccomp -version\n"
+                "/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke"
+            ),
+        }
+
+        self.assertEqual(
+            commands.work_tool_recovery_reserve_seconds(
+                "run_command",
+                parameters,
+                task=task,
+                session=session,
+            ),
+            0.0,
+        )
+
+    def test_long_build_recovery_command_can_spend_reserved_budget_after_runtime_install_failure(self):
+        task = {
+            "title": "Build CompCert compiler",
+            "description": "Build the compiler from source and verify the runtime install path.",
+        }
+        session = {
+            "tool_calls": [
+                {
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {
+                        "exit_code": 2,
+                        "stdout": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                }
+            ]
+        }
+        parameters = {
+            "timeout": 600,
+            "command": (
+                "cd /tmp/CompCert\n"
+                "make -C runtime libcompcert.a\n"
+                "make install\n"
+                "/tmp/CompCert/ccomp -version\n"
+                "/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke"
+            ),
+        }
+
+        self.assertEqual(
+            commands.work_tool_recovery_reserve_seconds(
+                "run_command",
+                parameters,
+                task=task,
+                session=session,
+            ),
+            0.0,
+        )
+
     def test_run_command_for_work_streaming_kills_process_group_on_timeout(self):
         from mew.work_session import run_command_for_work
 
@@ -7609,6 +8303,11 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(recoverable_work_model_error("upstream returned 529"))
         self.assertTrue(recoverable_work_model_error("HTTP/1.1 502 Bad Gateway"))
         self.assertTrue(recoverable_work_model_error("response did not contain assistant text"))
+        self.assertTrue(
+            recoverable_work_model_error(
+                "failed to parse JSON plan: Expecting ',' delimiter: line 70 column 835"
+            )
+        )
         self.assertFalse(recoverable_work_model_error("model returned invalid JSON"))
         self.assertFalse(recoverable_work_model_error("model returned invalid JSON at char 500"))
         self.assertFalse(recoverable_work_model_error("permission denied"))
@@ -37483,6 +38182,78 @@ class WorkSessionTests(unittest.TestCase):
         self.assertLessEqual(
             len(context["work_session"]["resume"]["recent_decisions"]),
             2,
+        )
+
+    def test_plan_work_model_turn_uses_compact_recovery_under_wall_timeout_ceiling(self):
+        from mew.work_loop import plan_work_model_turn
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Build a compiler from source and verify the default runtime link path.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 1,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "make -j10 ccomp"},
+                    "result": {
+                        "command": "make -j10 ccomp",
+                        "exit_code": 2,
+                        "stdout": "build output\n" * 2000,
+                        "stderr": "install: cannot stat 'libcompcert.a': No such file or directory\n",
+                    },
+                    "summary": "runtime install failed after long build",
+                },
+                {
+                    "id": 2,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "/tmp/CompCert/runtime/Makefile"},
+                    "result": {
+                        "path": "/tmp/CompCert/runtime/Makefile",
+                        "text": "runtime makefile\n" * 1000,
+                        "truncated": False,
+                    },
+                    "summary": "read runtime makefile",
+                },
+            ],
+            "model_turns": [],
+        }
+        state = {"next_ids": {"work_model_turn": 1}, "work_sessions": [session]}
+        task = {
+            "id": 1,
+            "title": "Build CompCert compiler",
+            "description": "Build the CompCert compiler from source and verify /tmp/CompCert/ccomp.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        def fake_model(model_backend, model_auth, prompt, model, base_url, timeout, log_prefix=None, **kwargs):
+            return {"summary": "wait", "action": {"type": "wait", "reason": "need one bounded recovery command"}}
+
+        with patch("mew.work_loop.call_model_json_with_retries", side_effect=fake_model):
+            planned = plan_work_model_turn(
+                state,
+                session,
+                task,
+                {"path": "auth.json"},
+                timeout=30,
+                allowed_read_roots=["."],
+                allowed_write_roots=[],
+                allow_shell=True,
+                allow_verify=True,
+                act_mode="deterministic",
+                timeout_ceiling=True,
+            )
+
+        self.assertEqual(planned["model_metrics"]["prompt_context_mode"], "compact_recovery")
+        self.assertEqual(
+            planned["context"]["work_session"]["context_compaction"]["prompt_context_mode"],
+            "compact_recovery",
         )
 
     def test_work_tool_call_for_model_keeps_full_explicit_line_window_in_full_prompt(self):

@@ -199,6 +199,279 @@ Result:
 - codex-ultra review session `019ddd2b-8895-7771-b617-ef75359c2e7a`:
   `APPROVED` after two review/fix rounds
 
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-1attempt-20260501-0152/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `25m 37s`
+- work-session stop reason: `finish`
+- external verifier: `3 passed`
+
+Next validation is resource-normalized proof_5 for `compile-compcert` with
+sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
+remains paused.
+
+## v1.3 Compatibility Branch Budget Contract
+
+The v1.2 timeout-ceiling compact-recovery resource-normalized proof is recorded
+in:
+
+- `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-5attempts-seq-20260501-0356/result.json`
+
+The proof reached `2/3` valid completed trials before the frozen `5/5` close
+target became impossible. The failed valid trial did not repeat full-context
+model timeout or runtime-link recovery. It found the correct
+`-use-external-Flocq` compatibility branch, but only after serial compatibility
+probes consumed most of the wall budget; the final long build was capped to
+`702.927s`, timed out, and `/tmp/CompCert/ccomp` was missing when the external
+verifier ran.
+
+The bounded generic repair is:
+
+`long_dependency_compatibility_branch_budget_contract`
+
+Layer: profile/contract. The repair consolidates long dependency strategy
+rather than appending another narrow THINK sentence. It detects the generic
+failure shape where a source-build task has:
+
+- prebuilt package-manager dependency evidence;
+- source-exposed external/prebuilt compatibility branch evidence;
+- serial setup/probe churn before the winning branch;
+- a timed-out external-branch build; and
+- required final artifacts still missing or unproven.
+
+Changes:
+
+- `work_session.resume.long_dependency_build_state.strategy_blockers` now
+  surfaces `compatibility_branch_budget_contract_missing` with
+  `layer=profile_contract`;
+- the blocker is suppressed when a later strict final-artifact proof exists;
+- ignore-only compatibility probes do not count as external/prebuilt branch
+  evidence;
+- resume `suggested_next` and THINK guidance tell the model to commit early to
+  one coherent external/prebuilt dependency branch and reserve wall budget for
+  final artifact build/proof.
+
+Focused validation:
+
+```text
+uv run pytest --no-testmon tests/test_work_session.py -k 'late_external_branch_budget or branch_budget_for_ignore_only or version_pinned_source_toolchain_before_override or missing_compatibility_override_probe or source_toolchain_before_later_override_attempt or work_think_prompt_guides_independent_reads_to_batch' -q
+uv run pytest --no-testmon tests/test_work_session.py -k 'long_dependency or compatibility_override or runtime_install or default_runtime_link_path or source_archive_version_grounding or artifact_proof' -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result:
+
+- focused branch-budget tests: `7 passed`
+- broader long-dependency tests: `18 passed, 22 subtests passed`
+- ruff: passed
+- codex-ultra review session `019de01e-2b4f-72b1-b74d-87ab30174dcf`:
+  `APPROVED`
+
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_COMPAT_BRANCH_BUDGET_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-compat-branch-budget-compile-compcert-1attempt-20260501-0545/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `19m 26s`
+- work-session stop reason: `finish`
+- work-session steps: `7`
+- external verifier: `3 passed`
+
+The run installed the missing Menhir API dev package, used the existing
+CompCert source tree, configured and built with the coherent compatibility branch,
+built `/tmp/CompCert/ccomp`, installed runtime support into the default path,
+and passed the default compile/link/run smoke plus external verifier.
+
+Next validation is resource-normalized proof_5 for `compile-compcert` with
+sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
+remains paused.
+
+## v1.2 Timeout-Ceiling Compact Recovery Repair
+
+The malformed-JSON recovery proof_5 is recorded in:
+
+- `docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-5attempts-seq-20260501-0220/result.json`
+
+The close proof missed:
+
+- completed valid trials before stop: `2`
+- score on valid completed trials: `1/2`
+- cancelled trials: `1`
+- failed valid trial: `compile-compcert__gHMYo7H`
+
+The miss was not another missing runtime-link rule. The failed trial reached
+the known runtime-library recovery path and surfaced
+`runtime_install_before_runtime_library_build`, then read
+`/tmp/CompCert/runtime/Makefile`. The next model turns timed out under
+shrinking wall-clock ceilings while still using full prompt context.
+
+The bounded generic repair is:
+
+`work_timeout_ceiling_full_context_recovery_prompt`
+
+Changes:
+
+- `plan_work_model_turn()` now converts default `full` prompt context to
+  `compact_recovery` whenever wall-clock pressure sets
+  `timeout_ceiling=True`;
+- the change is generic model-context budgeting and does not inspect
+  Terminal-Bench, CompCert, command text, or failure strings.
+
+Focused validation:
+
+```text
+uv run pytest --no-testmon tests/test_work_session.py -k 'compact_recovery_under_wall_timeout_ceiling or compact_recovery_after_timeout_with_pending_steer' -q
+uv run ruff check src/mew/work_loop.py tests/test_work_session.py
+```
+
+Result:
+
+- focused tests: `2 passed`
+- ruff: passed
+- codex-ultra review session `019ddfa4-889a-7d72-a789-239af7ce2a2b`:
+  `APPROVE`
+
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-1attempt-20260501-0332/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `16m 55s`
+- work-session stop reason: `finish`
+- work-session steps: `9`
+- external verifier: `3 passed`
+
+Next validation is resource-normalized proof_5 for `compile-compcert` with
+sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
+remains paused.
+
+## v1.0 Final Recovery-Budget Reserve
+
+The OAuth-refresh proof rerun is recorded in:
+
+- `docs/M6_24_OAUTH_REFRESH_COMPILE_COMPCERT_PROOF_5_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-oauth-refresh-compile-compcert-5attempts-seq-20260430-2256/result.json`
+
+The proof infrastructure repair worked: no `HTTP 401 token_expired` recurrence
+was observed with refreshable `~/.codex/auth.json`. The close gate still missed:
+
+- valid completed trials reached `1/2`;
+- the failed valid trial built `/tmp/CompCert/ccomp`;
+- default functional smoke failed with `/usr/bin/ld: cannot find -lcompcert`;
+- the session then had only `14.873s` wall time left, leaving no useful model
+  recovery turn to run the already-known runtime-library build/install path.
+
+The bounded generic repair is:
+
+`long_dependency_final_recovery_budget_after_failed_validation`
+
+Changes:
+
+- `mew work` now detects long dependency/toolchain build commands with long
+  timeouts and final validation smoke markers;
+- those commands reserve `60s` of wall budget before execution rather than only
+  the normal `2s` tool reserve;
+- if a recent runtime-link/runtime-install blocker is already visible, the
+  follow-up recovery command can spend that reserved budget instead of being
+  re-reserved and blocked;
+- ordinary short tool calls keep the old timeout behavior.
+
+Focused validation:
+
+```text
+UV_CACHE_DIR=/tmp/uv-cache uv run pytest --no-testmon tests/test_work_session.py -k 'wall_budget or wall_timeout or long_build_validation_command' -q
+UV_CACHE_DIR=/tmp/uv-cache uv run ruff check src/mew/commands.py tests/test_work_session.py
+```
+
+Result:
+
+- focused wall-budget tests: `8 passed`
+- ruff: passed
+- broader regression (`tests/test_work_session.py`, `tests/test_codex_api.py`,
+  `tests/test_model_backends.py`): `858 passed`, one multiprocessing warning
+- `codex-ultra` review session `019ddeed-31bf-7373-a6f8-b417b0865203`:
+  `APPROVE` after the recovery-command re-reservation regressions were added
+
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_RECOVERY_BUDGET_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-recovery-budget-compile-compcert-1attempt-20260501-0018/result.json
+```
+
+Result:
+
+- reward: `1.0`
+- runner errors: `0`
+- runtime: `29m 25s`
+- work-session stop reason: `finish`
+- external verifier: `3 passed`
+
+Next validation is resource-normalized proof_5 for `compile-compcert` with
+sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement
+remains paused.
+
+## v1.1 Malformed JSON Plan Recovery
+
+The v1.0 resource-normalized proof is recorded in:
+
+- `docs/M6_24_RECOVERY_BUDGET_COMPILE_COMPCERT_PROOF_5_2026-05-01.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-recovery-budget-compile-compcert-5attempts-seq-20260501-0055/result.json`
+
+The proof reached `2/3` valid completed trials before the frozen `5/5` close
+target became impossible. The failed valid trial did not exercise
+long-dependency build behavior: the first model turn returned a malformed JSON
+plan and `mew work` stopped with `stop_reason=model_error`.
+
+The repair is:
+
+`work_oneshot_malformed_json_plan_recovery_missing`
+
+Changes:
+
+- one-shot work treats backend `failed to parse JSON plan` as a recoverable
+  transient model error;
+- generic `model returned invalid JSON` remains non-recoverable;
+- existing one-shot continue-after-model-error behavior handles the retry.
+
+Focused validation:
+
+```text
+UV_CACHE_DIR=/tmp/uv-cache uv run pytest --no-testmon tests/test_work_session.py -k 'recoverable_work_model_error or continues_after_recoverable_model_error or does_not_continue_after_recoverable_model_error' -q
+UV_CACHE_DIR=/tmp/uv-cache uv run ruff check src/mew/commands.py tests/test_work_session.py
+```
+
+Result:
+
+- focused tests: `3 passed`
+- ruff: passed
+- broader work-session regression: `826 passed`, one multiprocessing warning,
+  `67 subtests passed`
+- `codex-ultra` review session `019ddf49-e29d-7140-bd17-24c9d889c0a8`:
+  `APPROVE`
+
 Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
 Broad measurement and proof_5 remain paused.
 
@@ -251,6 +524,64 @@ Result:
 
 Next validation is a one-trial same-shape speed rerun for `compile-compcert`.
 Broad measurement and proof_5 remain paused.
+
+## v0.9 Timed-Out Artifact Proof Calibration
+
+The v0.8 resource-normalized proof is recorded in:
+
+- `docs/M6_24_SOURCE_IDENTITY_COMPILE_COMPCERT_PROOF_5_2026-04-30.md`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-identity-compile-compcert-5attempts-seq-20260430-1808/result.json`
+
+The proof scored `4/5` with runner errors `0`, below the frozen Codex target
+`5/5`. The failed trial did not reproduce source identity or empty-response
+failure. It timed out during a final `make -j10 ccomp` after patching local
+Flocq compatibility, and the external verifier failed because
+`/tmp/CompCert/ccomp` did not exist.
+
+The repair is:
+
+`long_dependency_timed_out_artifact_proof_calibration`
+
+Changes:
+
+- long-dependency final-artifact proof now requires a completed command with
+  `result.exit_code == 0`;
+- timed-out commands can no longer mark expected final artifacts as `proven`;
+- successful but non-evidential soft probes such as
+  `ls -l /tmp/CompCert/ccomp 2>/dev/null || true` no longer prove the final
+  artifact from command text alone;
+- strict command-only executable probes such as
+  `test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version` still count
+  when the command exits `0`;
+- masked output proofs and post-proof mutation commands, including pipe/`||`
+  probes, real newline continuations, `rm`/`find -delete`, and cwd-relative
+  artifact removal, do not count as proof;
+- timed-out final builds therefore preserve `missing_artifacts` and
+  `incomplete_reason=tool_timeout` for reentry instead of falsely closing the
+  artifact boundary.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'long_dependency or timed_out_call or soft_probe_before_timeout or masked_test_probe or masked_output_probe or strict_command_only' --no-testmon -q
+uv run ruff check src/mew/work_session.py tests/test_work_session.py
+```
+
+Result:
+
+- focused work-session tests: `8 passed`, `22 subtests passed`
+- ruff: passed
+- codex-ultra review: approved (`019dde2f-4a27-70b0-9e42-ab5943914f8e`)
+
+The one-trial same-shape speed proof passed:
+
+```text
+docs/M6_24_ARTIFACT_PROOF_CALIBRATION_COMPILE_COMPCERT_SPEED_RERUN_2026-04-30.md
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-artifact-proof-calibration-compile-compcert-1attempt-20260430-2102/result.json
+```
+
+Next validation is resource-normalized proof_5 for `compile-compcert`.
+Broad measurement remains paused.
 
 ## v0.3 Repair
 
