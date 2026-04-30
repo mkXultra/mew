@@ -4142,6 +4142,19 @@ _LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS = (
     "override",
     "allow-unsupported",
 )
+_LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE = re.compile(
+    r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:-ignore|--ignore|allow-unsupported|override)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_VERSION_PINNED_SOURCE_TOOLCHAIN_RE = re.compile(
+    r"\bopam\s+install\b[^\n;&|]*"
+    r"(?:[A-Za-z0-9][A-Za-z0-9_.+-]*[.=<>~!]+\d+\.\d+|[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_RETRIEVED_VERSIONED_SOURCE_TOOL_RE = re.compile(
+    r"\bretrieved\s+[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+",
+    re.IGNORECASE,
+)
 
 
 def _make_invocation_prefix_is_wrapper(parts):
@@ -4289,6 +4302,58 @@ def _long_dependency_untargeted_make_blocker(call, expected_artifacts):
             "source_tool_call_id": call.get("id"),
             "tool": call.get("tool") or "",
             "excerpt": clip_inline_text(invocation, 180),
+        }
+    return {}
+
+
+def _long_dependency_has_configure_override_attempt(call):
+    if not isinstance(call, dict):
+        return False
+    text = _runtime_artifact_call_text(call)
+    return bool(_LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE.search(text))
+
+
+def _long_dependency_uses_version_pinned_source_toolchain(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _runtime_artifact_call_text(call)
+    return bool(
+        _LONG_DEPENDENCY_VERSION_PINNED_SOURCE_TOOLCHAIN_RE.search(text)
+        or (
+            "opam install" in text.casefold()
+            and _LONG_DEPENDENCY_RETRIEVED_VERSIONED_SOURCE_TOOL_RE.search(text)
+        )
+    )
+
+
+def _long_dependency_source_toolchain_before_override_blocker(calls, existing_blockers):
+    missing_override_call_ids = {
+        blocker.get("source_tool_call_id")
+        for blocker in existing_blockers or []
+        if blocker.get("code") == "compatibility_override_probe_missing"
+    }
+    if not missing_override_call_ids:
+        return {}
+    missing_override_seen = False
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if call.get("id") in missing_override_call_ids:
+            missing_override_seen = True
+        if not missing_override_seen:
+            continue
+        if _long_dependency_has_configure_override_attempt(call):
+            return {}
+        if not _long_dependency_uses_version_pinned_source_toolchain(call):
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+        command = result.get("command") or parameters.get("command") or _runtime_artifact_call_text(call)
+        return {
+            "code": "version_pinned_source_toolchain_before_compatibility_override",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": clip_inline_text(command, 180),
         }
     return {}
 
@@ -4456,6 +4521,18 @@ def build_long_dependency_build_state(task, calls, session=None):
                     "status": "proven",
                     "source_tool_call_id": call.get("id"),
                 }
+    source_toolchain_before_override = _long_dependency_source_toolchain_before_override_blocker(
+        calls,
+        strategy_blockers,
+    )
+    if source_toolchain_before_override:
+        key = (
+            source_toolchain_before_override.get("code"),
+            source_toolchain_before_override.get("source_tool_call_id"),
+            source_toolchain_before_override.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(source_toolchain_before_override)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
     if not progress and not proven and not strategy_blockers:
@@ -4479,6 +4556,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "resume the existing source tree/toolchain state; do not restart package or source setup after a "
             "compatible path is found. If a configure step rejects an installed dependency version, inspect or try "
             "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
+            "If prebuilt package-manager dependencies are available and a source-provided compatibility override is "
+            "visible or likely, try that prebuilt dependency plus override path before starting version-pinned "
+            "source-built dependency/toolchain installation. "
             "If a compiler or toolchain can build a trivial binary but the linker reports a missing runtime "
             "library, install or configure the project runtime/library target before finish. Do not retry "
             "invalidated toolchain/package paths. Allocate remaining wall budget to the shortest idempotent "

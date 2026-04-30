@@ -168,7 +168,7 @@ Changes:
 Focused validation:
 
 ```text
-uv run pytest tests/test_work_session.py -k 'long_dependency or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run pytest tests/test_work_session.py -k 'long_dependency or source_toolchain or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
 uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
 jq empty proof-artifacts/m6_24_gap_ledger.jsonl
 git diff --check
@@ -206,6 +206,73 @@ external verifier.
 
 Next validation is resource-normalized proof_5 for the same shape:
 `compile-compcert -k 5 -n 1`.
+
+## v0.4 Resource-Normalized Proof
+
+The v0.4 resource-normalized proof rejected the close gate:
+
+```text
+proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compile-compcert-5attempts-seq-20260430-1119/2026-04-30__11-19-01/result.json
+```
+
+Result:
+
+- valid completed trials before stop: `1`
+- score on valid completed trials: `0/1`
+- runner/cancel errors at stop: `1` from intentional trial 2 cancellation
+- failed trial: `compile-compcert__mhwxWgK`
+
+Failure shape:
+
+- the trial grounded CompCert `3.13.1`;
+- it observed distro Coq candidate `8.18` and source version rejection;
+- `compatibility_override_probe_missing` was visible in reentry;
+- it then chose a version-pinned source-built OPAM dependency route
+  (`coq.8.16.1` / `coq-flocq`) instead of trying the prebuilt dependency plus
+  source override path first;
+- the session exhausted wall/model budget with `/tmp/CompCert/ccomp` missing.
+
+## v0.5 Repair
+
+`long_dependency_prebuilt_dependency_override_precedence_contract`
+
+Changes:
+
+- long-dependency resume state now surfaces
+  `version_pinned_source_toolchain_before_compatibility_override` when
+  `compatibility_override_probe_missing` remains unresolved and the session
+  starts a version-pinned source-built dependency/toolchain install;
+- long-dependency next guidance now says that if prebuilt package-manager
+  dependencies are available and a source compatibility override is visible or
+  likely, the model should try that prebuilt dependency plus override path
+  before version-pinned source-built dependency/toolchain installation;
+- THINK guidance carries the same ordering contract.
+
+Focused validation:
+
+```text
+uv run pytest tests/test_work_session.py -k 'long_dependency or source_toolchain or work_think_prompt_guides_independent_reads_to_batch' --no-testmon -q
+uv run ruff check src/mew/work_session.py src/mew/work_loop.py tests/test_work_session.py
+jq empty proof-artifacts/m6_24_gap_ledger.jsonl
+git diff --check
+```
+
+Result:
+
+- focused work-session tests: `8 passed`
+- ruff: passed
+- gap ledger JSON: valid
+- diff whitespace: clean
+
+`codex-ultra` review session `019ddc51-b48e-7ac0-a742-4aee99e2a5c4` found
+two pre-commit risks: the first detector was whole-history rather than
+order-sensitive, and its source-toolchain regex was too broad. The follow-up
+restricts the detector to OPAM version-pinned source dependency installs and
+only flags installs that occur after `compatibility_override_probe_missing` and
+before the first configure override attempt. Tests cover install-before-mismatch
+and mismatch-then-install-then-later-override ordering.
+
+Next validation is a one-trial same-shape speed proof for `compile-compcert`.
 
 ## v0.4 Repair
 
