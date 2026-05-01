@@ -68,18 +68,27 @@ _CUSTOM_RUNTIME_PATH_PROOF_RE = re.compile(r"(?:LD_LIBRARY_PATH|LIBRARY_PATH|-st
 _GENERIC_FAILURE_CLASS_BY_BLOCKER_CODE = {
     "compatibility_override_probe_missing": "dependency_strategy_unresolved",
     "version_pinned_source_toolchain_before_compatibility_override": "dependency_strategy_unresolved",
-    "compatibility_branch_budget_contract_missing": "dependency_strategy_unresolved",
+    "compatibility_branch_budget_contract_missing": "budget_reserve_violation",
     "external_branch_help_probe_too_narrow_before_source_toolchain": "dependency_strategy_unresolved",
     "external_dependency_source_provenance_unverified": "source_authority_unverified",
     "source_archive_version_grounding_too_strict": "source_authority_overconstrained",
     "vendored_dependency_patch_surgery_before_supported_branch": "dependency_strategy_unresolved",
     "dependency_generation_order_issue": "dependency_generation_required",
     "untargeted_full_project_build_for_specific_artifact": "target_selection_overbroad",
-    "runtime_link_library_missing": "runtime_default_path_unproven",
-    "default_runtime_link_path_failed": "runtime_default_path_unproven",
+    "runtime_link_library_missing": "runtime_link_failed",
+    "default_runtime_link_path_failed": "runtime_link_failed",
     "default_runtime_link_path_unproven": "runtime_default_path_unproven",
     "runtime_install_before_runtime_library_build": "runtime_install_before_build",
     "runtime_library_subdir_target_path_invalid": "build_system_target_surface_invalid",
+}
+_RECOVERY_DECISION_FAILURE_CLASSES = {
+    "artifact_missing_or_unproven",
+    "build_timeout",
+    "runtime_link_failed",
+    "runtime_default_path_unproven",
+    "runtime_install_before_build",
+    "build_system_target_surface_invalid",
+    "budget_reserve_violation",
 }
 
 
@@ -396,6 +405,19 @@ def reduce_long_build_state(
     status = _state_status(attempts, missing, current_failure, stages)
     latest_attempt_id = attempts[-1].get("id") if attempts else None
     latest_build_tool_call_id = latest_build_call.get("id") if isinstance(latest_build_call, Mapping) else None
+    effective_incomplete_reason = (
+        ""
+        if _incomplete_reason_cleared_by_later_success(incomplete_reason, attempts)
+        else str(incomplete_reason or "")
+    )
+    recovery_decision = _derive_recovery_decision(
+        contract,
+        status,
+        current_failure,
+        attempts,
+        normalized_evidence,
+        blockers,
+    )
     state = LongBuildState(
         schema_version=LONG_BUILD_SCHEMA_VERSION,
         kind="long_build_state",
@@ -406,7 +428,7 @@ def reduce_long_build_state(
         attempt_ids=[str(item.get("id") or "") for item in attempts if item.get("id")],
         latest_attempt_id=str(latest_attempt_id) if latest_attempt_id else None,
         current_failure=current_failure,
-        recovery_decision_id=None,
+        recovery_decision_id=recovery_decision.id if recovery_decision else None,
         unknown_fields={
             "contract": dict(contract),
             "attempts": attempts[-6:],
@@ -417,9 +439,10 @@ def reduce_long_build_state(
             "latest_build_evidence_id": evidence_by_tool_call_id.get(latest_build_tool_call_id),
             "latest_build_status": str(latest_build_call.get("status") or "") if isinstance(latest_build_call, Mapping) else "",
             "latest_build_command": latest_build_command,
-            "incomplete_reason": str(incomplete_reason or ""),
+            "incomplete_reason": effective_incomplete_reason,
             "strategy_blockers": blockers[-6:],
-            "suggested_next": str(suggested_next or ""),
+            "recovery_decision": recovery_decision.to_dict() if recovery_decision else None,
+            "suggested_next": str(suggested_next or "") if (current_failure and not recovery_decision) else "",
         },
     )
     return state.to_dict()
@@ -935,12 +958,18 @@ def _current_failure(
             "source_tool_call_id": source_tool_call_id,
             "clear_condition": _clear_condition(blocker.get("code"), contract, missing),
         }
-    if str(incomplete_reason or "") == "tool_timeout":
+    if str(incomplete_reason or "") == "tool_timeout" and not _incomplete_reason_cleared_by_later_success(
+        incomplete_reason,
+        attempts,
+    ):
         return {
             "failure_class": "build_timeout",
             "evidence_id": None,
             "clear_condition": "resume or rerun the shortest idempotent command with an explicit wall budget",
         }
+    diagnostic_failure = _latest_attempt_diagnostic_failure(attempts)
+    if diagnostic_failure:
+        return diagnostic_failure
     if list(missing or []):
         paths = ", ".join(str(item.get("path") or "") for item in missing if isinstance(item, Mapping))
         return {
@@ -956,6 +985,269 @@ def _current_failure(
             "clear_condition": "default compile/link smoke succeeds without custom runtime path flags",
         }
     return None
+
+
+def _latest_attempt_diagnostic_failure(attempts: Iterable[Mapping[str, object]]) -> dict | None:
+    for attempt in reversed([dict(item) for item in attempts or [] if isinstance(item, Mapping)]):
+        if _attempt_clears_prior_recovery_failure(attempt):
+            return None
+        failure_class = ""
+        excerpt = ""
+        for diagnostic in attempt.get("diagnostics") or []:
+            if not isinstance(diagnostic, Mapping):
+                continue
+            candidate = str(diagnostic.get("failure_class") or "")
+            if candidate in _RECOVERY_DECISION_FAILURE_CLASSES:
+                failure_class = candidate
+                excerpt = str(diagnostic.get("excerpt") or "")
+                break
+        if not failure_class:
+            continue
+        evidence_ref = attempt.get("command_evidence_ref") if isinstance(attempt.get("command_evidence_ref"), Mapping) else {}
+        return {
+            "failure_class": failure_class,
+            "evidence_id": evidence_ref.get("id"),
+            "attempt_id": attempt.get("id"),
+            "excerpt": excerpt,
+            "clear_condition": _clear_condition_for_failure_class(failure_class, missing=()),
+        }
+    return None
+
+
+def _incomplete_reason_cleared_by_later_success(
+    incomplete_reason: object,
+    attempts: Iterable[Mapping[str, object]],
+) -> bool:
+    return str(incomplete_reason or "") == "tool_timeout" and _latest_failure_cleared_by_later_success(
+        attempts,
+        "build_timeout",
+    )
+
+
+def _latest_failure_cleared_by_later_success(
+    attempts: Iterable[Mapping[str, object]],
+    failure_class: str,
+) -> bool:
+    for attempt in reversed([dict(item) for item in attempts or [] if isinstance(item, Mapping)]):
+        if _attempt_clears_prior_recovery_failure(attempt):
+            return True
+        if any(
+            isinstance(diagnostic, Mapping) and diagnostic.get("failure_class") == failure_class
+            for diagnostic in attempt.get("diagnostics") or []
+        ):
+            return False
+    return False
+
+
+def _attempt_clears_prior_recovery_failure(attempt: Mapping[str, object]) -> bool:
+    if attempt.get("result") != "success":
+        return False
+    return str(attempt.get("stage") or "") in {
+        "artifact_proof",
+        "default_smoke",
+        "runtime_build",
+        "runtime_install",
+    }
+
+
+def _derive_recovery_decision(
+    contract: Mapping[str, object],
+    state_status: str,
+    current_failure: Mapping[str, object] | None,
+    attempts: Iterable[Mapping[str, object]],
+    evidences: Iterable[CommandEvidence],
+    blockers: Iterable[Mapping[str, object]],
+) -> RecoveryDecision | None:
+    if not current_failure:
+        return None
+    failure_class = str(current_failure.get("failure_class") or "")
+    if failure_class not in _RECOVERY_DECISION_FAILURE_CLASSES:
+        return None
+    contract_id = str(contract.get("id") or "long_build")
+    failure_attempts = _failure_attempt_count(failure_class, attempts, blockers)
+    budget = _recovery_budget(contract, evidences, failure_class, failure_attempts)
+    return RecoveryDecision(
+        schema_version=LONG_BUILD_SCHEMA_VERSION,
+        id=f"{contract_id}:recovery:{failure_attempts}",
+        contract_id=contract_id,
+        state_status=str(state_status or ""),
+        failure_class=failure_class,
+        prerequisites=_recovery_prerequisites(failure_class, contract),
+        clear_condition=str(current_failure.get("clear_condition") or _clear_condition_for_failure_class(failure_class, missing=())),
+        allowed_next_action=_recovery_allowed_next_action(failure_class, contract),
+        prohibited_repeated_actions=_recovery_prohibited_repeated_actions(failure_class),
+        budget=budget,
+        decision="block_for_budget" if failure_class == "budget_reserve_violation" else "continue",
+    )
+
+
+def _failure_attempt_count(
+    failure_class: str,
+    attempts: Iterable[Mapping[str, object]],
+    blockers: Iterable[Mapping[str, object]],
+) -> int:
+    count = 0
+    for attempt in attempts or []:
+        if not isinstance(attempt, Mapping):
+            continue
+        for diagnostic in attempt.get("diagnostics") or []:
+            if isinstance(diagnostic, Mapping) and diagnostic.get("failure_class") == failure_class:
+                count += 1
+                break
+    for blocker in blockers or []:
+        if isinstance(blocker, Mapping) and _generic_failure_class(blocker.get("code")) == failure_class:
+            count += 1
+    return max(count, 1)
+
+
+def _recovery_budget(
+    contract: Mapping[str, object],
+    evidences: Iterable[CommandEvidence],
+    failure_class: str,
+    failure_attempts: int,
+) -> dict:
+    budget_policy = contract.get("budget") if isinstance(contract.get("budget"), Mapping) else {}
+    reserve_seconds = _coerce_int(budget_policy.get("final_proof_reserve_seconds"), default=60) or 60
+    latest_evidence = max(
+        [item for item in evidences or [] if isinstance(item, CommandEvidence)],
+        key=lambda item: item.finish_order,
+        default=None,
+    )
+    remaining_seconds = latest_evidence.wall_budget_after_seconds if latest_evidence else None
+    return {
+        "remaining_seconds": remaining_seconds,
+        "reserve_seconds": reserve_seconds,
+        "may_spend_reserve": failure_class
+        in {
+            "runtime_link_failed",
+            "runtime_install_before_build",
+            "build_system_target_surface_invalid",
+        },
+        "attempts_for_failure_class": failure_attempts,
+        "max_attempts_for_failure_class": 2,
+    }
+
+
+def _recovery_prerequisites(failure_class: str, contract: Mapping[str, object]) -> list[str]:
+    if failure_class == "artifact_missing_or_unproven":
+        return ["source_authority_if_required", "required_artifact_contract"]
+    if failure_class == "build_timeout":
+        return ["preserve_existing_source_tree", "known_current_build_stage"]
+    if failure_class in {"runtime_link_failed", "runtime_default_path_unproven"}:
+        return ["target_built", "runtime_proof_required"]
+    if failure_class == "runtime_install_before_build":
+        return ["runtime_library_target_known_or_discovered"]
+    if failure_class == "build_system_target_surface_invalid":
+        return ["build_system_surface_inspected"]
+    if failure_class == "budget_reserve_violation":
+        return ["remaining_wall_budget_checked", "final_proof_reserve_policy"]
+    return ["long_build_contract"]
+
+
+def _recovery_allowed_next_action(failure_class: str, contract: Mapping[str, object]) -> dict:
+    artifact_paths = [
+        str((artifact or {}).get("path") or "")
+        for artifact in contract.get("required_artifacts") or []
+        if isinstance(artifact, Mapping) and (artifact or {}).get("path")
+    ]
+    if failure_class == "artifact_missing_or_unproven":
+        return {
+            "kind": "command",
+            "stage": "target_build_or_artifact_proof",
+            "description": "run the shortest idempotent build/proof command that produces and terminally proves the missing required artifact",
+            "required_evidence": "terminal_success_command_evidence",
+            "targets": artifact_paths[:6],
+        }
+    if failure_class == "build_timeout":
+        return {
+            "kind": "command",
+            "stage": "continue_or_resume_build",
+            "description": "resume or rerun the shortest idempotent build command with an explicit wall budget and preserve existing source/tree progress",
+            "required_evidence": "terminal_command_progress_or_success",
+            "targets": artifact_paths[:6],
+        }
+    if failure_class == "runtime_link_failed":
+        return {
+            "kind": "command",
+            "stage": "runtime_build_or_install",
+            "description": "when the default compile/link smoke fails with a missing runtime library, do not restart source acquisition; build or install the shortest runtime/library target into the default lookup path, then rerun the same smoke",
+            "required_evidence": "terminal_success_default_runtime_smoke",
+            "targets": artifact_paths[:6],
+        }
+    if failure_class == "runtime_default_path_unproven":
+        return {
+            "kind": "command",
+            "stage": "default_runtime_smoke",
+            "description": "rerun the compile/link smoke without custom runtime/library path flags after the runtime is installed or configured for the default lookup path",
+            "required_evidence": "terminal_success_default_runtime_smoke",
+            "targets": artifact_paths[:6],
+        }
+    if failure_class == "runtime_install_before_build":
+        return {
+            "kind": "command",
+            "stage": "runtime_build_then_install",
+            "description": "build the shortest explicit runtime-library target first, then retry install and default compile/link smoke",
+            "required_evidence": "terminal_success_runtime_build_install_and_default_smoke",
+            "targets": artifact_paths[:6],
+        }
+    if failure_class == "build_system_target_surface_invalid":
+        return {
+            "kind": "command",
+            "stage": "build_system_target_surface_probe",
+            "description": "switch to the valid build-system target surface, such as make -C <runtime-dir> all/install for a runtime subdirectory Makefile, then prove the runtime/default smoke",
+            "required_evidence": "terminal_success_valid_target_surface",
+            "targets": artifact_paths[:6],
+        }
+    if failure_class == "budget_reserve_violation":
+        return {
+            "kind": "replan",
+            "stage": "budget_preserving_recovery",
+            "description": "commit to one coherent branch, preferably an external/prebuilt compatibility branch, and reserve enough wall budget for final build/proof before spending the final proof reserve",
+            "required_evidence": "updated_wall_budget_plan",
+            "targets": artifact_paths[:6],
+        }
+    return {"kind": "command", "stage": "long_build_recovery", "description": "clear the current long-build failure"}
+
+
+def _recovery_prohibited_repeated_actions(failure_class: str) -> list[str]:
+    if failure_class == "artifact_missing_or_unproven":
+        return ["repeat_non_proving_status_probe", "restart_source_acquisition_without_new_failure"]
+    if failure_class == "build_timeout":
+        return ["repeat_same_timeout_without_budget_change", "abandon_existing_source_tree_progress"]
+    if failure_class == "runtime_link_failed":
+        return ["source_reacquisition", "clean_rebuild", "custom_runtime_path_only_proof"]
+    if failure_class == "runtime_default_path_unproven":
+        return ["custom_runtime_path_only_proof", "repeat_custom_lookup_smoke"]
+    if failure_class == "runtime_install_before_build":
+        return ["retry_runtime_install_before_runtime_build", "clean_rebuild"]
+    if failure_class == "build_system_target_surface_invalid":
+        return ["retry_invalid_parent_target_path", "clean_rebuild"]
+    if failure_class == "budget_reserve_violation":
+        return ["long_validation_without_recovery_reserve", "serial_branch_probe_without_budget"]
+    return ["repeat_same_failed_branch_without_new_evidence"]
+
+
+def _clear_condition_for_failure_class(
+    failure_class: str,
+    *,
+    missing: Iterable[Mapping[str, object]],
+) -> str:
+    if failure_class == "artifact_missing_or_unproven":
+        paths = ", ".join(str(item.get("path") or "") for item in missing or [] if isinstance(item, Mapping))
+        return f"terminal command evidence proves required artifact(s): {paths}" if paths else "terminal command evidence proves required artifact(s)"
+    if failure_class == "build_timeout":
+        return "shortest idempotent build/resume command completes or records bounded progress with wall budget preserved"
+    if failure_class == "runtime_link_failed":
+        return "default compile/link smoke succeeds after runtime or standard library is built/installed into the default lookup path"
+    if failure_class == "runtime_default_path_unproven":
+        return "default compile/link smoke succeeds without custom runtime path flags"
+    if failure_class == "runtime_install_before_build":
+        return "runtime/library artifact is built before runtime install is retried"
+    if failure_class == "build_system_target_surface_invalid":
+        return "valid build-system target surface succeeds for the runtime/library or required artifact"
+    if failure_class == "budget_reserve_violation":
+        return "recovery plan preserves the final proof reserve or explicitly spends it on the known recovery condition"
+    return "the current failure is superseded by successful terminal evidence"
 
 
 def _custom_runtime_path_proof(evidence: CommandEvidence) -> bool:
@@ -1124,6 +1416,8 @@ def _clear_condition(code: object, contract: Mapping[str, object], missing: Iter
         return "shortest runtime/library target is built before runtime install is retried"
     if code_text == "runtime_library_subdir_target_path_invalid":
         return "runtime subdirectory build/install target succeeds from the subdirectory Makefile"
+    if code_text == "compatibility_branch_budget_contract_missing":
+        return "one external/prebuilt compatibility branch is selected early enough to preserve final build/proof budget"
     if code_text == "untargeted_full_project_build_for_specific_artifact":
         return "shortest explicit target for the required artifact is attempted"
     if code_text == "external_dependency_source_provenance_unverified":

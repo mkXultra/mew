@@ -10502,9 +10502,39 @@ def format_work_session_resume(resume):
                 f"{failure.get('failure_class') or 'unknown'} "
                 f"clear={failure.get('clear_condition') or ''}".strip()
             )
+        recovery_decision = long_build_state.get("recovery_decision")
+        if isinstance(recovery_decision, dict) and recovery_decision:
+            allowed_next = recovery_decision.get("allowed_next_action")
+            allowed_next = allowed_next if isinstance(allowed_next, dict) else {}
+            budget = recovery_decision.get("budget")
+            budget = budget if isinstance(budget, dict) else {}
+            lines.append(
+                "long_build_recovery_decision: "
+                f"{recovery_decision.get('failure_class') or 'unknown'} "
+                f"decision={recovery_decision.get('decision') or 'unknown'} "
+                f"stage={allowed_next.get('stage') or 'unknown'} "
+                f"clear={recovery_decision.get('clear_condition') or ''}".strip()
+            )
+            if allowed_next.get("description"):
+                lines.append(f"long_build_recovery_next: {allowed_next.get('description')}")
+            prohibited = [
+                str(item)
+                for item in recovery_decision.get("prohibited_repeated_actions") or []
+                if str(item)
+            ]
+            if prohibited:
+                lines.append("long_build_recovery_prohibited: " + ", ".join(prohibited[:4]))
+            if budget:
+                lines.append(
+                    "long_build_recovery_budget: "
+                    f"remaining={budget.get('remaining_seconds')} "
+                    f"reserve={budget.get('reserve_seconds')} "
+                    f"attempts={budget.get('attempts_for_failure_class')}/"
+                    f"{budget.get('max_attempts_for_failure_class')}"
+                )
         if long_build_state.get("latest_build_command"):
             lines.append(f"long_build_latest_build: {long_build_state.get('latest_build_command')}")
-        if long_build_state.get("suggested_next"):
+        if long_build_state.get("suggested_next") and not long_build_state.get("recovery_decision"):
             lines.append(f"long_build_next: {long_build_state.get('suggested_next')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:

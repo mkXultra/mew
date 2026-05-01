@@ -513,6 +513,80 @@ class WorkSessionTests(unittest.TestCase):
         self.assertGreater(metrics["cacheable_prefix_chars"], 0)
         self.assertGreater(metrics["dynamic_chars"], 0)
 
+    def test_work_think_prompt_keeps_long_build_state_out_of_static_profile_metrics(self):
+        task = {
+            "id": 1,
+            "title": "Build source toolchain",
+            "description": (
+                "Under /tmp/FooCC/, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can compile and link a program by default."
+            ),
+            "status": "todo",
+            "kind": "coding",
+        }
+        base_session = {
+            "id": 7,
+            "task_id": task["id"],
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        session_with_state = {
+            **base_session,
+            "command_evidence": [
+                {
+                    "schema_version": 1,
+                    "id": 1,
+                    "ref": {"kind": "command_evidence", "id": 1},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+                    "cwd": "/tmp/FooCC",
+                    "env_summary": {"policy": "env_summary_v1", "items": []},
+                    "start_order": 1,
+                    "finish_order": 2,
+                    "started_at": "unknown",
+                    "finished_at": "unknown",
+                    "duration_seconds": None,
+                    "requested_timeout_seconds": None,
+                    "effective_timeout_seconds": None,
+                    "wall_budget_before_seconds": None,
+                    "wall_budget_after_seconds": None,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "terminal_success": True,
+                    "output_ref": None,
+                    "stdout_head": "",
+                    "stdout_tail": "FooCC 1.0\n",
+                    "stderr_head": "",
+                    "stderr_tail": "",
+                    "output_head": "",
+                    "output_tail": "FooCC 1.0\n",
+                    "truncated": False,
+                    "output_bytes": None,
+                    "source_tool_call_id": 41,
+                }
+            ],
+        }
+        from mew.work_loop import build_work_model_context, build_work_think_prompt_bundle
+
+        base_context = build_work_model_context({"tasks": [task]}, base_session, task, "2026-04-17T00:01:00Z")
+        state_context = build_work_model_context({"tasks": [task]}, session_with_state, task, "2026-04-17T00:01:00Z")
+        _base_prompt, base_metrics = build_work_think_prompt_bundle(base_context)
+        state_prompt, state_metrics = build_work_think_prompt_bundle(state_context)
+        base_by_id = {section["id"]: section for section in base_metrics["sections"]}
+        state_by_id = {section["id"]: section for section in state_metrics["sections"]}
+
+        self.assertEqual(state_by_id["long_dependency_profile"]["hash"], base_by_id["long_dependency_profile"]["hash"])
+        self.assertEqual(state_by_id["long_dependency_profile"]["chars"], base_by_id["long_dependency_profile"]["chars"])
+        self.assertIn("recovery_decision", state_prompt)
+        self.assertGreater(state_by_id["context_json"]["chars"], base_by_id["context_json"]["chars"])
+
     def test_work_think_prompt_section_metrics_include_cache_hints(self):
         task = {
             "id": 1,
@@ -4812,7 +4886,7 @@ class WorkSessionTests(unittest.TestCase):
             "id": 1,
             "task_id": 1,
             "status": "active",
-            "title": "Compile source toolchain",
+            "title": "Build Widget CLI",
             "goal": (
                 "Under /tmp/FooCC/, build the FooCC compiler from source. "
                 "Ensure that FooCC can be invoked through /tmp/FooCC/foocc."
@@ -4863,6 +4937,115 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(state["attempt_ids"], ["work_session:1:long_build:1:attempt:1"])
         self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/FooCC/foocc")
         self.assertEqual(state["current_failure"]["failure_class"], "artifact_missing_or_unproven")
+        self.assertEqual(state["recovery_decision"]["allowed_next_action"]["stage"], "target_build_or_artifact_proof")
+        text = format_work_session_resume(build_work_session_resume(session))
+        self.assertIn("long_build_recovery_decision: artifact_missing_or_unproven", text)
+        self.assertIn("long_build_recovery_next: run the shortest idempotent build/proof command", text)
+        self.assertNotIn("long_build_next:", text)
+
+    def test_work_session_resume_clears_stale_native_tool_timeout_after_artifact_proof(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Build Widget CLI",
+            "goal": (
+                "Under /tmp/WidgetCLI/, build the Widget CLI from source. "
+                "Ensure that Widget can be invoked through /tmp/WidgetCLI/widget."
+            ),
+            "updated_at": "now",
+            "command_evidence": [
+                {
+                    "schema_version": 1,
+                    "id": 1,
+                    "ref": {"kind": "command_evidence", "id": 1},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "cargo build --release",
+                    "cwd": "/tmp/WidgetCLI",
+                    "env_summary": {"policy": "env_summary_v1", "items": []},
+                    "start_order": 1,
+                    "finish_order": 2,
+                    "started_at": "unknown",
+                    "finished_at": "unknown",
+                    "duration_seconds": None,
+                    "requested_timeout_seconds": 600,
+                    "effective_timeout_seconds": 600,
+                    "wall_budget_before_seconds": 900,
+                    "wall_budget_after_seconds": 300,
+                    "status": "completed",
+                    "exit_code": None,
+                    "timed_out": True,
+                    "terminal_success": False,
+                    "output_ref": None,
+                    "stdout_head": "",
+                    "stdout_tail": "still building\n",
+                    "stderr_head": "",
+                    "stderr_tail": "",
+                    "output_head": "",
+                    "output_tail": "still building\n",
+                    "truncated": False,
+                    "output_bytes": None,
+                    "source_tool_call_id": 41,
+                },
+                {
+                    "schema_version": 1,
+                    "id": 2,
+                    "ref": {"kind": "command_evidence", "id": 2},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help",
+                    "cwd": "/tmp/WidgetCLI",
+                    "env_summary": {"policy": "env_summary_v1", "items": []},
+                    "start_order": 3,
+                    "finish_order": 4,
+                    "started_at": "unknown",
+                    "finished_at": "unknown",
+                    "duration_seconds": None,
+                    "requested_timeout_seconds": None,
+                    "effective_timeout_seconds": None,
+                    "wall_budget_before_seconds": 300,
+                    "wall_budget_after_seconds": 280,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "terminal_success": True,
+                    "output_ref": None,
+                    "stdout_head": "",
+                    "stdout_tail": "Widget usage\n",
+                    "stderr_head": "",
+                    "stderr_tail": "",
+                    "output_head": "",
+                    "output_tail": "Widget usage\n",
+                    "truncated": False,
+                    "output_bytes": None,
+                    "source_tool_call_id": 42,
+                },
+            ],
+            "tool_calls": [
+                {
+                    "id": 41,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "result": {"timed_out": True},
+                }
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        state = resume["long_build_state"]
+        text = format_work_session_resume(resume)
+
+        self.assertIsNone(state["current_failure"])
+        self.assertIsNone(state["recovery_decision"])
+        self.assertEqual(state["incomplete_reason"], "")
+        self.assertNotIn("long_build_current_failure: build_timeout", text)
+        self.assertNotIn("long_build_recovery_decision: build_timeout", text)
+        self.assertNotIn("long_build_incomplete_reason: tool_timeout", text)
+        self.assertNotIn("long_build_next:", text)
 
     def test_work_session_resume_flags_untargeted_full_make_for_specific_long_artifact(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
@@ -5726,9 +5909,16 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(budget_blocker["prebuilt_dependency_tool_call_id"], 2)
         self.assertEqual(budget_blocker["external_branch_tool_call_id"], 3)
         self.assertEqual(budget_blocker["source_tool_call_id"], 5)
+        self.assertEqual(resume["long_build_state"]["recovery_decision"]["failure_class"], "budget_reserve_violation")
+        self.assertEqual(resume["long_build_state"]["recovery_decision"]["decision"], "block_for_budget")
+        self.assertEqual(
+            resume["long_build_state"]["recovery_decision"]["allowed_next_action"]["stage"],
+            "budget_preserving_recovery",
+        )
 
         text = format_work_session_resume(resume)
         self.assertIn("long_build_strategy_blocker: compatibility_branch_budget_contract_missing", text)
+        self.assertIn("long_build_recovery_decision: budget_reserve_violation", text)
         self.assertIn("external/prebuilt compatibility branch", text)
         self.assertIn("one coherent branch", text)
         self.assertIn("reserve enough wall budget", text)
@@ -6983,11 +7173,17 @@ class WorkSessionTests(unittest.TestCase):
         codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("runtime_install_before_runtime_library_build", codes)
+        self.assertEqual(resume["long_build_state"]["recovery_decision"]["failure_class"], "runtime_install_before_build")
+        self.assertEqual(
+            resume["long_build_state"]["recovery_decision"]["allowed_next_action"]["stage"],
+            "runtime_build_then_install",
+        )
         text = format_work_session_resume(resume)
         self.assertIn(
             "long_build_strategy_blocker: runtime_install_before_runtime_library_build",
             text,
         )
+        self.assertIn("long_build_recovery_decision: runtime_install_before_build", text)
         self.assertIn("shortest explicit runtime-library target", text)
 
     def test_work_session_resume_clears_runtime_install_before_library_after_target_build(self):

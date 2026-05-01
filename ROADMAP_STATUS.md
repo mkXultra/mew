@@ -269,7 +269,15 @@ M6.24 resume condition:
   and `tool_call` ref compatibility may be dropped by flag-day cutover. Preserve
   safety invariants instead.
   Current selected chain:
-  `M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 3`.
+  `M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 4`.
+- M6.24 Long-Build Substrate Phase 3 is now implemented and reviewed:
+  `RecoveryDecision` is derived/rendered for the approved narrow subset, stale
+  build/runtime recovery failures are cleared by later successful proof, and
+  static prompt profile size stays stable while dynamic recovery state moves
+  through Context JSON. Validation passed with 1036 scoped tests plus codex-ultra
+  review PASS in session `019de40c-42a8-71c1-955b-07022e84f1ec`. Next selected
+  action is Phase 4 budget enforcement before measurement because the current
+  gap repeatedly involves wall/recovery budget behavior.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the

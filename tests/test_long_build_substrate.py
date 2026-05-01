@@ -458,6 +458,205 @@ def test_runtime_required_contract_rejects_custom_runtime_path_as_completion():
     assert {"id": "default_smoke", "required": True, "status": "blocked"} in state["stages"]
     assert state["status"] == "blocked"
     assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+    assert state["recovery_decision"]["failure_class"] == "runtime_default_path_unproven"
+    assert state["recovery_decision"]["allowed_next_action"]["stage"] == "default_runtime_smoke"
+    assert "custom_runtime_path_only_proof" in state["recovery_decision"]["prohibited_repeated_actions"]
+
+
+def test_recovery_decision_selects_artifact_proof_for_missing_non_compcert_cli():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:recover-cli:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(
+                    1,
+                    "cargo build --release",
+                    stdout="built helper crates\n",
+                ),
+                "parameters": {"command": "cargo build --release", "cwd": "/tmp/WidgetCLI"},
+                "result": {
+                    "command": "cargo build --release",
+                    "cwd": "/tmp/WidgetCLI",
+                    "exit_code": 0,
+                    "stdout": "built helper crates\n",
+                },
+            }
+        ]
+    )
+
+    state = reduce_long_build_state(contract, build_attempts_from_command_evidence(evidence, contract), evidence)
+
+    assert state["current_failure"]["failure_class"] == "artifact_missing_or_unproven"
+    assert state["recovery_decision_id"] == "work_session:recover-cli:long_build:1:recovery:1"
+    assert state["recovery_decision"]["allowed_next_action"]["stage"] == "target_build_or_artifact_proof"
+    assert state["recovery_decision"]["allowed_next_action"]["targets"] == ["/tmp/WidgetCLI/widget"]
+    assert state["suggested_next"] == ""
+
+
+def test_recovery_decision_selects_runtime_repair_for_non_compcert_toolchain_link_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:recover-runtime:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+            _command_call(
+                2,
+                "/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe",
+                stderr="/usr/bin/ld: cannot find -lfoocc-runtime\n",
+                exit_code=1,
+            ),
+        ]
+    )
+
+    state = reduce_long_build_state(contract, build_attempts_from_command_evidence(evidence, contract), evidence)
+
+    assert state["current_failure"]["failure_class"] == "runtime_link_failed"
+    assert state["recovery_decision"]["allowed_next_action"]["stage"] == "runtime_build_or_install"
+    assert "source_reacquisition" in state["recovery_decision"]["prohibited_repeated_actions"]
+    assert state["recovery_decision"]["budget"]["reserve_seconds"] == 60
+
+
+def test_later_default_smoke_success_clears_prior_runtime_link_recovery_decision():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:recover-runtime-clear:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+            _command_call(
+                2,
+                "/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe",
+                stderr="/usr/bin/ld: cannot find -lfoocc-runtime\n",
+                exit_code=1,
+            ),
+            _command_call(
+                3,
+                "/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe && /tmp/probe",
+                stdout="default smoke ok\n",
+            ),
+        ]
+    )
+
+    state = reduce_long_build_state(contract, build_attempts_from_command_evidence(evidence, contract), evidence)
+
+    assert state["status"] == "ready_for_final_proof"
+    assert state["current_failure"] is None
+    assert state["recovery_decision"] is None
+
+
+def test_later_artifact_proof_success_clears_prior_build_timeout_recovery_decision():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:recover-timeout-clear:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, "cargo build --release", timed_out=True, status="completed"),
+                "parameters": {"command": "cargo build --release", "cwd": "/tmp/WidgetCLI"},
+                "result": {
+                    "command": "cargo build --release",
+                    "cwd": "/tmp/WidgetCLI",
+                    "exit_code": None,
+                    "timed_out": True,
+                    "stdout": "still building\n",
+                },
+            },
+            {
+                **_command_call(2, "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"),
+                "parameters": {
+                    "command": "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help",
+                    "cwd": "/tmp/WidgetCLI",
+                },
+                "result": {
+                    "command": "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help",
+                    "cwd": "/tmp/WidgetCLI",
+                    "exit_code": 0,
+                    "stdout": "Widget usage\n",
+                },
+            },
+        ]
+    )
+
+    state = reduce_long_build_state(contract, build_attempts_from_command_evidence(evidence, contract), evidence)
+
+    assert state["status"] == "ready_for_final_proof"
+    assert state["current_failure"] is None
+    assert state["recovery_decision"] is None
+
+
+def test_recovery_decision_selects_target_surface_repair_for_non_compcert_runtime_target():
+    contract = build_long_build_contract(
+        "Under /tmp/BarVM, build the BarVM interpreter from source. "
+        "Ensure /tmp/BarVM/barvm can compile and link a program by default.",
+        ["/tmp/BarVM/barvm"],
+        contract_id="work_session:recover-target:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(
+                    1,
+                    "make runtime/libbarvm.a",
+                    stderr="make: *** No rule to make target 'runtime/libbarvm.a'. Stop.\n",
+                    exit_code=2,
+                ),
+                "parameters": {"command": "make runtime/libbarvm.a", "cwd": "/tmp/BarVM"},
+                "result": {
+                    "command": "make runtime/libbarvm.a",
+                    "cwd": "/tmp/BarVM",
+                    "exit_code": 2,
+                    "stderr": "make: *** No rule to make target 'runtime/libbarvm.a'. Stop.\n",
+                },
+            }
+        ]
+    )
+
+    state = reduce_long_build_state(contract, build_attempts_from_command_evidence(evidence, contract), evidence)
+
+    assert state["current_failure"]["failure_class"] == "build_system_target_surface_invalid"
+    assert state["recovery_decision"]["allowed_next_action"]["stage"] == "build_system_target_surface_probe"
+    assert "retry_invalid_parent_target_path" in state["recovery_decision"]["prohibited_repeated_actions"]
+
+
+def test_recovery_decision_selects_bounded_resume_for_build_timeout():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:recover-timeout:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "make -j2 foocc",
+                stdout="still building\n",
+                timed_out=True,
+                status="completed",
+            )
+        ]
+    )
+
+    state = reduce_long_build_state(contract, build_attempts_from_command_evidence(evidence, contract), evidence)
+
+    assert state["current_failure"]["failure_class"] == "build_timeout"
+    assert state["recovery_decision"]["allowed_next_action"]["stage"] == "continue_or_resume_build"
+    assert "repeat_same_timeout_without_budget_change" in state["recovery_decision"]["prohibited_repeated_actions"]
 
 
 def test_runtime_required_contract_accepts_default_compile_link_smoke():
