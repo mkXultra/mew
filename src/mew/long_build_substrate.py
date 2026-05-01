@@ -65,6 +65,9 @@ _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE = re.compile(
     r"^matched_authority_url=https?://|^url=https?://|^CHOSEN https?://)",
     re.I | re.M,
 )
+_AUTHORITY_PAGE_OUTPUT_RE = re.compile(r"^authority_page_(?:saved|fetched)=https?://\S+", re.I | re.M)
+_ARCHIVE_HASH_OUTPUT_RE = re.compile(r"^archive_sha256=[0-9a-f]{32,128}\b", re.I | re.M)
+_ARCHIVE_ROOT_OUTPUT_RE = re.compile(r"^archive_root=\S+", re.I | re.M)
 _PYTHON_SOURCE_ARCHIVE_OUTPUT_RE = re.compile(
     r"^ARCHIVE\s+\S+\s+bytes=\d+\s+sha256=[0-9a-f]{32,128}\b",
     re.I | re.M,
@@ -807,6 +810,8 @@ def _diagnostics(evidence: CommandEvidence) -> list[dict]:
 def _source_authority_signal(evidence: CommandEvidence) -> bool:
     text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    if _saved_authority_page_archive_signal(evidence, output_text):
+        return True
     if _command_uses_direct_source_acquisition_tool(evidence.command):
         has_direct_source_authority = bool(_DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text))
         direct_authority_urls = _direct_source_authority_output_urls(output_text)
@@ -842,11 +847,40 @@ def _source_authority_signal(evidence: CommandEvidence) -> bool:
 def _source_authority_excerpt(evidence: CommandEvidence) -> str:
     text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    if _AUTHORITY_PAGE_OUTPUT_RE.search(output_text):
+        return _first_matching_line(output_text, _AUTHORITY_PAGE_OUTPUT_RE.pattern)
     if _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text):
         return _first_matching_line(output_text, _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.pattern)
     if _SOURCE_AUTHORITY_RE.search(text):
         return _first_matching_line(text, _SOURCE_AUTHORITY_RE.pattern)
     return _first_matching_line(output_text, _PACKAGE_METADATA_OUTPUT_RE.pattern)
+
+
+def _saved_authority_page_archive_signal(evidence: CommandEvidence, output_text: str) -> bool:
+    if not (
+        _AUTHORITY_PAGE_OUTPUT_RE.search(output_text)
+        and _ARCHIVE_HASH_OUTPUT_RE.search(output_text)
+        and _ARCHIVE_ROOT_OUTPUT_RE.search(output_text)
+    ):
+        return False
+    command = str(evidence.command or "")
+    if not (_command_enables_errexit(command) and not _command_disables_errexit(command)):
+        return False
+    if _command_masks_remote_source_fetch_failure(command):
+        return False
+    if _command_uses_python_remote_source_acquisition_tool(command):
+        return False
+    if _command_has_authority_page_readback(command):
+        return True
+    return bool(_command_has_strict_non_python_remote_source_acquisition(command))
+
+
+def _command_has_authority_page_readback(command: object) -> bool:
+    command_text = _shell_logical_command_text(command)
+    return bool(
+        re.search(r"\bgrep\b[^\n;]*(?:release|download|version|v?[0-9]+(?:\.[0-9]+)+)[^\n;]*\.(?:html|txt|md)\b", command_text, re.I)
+        or re.search(r"\bgrep\b[^\n;]*\.(?:html|txt|md)\b[^\n;]*(?:release|download|version|v?[0-9]+(?:\.[0-9]+)+)", command_text, re.I)
+    )
 
 
 def _command_has_assertion_only_source_authority_segment(command: object) -> bool:
@@ -1040,16 +1074,57 @@ def _python_remote_source_urls(code: str) -> set[str]:
             "requests.head",
             "httpx.get",
             "httpx.head",
+            "urlopen",
+            "urlretrieve",
+            "get",
+            "head",
         }:
             continue
         for arg in node.args[:1]:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value.startswith(("http://", "https://")):
                 urls.add(arg.value.rstrip("'\""))
+        for keyword in node.keywords:
+            if keyword.arg in {None, "url"}:
+                value = keyword.value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value.startswith(("http://", "https://")):
+                    urls.add(value.value.rstrip("'\""))
     return urls
 
 
 def _command_uses_python_remote_source_acquisition_tool(command: object) -> bool:
-    return False
+    return any(
+        _python_remote_source_urls(code)
+        or _python_code_has_remote_fetch_with_http_context(code)
+        or _python_code_has_remote_source_call(code)
+        for code in _python_command_bodies(command)
+    )
+
+
+def _python_command_bodies(command: object) -> list[str]:
+    return [*_python_heredoc_bodies(command), *_python_inline_bodies(command)]
+
+
+def _python_inline_bodies(command: object) -> list[str]:
+    bodies: list[str] = []
+    for segment in split_unquoted_shell_command_segments(command):
+        try:
+            parts = shlex.split(str(segment or ""))
+        except ValueError:
+            parts = str(segment or "").split()
+        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+        if not re.fullmatch(r"python(?:3(?:\.\d+)?)?", token):
+            continue
+        index = 1
+        while index < len(parts):
+            part = str(parts[index] or "")
+            if part == "-c" and index + 1 < len(parts):
+                bodies.append(str(parts[index + 1] or ""))
+                break
+            if part.startswith("-c") and len(part) > 2:
+                bodies.append(part[2:])
+                break
+            index += 1
+    return bodies
 
 
 def _command_has_plain_python_heredoc_source(command: object) -> bool:
@@ -1059,7 +1134,7 @@ def _command_has_plain_python_heredoc_source(command: object) -> bool:
             continue
         if re.match(r"^set\b", stripped):
             continue
-        return bool(re.match(r"^python3?\b[^\n|&;]*<<[^\n|&;]*$", stripped))
+        return bool(re.match(r"^python(?:3(?:\.\d+)?)?\b[^\n|&;]*<<[^\n|&;]*$", stripped))
     return False
 
 
@@ -1077,7 +1152,7 @@ def _python_heredoc_bodies(command: object) -> list[str]:
     while index < len(lines):
         line = lines[index]
         match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
-        if not match or not re.search(r"\bpython3?\b", line):
+        if not match or not re.search(r"\bpython(?:3(?:\.\d+)?)?\b", line):
             index += 1
             continue
         delimiter = match.group(1)
@@ -1257,6 +1332,32 @@ def _python_code_has_remote_source_call(code: str) -> bool:
     visitor = RemoteSourceCallVisitor()
     visitor.visit(tree)
     return bool(visitor.found and visitor.archive_success_after_remote)
+
+
+def _python_code_has_remote_fetch_with_http_context(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    remote_names = {
+        "urllib.request.urlopen",
+        "urllib.request.urlretrieve",
+        "requests.get",
+        "requests.head",
+        "httpx.get",
+        "httpx.head",
+        "urlopen",
+        "urlretrieve",
+        "get",
+        "head",
+    }
+    has_http_literal = any(
+        isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith(("http://", "https://"))
+        for node in ast.walk(tree)
+    )
+    if not has_http_literal:
+        return False
+    return any(isinstance(node, ast.Call) and _python_call_name(node.func) in remote_names for node in ast.walk(tree))
 
 
 def _python_code_has_ambiguous_source_flow(tree: ast.AST) -> bool:
