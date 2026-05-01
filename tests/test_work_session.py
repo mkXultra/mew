@@ -498,6 +498,9 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("bounded run_command timeout", prompt)
         self.assertIn("DynamicFailureEvidence", prompt)
         self.assertIn("Context JSON:", prompt)
+        context_suffix = prompt.split("Context JSON:\n", 1)[1]
+        self.assertNotIn("[/section:context_json]", context_suffix)
+        self.assertEqual(json.loads(context_suffix)["work_session"]["id"], 7)
         self.assertIn("long_dependency_profile", section_ids)
         self.assertIn("runtime_link_proof", section_ids)
         self.assertIn("dynamic_failure_evidence", section_ids)
@@ -39576,6 +39579,11 @@ class WorkSessionTests(unittest.TestCase):
         close_session.assert_not_called()
         self.assertFalse(result["task_done"])
         self.assertIn("acceptance constraints unchecked", result["finished_note"])
+        self.assertEqual(result["finish_gate"]["decision"], "block_continue")
+        self.assertEqual(result["finish_blockers"][0]["code"], "acceptance_constraints_unchecked")
+        self.assertIn("deterministic done gate", result["continuation_prompt"])
+        self.assertEqual(session["notes"][-1]["source"], "finish_gate")
+        self.assertIn("deterministic done gate", session["notes"][-1]["text"])
         self.assertIn("Work session finish blocked", task["notes"])
 
     def test_work_finish_blocks_model_inference_handoff_without_task_done_when_equivalence_unknown(self):
@@ -39817,6 +39825,7 @@ class WorkSessionTests(unittest.TestCase):
                     "tool": "run_command",
                     "status": "completed",
                     "result": {
+                        "exit_code": 0,
                         "stdout": "Enumerated all legal moves; mates ['e2e4', 'g2g4']; no other mate moves."
                     },
                 },
@@ -39941,6 +39950,11 @@ class WorkSessionTests(unittest.TestCase):
             )
         )
         self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))
+        self.assertFalse(
+            work_finish_blocker_allows_continue(
+                "finish blocked: pending approval, acceptance constraints unchecked"
+            )
+        )
 
     def test_work_finish_blocks_numeric_artifact_without_independent_cross_check(self):
         from mew.commands import apply_work_control_action
@@ -40217,7 +40231,13 @@ class WorkSessionTests(unittest.TestCase):
             "goal": description,
             "tool_calls": [
                 {"id": 1, "tool": "read_file", "status": "completed", "result": {"text": "expected"}},
-                {"id": 2, "tool": "run_command", "status": "completed", "parameters": {"command": "cmp output.txt expected.json"}},
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "cmp output.txt expected.json"},
+                    "result": {"exit_code": 0},
+                },
             ],
         }
         task = {"id": 15, "title": "Compare output", "description": description, "status": "ready", "notes": ""}
@@ -40306,7 +40326,7 @@ class WorkSessionTests(unittest.TestCase):
                     "tool": "run_command",
                     "status": "completed",
                     "parameters": {"command": "validator --threshold 50 --format json output.txt"},
-                    "result": {"stdout": "validator ok"},
+                    "result": {"exit_code": 0, "stdout": "validator ok"},
                 }
             ],
         }
@@ -40355,7 +40375,7 @@ class WorkSessionTests(unittest.TestCase):
                     "parameters": {
                         "command": "oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 ACTGACTGACTGACTG"
                     },
-                    "result": {"stdout": "oligotm 61.02"},
+                    "result": {"exit_code": 0, "stdout": "oligotm 61.02"},
                 },
                 {"id": 2, "tool": "write_file", "status": "completed"},
             ],

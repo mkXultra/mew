@@ -3,6 +3,11 @@ from __future__ import annotations
 import re
 import shlex
 
+from .acceptance_evidence import (
+    long_dependency_artifact_proven_by_call,
+    tool_call_evidence_ref,
+    tool_call_terminal_success,
+)
 from .tasks import clip_output
 
 
@@ -767,10 +772,39 @@ def is_edit_scope_constraint(text: object) -> bool:
     return any(marker in lowered for marker in _EDIT_SCOPE_MARKERS)
 
 
-def coerce_acceptance_checks(value: object, *, limit: int = 8) -> list[dict[str, str]]:
+def _coerce_evidence_refs(value: object, *, limit: int = 8) -> list[dict]:
     if not isinstance(value, list):
         return []
-    checks: list[dict[str, str]] = []
+    refs: list[dict] = []
+    for item in value:
+        if isinstance(item, int):
+            ref = {"kind": "tool_call", "id": item}
+        elif isinstance(item, str):
+            ids = _evidence_tool_ids(item)
+            if not ids:
+                continue
+            ref = {"kind": "tool_call", "id": ids[0]}
+        elif isinstance(item, dict):
+            kind = str(item.get("kind") or item.get("type") or "tool_call").strip() or "tool_call"
+            raw_id = item.get("id", item.get("tool_call_id"))
+            try:
+                ref_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            ref = {"kind": kind, "id": ref_id}
+        else:
+            continue
+        if ref not in refs:
+            refs.append(ref)
+        if len(refs) >= limit:
+            break
+    return refs
+
+
+def coerce_acceptance_checks(value: object, *, limit: int = 8) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    checks: list[dict] = []
     for item in value:
         if isinstance(item, str):
             check = {
@@ -787,6 +821,19 @@ def coerce_acceptance_checks(value: object, *, limit: int = 8) -> list[dict[str,
                 "status": _clean_constraint_text(item.get("status") or item.get("result"), limit=80),
                 "evidence": _clean_constraint_text(item.get("evidence") or item.get("proof"), limit=240),
             }
+            evidence_refs = _coerce_evidence_refs(item.get("evidence_refs") or item.get("evidence_ref"))
+            if evidence_refs:
+                check["evidence_refs"] = evidence_refs
+                ref_text = " ".join(
+                    f"tool #{ref.get('id')}"
+                    for ref in evidence_refs
+                    if str(ref.get("kind") or "tool_call") == "tool_call" and ref.get("id") is not None
+                )
+                if ref_text and ref_text not in check["evidence"].casefold():
+                    check["evidence"] = _clean_constraint_text(
+                        f"Evidence refs: {ref_text}. {check['evidence']}".strip(),
+                        limit=240,
+                    )
         else:
             continue
         if not check["constraint"] and not check["status"] and not check["evidence"]:
@@ -824,6 +871,18 @@ def _latest_completed_write_tool_id(session: object) -> int | None:
 def _tool_call_by_id(session: object, tool_id: int) -> dict | None:
     for call in _completed_tool_calls(session):
         if call.get("id") == tool_id:
+            return call
+    return None
+
+
+def _any_tool_call_by_id(session: object, tool_id: int) -> dict | None:
+    if not isinstance(session, dict):
+        return None
+    calls = session.get("tool_calls")
+    if not isinstance(calls, list):
+        return None
+    for call in calls:
+        if isinstance(call, dict) and call.get("id") == tool_id:
             return call
     return None
 
@@ -1198,17 +1257,23 @@ def _long_dependency_artifact_proved_by_text(text: object, artifact: str) -> boo
 
 
 def _has_long_dependency_artifact_evidence(evidence: object, session: object, artifact: str) -> bool:
-    if not _long_dependency_artifact_proved_by_text(evidence, artifact):
+    if isinstance(evidence, dict):
+        evidence_text = "\n".join(
+            str(evidence.get(key) or "") for key in ("constraint", "evidence", "proof") if evidence.get(key)
+        )
+        tool_ids = [int(ref.get("id")) for ref in _check_evidence_refs(evidence) if ref.get("id") is not None]
+    else:
+        evidence_text = str(evidence or "")
+        tool_ids = _evidence_tool_ids(evidence)
+    text_proves_artifact = _long_dependency_artifact_proved_by_text(evidence_text, artifact)
+    text_names_artifact = str(artifact or "").casefold() in evidence_text.casefold()
+    if not text_proves_artifact and not text_names_artifact:
         return False
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for tool_id in tool_ids:
+        call = _any_tool_call_by_id(session, tool_id)
         if not call or call.get("tool") not in {"run_command", "run_tests"}:
             continue
-        result_text = _tool_call_result_text(call)
-        if not result_text:
-            continue
-        command_and_result = "\n".join(part for part in (_tool_call_external_command_text(call), result_text) if part)
-        if _long_dependency_artifact_proved_by_text(command_and_result, artifact):
+        if long_dependency_artifact_proven_by_call(call, artifact):
             return True
     return False
 
@@ -1235,7 +1300,7 @@ def _long_dependency_build_artifact_blocker(
     missing = [
         artifact
         for artifact in artifacts
-        if not any(_has_long_dependency_artifact_evidence(check.get("evidence"), session, artifact) for check in verified_checks)
+        if not any(_has_long_dependency_artifact_evidence(check, session, artifact) for check in verified_checks)
     ]
     if not missing:
         return ""
@@ -1591,6 +1656,82 @@ def _evidence_tool_ids(text: object) -> list[int]:
         if tool_id not in ids:
             ids.append(tool_id)
     return ids
+
+
+def _check_evidence_refs(check: object) -> list[dict]:
+    if not isinstance(check, dict):
+        return []
+    refs = _coerce_evidence_refs(check.get("evidence_refs") or check.get("evidence_ref"))
+    for tool_id in _evidence_tool_ids(check.get("evidence")):
+        ref = {"kind": "tool_call", "id": tool_id}
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def _evidence_ref_findings_for_checks(checks: list[dict], session: object) -> dict:
+    if not isinstance(session, dict):
+        return {"blocker": "", "invalid_refs": []}
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if not verified_checks:
+        return {"blocker": "", "invalid_refs": []}
+    missing: list[str] = []
+    invalid: list[str] = []
+    invalid_refs: list[dict] = []
+    for check in verified_checks:
+        refs = _check_evidence_refs(check)
+        if not refs:
+            missing.append(_clean_constraint_text(check.get("constraint"), limit=80) or "unnamed acceptance check")
+            continue
+        for ref in refs:
+            kind = str(ref.get("kind") or "tool_call")
+            ref_id = ref.get("id")
+            if kind != "tool_call":
+                invalid.append(f"{kind}#{ref_id} unsupported")
+                invalid_refs.append({"kind": kind, "id": ref_id, "reason": "unsupported_evidence_kind"})
+                continue
+            call = _any_tool_call_by_id(session, ref_id)
+            if not call:
+                invalid.append(f"tool_call#{ref_id} missing")
+                invalid_refs.append({"kind": "tool_call", "id": ref_id, "reason": "missing"})
+                continue
+            if not tool_call_terminal_success(call):
+                evidence = tool_call_evidence_ref(call)
+                invalid.append(
+                    "tool_call#"
+                    f"{ref_id} not terminal-success "
+                    f"(status={evidence.get('status')}, exit={evidence.get('exit_code')}, "
+                    f"timed_out={evidence.get('timed_out')})"
+                )
+                invalid_refs.append(
+                    {
+                        "kind": "tool_call",
+                        "id": ref_id,
+                        "reason": "not_terminal_success",
+                        "status": evidence.get("status"),
+                        "exit_code": evidence.get("exit_code"),
+                        "timed_out": evidence.get("timed_out"),
+                    }
+                )
+    if missing:
+        return {
+            "blocker": (
+                "acceptance evidence refs missing: verified acceptance checks must cite "
+                f"terminal tool evidence such as tool #N ({'; '.join(missing[:3])})"
+            ),
+            "invalid_refs": invalid_refs,
+        }
+    if invalid:
+        return {"blocker": "acceptance evidence refs invalid: " + "; ".join(invalid[:3]), "invalid_refs": invalid_refs}
+    return {"blocker": "", "invalid_refs": []}
+
+
+def _evidence_ref_blocker_for_checks(checks: list[dict], session: object) -> str:
+    return str(_evidence_ref_findings_for_checks(checks, session).get("blocker") or "")
 
 
 def _has_post_write_grounding_evidence(evidence: object, session: object) -> bool:
@@ -2408,3 +2549,105 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
         "acceptance constraints unchecked: finish with task_done=true must include "
         "acceptance_checks with verified status and direct evidence for every stated constraint"
     )
+
+
+def finish_blocker_code(blocker: object) -> str:
+    text = str(blocker or "").casefold()
+    if "pending approval" in text:
+        return "pending_approval"
+    if "unverified source-edit verification" in text:
+        return "unverified_source_edit"
+    if "same-surface audit" in text:
+        return "same_surface_audit_required"
+    if "acceptance evidence refs missing" in text:
+        return "acceptance_evidence_refs_missing"
+    if "acceptance evidence refs invalid" in text:
+        return "acceptance_evidence_refs_invalid"
+    if "acceptance constraints unchecked" in text:
+        return "acceptance_constraints_unchecked"
+    if "long dependency/toolchain final artifact evidence" in text:
+        return "long_dependency_final_artifact_evidence"
+    if "runtime final verifier artifact evidence" in text:
+        return "runtime_final_verifier_artifact_evidence"
+    if "runtime artifact freshness unchecked" in text:
+        return "runtime_artifact_freshness_unchecked"
+    if "runtime visual artifact quality evidence" in text:
+        return "runtime_visual_artifact_quality_evidence"
+    if "numeric artifact quality evidence" in text:
+        return "numeric_artifact_quality_evidence"
+    if "edit-scope acceptance evidence" in text:
+        return "edit_scope_acceptance_evidence"
+    if "all-valid answer completeness evidence" in text:
+        return "all_valid_answer_completeness_evidence"
+    if "external ground-truth" in text:
+        return "external_ground_truth_evidence"
+    if "exact command" in text:
+        return "exact_command_evidence"
+    if "query-only hidden-model" in text:
+        return "query_only_hidden_model_evidence"
+    if "model inference output quality evidence" in text:
+        return "model_inference_output_quality_evidence"
+    if "model inference oracle provenance" in text:
+        return "model_inference_oracle_provenance"
+    return "finish_blocked"
+
+
+def finish_continuation_prompt(blockers: list[object]) -> str:
+    reasons = [str(blocker or "").strip() for blocker in blockers if str(blocker or "").strip()]
+    if not reasons:
+        return ""
+    bullets = "\n".join(f"- {reason}" for reason in reasons[:8])
+    return (
+        "Finish was blocked by the deterministic done gate. Continue the same task; "
+        "do not mark task_done=true until each blocker is repaired with terminal tool evidence.\n"
+        f"{bullets}\n"
+        "Next action: run the smallest read, diff, verifier, or artifact-smoke command that directly proves "
+        "the missing acceptance item, then cite its tool id in acceptance_checks evidence_refs or evidence text."
+    )
+
+
+def acceptance_done_gate_decision(
+    task_description: object,
+    action: object,
+    *,
+    session: object = None,
+) -> dict:
+    action = action if isinstance(action, dict) else {}
+    if not action.get("task_done"):
+        return {
+            "decision": "allow_complete",
+            "reason": "",
+            "blockers": [],
+            "invalid_evidence_refs": [],
+            "continuation_prompt": "",
+        }
+    blockers: list[str] = []
+    acceptance_blocker = acceptance_finish_blocker(task_description, action, session=session)
+    if acceptance_blocker:
+        blockers.append(acceptance_blocker)
+    checks = coerce_acceptance_checks(action.get("acceptance_checks"))
+    evidence_ref_findings = _evidence_ref_findings_for_checks(checks, session)
+    evidence_ref_blocker = str(evidence_ref_findings.get("blocker") or "")
+    if evidence_ref_blocker:
+        blockers.append(evidence_ref_blocker)
+    if not blockers:
+        return {
+            "decision": "allow_complete",
+            "reason": "",
+            "blockers": [],
+            "invalid_evidence_refs": [],
+            "continuation_prompt": "",
+        }
+    return {
+        "decision": "block_continue",
+        "reason": blockers[0],
+        "blockers": [
+            {
+                "code": finish_blocker_code(blocker),
+                "message": blocker,
+            }
+            for blocker in blockers
+        ],
+        "invalid_evidence_refs": [dict(item) for item in evidence_ref_findings.get("invalid_refs") or []],
+        "continuation_prompt": finish_continuation_prompt(blockers),
+    }

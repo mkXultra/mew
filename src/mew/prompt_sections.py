@@ -48,6 +48,24 @@ def prompt_section_cache_hint(section: PromptSection, *, in_cacheable_prefix: bo
 def render_prompt_sections(sections: list[PromptSection]) -> str:
     rendered = []
     for section in sections:
+        if section.id == "context_json" and section.content.startswith("Context JSON:\n"):
+            # Keep Context JSON as the final raw suffix so older tests/tools can
+            # still parse prompt.split("Context JSON:\n", 1)[1] as JSON.
+            rendered.append(
+                "\n".join(
+                    [
+                        (
+                            f"[section:{section.id} version={section.version} "
+                            f"stability={section.stability} cache_policy={section.cache_policy} "
+                            f"hash={prompt_section_hash(section.content)}]"
+                        ),
+                        section.title,
+                        f"[/section:{section.id}]",
+                        section.content.rstrip(),
+                    ]
+                )
+            )
+            continue
         rendered.append(
             "\n".join(
                 [

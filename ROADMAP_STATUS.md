@@ -193,8 +193,16 @@ M6.24 resume condition:
   is tracked by section id, hash, stability, cache policy, and cache hint.
   Provider-specific Codex / Claude / OpenAI cache-control transport is
   intentionally deferred to M6.25 and must stay off the M6.24 default scoring
-  path. Current selected chain:
-  `M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> prompt_section_registry_v1 recorded -> long_dependency_compatibility_branch_budget_contract proof_5 -> compile-compcert`.
+  path. On 2026-05-01, acceptance-pattern audits from Codex, Claude Code, and
+  mew showed that the current head should prioritize structural done-gate
+  correctness over preserving the already-changed prompt-section scoring head.
+  Acceptance substrate v1 is now implemented: shared terminal evidence helpers,
+  shared long-dependency final-artifact proof authority between finish
+  acceptance and resume state, structured finish blockers, and blocked
+  continuation prompts. Focused acceptance tests, full `tests/test_work_session.py`,
+  and ruff passed.
+  Current selected chain:
+  `M6.24 -> acceptance_substrate_v1 -> compile-compcert speed_1 -> proof_5 only if speed_1 is viable`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -2346,15 +2354,18 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.24 improvement_phase -> compile-compcert same-shape proof_5 -> decide close/next repair from decision ledger`
+`M6.24 improvement_phase -> acceptance_substrate_v1 -> compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
 
 Acceptable near-term work:
 
 - keep `mew work --oneshot` as the implementation path and preserve the
   no-Terminal-Bench-specific-solver constraint
-- run the resource-normalized `compile-compcert` proof_5 shape recorded in
-  `docs/M6_24_DECISION_LEDGER.md`: sequential `-k 5 -n 1` with refreshable
-  `~/.codex/auth.json`
+- finish and validate acceptance substrate v1: shared terminal evidence helpers,
+  shared long-dependency final-artifact proof authority for acceptance and
+  resume state, structured finish blockers, and blocked-continuation prompts
+- after that structural repair, run one same-shape `compile-compcert` speed_1
+  with refreshable `~/.codex/auth.json`; escalate to sequential proof_5 only
+  after speed_1 shows the head is viable
 - if proof_5 misses the frozen `5/5` close target, read
   `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before selecting any next
   repair, and update `proof-artifacts/m6_24_gap_ledger.jsonl`

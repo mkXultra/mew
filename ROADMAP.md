@@ -1362,6 +1362,11 @@ Target:
 - preserve the generic arbitrary-workspace contract throughout the campaign;
   the same work-session path should be usable for normal repositories and
   Terminal-Bench task directories
+- when reference audits show that a scoring head already changed and finish
+  semantics are the likely weak substrate, prefer a generic acceptance/done
+  gate repair over preserving stale proof comparability: finish is a candidate,
+  deterministic evidence gates own completion, and blocked finishes continue
+  the same lane with structured repair guidance
 - use a batch-level controller:
   - batch gap `<= 10 percentage points`: classify gaps and continue measurement
   - batch gap `> 10` and `<= 20 percentage points`: record gap classes; continue
