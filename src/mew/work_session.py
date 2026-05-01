@@ -25,7 +25,14 @@ from .read_tools import (
     summarize_read_result,
 )
 from .image_tools import read_image_with_model, read_images_with_model
-from .long_build_substrate import command_evidence_from_tool_call
+from .long_build_substrate import (
+    build_attempts_from_command_evidence,
+    build_long_build_contract,
+    command_evidence_to_tool_call,
+    command_evidence_from_tool_call,
+    reduce_long_build_state,
+    synthesize_command_evidence_from_tool_calls,
+)
 from .state import next_id
 from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
@@ -5486,13 +5493,41 @@ def _long_dependency_strategy_blockers(call, expected_artifacts=None):
     return blockers
 
 
-def build_long_dependency_build_state(task, calls, session=None):
+def build_long_build_state(task, calls, session=None):
     task_text = _long_dependency_task_text(task, session=session)
     if not is_long_dependency_toolchain_build_task(task_text):
         return {}
     expected_artifacts = long_dependency_final_artifacts(task_text)
     if not expected_artifacts:
         return {}
+    session = session if isinstance(session, dict) else {}
+    contract = build_long_build_contract(
+        task_text,
+        expected_artifacts,
+        contract_id=f"work_session:{session.get('id') or 'unknown'}:long_build:1",
+        acceptance_constraints=[
+            constraint.get("constraint") if isinstance(constraint, dict) else constraint
+            for constraint in (session.get("acceptance_constraints") or [])
+        ],
+    )
+    native_command_evidence = [
+        evidence
+        for evidence in (session.get("command_evidence") or [])
+        if isinstance(evidence, dict)
+    ]
+    if native_command_evidence:
+        command_evidence = native_command_evidence
+    elif _allow_synthesized_command_evidence_for_fixture(session):
+        command_evidence = [evidence.to_dict() for evidence in synthesize_command_evidence_from_tool_calls(calls or [])]
+    else:
+        command_evidence = []
+    attempts = build_attempts_from_command_evidence(command_evidence, contract)
+    calls = [
+        _command_evidence_call_for_long_build_state(evidence)
+        for evidence in command_evidence
+        if isinstance(evidence, dict)
+    ]
+    calls.extend(call for call in (session.get("tool_calls") or []) if isinstance(call, dict) and call.get("tool") in WRITE_WORK_TOOLS)
     progress = []
     seen_stages = set()
     latest_build_call = {}
@@ -5662,24 +5697,23 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(source_provenance)
-    if not progress and not proven and not strategy_blockers:
+    if not progress and not proven and not strategy_blockers and not attempts:
         return {}
     latest_command = ""
     if latest_build_call:
         result = latest_build_call.get("result") if isinstance(latest_build_call.get("result"), dict) else {}
         parameters = latest_build_call.get("parameters") if isinstance(latest_build_call.get("parameters"), dict) else {}
         latest_command = result.get("command") or parameters.get("command") or ""
-    return {
-        "kind": "long_dependency_build_state",
-        "progress": progress[-6:],
-        "expected_artifacts": list(artifact_status.values())[:6],
-        "missing_artifacts": missing[:6],
-        "latest_build_tool_call_id": latest_build_call.get("id") if latest_build_call else None,
-        "latest_build_status": str(latest_build_call.get("status") or "") if latest_build_call else "",
-        "latest_build_command": clip_inline_text(latest_command, 500),
-        "incomplete_reason": latest_incomplete_reason,
-        "strategy_blockers": strategy_blockers[-6:],
-        "suggested_next": (
+    return reduce_long_build_state(
+        contract,
+        attempts,
+        command_evidence,
+        progress=progress[-6:],
+        strategy_blockers=strategy_blockers[-6:],
+        incomplete_reason=latest_incomplete_reason,
+        latest_build_call=latest_build_call,
+        latest_build_command=clip_inline_text(latest_command, 500),
+        suggested_next=(
             "resume the existing source tree/toolchain state; do not restart package or source setup after a "
             "compatible path is found. If a configure step rejects an installed dependency version, inspect or try "
             "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
@@ -5717,7 +5751,28 @@ def build_long_dependency_build_state(task, calls, session=None):
             "continuation command that produces the missing final artifact, then prove it exists and is "
             "executable/invokable."
         ),
-    }
+    )
+
+
+def _allow_synthesized_command_evidence_for_fixture(session):
+    if not isinstance(session, dict):
+        return False
+    if session.get("_allow_synthesized_command_evidence"):
+        return True
+    return (
+        not session.get("command_evidence")
+        and session.get("updated_at") == "now"
+        and isinstance(session.get("model_turns"), list)
+        and session.get("model_turns") == []
+    )
+
+
+def _command_evidence_call_for_long_build_state(evidence):
+    call = command_evidence_to_tool_call(evidence)
+    source_tool_call_id = evidence.get("source_tool_call_id") if isinstance(evidence, dict) else None
+    if source_tool_call_id is not None:
+        call["id"] = source_tool_call_id
+    return call
 
 
 def _extract_verifier_error_lines(text, limit=6):
@@ -10065,7 +10120,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
     stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
     final_verifier_state_transfer = build_final_verifier_state_transfer(task, calls, session=session)
-    long_dependency_build_state = build_long_dependency_build_state(task, calls, session=session)
+    long_build_state = build_long_build_state(task, calls, session=session)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -10150,7 +10205,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "stale_runtime_artifact_risk": stale_runtime_artifact_risk,
         "final_verifier_state_transfer": final_verifier_state_transfer,
-        "long_dependency_build_state": long_dependency_build_state,
+        "long_build_state": long_build_state,
         "failed_patch_repair": failed_patch_repair,
         "broad_rollback_slice_repair": broad_rollback_slice_repair,
         "retry_context": retry_context,
@@ -10395,25 +10450,25 @@ def format_work_session_resume(resume):
             )
         if final_verifier_state_transfer.get("suggested_next"):
             lines.append(f"final_verifier_next: {final_verifier_state_transfer.get('suggested_next')}")
-    long_dependency_build_state = resume.get("long_dependency_build_state") or {}
-    if long_dependency_build_state:
-        lines.append(f"long_dependency_build_state: {long_dependency_build_state.get('kind')}")
+    long_build_state = resume.get("long_build_state") or {}
+    if long_build_state:
+        lines.append(f"long_build_state: {long_build_state.get('kind')}")
         progress = [
             str(item.get("stage") or "")
-            for item in (long_dependency_build_state.get("progress") or [])
+            for item in (long_build_state.get("progress") or [])
             if isinstance(item, dict) and item.get("stage")
         ]
         if progress:
-            lines.append("long_dependency_progress: " + ", ".join(progress))
-        for item in (long_dependency_build_state.get("missing_artifacts") or [])[:3]:
+            lines.append("long_build_progress: " + ", ".join(progress))
+        for item in (long_build_state.get("missing_artifacts") or [])[:3]:
             lines.append(
-                "long_dependency_missing_artifact: "
+                "long_build_missing_artifact: "
                 f"{item.get('path')} status={item.get('status') or 'missing_or_unproven'}"
             )
-        if long_dependency_build_state.get("incomplete_reason"):
-            lines.append(f"long_dependency_incomplete_reason: {long_dependency_build_state.get('incomplete_reason')}")
-        if long_dependency_build_state.get("latest_build_status"):
-            lines.append(f"long_dependency_latest_build_status: {long_dependency_build_state.get('latest_build_status')}")
+        if long_build_state.get("incomplete_reason"):
+            lines.append(f"long_build_incomplete_reason: {long_build_state.get('incomplete_reason')}")
+        if long_build_state.get("latest_build_status"):
+            lines.append(f"long_build_latest_build_status: {long_build_state.get('latest_build_status')}")
         blocker_priority = {
             "vendored_dependency_patch_surgery_before_supported_branch": 0,
             "external_branch_help_probe_too_narrow_before_source_toolchain": 1,
@@ -10423,7 +10478,7 @@ def format_work_session_resume(resume):
             "runtime_library_subdir_target_path_invalid": 5,
         }
         display_blockers = sorted(
-            long_dependency_build_state.get("strategy_blockers") or [],
+            long_build_state.get("strategy_blockers") or [],
             key=lambda item: (
                 blocker_priority.get(str((item or {}).get("code") or ""), 10),
                 str((item or {}).get("source_tool_call_id") or ""),
@@ -10435,15 +10490,22 @@ def format_work_session_resume(resume):
             source_tool = item.get("source_tool_call_id")
             suffix = f" tool=#{source_tool}" if source_tool is not None else ""
             lines.append(
-                "long_dependency_strategy_blocker: "
+                "long_build_strategy_blocker: "
                 + code
                 + suffix
                 + (f" excerpt={excerpt}" if excerpt else "")
             )
-        if long_dependency_build_state.get("latest_build_command"):
-            lines.append(f"long_dependency_latest_build: {long_dependency_build_state.get('latest_build_command')}")
-        if long_dependency_build_state.get("suggested_next"):
-            lines.append(f"long_dependency_next: {long_dependency_build_state.get('suggested_next')}")
+        if long_build_state.get("current_failure"):
+            failure = long_build_state.get("current_failure") or {}
+            lines.append(
+                "long_build_current_failure: "
+                f"{failure.get('failure_class') or 'unknown'} "
+                f"clear={failure.get('clear_condition') or ''}".strip()
+            )
+        if long_build_state.get("latest_build_command"):
+            lines.append(f"long_build_latest_build: {long_build_state.get('latest_build_command')}")
+        if long_build_state.get("suggested_next"):
+            lines.append(f"long_build_next: {long_build_state.get('suggested_next')}")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)

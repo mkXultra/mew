@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 import re
+import shlex
 from typing import Iterable, Mapping
 
 from .acceptance_evidence import (
     COMMAND_EVIDENCE_TOOLS,
+    _long_dependency_invoked_command_token,
     _long_dependency_segment_may_mutate_artifact_scope,
     long_dependency_artifact_proven_by_call,
     split_unquoted_shell_command_segments,
@@ -34,6 +37,50 @@ _SAFE_ENV_NAMES = {
     "PKG_CONFIG_PATH",
 }
 _SECRET_ENV_NAME_RE = re.compile(r"(?:secret|token|password|passwd|credential|api[_-]?key|private[_-]?key)", re.I)
+_RUNTIME_PROOF_TASK_MARKER_RE = re.compile(
+    r"\b(?:compiler|toolchain|interpreter|runtime|sdk|linker|standard[- ]library|stdlib|vm|emulator)\b",
+    re.I,
+)
+_RUNTIME_PROOF_EVIDENCE_MARKER_RE = re.compile(
+    r"(?:cannot find -l|default link|default-link|runtime library|standard library|stdlib|"
+    r"LD_LIBRARY_PATH|LIBRARY_PATH|-stdlib)",
+    re.I,
+)
+_SOURCE_AUTHORITY_RE = re.compile(
+    r"(?:official release|release archive|distribution archive|signed checksum|upstream|project docs|"
+    r"download page|package-manager metadata|package manager metadata)",
+    re.I,
+)
+_PACKAGE_METADATA_OUTPUT_RE = re.compile(
+    r"(?:^dist\.tarball\s*=|^dist\.integrity\s*=|^\s*tarball:\s*['\"]?https?://|"
+    r"^\s*integrity:\s*['\"]?sha(?:256|512)-|^Package:\s*\S+|^Version:\s*\S+|"
+    r"^https?://\S+|^sha(?:256|512)-\S+|Available versions:|LATEST:)",
+    re.I | re.M,
+)
+_PACKAGE_METADATA_ASSERTION_RE = re.compile(r"(?:https?://\S+|sha(?:256|512)-\S+)", re.I)
+_CONFIGURE_RE = re.compile(r"(?:\./configure|\bcmake\b|\bmeson\b|\bautoconf\b|\bconfigure\b)", re.I)
+_DEPENDENCY_GENERATION_RE = re.compile(r"(?:make\s+depend|\.depend|dependency generation|generated depend)", re.I)
+_BUILD_RE = re.compile(r"\b(?:make|ninja|cargo|go build|npm run build|python -m build|opam install|pip install)\b", re.I)
+_RUNTIME_BUILD_RE = re.compile(r"(?:runtime|stdlib|standard[- ]library|lib[A-Za-z0-9_+-]*\.a)", re.I)
+_INSTALL_RE = re.compile(r"\b(?:install|cp -a|cp -r|ln -s)\b", re.I)
+_BUILD_FAILURE_RE = re.compile(r"(?:error:|failed|failure|no rule to make target|unsupported|version mismatch)", re.I)
+_CUSTOM_RUNTIME_PATH_PROOF_RE = re.compile(r"(?:LD_LIBRARY_PATH|LIBRARY_PATH|-stdlib|-L\s*(?:/|\$|\.|[A-Za-z0-9_]))")
+_GENERIC_FAILURE_CLASS_BY_BLOCKER_CODE = {
+    "compatibility_override_probe_missing": "dependency_strategy_unresolved",
+    "version_pinned_source_toolchain_before_compatibility_override": "dependency_strategy_unresolved",
+    "compatibility_branch_budget_contract_missing": "dependency_strategy_unresolved",
+    "external_branch_help_probe_too_narrow_before_source_toolchain": "dependency_strategy_unresolved",
+    "external_dependency_source_provenance_unverified": "source_authority_unverified",
+    "source_archive_version_grounding_too_strict": "source_authority_overconstrained",
+    "vendored_dependency_patch_surgery_before_supported_branch": "dependency_strategy_unresolved",
+    "dependency_generation_order_issue": "dependency_generation_required",
+    "untargeted_full_project_build_for_specific_artifact": "target_selection_overbroad",
+    "runtime_link_library_missing": "runtime_default_path_unproven",
+    "default_runtime_link_path_failed": "runtime_default_path_unproven",
+    "default_runtime_link_path_unproven": "runtime_default_path_unproven",
+    "runtime_install_before_runtime_library_build": "runtime_install_before_build",
+    "runtime_library_subdir_target_path_invalid": "build_system_target_surface_invalid",
+}
 
 
 @dataclass(frozen=True)
@@ -207,6 +254,175 @@ class RecoveryDecision:
         data.update(asdict(self))
         data.pop("unknown_fields", None)
         return data
+
+
+def build_long_build_contract(
+    task_text: object,
+    required_artifacts: Iterable[object],
+    *,
+    contract_id: str = "work_session:unknown:long_build:1",
+    authority_source: str = "task_text",
+    acceptance_constraints: Iterable[object] | None = None,
+) -> dict:
+    artifacts = []
+    for artifact in required_artifacts or []:
+        path = str(artifact or "").strip()
+        if not path:
+            continue
+        artifacts.append(
+            {
+                "path": path,
+                "kind": _artifact_kind(path),
+                "proof_required": "exists_and_invokable",
+            }
+        )
+    text = "\n".join(str(value or "") for value in [task_text, *(acceptance_constraints or [])] if value)
+    runtime_required = _runtime_proof_required(text, artifacts)
+    contract = LongBuildContract(
+        schema_version=LONG_BUILD_SCHEMA_VERSION,
+        id=contract_id,
+        authority_source=authority_source,
+        required_artifacts=artifacts,
+        source_policy={
+            "authority_required": True,
+            "accepted_authorities": [
+                "project_docs",
+                "package_manager_metadata",
+                "official_release_archive",
+                "signed_checksum",
+                "upstream_download_page",
+            ],
+            "invalid_authorities": ["model_assertion", "random_mirror", "ungrounded_generated_source"],
+        },
+        dependency_policy={
+            "prefer_source_provided_compatibility_branch": True,
+            "allow_vendored_dependency_surgery": "only_after_supported_branches_exhausted",
+        },
+        build_policy={
+            "prefer_shortest_final_target": True,
+            "dependency_generation_before_final_target": True,
+        },
+        runtime_proof={
+            "required": "required" if runtime_required else "not_required",
+            "classifier": "runtime_proof_classifier_v1",
+            "reason": _runtime_proof_reason(text, artifacts, runtime_required),
+            "default_lookup_required": bool(runtime_required),
+            "custom_lookup_is_diagnostic": bool(runtime_required),
+        },
+        budget={"wall_seconds": None, "final_proof_reserve_seconds": 60},
+        final_proof={
+            "terminal_success_required": True,
+            "artifact_freshness_required": True,
+            "evidence_kinds": ["command_evidence"],
+        },
+    )
+    return contract.to_dict()
+
+
+def build_attempts_from_command_evidence(
+    evidences: Iterable[CommandEvidence | Mapping[str, object]],
+    contract: Mapping[str, object],
+) -> list[dict]:
+    attempts = []
+    for index, item in enumerate(evidences or [], start=1):
+        evidence = item if isinstance(item, CommandEvidence) else CommandEvidence.from_dict(item)
+        stage = _command_stage(evidence, contract)
+        attempt = BuildAttempt(
+            schema_version=LONG_BUILD_SCHEMA_VERSION,
+            id=f"{contract.get('id') or 'long_build'}:attempt:{index}",
+            contract_id=str(contract.get("id") or ""),
+            command_evidence_ref={"kind": "command_evidence", "id": evidence.id},
+            stage=stage,
+            selected_target=_selected_target(evidence.command, contract),
+            requested_timeout_seconds=evidence.requested_timeout_seconds,
+            effective_timeout_seconds=evidence.effective_timeout_seconds,
+            wall_budget_before_seconds=evidence.wall_budget_before_seconds,
+            wall_budget_after_seconds=evidence.wall_budget_after_seconds,
+            result=_attempt_result(evidence),
+            produced_artifacts=_produced_artifacts(evidence, contract),
+            mutation_refs=[],
+            diagnostics=_diagnostics(evidence),
+        )
+        attempts.append(attempt.to_dict())
+    return attempts
+
+
+def reduce_long_build_state(
+    contract: Mapping[str, object],
+    attempts: Iterable[Mapping[str, object]],
+    evidences: Iterable[CommandEvidence | Mapping[str, object]],
+    *,
+    progress: Iterable[Mapping[str, object]] = (),
+    strategy_blockers: Iterable[Mapping[str, object]] = (),
+    incomplete_reason: str = "",
+    latest_build_call: Mapping[str, object] | None = None,
+    latest_build_command: str = "",
+    suggested_next: str = "",
+) -> dict:
+    normalized_evidence = [item if isinstance(item, CommandEvidence) else CommandEvidence.from_dict(item) for item in evidences or []]
+    evidence_by_tool_call_id = {
+        evidence.source_tool_call_id: evidence.id
+        for evidence in normalized_evidence
+        if evidence.source_tool_call_id is not None
+    }
+    artifact_status = []
+    attempts = [dict(item) for item in attempts or [] if isinstance(item, Mapping)]
+    fresh_default_smoke = _has_fresh_default_smoke(attempts, normalized_evidence, contract)
+    for artifact in contract.get("required_artifacts") or []:
+        path = str((artifact or {}).get("path") or "")
+        proof = fresh_long_dependency_artifact_evidence(normalized_evidence, path) if path else None
+        produced_proof = _attempt_produced_artifact_proof(attempts, path, normalized_evidence) if path else None
+        artifact_status.append(
+            {
+                "path": path,
+                "kind": (artifact or {}).get("kind") or _artifact_kind(path),
+                "status": "proven" if proof or produced_proof else "missing_or_unproven",
+                "proof_evidence_id": proof.id if proof else (produced_proof or {}).get("proof_evidence_id"),
+                "source_tool_call_id": proof.source_tool_call_id if proof else None,
+            }
+        )
+    blockers = [dict(item) for item in strategy_blockers or [] if isinstance(item, Mapping)]
+    stages = _reduce_stages(contract, attempts, artifact_status, blockers, fresh_default_smoke=fresh_default_smoke)
+    missing = [item for item in artifact_status if item.get("status") != "proven"]
+    current_failure = _current_failure(
+        contract,
+        attempts,
+        blockers,
+        missing,
+        incomplete_reason,
+        evidence_by_tool_call_id,
+        fresh_default_smoke=fresh_default_smoke,
+    )
+    status = _state_status(attempts, missing, current_failure, stages)
+    latest_attempt_id = attempts[-1].get("id") if attempts else None
+    latest_build_tool_call_id = latest_build_call.get("id") if isinstance(latest_build_call, Mapping) else None
+    state = LongBuildState(
+        schema_version=LONG_BUILD_SCHEMA_VERSION,
+        kind="long_build_state",
+        contract_id=str(contract.get("id") or ""),
+        status=status,
+        stages=stages,
+        artifacts=artifact_status[:6],
+        attempt_ids=[str(item.get("id") or "") for item in attempts if item.get("id")],
+        latest_attempt_id=str(latest_attempt_id) if latest_attempt_id else None,
+        current_failure=current_failure,
+        recovery_decision_id=None,
+        unknown_fields={
+            "contract": dict(contract),
+            "attempts": attempts[-6:],
+            "progress": [dict(item) for item in progress or [] if isinstance(item, Mapping)][-6:],
+            "expected_artifacts": artifact_status[:6],
+            "missing_artifacts": missing[:6],
+            "latest_build_tool_call_id": latest_build_tool_call_id,
+            "latest_build_evidence_id": evidence_by_tool_call_id.get(latest_build_tool_call_id),
+            "latest_build_status": str(latest_build_call.get("status") or "") if isinstance(latest_build_call, Mapping) else "",
+            "latest_build_command": latest_build_command,
+            "incomplete_reason": str(incomplete_reason or ""),
+            "strategy_blockers": blockers[-6:],
+            "suggested_next": str(suggested_next or ""),
+        },
+    )
+    return state.to_dict()
 
 
 def summarize_env(env: object) -> dict:
@@ -392,6 +608,552 @@ def fresh_long_dependency_artifact_evidence(
         ):
             latest = None
     return latest
+
+
+def _artifact_kind(path: object) -> str:
+    suffix = Path(str(path or "")).suffix.casefold()
+    if suffix in {"", ".exe", ".out", ".bin"}:
+        return "executable"
+    if suffix in {".a", ".so", ".dylib", ".dll", ".lib"}:
+        return "library"
+    return "file"
+
+
+def _runtime_proof_required(text: object, artifacts: Iterable[Mapping[str, object]]) -> bool:
+    value = str(text or "")
+    if _RUNTIME_PROOF_EVIDENCE_MARKER_RE.search(value):
+        return True
+    if _RUNTIME_PROOF_TASK_MARKER_RE.search(value):
+        return True
+    for artifact in artifacts or []:
+        name = Path(str((artifact or {}).get("path") or "")).name.casefold()
+        if name and re.search(r"(?:cc|gcc|clang|compiler|ld|link|interp|runtime|sdk|vm)", name):
+            return True
+    return False
+
+
+def _runtime_proof_reason(text: object, artifacts: Iterable[Mapping[str, object]], required: bool) -> str:
+    if not required:
+        return "task does not require default runtime/link proof"
+    value = str(text or "")
+    if _RUNTIME_PROOF_EVIDENCE_MARKER_RE.search(value):
+        return "task or evidence mentions default link/runtime behavior"
+    if _RUNTIME_PROOF_TASK_MARKER_RE.search(value):
+        return "task asks for a compiler/toolchain/runtime-like artifact"
+    names = [Path(str((artifact or {}).get("path") or "")).name for artifact in artifacts or []]
+    return "artifact name is compiler/toolchain-like: " + ", ".join(name for name in names if name)
+
+
+def _command_stage(evidence: CommandEvidence, contract: Mapping[str, object]) -> str:
+    text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}"
+    if _custom_runtime_path_proof(evidence):
+        return "custom_runtime_smoke"
+    if _default_compile_link_smoke(evidence, contract):
+        return "default_smoke"
+    if _produced_artifacts(evidence, contract):
+        return "artifact_proof"
+    if _RUNTIME_PROOF_EVIDENCE_MARKER_RE.search(text):
+        if _INSTALL_RE.search(text):
+            return "runtime_install"
+        return "default_smoke"
+    if _RUNTIME_BUILD_RE.search(text) and _BUILD_RE.search(text):
+        return "runtime_build"
+    if _DEPENDENCY_GENERATION_RE.search(text):
+        return "dependency_generation"
+    if _CONFIGURE_RE.search(text):
+        return "configure"
+    if _source_authority_signal(evidence) or _command_uses_source_acquisition_tool(evidence.command):
+        return "source_acquisition"
+    if _BUILD_RE.search(text):
+        return "build"
+    return "command"
+
+
+def _selected_target(command: object, contract: Mapping[str, object]) -> str:
+    command_text = str(command or "")
+    artifact_names = [
+        Path(str((artifact or {}).get("path") or "")).name
+        for artifact in contract.get("required_artifacts") or []
+        if isinstance(artifact, Mapping)
+    ]
+    for name in artifact_names:
+        if name and re.search(r"(?:^|[\s/])" + re.escape(name) + r"(?:$|\s)", command_text):
+            return name
+    make_match = re.search(r"\bmake\b(?:\s+-[A-Za-z0-9\"'$()._-]+)*\s+([A-Za-z0-9_./+-]+)", command_text)
+    if make_match:
+        return make_match.group(1)
+    return ""
+
+
+def _attempt_result(evidence: CommandEvidence) -> str:
+    status = str(evidence.status or "").casefold()
+    if status in {"running", "interrupted"}:
+        return status
+    if evidence.timed_out:
+        return "timeout"
+    if evidence.terminal_success:
+        return "success"
+    if status == "completed" or evidence.exit_code not in (None, 0):
+        return "failure"
+    return "unknown"
+
+
+def _produced_artifacts(evidence: CommandEvidence, contract: Mapping[str, object]) -> list[dict]:
+    produced = []
+    for artifact in contract.get("required_artifacts") or []:
+        path = str((artifact or {}).get("path") or "")
+        if path and (
+            long_dependency_artifact_proven_by_command_evidence(evidence, path)
+            or _terminal_command_uses_required_artifact(evidence, path)
+        ):
+            produced.append({"path": path, "proof_evidence_id": evidence.id})
+    return produced
+
+
+def _diagnostics(evidence: CommandEvidence) -> list[dict]:
+    text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    diagnostics = []
+    if _source_authority_signal(evidence):
+        diagnostics.append({"signal": "source_authority", "excerpt": _source_authority_excerpt(evidence)})
+    if evidence.timed_out:
+        diagnostics.append({"failure_class": "build_timeout", "excerpt": _first_nonempty_line(text)})
+    if re.search(r"cannot find -l|ld: library not found|missing runtime|stdlib", text, re.I):
+        diagnostics.append({"failure_class": "runtime_link_failed", "excerpt": _first_matching_line(text, "cannot find -l|library not found|runtime|stdlib")})
+    if re.search(r"no rule to make target|No rule to make target", text):
+        diagnostics.append({"failure_class": "build_system_target_surface_invalid", "excerpt": _first_matching_line(text, "no rule")})
+    if _BUILD_FAILURE_RE.search(text) and not diagnostics:
+        diagnostics.append({"failure_class": "build_failed", "excerpt": _first_matching_line(text, _BUILD_FAILURE_RE.pattern)})
+    return [item for item in diagnostics if item.get("failure_class") or item.get("signal")]
+
+
+def _source_authority_signal(evidence: CommandEvidence) -> bool:
+    text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    if _command_has_assertion_only_source_authority_segment(evidence.command):
+        return False
+    if _SOURCE_AUTHORITY_RE.search(text) and _command_uses_source_acquisition_tool(evidence.command):
+        return True
+    output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    return bool(_command_uses_package_metadata_tool(evidence.command) and _PACKAGE_METADATA_OUTPUT_RE.search(output_text))
+
+
+def _source_authority_excerpt(evidence: CommandEvidence) -> str:
+    text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    if _SOURCE_AUTHORITY_RE.search(text):
+        return _first_matching_line(text, _SOURCE_AUTHORITY_RE.pattern)
+    return _first_matching_line(f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}", _PACKAGE_METADATA_OUTPUT_RE.pattern)
+
+
+def _command_has_assertion_only_source_authority_segment(command: object) -> bool:
+    for segment in split_unquoted_shell_command_segments(command):
+        segment_text = str(segment or "")
+        if (
+            (
+                _SOURCE_AUTHORITY_RE.search(segment_text)
+                or _PACKAGE_METADATA_OUTPUT_RE.search(segment_text)
+                or _PACKAGE_METADATA_ASSERTION_RE.search(segment_text)
+            )
+            and not _segment_uses_source_acquisition_tool(segment)
+        ):
+            return True
+    return False
+
+
+def _command_uses_source_acquisition_tool(command: object) -> bool:
+    return any(_segment_uses_source_acquisition_tool(segment) for segment in split_unquoted_shell_command_segments(command))
+
+
+def _command_uses_package_metadata_tool(command: object) -> bool:
+    return any(_segment_uses_package_metadata_tool(segment) for segment in split_unquoted_shell_command_segments(command))
+
+
+def _segment_uses_source_acquisition_tool(segment: object) -> bool:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+    lowered_parts = [str(part or "").casefold() for part in parts]
+    if token in {"curl", "wget", "tar", "unzip", "gh"}:
+        return True
+    if token == "git" and any(part in {"clone", "checkout", "fetch", "ls-remote"} for part in lowered_parts[1:3]):
+        return True
+    if _segment_uses_package_metadata_tool(segment):
+        return True
+    return False
+
+
+def _segment_uses_package_metadata_tool(segment: object) -> bool:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+    lowered_parts = [str(part or "").casefold() for part in parts]
+    segment_lower = str(segment or "").casefold()
+    if token == "apt-cache" and "show" in lowered_parts[1:3]:
+        return True
+    if token == "apt" and "show" in lowered_parts[1:3]:
+        return True
+    if token == "pip" and any(part in {"index", "show"} for part in lowered_parts[1:3]):
+        return True
+    if token == "npm" and any(part in {"view", "info"} for part in lowered_parts[1:3]):
+        return True
+    return bool(re.search(r"\bpython3?\s+-m\s+pip\s+(?:index|show)\b", segment_lower))
+
+
+def _reduce_stages(
+    contract: Mapping[str, object],
+    attempts: Iterable[Mapping[str, object]],
+    artifacts: Iterable[Mapping[str, object]],
+    blockers: Iterable[Mapping[str, object]],
+    *,
+    fresh_default_smoke: bool = False,
+) -> list[dict]:
+    attempts = [dict(item) for item in attempts or []]
+    blockers = [dict(item) for item in blockers or []]
+    stages: list[dict] = []
+    source_blocked = _has_source_blocker(blockers)
+    source_satisfied = any(
+        str(item.get("stage") or "") == "source_acquisition"
+        and item.get("result") == "success"
+        and _attempt_has_signal(item, "source_authority")
+        for item in attempts
+    )
+    stages.append(
+        {
+            "id": "source_authority",
+            "required": bool((contract.get("source_policy") or {}).get("authority_required", True)),
+            "status": "blocked" if source_blocked else ("satisfied" if source_satisfied else "unknown"),
+        }
+    )
+    if any(str(item.get("stage") or "") == "configure" for item in attempts):
+        stages.append(
+            {
+                "id": "configure",
+                "required": False,
+                "status": _stage_status(attempts, "configure"),
+            }
+        )
+    if any(str(item.get("stage") or "") == "dependency_generation" for item in attempts):
+        stages.append(
+            {
+                "id": "dependency_generation",
+                "required": bool((contract.get("build_policy") or {}).get("dependency_generation_before_final_target")),
+                "status": _stage_status(attempts, "dependency_generation"),
+            }
+        )
+    target_proven = all((item or {}).get("status") == "proven" for item in artifacts or [])
+    stages.append(
+        {
+            "id": "target_built",
+            "required": True,
+            "status": "satisfied" if target_proven else ("blocked" if blockers else "unknown"),
+        }
+    )
+    runtime_policy = contract.get("runtime_proof") if isinstance(contract.get("runtime_proof"), Mapping) else {}
+    runtime_required = runtime_policy.get("required") == "required"
+    if runtime_required:
+        stages.append(
+            {
+                "id": "default_smoke",
+                "required": True,
+                "status": _runtime_stage_status(attempts, blockers, fresh_default_smoke=fresh_default_smoke),
+            }
+        )
+    else:
+        stages.append({"id": "default_smoke", "required": False, "status": "not_required"})
+    return stages
+
+
+def _stage_status(attempts: Iterable[Mapping[str, object]], stage: str) -> str:
+    stage_attempts = [item for item in attempts if item.get("stage") == stage]
+    if any(item.get("result") == "success" for item in stage_attempts):
+        return "satisfied"
+    if any(item.get("result") in {"failure", "timeout"} for item in stage_attempts):
+        return "blocked"
+    if stage_attempts:
+        return "unknown"
+    return "unknown"
+
+
+def _runtime_stage_status(
+    attempts: Iterable[Mapping[str, object]],
+    blockers: Iterable[Mapping[str, object]],
+    *,
+    fresh_default_smoke: bool = False,
+) -> str:
+    if fresh_default_smoke:
+        return "satisfied"
+    if any(item.get("stage") == "custom_runtime_smoke" and item.get("result") == "success" for item in attempts):
+        return "blocked"
+    if any(
+        str(item.get("code") or "") in {"default_runtime_link_path_failed", "default_runtime_link_path_unproven", "runtime_link_library_missing"}
+        for item in blockers or []
+    ):
+        return "blocked"
+    return "unknown"
+
+
+def _state_status(
+    attempts: Iterable[Mapping[str, object]],
+    missing: Iterable[Mapping[str, object]],
+    current_failure: Mapping[str, object] | None,
+    stages: Iterable[Mapping[str, object]],
+) -> str:
+    if not attempts:
+        return "not_started"
+    if current_failure:
+        return "blocked"
+    if any(item.get("status") == "blocked" and item.get("required") for item in stages or []):
+        return "blocked"
+    if any(item.get("status") == "unknown" and item.get("required") for item in stages or []):
+        return "ready_for_final_proof" if not missing else "in_progress"
+    if not missing:
+        return "complete"
+    return "in_progress"
+
+
+def _current_failure(
+    contract: Mapping[str, object],
+    attempts: Iterable[Mapping[str, object]],
+    blockers: Iterable[Mapping[str, object]],
+    missing: Iterable[Mapping[str, object]],
+    incomplete_reason: object,
+    evidence_by_tool_call_id: Mapping[object, int],
+    *,
+    fresh_default_smoke: bool = False,
+) -> dict | None:
+    blockers = [dict(item) for item in blockers or []]
+    if blockers:
+        blocker = blockers[-1]
+        source_tool_call_id = blocker.get("source_tool_call_id")
+        legacy_code = blocker.get("code") or "long_build_strategy_blocked"
+        return {
+            "failure_class": _generic_failure_class(legacy_code),
+            "legacy_code": legacy_code,
+            "evidence_id": evidence_by_tool_call_id.get(source_tool_call_id),
+            "source_tool_call_id": source_tool_call_id,
+            "clear_condition": _clear_condition(blocker.get("code"), contract, missing),
+        }
+    if str(incomplete_reason or "") == "tool_timeout":
+        return {
+            "failure_class": "build_timeout",
+            "evidence_id": None,
+            "clear_condition": "resume or rerun the shortest idempotent command with an explicit wall budget",
+        }
+    if list(missing or []):
+        paths = ", ".join(str(item.get("path") or "") for item in missing if isinstance(item, Mapping))
+        return {
+            "failure_class": "artifact_missing_or_unproven",
+            "evidence_id": None,
+            "clear_condition": f"terminal command evidence proves required artifact(s): {paths}",
+        }
+    runtime_policy = contract.get("runtime_proof") if isinstance(contract.get("runtime_proof"), Mapping) else {}
+    if runtime_policy.get("required") == "required" and not fresh_default_smoke:
+        return {
+            "failure_class": "runtime_default_path_unproven",
+            "evidence_id": None,
+            "clear_condition": "default compile/link smoke succeeds without custom runtime path flags",
+        }
+    return None
+
+
+def _custom_runtime_path_proof(evidence: CommandEvidence) -> bool:
+    return bool(_CUSTOM_RUNTIME_PATH_PROOF_RE.search(f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}"))
+
+
+def _terminal_command_uses_required_artifact(evidence: CommandEvidence, artifact: object) -> bool:
+    if not evidence.terminal_success:
+        return False
+    command = str(evidence.command or "")
+    artifact_text = str(artifact or "")
+    if re.search(r"\|\|\s*true\b|;\s*true\b", command):
+        return False
+    return _command_has_default_smoke_artifact_segment(command, artifact_text, evidence.cwd)
+
+
+def _default_compile_link_smoke(evidence: CommandEvidence, contract: Mapping[str, object]) -> bool:
+    if not evidence.terminal_success:
+        return False
+    command = str(evidence.command or "")
+    if _custom_runtime_path_proof(evidence):
+        return False
+    if not re.search(r"\.(?:c|cc|cpp|cxx)\b", command):
+        return False
+    if not re.search(r"(?:^|\s)-o\s+\S+", command):
+        return False
+    artifact_paths = [
+        str((artifact or {}).get("path") or "")
+        for artifact in contract.get("required_artifacts") or []
+        if isinstance(artifact, Mapping)
+    ]
+    return any(path and _command_has_default_smoke_artifact_segment(command, path, evidence.cwd) for path in artifact_paths)
+
+
+def _command_has_default_smoke_artifact_segment(command: object, artifact: object, cwd: object) -> bool:
+    artifact_text = str(artifact or "")
+    if not artifact_text:
+        return False
+    segments = split_unquoted_shell_command_segments(command)
+    for index, segment in enumerate(segments):
+        if not (
+            _segment_invokes_required_artifact(segment, artifact_text, cwd)
+            and re.search(r"\.(?:c|cc|cpp|cxx)\b", segment)
+            and re.search(r"(?:^|\s)-o\s+\S+", segment)
+        ):
+            continue
+        if _long_dependency_segment_may_mutate_artifact_scope(segment, artifact_text, cwd):
+            continue
+        if any(
+            _long_dependency_segment_may_mutate_artifact_scope(later_segment, artifact_text, cwd)
+            for later_segment in segments[index + 1 :]
+        ):
+            continue
+        return True
+    return False
+
+
+def _segment_invokes_required_artifact(segment: object, artifact: object, cwd: object) -> bool:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    command_token = _long_dependency_invoked_command_token(parts)
+    return _segment_names_required_artifact(command_token, artifact, cwd)
+
+
+def _segment_names_required_artifact(segment: object, artifact: object, cwd: object) -> bool:
+    segment_text = str(segment or "")
+    artifact_text = str(artifact or "")
+    if not artifact_text:
+        return False
+    if re.search(r"(?:^|[\s'\"])" + re.escape(artifact_text) + r"(?:$|\s|['\"])", segment_text):
+        return True
+    artifact_parent = str(Path(artifact_text).parent).rstrip("/")
+    cwd_text = str(Path(str(cwd or ""))).rstrip("/")
+    if artifact_parent and artifact_parent != "." and cwd_text == artifact_parent:
+        basename = Path(artifact_text).name
+        basename_pattern = r"(?:\./)?" + re.escape(basename)
+        return bool(basename and re.search(r"(?:^|\s)" + basename_pattern + r"(?:$|\s)", segment_text))
+    return False
+
+
+def _generic_failure_class(code: object) -> str:
+    return _GENERIC_FAILURE_CLASS_BY_BLOCKER_CODE.get(str(code or ""), str(code or "long_build_strategy_blocked"))
+
+
+def _attempt_has_signal(attempt: Mapping[str, object], signal: str) -> bool:
+    return any(
+        isinstance(item, Mapping) and item.get("signal") == signal
+        for item in attempt.get("diagnostics") or []
+    )
+
+
+def _attempt_produced_artifact_proof(
+    attempts: Iterable[Mapping[str, object]],
+    path: str,
+    evidences: Iterable[CommandEvidence],
+) -> dict:
+    latest = {}
+    for attempt in attempts or []:
+        if not isinstance(attempt, Mapping):
+            continue
+        for artifact in attempt.get("produced_artifacts") or []:
+            if isinstance(artifact, Mapping) and artifact.get("path") == path:
+                latest = dict(artifact)
+    if latest and _later_evidence_mutates_artifact(latest, path, evidences):
+        return {}
+    return latest
+
+
+def _has_fresh_default_smoke(
+    attempts: Iterable[Mapping[str, object]],
+    evidences: Iterable[CommandEvidence],
+    contract: Mapping[str, object],
+) -> bool:
+    artifact_paths = [
+        str((artifact or {}).get("path") or "")
+        for artifact in contract.get("required_artifacts") or []
+        if isinstance(artifact, Mapping) and (artifact or {}).get("path")
+    ]
+    if not artifact_paths:
+        return False
+    for attempt in attempts or []:
+        if not (
+            isinstance(attempt, Mapping)
+            and attempt.get("stage") == "default_smoke"
+            and attempt.get("result") == "success"
+        ):
+            continue
+        produced_paths = {
+            str((artifact or {}).get("path") or "")
+            for artifact in attempt.get("produced_artifacts") or []
+            if isinstance(artifact, Mapping)
+        }
+        if not all(path in produced_paths for path in artifact_paths):
+            continue
+        evidence_id = (attempt.get("command_evidence_ref") or {}).get("id")
+        proof = {"proof_evidence_id": evidence_id}
+        if not any(_later_evidence_mutates_artifact(proof, path, evidences) for path in artifact_paths):
+            return True
+    return False
+
+
+def _later_evidence_mutates_artifact(
+    proof: Mapping[str, object],
+    path: str,
+    evidences: Iterable[CommandEvidence],
+) -> bool:
+    proof_evidence_id = proof.get("proof_evidence_id")
+    evidence_items = [item for item in evidences or [] if isinstance(item, CommandEvidence)]
+    proof_evidence = next((item for item in evidence_items if item.id == proof_evidence_id), None)
+    if proof_evidence is None:
+        return False
+    proof_order = proof_evidence.finish_order
+    return any(
+        item.finish_order > proof_order and _command_may_mutate_artifact_scope(item.command, path, item.cwd)
+        for item in evidence_items
+    )
+
+
+def _clear_condition(code: object, contract: Mapping[str, object], missing: Iterable[Mapping[str, object]]) -> str:
+    code_text = str(code or "")
+    if code_text in {"default_runtime_link_path_failed", "default_runtime_link_path_unproven", "runtime_link_library_missing"}:
+        return "default compile/link smoke succeeds without custom runtime path flags"
+    if code_text == "runtime_install_before_runtime_library_build":
+        return "shortest runtime/library target is built before runtime install is retried"
+    if code_text == "runtime_library_subdir_target_path_invalid":
+        return "runtime subdirectory build/install target succeeds from the subdirectory Makefile"
+    if code_text == "untargeted_full_project_build_for_specific_artifact":
+        return "shortest explicit target for the required artifact is attempted"
+    if code_text == "external_dependency_source_provenance_unverified":
+        return "source authority is grounded by project docs, package metadata, official release archive, checksum, or upstream page"
+    if code_text == "external_branch_help_probe_too_narrow_before_source_toolchain":
+        return "project help is inspected broadly enough to find external/prebuilt/system dependency branches"
+    if list(missing or []):
+        paths = ", ".join(str(item.get("path") or "") for item in missing if isinstance(item, Mapping))
+        return f"terminal command evidence proves required artifact(s): {paths}"
+    return "the blocker-specific command evidence is superseded by a successful terminal proof"
+
+
+def _has_source_blocker(blockers: Iterable[Mapping[str, object]]) -> bool:
+    return any("source" in str(item.get("code") or "") or "archive" in str(item.get("code") or "") for item in blockers or [])
+
+
+def _first_matching_line(text: object, pattern: str) -> str:
+    regex = re.compile(pattern, re.I)
+    for line in str(text or "").splitlines():
+        if regex.search(line):
+            return _clip(line.strip(), 180)
+    return _first_nonempty_line(text)
+
+
+def _first_nonempty_line(text: object) -> str:
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if stripped:
+            return _clip(stripped, 180)
+    return ""
 
 
 def _dict_value(value: object) -> dict:

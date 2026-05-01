@@ -269,7 +269,7 @@ M6.24 resume condition:
   and `tool_call` ref compatibility may be dropped by flag-day cutover. Preserve
   safety invariants instead.
   Current selected chain:
-  `M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 2`.
+  `M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 3`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -300,12 +300,16 @@ M6.24 resume condition:
   implemented, canonical `command_evidence` refs are accepted by the done gate
   and command-output semantic validators, and prompt/resume command surfaces
   expose the independent command evidence ids; codex-ultra review passed in
-  session `019de38b-fc9b-72f1-846a-987ea63d6d58`. Phase 2 is now selected:
-  `LongBuildContract` extraction and `LongBuildState` reducer cutover. Do not
-  resume `compile-compcert` proof_5 or broad measurement yet. Same-shape
-  `compile-compcert` speed_1 may run after Phase 3 if unit/fixture tests pass;
-  because Phase 4 changes recovery-budget enforcement, prefer completing Phase
-  4 before measurement when budget behavior changed.
+  session `019de38b-fc9b-72f1-846a-987ea63d6d58`. Phase 2 is complete:
+  `LongBuildContract` extraction and `LongBuildState` reducer cutover replace
+  old `long_dependency_build_state` resume output with `long_build_state`;
+  codex-ultra review passed in session
+  `019de3ab-47b6-71c3-849d-db3f089e1ecd`. Phase 3 is now selected:
+  `RecoveryDecision` derivation/rendering for the narrow failure classes in the
+  design. Do not resume `compile-compcert` proof_5 or broad measurement yet.
+  Same-shape `compile-compcert` speed_1 may run after Phase 3 if unit/fixture
+  tests pass; because Phase 4 changes recovery-budget enforcement, prefer
+  completing Phase 4 before measurement when budget behavior changed.
 
 Historical selected gap class:
   `hard_task_implementation_strategy_contract_retention`, recorded in

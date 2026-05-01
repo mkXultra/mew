@@ -497,7 +497,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("SourceAcquisitionProfile", prompt)
         self.assertIn("authoritative source channel", prompt)
         self.assertIn("VCS-generated tag/archive URLs", prompt)
-        self.assertIn("work_session.resume.long_dependency_build_state", prompt)
+        self.assertIn("work_session.resume.long_build_state", prompt)
         self.assertIn("default lookup path", prompt)
         self.assertIn("bounded run_command timeout", prompt)
         self.assertIn("DynamicFailureEvidence", prompt)
@@ -4730,7 +4730,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("expected_artifacts=/tmp/frame.bmp", text)
         self.assertIn("verifier_failure_runtime_tools: readelf, nm, objdump, addr2line", text)
 
-    def test_work_session_resume_surfaces_long_dependency_build_state(self):
+    def test_work_session_resume_surfaces_long_build_state(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
         session = {
@@ -4786,9 +4786,9 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        state = resume["long_dependency_build_state"]
+        state = resume["long_build_state"]
 
-        self.assertEqual(state["kind"], "long_dependency_build_state")
+        self.assertEqual(state["kind"], "long_build_state")
         self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
         self.assertEqual(state["latest_build_tool_call_id"], 10)
         self.assertEqual(state["latest_build_status"], "running")
@@ -4798,12 +4798,71 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(state["strategy_blockers"][0]["code"], "dependency_generation_order_issue")
 
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_build_state: long_dependency_build_state", text)
-        self.assertIn("long_dependency_missing_artifact: /tmp/CompCert/ccomp", text)
-        self.assertIn("long_dependency_incomplete_reason: running", text)
-        self.assertIn("long_dependency_latest_build_status: running", text)
-        self.assertIn("long_dependency_strategy_blocker: dependency_generation_order_issue", text)
-        self.assertIn("long_dependency_next: resume the existing source tree/toolchain state", text)
+        self.assertIn("long_build_state: long_build_state", text)
+        self.assertIn("long_build_missing_artifact: /tmp/CompCert/ccomp", text)
+        self.assertIn("long_build_incomplete_reason: running", text)
+        self.assertIn("long_build_latest_build_status: running", text)
+        self.assertIn("long_build_strategy_blocker: dependency_generation_order_issue", text)
+        self.assertIn("long_build_next: resume the existing source tree/toolchain state", text)
+
+    def test_work_session_resume_uses_native_command_evidence_without_marker_progress(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/FooCC/, build the FooCC compiler from source. "
+                "Ensure that FooCC can be invoked through /tmp/FooCC/foocc."
+            ),
+            "updated_at": "now",
+            "command_evidence": [
+                {
+                    "schema_version": 1,
+                    "id": 1,
+                    "ref": {"kind": "command_evidence", "id": 1},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "true",
+                    "cwd": "/tmp/FooCC",
+                    "env_summary": {"policy": "env_summary_v1", "items": []},
+                    "start_order": 1,
+                    "finish_order": 2,
+                    "started_at": "unknown",
+                    "finished_at": "unknown",
+                    "duration_seconds": None,
+                    "requested_timeout_seconds": None,
+                    "effective_timeout_seconds": None,
+                    "wall_budget_before_seconds": None,
+                    "wall_budget_after_seconds": None,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "terminal_success": True,
+                    "output_ref": None,
+                    "stdout_head": "",
+                    "stdout_tail": "",
+                    "stderr_head": "",
+                    "stderr_tail": "",
+                    "output_head": "",
+                    "output_tail": "",
+                    "truncated": False,
+                    "output_bytes": None,
+                    "source_tool_call_id": 41,
+                }
+            ],
+            "tool_calls": [],
+            "model_turns": [],
+        }
+
+        state = build_work_session_resume(session)["long_build_state"]
+
+        self.assertEqual(state["kind"], "long_build_state")
+        self.assertEqual(state["attempt_ids"], ["work_session:1:long_build:1:attempt:1"])
+        self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/FooCC/foocc")
+        self.assertEqual(state["current_failure"]["failure_class"], "artifact_missing_or_unproven")
 
     def test_work_session_resume_flags_untargeted_full_make_for_specific_long_artifact(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
@@ -4834,13 +4893,13 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        state = resume["long_dependency_build_state"]
+        state = resume["long_build_state"]
         codes = [item["code"] for item in state["strategy_blockers"]]
 
         self.assertIn("untargeted_full_project_build_for_specific_artifact", codes)
         text = format_work_session_resume(resume)
         self.assertIn(
-            "long_dependency_strategy_blocker: untargeted_full_project_build_for_specific_artifact",
+            "long_build_strategy_blocker: untargeted_full_project_build_for_specific_artifact",
             text,
         )
 
@@ -4881,12 +4940,12 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertIn("toolchain_version_constraint_mismatch", codes)
         self.assertIn("compatibility_override_probe_missing", codes)
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_strategy_blocker: compatibility_override_probe_missing", text)
+        self.assertIn("long_build_strategy_blocker: compatibility_override_probe_missing", text)
         self.assertIn("compatibility/override flags", text)
 
     def test_work_session_resume_flags_over_strict_source_archive_version_grounding(self):
@@ -4941,11 +5000,11 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertIn("source_archive_version_grounding_too_strict", codes)
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_strategy_blocker: source_archive_version_grounding_too_strict", text)
+        self.assertIn("long_build_strategy_blocker: source_archive_version_grounding_too_strict", text)
         self.assertIn("archive/tag", text)
         self.assertIn("omits a patch suffix", text)
 
@@ -4989,7 +5048,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("source_archive_version_grounding_too_strict", codes)
 
@@ -5039,7 +5098,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("source_archive_version_grounding_too_strict", codes)
 
@@ -5108,11 +5167,11 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("external_dependency_source_provenance_unverified", codes)
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_strategy_blocker: external_dependency_source_provenance_unverified", text)
+        self.assertIn("long_build_strategy_blocker: external_dependency_source_provenance_unverified", text)
         self.assertIn("authoritative source channel", text)
 
     def test_work_session_resume_does_not_flag_source_provenance_after_authoritative_source_check(self):
@@ -5185,7 +5244,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("external_dependency_source_provenance_unverified", codes)
 
@@ -5253,7 +5312,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertIn("external_dependency_source_provenance_unverified", codes)
 
@@ -5301,7 +5360,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertIn("external_dependency_source_provenance_unverified", codes)
 
@@ -5358,13 +5417,13 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("compatibility_override_probe_missing", codes)
         self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
         text = format_work_session_resume(resume)
         self.assertIn(
-            "long_dependency_strategy_blocker: version_pinned_source_toolchain_before_compatibility_override",
+            "long_build_strategy_blocker: version_pinned_source_toolchain_before_compatibility_override",
             text,
         )
         self.assertIn("version-pinned source-built dependency/toolchain", text)
@@ -5436,7 +5495,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertNotIn("version_pinned_source_toolchain_before_compatibility_override", codes)
 
@@ -5492,7 +5551,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("compatibility_override_probe_missing", codes)
         self.assertNotIn("version_pinned_source_toolchain_before_compatibility_override", codes)
@@ -5564,7 +5623,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
 
@@ -5658,7 +5717,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
         budget_blocker = next(
             item for item in blockers if item.get("code") == "compatibility_branch_budget_contract_missing"
         )
@@ -5669,7 +5728,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(budget_blocker["source_tool_call_id"], 5)
 
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_strategy_blocker: compatibility_branch_budget_contract_missing", text)
+        self.assertIn("long_build_strategy_blocker: compatibility_branch_budget_contract_missing", text)
         self.assertIn("external/prebuilt compatibility branch", text)
         self.assertIn("one coherent branch", text)
         self.assertIn("reserve enough wall budget", text)
@@ -5764,7 +5823,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
         probe_blocker = next(
             item for item in blockers
             if item.get("code") == "external_branch_help_probe_too_narrow_before_source_toolchain"
@@ -5777,7 +5836,7 @@ class WorkSessionTests(unittest.TestCase):
 
         text = format_work_session_resume(resume)
         self.assertIn(
-            "long_dependency_strategy_blocker: external_branch_help_probe_too_narrow_before_source_toolchain",
+            "long_build_strategy_blocker: external_branch_help_probe_too_narrow_before_source_toolchain",
             text,
         )
         self.assertIn("include external/use-external/prebuilt/system/library terms", text)
@@ -5855,7 +5914,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
         probe_blocker = next(
             item for item in blockers
             if item.get("code") == "external_branch_help_probe_too_narrow_before_source_toolchain"
@@ -5937,7 +5996,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("external_branch_help_probe_too_narrow_before_source_toolchain", codes)
 
@@ -6035,7 +6094,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("compatibility_branch_budget_contract_missing", codes)
 
@@ -6101,7 +6160,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("compatibility_branch_budget_contract_missing", codes)
 
@@ -6205,7 +6264,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
         blocker = next(
             item
             for item in blockers
@@ -6219,7 +6278,7 @@ class WorkSessionTests(unittest.TestCase):
 
         text = format_work_session_resume(resume)
         self.assertIn(
-            "long_dependency_strategy_blocker: vendored_dependency_patch_surgery_before_supported_branch",
+            "long_build_strategy_blocker: vendored_dependency_patch_surgery_before_supported_branch",
             text,
         )
         self.assertIn("vendored/third-party dependency", text)
@@ -6289,7 +6348,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
 
@@ -6339,7 +6398,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
 
@@ -6402,7 +6461,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
 
@@ -6463,7 +6522,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
 
@@ -6517,7 +6576,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
 
@@ -6573,7 +6632,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
 
@@ -6615,11 +6674,11 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("runtime_link_library_missing", codes)
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_strategy_blocker: runtime_link_library_missing", text)
+        self.assertIn("long_build_strategy_blocker: runtime_link_library_missing", text)
         self.assertIn("runtime/library target", text)
 
     def test_work_session_resume_flags_default_runtime_link_failure_after_compiler_smoke(self):
@@ -6666,11 +6725,11 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("default_runtime_link_path_failed", codes)
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_strategy_blocker: default_runtime_link_path_failed", text)
+        self.assertIn("long_build_strategy_blocker: default_runtime_link_path_failed", text)
         self.assertIn("default compile/link smoke fails", text)
         self.assertIn("do not restart source acquisition", text)
 
@@ -6729,7 +6788,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("default_runtime_link_path_failed", codes)
         self.assertNotIn("runtime_link_library_missing", codes)
@@ -6783,7 +6842,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("default_runtime_link_path_failed", codes)
         self.assertIn("runtime_link_library_missing", codes)
@@ -6822,7 +6881,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("default_runtime_link_path_failed", codes)
 
@@ -6875,11 +6934,11 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("default_runtime_link_path_unproven", codes)
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_strategy_blocker: default_runtime_link_path_unproven", text)
+        self.assertIn("long_build_strategy_blocker: default_runtime_link_path_unproven", text)
         self.assertIn("custom runtime/library path flags", text)
         self.assertIn("default lookup path", text)
 
@@ -6921,12 +6980,12 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("runtime_install_before_runtime_library_build", codes)
         text = format_work_session_resume(resume)
         self.assertIn(
-            "long_dependency_strategy_blocker: runtime_install_before_runtime_library_build",
+            "long_build_strategy_blocker: runtime_install_before_runtime_library_build",
             text,
         )
         self.assertIn("shortest explicit runtime-library target", text)
@@ -6974,7 +7033,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("runtime_install_before_runtime_library_build", codes)
 
@@ -7012,7 +7071,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
         codes = [item["code"] for item in blockers]
 
         self.assertIn("runtime_library_subdir_target_path_invalid", codes)
@@ -7020,7 +7079,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("runtime/libcompcert.a", blocker["excerpt"])
         text = format_work_session_resume(resume)
         self.assertIn(
-            "long_dependency_strategy_blocker: runtime_library_subdir_target_path_invalid",
+            "long_build_strategy_blocker: runtime_library_subdir_target_path_invalid",
             text,
         )
         self.assertIn("make -C <runtime-dir>", text)
@@ -7098,7 +7157,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("runtime_library_subdir_target_path_invalid", codes)
         self.assertNotIn("dependency_generation_order_issue", codes)
@@ -7135,7 +7194,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("runtime_library_subdir_target_path_invalid", codes)
 
@@ -7173,7 +7232,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("runtime_library_subdir_target_path_invalid", codes)
 
@@ -7209,7 +7268,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("runtime_install_before_runtime_library_build", codes)
 
@@ -7268,7 +7327,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
         runtime_blockers = [
             item for item in blockers if item.get("code") == "runtime_install_before_runtime_library_build"
         ]
@@ -7319,7 +7378,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("runtime_install_before_runtime_library_build", codes)
 
@@ -7366,7 +7425,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("runtime_install_before_runtime_library_build", codes)
 
@@ -7413,7 +7472,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertIn("runtime_install_before_runtime_library_build", codes)
 
@@ -7482,7 +7541,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("default_runtime_link_path_unproven", codes)
 
@@ -7543,7 +7602,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("default_runtime_link_path_unproven", codes)
 
@@ -7587,7 +7646,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("default_runtime_link_path_unproven", codes)
 
@@ -7631,7 +7690,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertIn("default_runtime_link_path_unproven", codes)
 
@@ -7675,7 +7734,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
 
         self.assertNotIn("default_runtime_link_path_unproven", codes)
 
@@ -7717,7 +7776,7 @@ class WorkSessionTests(unittest.TestCase):
                 }
 
                 resume = build_work_session_resume(session)
-                codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+                codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
                 self.assertIn("untargeted_full_project_build_for_specific_artifact", codes)
 
     def test_work_session_resume_accepts_chained_artifact_target_make_for_specific_long_artifact(self):
@@ -7748,7 +7807,7 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+        codes = [item["code"] for item in resume["long_build_state"]["strategy_blockers"]]
 
         self.assertNotIn("untargeted_full_project_build_for_specific_artifact", codes)
 
@@ -7798,13 +7857,13 @@ class WorkSessionTests(unittest.TestCase):
         }
 
         resume = build_work_session_resume(session)
-        state = resume["long_dependency_build_state"]
+        state = resume["long_build_state"]
 
         self.assertEqual(state["expected_artifacts"][0]["status"], "missing_or_unproven")
         self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
         self.assertEqual(state["incomplete_reason"], "tool_timeout")
         text = format_work_session_resume(resume)
-        self.assertIn("long_dependency_missing_artifact: /tmp/CompCert/ccomp", text)
+        self.assertIn("long_build_missing_artifact: /tmp/CompCert/ccomp", text)
 
     def test_work_session_resume_does_not_prove_long_dependency_artifact_from_soft_probe_before_timeout(self):
         from mew.work_session import build_work_session_resume
@@ -7856,7 +7915,7 @@ class WorkSessionTests(unittest.TestCase):
             "model_turns": [],
         }
 
-        state = build_work_session_resume(session)["long_dependency_build_state"]
+        state = build_work_session_resume(session)["long_build_state"]
 
         self.assertEqual(state["expected_artifacts"][0]["status"], "missing_or_unproven")
         self.assertEqual(state["missing_artifacts"][0]["path"], "/tmp/CompCert/ccomp")
@@ -7915,7 +7974,7 @@ class WorkSessionTests(unittest.TestCase):
                     "model_turns": [],
                 }
 
-                state = build_work_session_resume(session)["long_dependency_build_state"]
+                state = build_work_session_resume(session)["long_build_state"]
 
                 statuses = [
                     item.get("status")
@@ -7980,7 +8039,7 @@ class WorkSessionTests(unittest.TestCase):
                     "model_turns": [],
                 }
 
-                state = build_work_session_resume(session)["long_dependency_build_state"]
+                state = build_work_session_resume(session)["long_build_state"]
 
                 statuses = [
                     item.get("status")
@@ -8022,7 +8081,7 @@ class WorkSessionTests(unittest.TestCase):
             "model_turns": [],
         }
 
-        state = build_work_session_resume(session)["long_dependency_build_state"]
+        state = build_work_session_resume(session)["long_build_state"]
 
         self.assertEqual(state["expected_artifacts"][0]["status"], "proven")
         self.assertEqual(state["missing_artifacts"], [])
@@ -8046,8 +8105,8 @@ class WorkSessionTests(unittest.TestCase):
 
         resume = build_work_session_resume(session)
 
-        self.assertEqual(resume["long_dependency_build_state"], {})
-        self.assertNotIn("long_dependency_build_state:", format_work_session_resume(resume))
+        self.assertEqual(resume["long_build_state"], {})
+        self.assertNotIn("long_build_state:", format_work_session_resume(resume))
 
     def test_work_session_resume_surfaces_stale_runtime_artifact_risk(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
@@ -38289,7 +38348,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("VCS-generated tag/archive URLs", prompt)
         self.assertIn("before alternate toolchain surgery", prompt)
         self.assertIn("For long dependency/toolchain/source-build tasks", prompt)
-        self.assertIn("work_session.resume.long_dependency_build_state", prompt)
+        self.assertIn("work_session.resume.long_build_state", prompt)
         self.assertIn("Prerequisite installation, configure, dependency generation", prompt)
         self.assertIn("required final executable/artifact is missing", prompt)
         self.assertIn("Before installing a distro toolchain", prompt)
