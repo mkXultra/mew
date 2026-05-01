@@ -240,9 +240,13 @@ M6.24 resume condition:
   and switch to a supported dependency version or source-provided
   external/prebuilt branch. It is implemented and codex-ultra reviewed it after
   false-positive fixes for package-manager evidence, configure override
-  attempts, shell mutation detection, and read-only Python inspection.
+  attempts, shell mutation detection, and read-only Python inspection. Its
+  same-shape speed rerun passed at `1/1` with runner errors `0`,
+  Harbor mean `1.000`, runtime `30m 16s`, and all three external verifier
+  checks passed
+  (`docs/M6_24_VENDORED_PATCH_SURGERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`).
   Current selected chain:
-  `M6.24 -> vendored_dependency_patch_surgery_before_supported_branch -> compile-compcert speed_1 -> proof_5 only if speed_1 is viable`.
+  `M6.24 -> vendored_dependency_patch_surgery_before_supported_branch -> compile-compcert proof_5 with -k 5 -n 1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the

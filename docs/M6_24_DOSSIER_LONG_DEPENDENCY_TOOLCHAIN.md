@@ -20,7 +20,7 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> vendored_dependency_patch_surgery_before_supported_branch speed_1 -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> vendored_dependency_patch_surgery_before_supported_branch proof_5 -> compile-compcert
 ```
 
 Broad measurement remains paused. The source-acquisition profile and
@@ -32,8 +32,9 @@ VCS-generated source archive fallback, configured against unsupported Coq
 files before timing out without `/tmp/CompCert/ccomp`. This is now a
 profile/contract consolidation point, not another narrow Flocq or CompCert
 prompt clause. The current repair is
-`vendored_dependency_patch_surgery_before_supported_branch`; the next action is
-one same-shape `compile-compcert` speed_1 before another proof_5.
+`vendored_dependency_patch_surgery_before_supported_branch`. Its one-trial
+same-shape speed proof passed at `1/1`; the next action is the
+resource-normalized `compile-compcert` proof_5.
 
 ## Repair Timeline
 
@@ -58,7 +59,7 @@ one same-shape `compile-compcert` speed_1 before another proof_5.
 | v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | Speed `1/1`; proof_5 pending. |
 | source acquisition profile | Surface VCS-generated archive fallback plus compatibility/toolchain surgery without authoritative source-channel evaluation. | source acquisition profile + detector/resume | Speed `1/1`; proof `0/1`; next failure default runtime link. |
 | default runtime link failure recovery | Surface failed default compile/link smoke after compiler build as a runtime-link recovery blocker. | runtime link proof + detector/resume | Speed `1/1`; proof `0/1`; next failure vendored dependency proof surgery before supported branch. |
-| v1.4 vendored dependency patch surgery | Stop local vendored/third-party dependency or proof-library mutation when source-provided external/prebuilt branch evidence exists and final artifacts are still missing. | profile/contract + detector/resume | Implemented and reviewed; speed_1 pending. |
+| v1.4 vendored dependency patch surgery | Stop local vendored/third-party dependency or proof-library mutation when source-provided external/prebuilt branch evidence exists and final artifacts are still missing. | profile/contract + detector/resume | Speed `1/1`; proof_5 pending. |
 
 ## Pattern Readout
 
@@ -136,6 +137,10 @@ one same-shape `compile-compcert` speed_1 before another proof_5.
 - v1.4 keeps the repair in the existing implementation profile. It should not
   fire from package-manager evidence alone, configure override attempts alone,
   read-only inspection, or normal project source patches.
+- The v1.4 vendored patch surgery speed proof passed `1/1`: `mew work` built
+  `/tmp/CompCert/ccomp`, verified source/config/runtime evidence, ran the
+  default compile/link/run smoke, and the external verifier passed. Escalate to
+  resource-normalized proof_5 before another repair or broad measurement.
 
 ## Preflight Before Next Repair
 
