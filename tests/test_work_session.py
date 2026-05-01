@@ -487,12 +487,16 @@ class WorkSessionTests(unittest.TestCase):
         section_ids = [section["id"] for section in metrics["sections"]]
 
         self.assertIn("[section:implementation_lane_base", prompt)
+        self.assertIn("[section:source_acquisition_profile", prompt)
         self.assertIn("[section:long_dependency_profile", prompt)
         self.assertIn("[section:runtime_link_proof", prompt)
         self.assertIn("[section:recovery_budget", prompt)
         self.assertIn("[section:dynamic_failure_evidence", prompt)
         self.assertIn("[section:compact_recovery", prompt)
         self.assertIn("[section:context_json", prompt)
+        self.assertIn("SourceAcquisitionProfile", prompt)
+        self.assertIn("authoritative source channel", prompt)
+        self.assertIn("VCS-generated tag/archive URLs", prompt)
         self.assertIn("work_session.resume.long_dependency_build_state", prompt)
         self.assertIn("default lookup path", prompt)
         self.assertIn("bounded run_command timeout", prompt)
@@ -502,6 +506,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("[/section:context_json]", context_suffix)
         self.assertEqual(json.loads(context_suffix)["work_session"]["id"], 7)
         self.assertIn("long_dependency_profile", section_ids)
+        self.assertIn("source_acquisition_profile", section_ids)
         self.assertIn("runtime_link_proof", section_ids)
         self.assertIn("dynamic_failure_evidence", section_ids)
         self.assertEqual(metrics["contract_version"], "prompt_sections_v1")
@@ -534,6 +539,8 @@ class WorkSessionTests(unittest.TestCase):
         by_id = {section["id"]: section for section in metrics["sections"]}
 
         self.assertEqual(by_id["implementation_lane_base"]["cache_hint"], "cacheable_prefix")
+        self.assertEqual(by_id["source_acquisition_profile"]["cache_policy"], "cacheable")
+        self.assertEqual(by_id["source_acquisition_profile"]["cache_hint"], "cacheable_prefix")
         self.assertEqual(by_id["long_dependency_profile"]["cache_policy"], "cacheable")
         self.assertEqual(by_id["dynamic_failure_evidence"]["cache_hint"], "dynamic")
         self.assertEqual(by_id["context_json"]["cache_policy"], "dynamic")
@@ -4942,6 +4949,268 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertNotIn("source_archive_version_grounding_too_strict", codes)
 
+    def test_work_session_resume_flags_external_dependency_source_provenance_unverified(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/FooCC/, build the FooCC verified compiler version 1.2.3 from source. "
+                "Ensure that FooCC can be invoked through /tmp/FooCC/foocc."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": (
+                            "Testing dependency... version 9.9.0 -- UNSUPPORTED\n"
+                            "Warning: this version is unsupported, proceed at your own risks.\n"
+                            "Error: dependency API symbol was not found\n"
+                            "FOOCC_BUILD_STATUS=2\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/FooCC",
+                        "command": "opam install -y dep.1.0.0 helper.2.0.0",
+                    },
+                    "result": {
+                        "command": "opam install -y dep.1.0.0 helper.2.0.0",
+                        "cwd": "/tmp/FooCC",
+                        "exit_code": 124,
+                        "timed_out": True,
+                        "stdout": "retrieved dep.1.0.0\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("external_dependency_source_provenance_unverified", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: external_dependency_source_provenance_unverified", text)
+        self.assertIn("authoritative source channel", text)
+
+    def test_work_session_resume_does_not_flag_source_provenance_after_authoritative_source_check(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/FooCC/, build the FooCC verified compiler version 1.2.3 from source. "
+                "Ensure that FooCC can be invoked through /tmp/FooCC/foocc."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": (
+                            "Testing dependency... version 9.9.0 -- UNSUPPORTED\n"
+                            "Error: dependency API symbol was not found\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "curl -L -o /tmp/foocc-official.tar.gz "
+                            "https://github.com/example/FooCC/releases/download/v1.2.3/foocc-1.2.3.tar.gz\n"
+                            "echo 'official release archive and checksum checked'"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "curl -L -o /tmp/foocc-official.tar.gz "
+                            "https://github.com/example/FooCC/releases/download/v1.2.3/foocc-1.2.3.tar.gz\n"
+                            "echo 'official release archive and checksum checked'"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "official release archive and checksum checked\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("external_dependency_source_provenance_unverified", codes)
+
+    def test_work_session_resume_source_provenance_ignores_incidental_output_text(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/FooCC/, build the FooCC verified compiler version 1.2.3 from source. "
+                "Ensure that FooCC can be invoked through /tmp/FooCC/foocc."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": (
+                            "Testing dependency... version 9.9.0 -- UNSUPPORTED\n"
+                            "Error: dependency API symbol was not found\n"
+                            "Hint: consult upstream docs or an official release archive.\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/FooCC",
+                        "command": "opam install -y dep.1.0.0 helper.2.0.0",
+                    },
+                    "result": {
+                        "command": "opam install -y dep.1.0.0 helper.2.0.0",
+                        "cwd": "/tmp/FooCC",
+                        "exit_code": 124,
+                        "timed_out": True,
+                        "stdout": "retrieved dep.1.0.0\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertIn("external_dependency_source_provenance_unverified", codes)
+
+    def test_work_session_resume_flags_gitlab_generated_source_archive_provenance(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/FooCC/, build the FooCC verified compiler version 1.2.3 from source. "
+                "Ensure that FooCC can be invoked through /tmp/FooCC/foocc."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/app",
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://gitlab.com/example/FooCC/-/archive/v1.2.3/FooCC-v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "wget -O /tmp/foocc-1.2.3.tar.gz "
+                            "https://gitlab.com/example/FooCC/-/archive/v1.2.3/FooCC-v1.2.3.tar.gz\n"
+                            "tar -xzf /tmp/foocc-1.2.3.tar.gz -C /tmp\n"
+                            "cd /tmp/FooCC && ./configure && make -j2 foocc"
+                        ),
+                        "cwd": "/app",
+                        "exit_code": 0,
+                        "stdout": "Testing dependency... version 9.9.0 -- UNSUPPORTED\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertIn("external_dependency_source_provenance_unverified", codes)
+
     def test_work_session_resume_flags_version_pinned_source_toolchain_before_override(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -5475,6 +5744,478 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertNotIn("compatibility_branch_budget_contract_missing", codes)
 
+    def test_work_session_resume_flags_vendored_dependency_patch_surgery(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq libcoq-flocq"},
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help | grep external"},
+                    "result": {
+                        "command": "./configure --help | grep external",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-use-external-Flocq\n-use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure x86_64-linux"},
+                    "result": {
+                        "command": "./configure x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                        "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "COQC flocq/Calc/Bracket.v\nError: The variable Z_div_mod_eq was not found\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "summary": "edit_file /tmp/CompCert/flocq/Calc/Bracket.v\nchanged: True",
+                    "parameters": {
+                        "path": "/tmp/CompCert/flocq/Calc/Bracket.v",
+                        "old": "now rewrite <- Z_div_mod_eq.",
+                        "new": "now rewrite <- Z.div_mod.",
+                        "reason": "Patch Coq compatibility in the vendored Flocq proof.",
+                    },
+                    "result": {
+                        "path": "/tmp/CompCert/flocq/Calc/Bracket.v",
+                        "changed": True,
+                        "written": True,
+                    },
+                },
+                {
+                    "id": 7,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -j\"$(nproc)\" ccomp"},
+                    "result": {
+                        "command": "make -j\"$(nproc)\" ccomp",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "command timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        blocker = next(
+            item
+            for item in blockers
+            if item.get("code") == "vendored_dependency_patch_surgery_before_supported_branch"
+        )
+
+        self.assertEqual(blocker["layer"], "profile_contract")
+        self.assertEqual(blocker["source_tool_call_id"], 6)
+        self.assertEqual(blocker["external_branch_tool_call_id"], 3)
+        self.assertEqual(blocker["prebuilt_dependency_tool_call_id"], 2)
+
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_dependency_strategy_blocker: vendored_dependency_patch_surgery_before_supported_branch",
+            text,
+        )
+        self.assertIn("vendored/third-party dependency", text)
+        self.assertIn("supported dependency version", text)
+
+    def test_work_session_resume_does_not_flag_vendored_dependency_patch_after_artifact_proof(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq libcoq-flocq"},
+                    "result": {"command": "apt-get install -y coq libcoq-flocq", "cwd": "/tmp/CompCert", "exit_code": 0},
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {"command": "./configure --help", "cwd": "/tmp/CompCert", "exit_code": 0, "stdout": "-use-external-Flocq\n"},
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure -ignore-coq-version x86_64-linux"},
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "summary": "edit_file /tmp/CompCert/flocq/Calc/Bracket.v\nchanged: True",
+                    "parameters": {"path": "/tmp/CompCert/flocq/Calc/Bracket.v"},
+                    "result": {"path": "/tmp/CompCert/flocq/Calc/Bracket.v", "changed": True, "written": True},
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version"},
+                    "result": {
+                        "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "CompCert C compiler version 3.13\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
+
+    def test_work_session_resume_requires_external_branch_for_vendored_dependency_patch_surgery(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq libcoq-flocq"},
+                    "result": {"command": "apt-get install -y coq libcoq-flocq", "cwd": "/tmp/CompCert", "exit_code": 0},
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure x86_64-linux"},
+                    "result": {
+                        "command": "./configure x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "summary": "edit_file /tmp/CompCert/flocq/Calc/Bracket.v\nchanged: True",
+                    "parameters": {"path": "/tmp/CompCert/flocq/Calc/Bracket.v"},
+                    "result": {"path": "/tmp/CompCert/flocq/Calc/Bracket.v", "changed": True, "written": True},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
+
+    def test_work_session_resume_flags_shell_vendored_dependency_patch_surgery(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq libcoq-flocq"},
+                    "result": {"command": "apt-get install -y coq libcoq-flocq", "cwd": "/tmp/CompCert", "exit_code": 0},
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {"command": "./configure --help", "cwd": "/tmp/CompCert", "exit_code": 0, "stdout": "-use-external-Flocq\n"},
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure x86_64-linux"},
+                    "result": {
+                        "command": "./configure x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Testing Coq... version 8.18.0 -- UNSUPPORTED\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "sed -i 's/Z_div_mod_eq/Z.div_mod/' flocq/Calc/Bracket.v",
+                    },
+                    "result": {
+                        "command": "sed -i 's/Z_div_mod_eq/Z.div_mod/' flocq/Calc/Bracket.v",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
+
+    def test_work_session_resume_does_not_flag_read_only_python_vendored_inspection(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-ignore-coq-version\n-use-external-Flocq\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure x86_64-linux"},
+                    "result": {
+                        "command": "./configure x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Testing Coq... version 8.18.0 -- UNSUPPORTED\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('flocq/Calc/Bracket.v').read_text()[:80])\nPY",
+                    },
+                    "result": {
+                        "command": "python3 - <<'PY'\nfrom pathlib import Path\nprint(Path('flocq/Calc/Bracket.v').read_text()[:80])\nPY",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
+
+    def test_work_session_resume_does_not_treat_override_attempt_alone_as_patch_surgery(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-ignore-coq-version\n-use-external-Flocq\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure -ignore-coq-version x86_64-linux"},
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "summary": "edit_file /tmp/CompCert/flocq/Calc/Bracket.v\nchanged: True",
+                    "parameters": {"path": "/tmp/CompCert/flocq/Calc/Bracket.v"},
+                    "result": {"path": "/tmp/CompCert/flocq/Calc/Bracket.v", "changed": True, "written": True},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
+
+    def test_work_session_resume_does_not_flag_normal_source_patch_as_dependency_surgery(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": "Build the source toolchain and expose /tmp/toolchain/bin/compiler.",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/toolchain", "command": "apt-get install -y gcc"},
+                    "result": {"command": "apt-get install -y gcc", "cwd": "/tmp/toolchain", "exit_code": 0},
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/toolchain", "command": "./configure --help"},
+                    "result": {"command": "./configure --help", "cwd": "/tmp/toolchain", "exit_code": 0, "stdout": "--use-external-libfoo\n"},
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/toolchain", "command": "./configure --ignore-version"},
+                    "result": {"command": "./configure --ignore-version", "cwd": "/tmp/toolchain", "exit_code": 0},
+                },
+                {
+                    "id": 5,
+                    "tool": "edit_file",
+                    "status": "completed",
+                    "summary": "edit_file /tmp/toolchain/src/compiler.c\nchanged: True",
+                    "parameters": {"path": "/tmp/toolchain/src/compiler.c"},
+                    "result": {"path": "/tmp/toolchain/src/compiler.c", "changed": True, "written": True},
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/toolchain", "command": "make -j2"},
+                    "result": {"command": "make -j2", "cwd": "/tmp/toolchain", "exit_code": None, "timed_out": True},
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("vendored_dependency_patch_surgery_before_supported_branch", codes)
+
     def test_work_session_resume_flags_long_dependency_missing_runtime_link_library(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 
@@ -5519,6 +6260,210 @@ class WorkSessionTests(unittest.TestCase):
         text = format_work_session_resume(resume)
         self.assertIn("long_dependency_strategy_blocker: runtime_link_library_missing", text)
         self.assertIn("runtime/library target", text)
+
+    def test_work_session_resume_flags_default_runtime_link_failure_after_compiler_smoke(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 20,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make -j2 all && test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make -j2 all && test -x /tmp/CompCert/ccomp && "
+                            "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "CCOMP /tmp/CompCert/ccomp\n",
+                        "stderr": (
+                            "/usr/bin/ld: cannot find -lcompcert: No such file or directory\n"
+                            "ccomp: error: linker command failed with exit code 1\n"
+                        ),
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("default_runtime_link_path_failed", codes)
+        text = format_work_session_resume(resume)
+        self.assertIn("long_dependency_strategy_blocker: default_runtime_link_path_failed", text)
+        self.assertIn("default compile/link smoke fails", text)
+        self.assertIn("do not restart source acquisition", text)
+
+    def test_work_session_resume_clears_default_runtime_link_failure_after_default_smoke(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 20,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c",
+                    },
+                    "result": {
+                        "command": "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "/usr/bin/ld: cannot find -lcompcert: No such file or directory\n",
+                    },
+                },
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "make -C runtime libcompcert.a && make install && "
+                            "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "make -C runtime libcompcert.a && make install && "
+                            "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "AR libcompcert.a\nINSTALL runtime\npositive probe ok\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("default_runtime_link_path_failed", codes)
+        self.assertNotIn("runtime_link_library_missing", codes)
+
+    def test_work_session_resume_keeps_later_default_runtime_link_failure_after_prior_smoke(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 20,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "/tmp/CompCert/ccomp -o /tmp/first_probe /tmp/first_probe.c",
+                    },
+                    "result": {
+                        "command": "/tmp/CompCert/ccomp -o /tmp/first_probe /tmp/first_probe.c",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "first probe ok\n",
+                    },
+                },
+                {
+                    "id": 21,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "/tmp/CompCert/ccomp -o /tmp/later_probe /tmp/later_probe.c",
+                    },
+                    "result": {
+                        "command": "/tmp/CompCert/ccomp -o /tmp/later_probe /tmp/later_probe.c",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "/usr/bin/ld: cannot find -lcompcert: No such file or directory\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("default_runtime_link_path_failed", codes)
+        self.assertIn("runtime_link_library_missing", codes)
+
+    def test_work_session_resume_flags_lld_missing_runtime_library_wording(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 20,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c",
+                    },
+                    "result": {
+                        "command": "/tmp/CompCert/ccomp -o /tmp/positive_probe /tmp/positive_probe.c",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "ld.lld: error: unable to find library -lcompcert\nlinker command failed\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"]["strategy_blockers"]]
+
+        self.assertIn("default_runtime_link_path_failed", codes)
 
     def test_work_session_resume_flags_custom_runtime_path_smoke_without_default_link_proof(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
@@ -36779,6 +37724,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
         self.assertIn("expected dimensions/resolution, reference similarity", prompt)
+        self.assertIn("For external dependency/source acquisition tasks", prompt)
+        self.assertIn("authoritative source channel", prompt)
+        self.assertIn("VCS-generated tag/archive URLs", prompt)
+        self.assertIn("before alternate toolchain surgery", prompt)
         self.assertIn("For long dependency/toolchain/source-build tasks", prompt)
         self.assertIn("work_session.resume.long_dependency_build_state", prompt)
         self.assertIn("Prerequisite installation, configure, dependency generation", prompt)

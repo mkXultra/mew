@@ -20,31 +20,20 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> long_dependency_compatibility_branch_budget_contract speed_1 -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> vendored_dependency_patch_surgery_before_supported_branch speed_1 -> compile-compcert
 ```
 
-Broad measurement remains paused. The OAuth-refresh proof rerun validated the
-proof-infrastructure fix but missed the `5/5` close target after a recoverable
-runtime-link failure consumed the remaining wall/model budget. The tool/runtime
-recovery-budget repair passed its one-trial same-shape speed proof at `1/1`.
-The resource-normalized proof then reached `2/3` valid completed trials before
-the close target became impossible; the failed valid trial stopped at step 1 on
-`failed to parse JSON plan`, before task work ran. The bounded one-shot
-malformed JSON plan recovery repair passed its one-trial speed proof at `1/1`.
-The next proof_5 reached `1/2` valid completed trials before the close target
-became impossible. The failed valid trial reached the known runtime-library
-recovery path, then burned the remaining recovery budget on full-context model
-timeouts under a wall-clock timeout ceiling. The generic timeout-ceiling
-`compact_recovery` repair passed its same-shape speed proof at `1/1`. The
-following resource-normalized proof reached `2/3` valid completed trials
-before the close target became impossible. The failed valid trial repeated the
-winning external-Flocq strategy too late: serial compatibility probes consumed
-the wall budget, then the final `-use-external-Flocq` build was capped and
-timed out before `/tmp/CompCert/ccomp` existed. This is now a profile/contract
-consolidation point, not another narrow inline prompt clause. The
-`long_dependency_compatibility_branch_budget_contract` repair passed its
-one-trial same-shape speed proof at `1/1`; the next action is the
-resource-normalized `compile-compcert` proof_5.
+Broad measurement remains paused. The source-acquisition profile and
+runtime-link recovery repairs both passed one-trial same-shape speed proofs at
+`1/1`. The latest resource-normalized proof_5 missed on a new
+long-dependency/toolchain strategy shape: the failed valid trial started from a
+VCS-generated source archive fallback, configured against unsupported Coq
+`8.18.0`, then spent recovery attempts editing bundled Flocq proof-library
+files before timing out without `/tmp/CompCert/ccomp`. This is now a
+profile/contract consolidation point, not another narrow Flocq or CompCert
+prompt clause. The current repair is
+`vendored_dependency_patch_surgery_before_supported_branch`; the next action is
+one same-shape `compile-compcert` speed_1 before another proof_5.
 
 ## Repair Timeline
 
@@ -67,6 +56,9 @@ resource-normalized `compile-compcert` proof_5.
 | v1.1 malformed JSON plan recovery | Treat backend `failed to parse JSON plan` as a recoverable one-shot transient model error. | loop recovery | Speed `1/1`; proof `1/2`; next failure timeout-ceiling full-context recovery. |
 | v1.2 timeout-ceiling compact recovery | Use compact recovery context when wall-clock pressure reduces model timeout. | model context budgeting | Speed `1/1`; proof `2/3`; next failure compatibility branch budget. |
 | v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | Speed `1/1`; proof_5 pending. |
+| source acquisition profile | Surface VCS-generated archive fallback plus compatibility/toolchain surgery without authoritative source-channel evaluation. | source acquisition profile + detector/resume | Speed `1/1`; proof `0/1`; next failure default runtime link. |
+| default runtime link failure recovery | Surface failed default compile/link smoke after compiler build as a runtime-link recovery blocker. | runtime link proof + detector/resume | Speed `1/1`; proof `0/1`; next failure vendored dependency proof surgery before supported branch. |
+| v1.4 vendored dependency patch surgery | Stop local vendored/third-party dependency or proof-library mutation when source-provided external/prebuilt branch evidence exists and final artifacts are still missing. | profile/contract + detector/resume | Implemented and reviewed; speed_1 pending. |
 
 ## Pattern Readout
 
@@ -132,11 +124,18 @@ resource-normalized `compile-compcert` proof_5.
   the wall budget on weaker compatibility probes. This should be repaired as a
   long-dependency profile/contract budget issue, not by appending another
   task-local prompt sentence.
-- The v1.3 compatibility-branch budget speed proof passed `1/1`: `mew work`
-  finished after 7 steps, built `/tmp/CompCert/ccomp`, installed default
-  runtime support, ran a default-path smoke, and the external verifier passed.
-  Escalate to resource-normalized proof_5 before another repair or broad
-  measurement.
+- The source-acquisition profile speed proof passed `1/1`, but its proof_5
+  miss repeated the known runtime-link failure after building `ccomp`; that was
+  repaired by `default_runtime_link_path_failed` and validated by another
+  speed proof.
+- The default-runtime-link recovery proof miss did not repeat runtime-link
+  failure. It fell back to a VCS-generated source archive, then edited bundled
+  Flocq proof-library files under unsupported Coq while the final compiler
+  artifact was missing. The transferable issue is local vendored dependency
+  patch surgery after source-provided external/prebuilt branch evidence exists.
+- v1.4 keeps the repair in the existing implementation profile. It should not
+  fire from package-manager evidence alone, configure override attempts alone,
+  read-only inspection, or normal project source patches.
 
 ## Preflight Before Next Repair
 

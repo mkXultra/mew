@@ -205,10 +205,44 @@ M6.24 resume condition:
   slash-compound artifact extraction false positive: guidance compounds such as
   `dependency/toolchain` and `executable/invokable` were treated as missing
   absolute artifacts `/toolchain` and `/invokable`. The bounded v1.1 repair is
-  now active: ignore slash-prefixed matches embedded in word compounds, validate
-  with focused acceptance tests, then rerun one same-shape speed_1 before proof_5.
+  implemented. After a reference check, user explicitly chose the broader
+  Claude Code substrate plus Codex directness import over another narrow proof
+  cycle. The active bounded repair is now `SourceAcquisitionProfile` plus the
+  generic `external_dependency_source_provenance_unverified` resume blocker,
+  not a task-specific release-tarball rule. That repair is implemented and
+  codex-ultra reviewed it after stdout false-suppression and GitLab/Bitbucket
+  generated-archive fixes. Its same-shape `compile-compcert` speed rerun
+  passed externally at `1/1` with runner errors `0` in `33m 41s`
+  (`docs/M6_24_SOURCE_ACQUISITION_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`).
+  The follow-on sequential proof_5 was stopped after its first valid trial
+  scored `0/1`; `5/5` was already impossible. The failed trial built
+  `/tmp/CompCert/ccomp` but the default compile/link smoke and external
+  verifier failed with `/usr/bin/ld: cannot find -lcompcert`. The current
+  bounded repair is a generic `default_runtime_link_path_failed` resume blocker
+  plus sharper `RuntimeLinkProof` guidance for missing runtime libraries after
+  a default smoke failure. It is implemented and targeted tests pass; ACM review
+  passed in codex-ultra session `019de1b4-10c9-7511-b52b-44efe30fb7d4`. Its
+  same-shape speed rerun then passed at `1/1` with runner errors `0`,
+  Harbor mean `1.000`, runtime `30m 23s`, and all three external verifier
+  checks passed
+  (`docs/M6_24_RUNTIME_LINK_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`).
+  The follow-on sequential proof_5 was stopped after its first valid trial
+  scored `0/1`; `5/5` was already impossible. The failed trial did not recreate
+  the runtime-link miss. It started from a VCS-generated source archive
+  fallback, configured against unsupported Coq `8.18.0`, then spent recovery
+  attempts editing bundled Flocq proof-library files before timing out without
+  `/tmp/CompCert/ccomp`
+  (`docs/M6_24_RUNTIME_LINK_RECOVERY_COMPILE_COMPCERT_PROOF_5_ABORTED_2026-05-01.md`).
+  The current bounded repair is
+  `vendored_dependency_patch_surgery_before_supported_branch`: when final
+  artifacts are missing and source-provided external/prebuilt branch evidence
+  exists, mew should stop local vendored/third-party dependency proof surgery
+  and switch to a supported dependency version or source-provided
+  external/prebuilt branch. It is implemented and codex-ultra reviewed it after
+  false-positive fixes for package-manager evidence, configure override
+  attempts, shell mutation detection, and read-only Python inspection.
   Current selected chain:
-  `M6.24 -> acceptance_substrate_v1.1 slash-compound path repair -> compile-compcert speed_1 -> proof_5 only if speed_1 is viable`.
+  `M6.24 -> vendored_dependency_patch_surgery_before_supported_branch -> compile-compcert speed_1 -> proof_5 only if speed_1 is viable`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the

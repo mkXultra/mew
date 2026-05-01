@@ -4158,6 +4158,17 @@ _LONG_DEPENDENCY_RETRIEVED_VERSIONED_SOURCE_TOOL_RE = re.compile(
     r"\bretrieved\s+[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+",
     re.IGNORECASE,
 )
+_LONG_DEPENDENCY_VENDORED_DEPENDENCY_PATH_PARTS = {
+    "deps",
+    "dependencies",
+    "external",
+    "flocq",
+    "menhir",
+    "third-party",
+    "third_party",
+    "vendor",
+    "vendored",
+}
 _LONG_DEPENDENCY_CUSTOM_RUNTIME_PATH_MARKERS = (
     "-stdlib",
     "${stdlib_args",
@@ -4200,6 +4211,24 @@ _LONG_DEPENDENCY_SOURCE_ARCHIVE_EVIDENCE_MARKERS = (
     "tarball identity",
     "source root",
     "source identity",
+)
+_LONG_DEPENDENCY_VCS_GENERATED_ARCHIVE_RE = re.compile(
+    r"(?:github\.com/[^\s'\"<>]+/archive/refs/(?:tags|heads)/|"
+    r"codeload\.github\.com/[^\s'\"<>]+/(?:tar|zip)|"
+    r"github\.com/[^\s'\"<>]+/(?:tarball|zipball)/|"
+    r"gitlab\.com/[^\s'\"<>]+/-/archive/|"
+    r"bitbucket\.org/[^\s'\"<>]+/get/)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_AUTHORITATIVE_SOURCE_RE = re.compile(
+    r"(?:github\.com/[^\s'\"<>]+/releases/download/|"
+    r"\b(?:official|upstream|project)\s+(?:release|download|source|archive|tarball|distribution|docs?)\b|"
+    r"\b(?:release|distribution)\s+(?:archive|tarball|source)\b|"
+    r"\b(?:signed\s+)?(?:sha256|sha512|checksum|signature)\b|"
+    r"\b(?:release\s+notes?|download\s+page)\b|"
+    r"\b(?:apt\s+source|apt-cache\s+showsrc|dnf\s+download\s+--source|yumdownloader\s+--source|"
+    r"opam\s+source|pip\s+download|cargo\s+package)\b)",
+    re.IGNORECASE,
 )
 
 
@@ -4467,6 +4496,60 @@ def _long_dependency_source_version_grounding_blocker(call):
     }
 
 
+def _long_dependency_uses_vcs_generated_source_archive(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    return bool(_LONG_DEPENDENCY_VCS_GENERATED_ARCHIVE_RE.search(_runtime_artifact_call_text(call)))
+
+
+def _long_dependency_checks_authoritative_source_channel(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _long_dependency_call_command_text(call)
+    if not text:
+        return False
+    return bool(_LONG_DEPENDENCY_AUTHORITATIVE_SOURCE_RE.search(text))
+
+
+def _long_dependency_source_provenance_blocker(calls, missing_artifacts, existing_blockers):
+    if not missing_artifacts:
+        return {}
+    vcs_archive_call = {}
+    authoritative_source_seen = False
+    compatibility_or_invasive_repair_seen = False
+    blocker_codes = {
+        str(blocker.get("code") or "")
+        for blocker in existing_blockers or []
+        if isinstance(blocker, dict)
+    }
+    if blocker_codes & {
+        "compatibility_override_probe_missing",
+        "toolchain_version_constraint_mismatch",
+        "version_pinned_source_toolchain_before_compatibility_override",
+        "source_archive_version_grounding_too_strict",
+    }:
+        compatibility_or_invasive_repair_seen = True
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if not vcs_archive_call and _long_dependency_uses_vcs_generated_source_archive(call):
+            vcs_archive_call = call
+        if _long_dependency_checks_authoritative_source_channel(call):
+            authoritative_source_seen = True
+        if _long_dependency_uses_version_pinned_source_toolchain(call):
+            compatibility_or_invasive_repair_seen = True
+    if not vcs_archive_call or authoritative_source_seen or not compatibility_or_invasive_repair_seen:
+        return {}
+    command = _long_dependency_call_command_text(vcs_archive_call) or _runtime_artifact_call_text(vcs_archive_call)
+    return {
+        "code": "external_dependency_source_provenance_unverified",
+        "layer": "source_acquisition_profile",
+        "source_tool_call_id": vcs_archive_call.get("id"),
+        "tool": vcs_archive_call.get("tool") or "",
+        "excerpt": clip_inline_text(command, 180),
+    }
+
+
 def _long_dependency_artifact_refs(expected_artifacts):
     refs = []
     for artifact in expected_artifacts or []:
@@ -4700,6 +4783,57 @@ def _long_dependency_default_runtime_link_path_blocker(calls, expected_artifacts
     return custom_smoke
 
 
+def _long_dependency_default_runtime_link_failure_blocker(calls, expected_artifacts):
+    blocker = {}
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+            continue
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            blocker = {}
+            continue
+        if str(call.get("status") or "").casefold() != "completed":
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("exit_code") in (None, 0):
+            continue
+        smoke_entries = [
+            entry for entry in _long_dependency_smoke_entries(call, expected_artifacts)
+            if not entry.get("custom_runtime_path")
+        ]
+        if not smoke_entries:
+            continue
+        text = _runtime_artifact_call_text(call)
+        lowered = text.casefold()
+        if not (
+            any(marker in lowered for marker in ("cannot find -l", "library not found"))
+            or re.search(r"\bunable to find (?:library )?-l", lowered)
+        ):
+            continue
+        if not any(marker in lowered for marker in ("ld:", "linker", "link failed", "link command failed")):
+            continue
+        excerpt = ""
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line_lower = line.casefold()
+            if (
+                "cannot find -l" in line_lower
+                or "library not found" in line_lower
+                or re.search(r"\bunable to find (?:library )?-l", line_lower)
+            ):
+                excerpt = clip_inline_text(line, 180)
+                break
+        blocker = {
+            "code": "default_runtime_link_path_failed",
+            "layer": "runtime_link_proof",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": excerpt or clip_inline_text(smoke_entries[-1].get("line") or text, 180),
+        }
+    return blocker
+
+
 def _long_dependency_runtime_install_missing_library_failure(call):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return {}
@@ -4894,6 +5028,117 @@ def _long_dependency_compatibility_branch_budget_blocker(calls, missing_artifact
     return {}
 
 
+def _long_dependency_is_vendored_dependency_patch_call(call):
+    if not isinstance(call, dict):
+        return False
+    if call.get("tool") in COMMAND_WORK_TOOLS:
+        text = _long_dependency_call_command_text(call)
+        lowered = text.casefold()
+        shell_mutation = any(
+            marker in lowered
+            for marker in (
+                "sed -i",
+                "perl -pi",
+                "patch ",
+                "git apply",
+                "tee ",
+                "cat >",
+                "cat <<",
+            )
+        )
+        python_invocation = any(marker in lowered for marker in ("python -", "python3 -", "python -c", "python3 -c"))
+        python_mutation = bool(
+            python_invocation
+            and re.search(
+                r"(?:write_text\s*\(|write_bytes\s*\(|"
+                r"open\s*\([^)]*,\s*['\"][^'\"]*[wa+][^'\"]*['\"]|"
+                r"\.(?:rename|replace|unlink)\s*\(|shutil\.copy)",
+                text,
+                re.IGNORECASE,
+            )
+        )
+        if not shell_mutation and not python_mutation:
+            return False
+        return bool(
+            re.search(
+                r"(?:^|[/\s])(?:deps|dependencies|external|flocq|menhir|third[-_]party|vendor|vendored)/"
+                r"[A-Za-z0-9_./+-]+",
+                text,
+                re.IGNORECASE,
+            )
+        )
+    if call.get("tool") not in WRITE_WORK_TOOLS:
+        return False
+    path = str(work_call_path(call) or "")
+    path_parts = {part.casefold() for part in Path(path).parts if part}
+    if not (path_parts & _LONG_DEPENDENCY_VENDORED_DEPENDENCY_PATH_PARTS):
+        return False
+    text = _runtime_artifact_call_text(call)
+    if not text:
+        text = "\n".join(
+            str(value or "")
+            for value in (
+                path,
+                (call.get("parameters") or {}).get("old") if isinstance(call.get("parameters"), dict) else "",
+                (call.get("parameters") or {}).get("new") if isinstance(call.get("parameters"), dict) else "",
+                (call.get("parameters") or {}).get("reason") if isinstance(call.get("parameters"), dict) else "",
+            )
+            if value
+        )
+    lowered = text.casefold()
+    suffix = Path(path).suffix.casefold()
+    return bool(
+        suffix in {".v", ".ml", ".mli", ".hs", ".c", ".h", ".cc", ".cpp", ".rs"}
+        or any(marker in lowered for marker in ("proof", "lemma", "theorem", "coq", "compatib", "dependency"))
+    )
+
+
+def _long_dependency_vendored_patch_surgery_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    dependency_mismatch_seen = False
+    external_branch_evidence_call = {}
+    prebuilt_dependency_call = {}
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if not external_branch_evidence_call and _long_dependency_has_external_compatibility_branch_evidence(call):
+            external_branch_evidence_call = call
+        blocker_codes = {
+            str(blocker.get("code") or "")
+            for blocker in _long_dependency_strategy_blockers(call)
+            if isinstance(blocker, dict)
+        }
+        if blocker_codes & {
+            "toolchain_version_constraint_mismatch",
+            "compatibility_override_probe_missing",
+            "version_pinned_source_toolchain_before_compatibility_override",
+        }:
+            dependency_mismatch_seen = True
+        if not (
+            dependency_mismatch_seen
+            and external_branch_evidence_call
+            and _long_dependency_is_vendored_dependency_patch_call(call)
+        ):
+            continue
+        path = work_call_path(call)
+        return {
+            "code": "vendored_dependency_patch_surgery_before_supported_branch",
+            "layer": "profile_contract",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "path": path,
+            "excerpt": clip_inline_text(path or _runtime_artifact_call_text(call), 180),
+            "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id") if prebuilt_dependency_call else None,
+            "external_branch_tool_call_id": (
+                external_branch_evidence_call.get("id") if external_branch_evidence_call else None
+            ),
+        }
+    return {}
+
+
 def _long_dependency_task_text(task, session=None):
     task = task if isinstance(task, dict) else {}
     session = session if isinstance(session, dict) else {}
@@ -5040,6 +5285,15 @@ def build_long_dependency_build_state(task, calls, session=None):
                 continue
             seen_strategy_blockers.add(key)
             strategy_blockers.append(blocker)
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            strategy_blockers = [
+                blocker for blocker in strategy_blockers
+                if blocker.get("code") != "runtime_link_library_missing"
+            ]
+            seen_strategy_blockers = {
+                (blocker.get("code"), blocker.get("source_tool_call_id"), blocker.get("excerpt"))
+                for blocker in strategy_blockers
+            }
         if call_status != "completed":
             continue
         for artifact in expected_artifacts:
@@ -5073,6 +5327,18 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(default_runtime_link_path)
+    default_runtime_link_failure = _long_dependency_default_runtime_link_failure_blocker(
+        calls,
+        expected_artifacts,
+    )
+    if default_runtime_link_failure:
+        key = (
+            default_runtime_link_failure.get("code"),
+            default_runtime_link_failure.get("source_tool_call_id"),
+            default_runtime_link_failure.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(default_runtime_link_failure)
     runtime_install_before_library = _long_dependency_runtime_install_before_library_blocker(
         calls,
         expected_artifacts,
@@ -5099,6 +5365,31 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(compatibility_branch_budget)
+    vendored_patch_surgery = _long_dependency_vendored_patch_surgery_blocker(
+        calls,
+        missing,
+    )
+    if vendored_patch_surgery:
+        key = (
+            vendored_patch_surgery.get("code"),
+            vendored_patch_surgery.get("source_tool_call_id"),
+            vendored_patch_surgery.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(vendored_patch_surgery)
+    source_provenance = _long_dependency_source_provenance_blocker(
+        calls,
+        missing,
+        strategy_blockers,
+    )
+    if source_provenance:
+        key = (
+            source_provenance.get("code"),
+            source_provenance.get("source_tool_call_id"),
+            source_provenance.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(source_provenance)
     if not progress and not proven and not strategy_blockers:
         return {}
     latest_command = ""
@@ -5125,11 +5416,22 @@ def build_long_dependency_build_state(task, calls, session=None):
             "source-built dependency/toolchain installation; once source help or configure exposes an external/prebuilt "
             "compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final "
             "artifact build instead of serially probing weaker branches. "
+            "If the source tree came from a VCS-generated tag/archive and dependency or API compatibility fails, "
+            "check the authoritative source channel next: project docs, package-manager metadata, official release/"
+            "distribution archive, signed checksum, release notes, or upstream download page. Do that before "
+            "heavy alternate-toolchain surgery. "
+            "If compatibility repair turns into edits under a vendored/third-party dependency or proof library "
+            "while the final artifact is still missing, stop local dependency patch surgery and switch to a "
+            "supported dependency version or source-provided external/prebuilt dependency branch before another "
+            "long rebuild. "
             "For release archive/tag source builds, treat the versioned archive URL, tag/root directory, and "
             "coarse internal VERSION markers as source identity evidence; do not abort solely because an "
             "internal VERSION file omits a patch suffix that is already grounded by the archive/tag. "
             "If a compiler or toolchain can build a trivial binary but the linker reports a missing runtime "
-            "library, install or configure the project runtime/library target before finish. If local smoke "
+            "library, install or configure the project runtime/library target before finish. If a default "
+            "compile/link smoke fails with 'cannot find -l...' or a missing runtime library, do not restart "
+            "source acquisition, configure, or clean rebuild; build/install the shortest runtime/library target "
+            "into the default lookup path and rerun that default smoke. If local smoke "
             "only works with custom runtime/library path flags, install or configure that runtime into the "
             "default lookup path and rerun a default invocation proof before finish. If runtime install reports "
             "a missing library artifact, build the shortest explicit runtime-library target first, then retry "
@@ -9834,7 +10136,20 @@ def format_work_session_resume(resume):
             lines.append(f"long_dependency_incomplete_reason: {long_dependency_build_state.get('incomplete_reason')}")
         if long_dependency_build_state.get("latest_build_status"):
             lines.append(f"long_dependency_latest_build_status: {long_dependency_build_state.get('latest_build_status')}")
-        for item in (long_dependency_build_state.get("strategy_blockers") or [])[:4]:
+        blocker_priority = {
+            "vendored_dependency_patch_surgery_before_supported_branch": 0,
+            "compatibility_branch_budget_contract_missing": 1,
+            "external_dependency_source_provenance_unverified": 2,
+            "default_runtime_link_path_failed": 3,
+        }
+        display_blockers = sorted(
+            long_dependency_build_state.get("strategy_blockers") or [],
+            key=lambda item: (
+                blocker_priority.get(str((item or {}).get("code") or ""), 10),
+                str((item or {}).get("source_tool_call_id") or ""),
+            ),
+        )
+        for item in display_blockers[:6]:
             code = item.get("code") or "unknown"
             excerpt = item.get("excerpt") or ""
             source_tool = item.get("source_tool_call_id")
