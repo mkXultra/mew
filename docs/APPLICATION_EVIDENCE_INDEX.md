@@ -8,11 +8,11 @@ Codex for Open Source applications.
 
 ## Summary
 
-`mew` is an MIT-licensed durable-state runtime for long-running AI coding
-agents. It preserves task memory, typed/scoped recall, recovery state,
-approval history, verifier evidence, runtime effects, and audit trails so an
-interrupted agent can resume with less human rebriefing than a fresh CLI
-restart.
+`mew` is an MIT-licensed durable-state runtime for resident AI. It preserves
+task memory, typed/scoped recall, recovery state, approval history, verifier
+evidence, runtime effects, and audit trails so an interrupted AI can resume
+with less human rebriefing than a fresh process. Coding and Terminal-Bench are
+the first hard proof surfaces, not the full product boundary.
 
 Current application framing:
 

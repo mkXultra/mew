@@ -1,14 +1,17 @@
 # mew
 
-`mew` is a durable-state runtime for long-running AI coding agents.
+`mew` is a durable-state runtime for resident AI: a local AI body that can
+remain present across sessions, remember context, recover from failures, and
+keep working.
 
-Most coding agents are powerful inside one session, but brittle across time.
-After a context window fills, a process crashes, a verifier fails, or a day
-passes, the next model often has to reconstruct intent from git status,
+Most AI assistants are powerful inside one interaction, but brittle across
+time. After a context window fills, a process crashes, a verifier fails, or a
+day passes, the next model often has to reconstruct intent from git status,
 scattered notes, and human rebriefing. `mew` is built around the opposite
-operating model: a resident agent shell that preserves task memory, recovery
+operating model: a resident AI shell that preserves task memory, recovery
 state, approval history, verifier evidence, runtime effects, and audit trails
-so work can resume with less reconstruction.
+so work can resume with less reconstruction. Coding is the first hard proof
+surface, not the full product boundary.
 
 It keeps task state in `.mew/state.json`, wakes on explicit events or timers,
 remembers context, asks questions, runs guarded native work sessions, and
