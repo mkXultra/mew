@@ -58,6 +58,11 @@ _PACKAGE_METADATA_OUTPUT_RE = re.compile(
     re.I | re.M,
 )
 _PACKAGE_METADATA_ASSERTION_RE = re.compile(r"(?:https?://\S+|sha(?:256|512)-\S+)", re.I)
+_DIRECT_SOURCE_AUTHORITY_OUTPUT_RE = re.compile(
+    r"(?:^upstream_(?:ref|ref_url)=|^authority_(?:archive_)?url=https?://|"
+    r"^matched_authority_url=https?://)",
+    re.I | re.M,
+)
 _CONFIGURE_RE = re.compile(r"(?:\./configure|\bcmake\b|\bmeson\b|\bautoconf\b|\bconfigure\b)", re.I)
 _DEPENDENCY_GENERATION_RE = re.compile(r"(?:make\s+depend|\.depend|dependency generation|generated depend)", re.I)
 _BUILD_RE = re.compile(r"\b(?:make|ninja|cargo|go build|npm run build|python -m build|opam install|pip install)\b", re.I)
@@ -391,12 +396,19 @@ def reduce_long_build_state(
             }
         )
     blockers = [dict(item) for item in strategy_blockers or [] if isinstance(item, Mapping)]
-    stages = _reduce_stages(contract, attempts, artifact_status, blockers, fresh_default_smoke=fresh_default_smoke)
+    active_blockers = _active_strategy_blockers(
+        blockers,
+        attempts,
+        artifact_status,
+        contract,
+        fresh_default_smoke=fresh_default_smoke,
+    )
+    stages = _reduce_stages(contract, attempts, artifact_status, active_blockers, fresh_default_smoke=fresh_default_smoke)
     missing = [item for item in artifact_status if item.get("status") != "proven"]
     current_failure = _current_failure(
         contract,
         attempts,
-        blockers,
+        active_blockers,
         missing,
         incomplete_reason,
         evidence_by_tool_call_id,
@@ -440,7 +452,8 @@ def reduce_long_build_state(
             "latest_build_status": str(latest_build_call.get("status") or "") if isinstance(latest_build_call, Mapping) else "",
             "latest_build_command": latest_build_command,
             "incomplete_reason": effective_incomplete_reason,
-            "strategy_blockers": blockers[-6:],
+            "strategy_blockers": active_blockers[-6:],
+            "cleared_strategy_blockers": _cleared_strategy_blockers(blockers, active_blockers)[-6:],
             "recovery_decision": recovery_decision.to_dict() if recovery_decision else None,
             "suggested_next": str(suggested_next or "") if (current_failure and not recovery_decision) else "",
         },
@@ -783,11 +796,17 @@ def _diagnostics(evidence: CommandEvidence) -> list[dict]:
 
 def _source_authority_signal(evidence: CommandEvidence) -> bool:
     text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    if _command_uses_direct_source_acquisition_tool(evidence.command):
+        if _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text):
+            return True
+        if _command_has_assertion_only_source_authority_segment(evidence.command):
+            return False
+        return bool(_SOURCE_AUTHORITY_RE.search(output_text) and not _BUILD_FAILURE_RE.search(output_text))
     if _command_has_assertion_only_source_authority_segment(evidence.command):
         return False
     if _SOURCE_AUTHORITY_RE.search(text) and _command_uses_source_acquisition_tool(evidence.command):
         return True
-    output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     return bool(_command_uses_package_metadata_tool(evidence.command) and _PACKAGE_METADATA_OUTPUT_RE.search(output_text))
 
 
@@ -817,11 +836,19 @@ def _command_uses_source_acquisition_tool(command: object) -> bool:
     return any(_segment_uses_source_acquisition_tool(segment) for segment in split_unquoted_shell_command_segments(command))
 
 
+def _command_uses_direct_source_acquisition_tool(command: object) -> bool:
+    return any(_segment_uses_direct_source_acquisition_tool(segment) for segment in split_unquoted_shell_command_segments(command))
+
+
 def _command_uses_package_metadata_tool(command: object) -> bool:
     return any(_segment_uses_package_metadata_tool(segment) for segment in split_unquoted_shell_command_segments(command))
 
 
 def _segment_uses_source_acquisition_tool(segment: object) -> bool:
+    return _segment_uses_direct_source_acquisition_tool(segment) or _segment_uses_package_metadata_tool(segment)
+
+
+def _segment_uses_direct_source_acquisition_tool(segment: object) -> bool:
     try:
         parts = shlex.split(str(segment or ""))
     except ValueError:
@@ -831,8 +858,6 @@ def _segment_uses_source_acquisition_tool(segment: object) -> bool:
     if token in {"curl", "wget", "tar", "unzip", "gh"}:
         return True
     if token == "git" and any(part in {"clone", "checkout", "fetch", "ls-remote"} for part in lowered_parts[1:3]):
-        return True
-    if _segment_uses_package_metadata_tool(segment):
         return True
     return False
 
@@ -868,12 +893,7 @@ def _reduce_stages(
     blockers = [dict(item) for item in blockers or []]
     stages: list[dict] = []
     source_blocked = _has_source_blocker(blockers)
-    source_satisfied = any(
-        str(item.get("stage") or "") == "source_acquisition"
-        and item.get("result") == "success"
-        and _attempt_has_signal(item, "source_authority")
-        for item in attempts
-    )
+    source_satisfied = _source_authority_satisfied(attempts)
     stages.append(
         {
             "id": "source_authority",
@@ -918,6 +938,68 @@ def _reduce_stages(
     else:
         stages.append({"id": "default_smoke", "required": False, "status": "not_required"})
     return stages
+
+
+def _active_strategy_blockers(
+    blockers: Iterable[Mapping[str, object]],
+    attempts: Iterable[Mapping[str, object]],
+    artifacts: Iterable[Mapping[str, object]],
+    contract: Mapping[str, object],
+    *,
+    fresh_default_smoke: bool = False,
+) -> list[dict]:
+    blockers = [dict(item) for item in blockers or [] if isinstance(item, Mapping)]
+    if not blockers:
+        return []
+    attempts = [dict(item) for item in attempts or [] if isinstance(item, Mapping)]
+    artifacts = [dict(item) for item in artifacts or [] if isinstance(item, Mapping)]
+    source_required = bool((contract.get("source_policy") or {}).get("authority_required", True))
+    source_satisfied = _source_authority_satisfied(attempts)
+    target_proven = bool(artifacts) and all(item.get("status") == "proven" for item in artifacts)
+    runtime_policy = contract.get("runtime_proof") if isinstance(contract.get("runtime_proof"), Mapping) else {}
+    runtime_required = runtime_policy.get("required") == "required"
+    runtime_satisfied = (not runtime_required) or fresh_default_smoke
+    final_contract_satisfied = target_proven and runtime_satisfied and ((not source_required) or source_satisfied)
+
+    active = []
+    for blocker in blockers:
+        code = str(blocker.get("code") or "")
+        if code == "external_dependency_source_provenance_unverified" and source_satisfied:
+            continue
+        if final_contract_satisfied:
+            continue
+        active.append(blocker)
+    return active
+
+
+def _cleared_strategy_blockers(
+    blockers: Iterable[Mapping[str, object]],
+    active_blockers: Iterable[Mapping[str, object]],
+) -> list[dict]:
+    active_ids = {_blocker_identity(item) for item in active_blockers or [] if isinstance(item, Mapping)}
+    cleared = []
+    for blocker in blockers or []:
+        if not isinstance(blocker, Mapping):
+            continue
+        if _blocker_identity(blocker) not in active_ids:
+            cleared.append(dict(blocker))
+    return cleared
+
+
+def _blocker_identity(blocker: Mapping[str, object]) -> tuple[str, str, str]:
+    return (
+        str(blocker.get("code") or ""),
+        str(blocker.get("source_tool_call_id") or ""),
+        str(blocker.get("excerpt") or ""),
+    )
+
+
+def _source_authority_satisfied(attempts: Iterable[Mapping[str, object]]) -> bool:
+    return any(
+        item.get("result") == "success" and _attempt_has_signal(item, "source_authority")
+        for item in attempts or []
+        if isinstance(item, Mapping)
+    )
 
 
 def _stage_status(attempts: Iterable[Mapping[str, object]], stage: str) -> str:

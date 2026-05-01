@@ -275,9 +275,23 @@ M6.24 resume condition:
   stage classification, and `RecoveryDecision` budget policy instead of command
   marker heuristics. Validation passed with 64 scoped long-build/wall-budget
   tests, ruff, diff check, and codex-ultra review PASS in session
-  `019de42b-0c04-7010-b73e-19f41071fbc1`. Next selected action is one
-  same-shape `compile-compcert` speed_1 with refreshable `~/.codex/auth.json`;
-  do not jump to proof_5 or broad measurement before recording that speed rerun.
+  `019de42b-0c04-7010-b73e-19f41071fbc1`. The first same-shape speed rerun
+  after Phase 4 externally passed `compile-compcert` at `1/1` with runner
+  errors `0`, Harbor mean `1.000`, and runtime `30m 34s`
+  (`docs/M6_24_LONG_BUILD_SUBSTRATE_PHASE_4_COMPILE_COMPCERT_SPEED_RERUN_2026-05-02.md`).
+  It also exposed a generic closeout defect: stale long-build strategy blockers
+  stayed active after successful source authority, final artifact, and default
+  smoke evidence, causing `mew work` to exhaust steps despite external reward
+  `1.0`. A follow-up substrate repair now separates active blockers from
+  cleared historical blockers and accepts objective source-authority acquisition
+  output despite harmless section headers while rejecting local-hash/archive-top
+  identity as standalone authority. Validation passed with 1044 combined
+  long-build/work-session/acceptance tests, one warning, 67 subtests, and
+  scoped ruff. Codex-ultra review passed in
+  `docs/REVIEW_2026-05-02_M6_24_STALE_STRATEGY_BLOCKER_CLEARING_CODEX.md`.
+  Next selected action is another same-shape `compile-compcert`
+  speed_1 requiring both external reward `1.0` and clean mew closeout; do not
+  jump to proof_5 or broad measurement before recording that rerun.
 - M6.24 Long-Build Substrate Phase 3 is implemented and reviewed:
   `RecoveryDecision` is derived/rendered for the approved narrow subset, stale
   build/runtime recovery failures are cleared by later successful proof, and
@@ -321,9 +335,11 @@ M6.24 resume condition:
   `019de3ab-47b6-71c3-849d-db3f089e1ecd`. Phase 3 is complete:
   `RecoveryDecision` derivation/rendering for the narrow failure classes in the
   design. Phase 4 is complete: budget enforcement now keys off the typed
-  contract/state/recovery decision substrate. The current measurement gate is a
-  same-shape `compile-compcert` speed_1; do not resume proof_5 or broad
-  measurement before that rerun is recorded.
+  contract/state/recovery decision substrate. The first Phase 4 speed rerun
+  externally passed but found stale strategy-blocker closeout. The current
+  measurement gate is a clean-closeout same-shape `compile-compcert` speed_1
+  after that follow-up repair; do not resume proof_5 or broad measurement before
+  that rerun is recorded.
 
 Historical selected gap class:
   `hard_task_implementation_strategy_contract_retention`, recorded in
