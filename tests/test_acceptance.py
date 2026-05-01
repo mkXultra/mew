@@ -1050,6 +1050,598 @@ def test_acceptance_finish_blocker_accepts_long_dependency_artifact_proof_in_com
     assert blocker == ""
 
 
+def test_acceptance_finish_blocker_accepts_long_dependency_artifact_section_label_before_real_probe():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact and smoke.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "printf '== required artifact /tmp/CompCert/ccomp ==\\n'\n"
+                    "test -x /tmp/CompCert/ccomp\n"
+                    "ls -l /tmp/CompCert/ccomp\n"
+                    "/tmp/CompCert/ccomp -version\n"
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": (
+                    "== required artifact /tmp/CompCert/ccomp ==\n"
+                    "-rwxr-xr-x 1 root root 10836768 /tmp/CompCert/ccomp\n"
+                    "The CompCert C verified compiler, version 3.13\n"
+                ),
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+
+
+def test_acceptance_finish_blocker_accepts_long_dependency_unrelated_missing_warning_after_artifact_probe():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact and default-link smoke.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "set -e\n"
+                    "test -x /tmp/CompCert/ccomp\n"
+                    "ls -l /tmp/CompCert/ccomp\n"
+                    "/tmp/CompCert/ccomp -o /tmp/smoke /tmp/smoke.c\n"
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": (
+                    "-rwxr-xr-x 1 root root 10836768 /tmp/CompCert/ccomp\n"
+                    "smoke-ok\n"
+                ),
+                "stderr_tail": (
+                    "/usr/bin/ld: warning: /tmp/compcert000283.o: "
+                    "missing .note.GNU-stack section implies executable stack\n"
+                ),
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+
+
+def test_acceptance_finish_blocker_rejects_masked_probe_plus_echoed_reverse_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": "test -x /tmp/CompCert/ccomp || true; printf '/tmp/CompCert/ccomp exists=true\\n'",
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_masked_probe_plus_variable_echoed_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "test -x /tmp/CompCert/ccomp || true; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_semicolon_masked_probe_plus_variable_echoed_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "test -x /tmp/CompCert/ccomp; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_probe_before_late_errexit_plus_variable_echoed_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "test -x /tmp/CompCert/ccomp; "
+                    "set -e; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_probe_after_errexit_disabled_plus_variable_echoed_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "set -e; "
+                    "set +e; "
+                    "test -x /tmp/CompCert/ccomp; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_quoted_probe_before_errexit_disabled_spoof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "set -e; "
+                    "printf 'test -x /tmp/CompCert/ccomp\\n'; "
+                    "set +e; "
+                    "test -x /tmp/CompCert/ccomp; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": (
+                    "test -x /tmp/CompCert/ccomp\n"
+                    "/tmp/CompCert/ccomp exists=true\n"
+                ),
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_and_skipped_probe_plus_variable_echoed_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "set -e; "
+                    "false && test -x /tmp/CompCert/ccomp; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_and_chain_skipped_probe_plus_variable_echoed_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "set -e; "
+                    "false && test -x /tmp/CompCert/ccomp && true; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_and_lhs_probe_failure_plus_variable_echoed_exists_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved /tmp/CompCert/ccomp exists and is invokable.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Command evidence #12 proved final artifact.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 12}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 12,
+                "ref": {"kind": "command_evidence", "id": 12},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": (
+                    "set -e; "
+                    "test -x /tmp/CompCert/ccomp && true; "
+                    "p=/tmp/CompCert/ccomp; "
+                    "printf '%s exists=true\\n' \"$p\""
+                ),
+                "cwd": "/app",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "/tmp/CompCert/ccomp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
 def test_acceptance_finish_blocker_rejects_timed_out_long_dependency_artifact_probe():
     text = (
         "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "

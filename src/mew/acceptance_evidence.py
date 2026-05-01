@@ -184,6 +184,53 @@ def split_unquoted_shell_command_segments(command: object) -> list[str]:
     return segments or [text]
 
 
+def split_unquoted_shell_command_segment_spans(command: object) -> list[dict[str, object]]:
+    text = str(command or "")
+    segments: list[dict[str, object]] = []
+    search_start = 0
+    segment_start = 0
+    previous_operator = ""
+    while search_start < len(text):
+        operator, kind, start, end = first_unquoted_shell_operator_span(text[search_start:])
+        if not operator:
+            break
+        absolute_start = search_start + start
+        absolute_end = search_start + end
+        if kind == "chain":
+            raw_segment = text[segment_start:absolute_start]
+            stripped = raw_segment.strip()
+            if stripped:
+                leading = len(raw_segment) - len(raw_segment.lstrip())
+                trailing = len(raw_segment) - len(raw_segment.rstrip())
+                segments.append(
+                    {
+                        "text": stripped,
+                        "start": segment_start + leading,
+                        "end": absolute_start - trailing,
+                        "before_operator": previous_operator,
+                        "after_operator": operator,
+                    }
+                )
+            previous_operator = operator
+            segment_start = absolute_end
+        search_start = absolute_end
+    raw_tail = text[segment_start:]
+    stripped_tail = raw_tail.strip()
+    if stripped_tail:
+        leading = len(raw_tail) - len(raw_tail.lstrip())
+        trailing = len(raw_tail) - len(raw_tail.rstrip())
+        segments.append(
+            {
+                "text": stripped_tail,
+                "start": segment_start + leading,
+                "end": len(text) - trailing,
+                "before_operator": previous_operator,
+                "after_operator": "",
+            }
+        )
+    return segments or [{"text": text, "start": 0, "end": len(text), "before_operator": "", "after_operator": ""}]
+
+
 def _long_dependency_artifact_command_refs(artifact: object, cwd: object = "") -> list[str]:
     artifact_text = str(artifact or "").strip()
     refs = [artifact_text] if artifact_text else []
@@ -442,21 +489,25 @@ def _long_dependency_segment_suppresses_artifact_proof_output(segment: object) -
     return bool(re.search(r"(?:^|[\s;&|])(?:\d*>>|\d*>\||\d*>|<>)\s*(?:/dev/null|['\"]/dev/null['\"])", text))
 
 
-def _long_dependency_segment_is_piped_in_raw_command(command: object, segment: object) -> bool:
-    raw = str(command or "")
-    needle = str(segment or "").strip()
-    if not raw or not needle:
-        return False
-    search_start = 0
-    while True:
-        index = raw.find(needle, search_start)
-        if index < 0:
-            return False
-        before = raw[:index].rstrip()
-        after = raw[index + len(needle) :].lstrip()
-        if (before.endswith("|") and not before.endswith("||")) or (after.startswith("|") and not after.startswith("||")):
-            return True
-        search_start = index + len(needle)
+def _long_dependency_command_enforces_errexit(command: object) -> bool:
+    errexit = False
+    for segment in split_unquoted_shell_command_segments(command):
+        try:
+            parts = shlex.split(segment)
+        except ValueError:
+            parts = segment.split()
+        if not parts or parts[0] != "set":
+            continue
+        for index, part in enumerate(parts):
+            if part == "+o" and index + 1 < len(parts) and parts[index + 1] == "errexit":
+                errexit = False
+            elif part == "-o" and index + 1 < len(parts) and parts[index + 1] == "errexit":
+                errexit = True
+            elif part.startswith("+") and "e" in part and not part.startswith("++"):
+                errexit = False
+            elif part.startswith("-") and "e" in part and not part.startswith("--"):
+                errexit = True
+    return errexit
 
 
 def long_dependency_command_surface_allows_artifact_proof(
@@ -573,7 +624,7 @@ def _long_dependency_output_proves_artifact(call: object, artifact: object) -> b
     artifact_pattern = _long_dependency_artifact_refs_pattern(artifact_refs)
     if not artifact_lower or not _long_dependency_text_has_artifact_ref(output_text, artifact_refs):
         return False
-    if any(marker in output_text for marker in ("does not exist", "missing", "no such file", "not found")):
+    if _long_dependency_output_reports_artifact_missing(output_text, artifact_pattern):
         return False
     if not _long_dependency_command_has_artifact_proof_segment(call, artifact):
         return False
@@ -592,6 +643,18 @@ def _long_dependency_output_proves_artifact(call: object, artifact: object) -> b
     return False
 
 
+def _long_dependency_output_reports_artifact_missing(output_text: str, artifact_pattern: str) -> bool:
+    missing_pattern = r"(?:does not exist|missing|no such file|not found)"
+    for line in str(output_text or "").splitlines():
+        if re.search(artifact_pattern, line, re.IGNORECASE) and re.search(
+            rf"\b{missing_pattern}\b",
+            line,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
 def _long_dependency_command_has_artifact_proof_segment(call: object, artifact: object) -> bool:
     command = tool_call_command_text(call)
     artifact_text = str(artifact or "").strip()
@@ -601,18 +664,42 @@ def _long_dependency_command_has_artifact_proof_segment(call: object, artifact: 
     escaped_artifact = re.escape(artifact_text)
     test_x_pattern = rf"(?:^|[\s;&|])test\s+-x\s+['\"]?{escaped_artifact}['\"]?(?:$|[\s;&|])"
     bracket_x_pattern = rf"(?:^|[\s;&|])\[\s+-x\s+['\"]?{escaped_artifact}['\"]?\s+\]"
-    segments = split_unquoted_shell_command_segments(command)
+    segment_entries = split_unquoted_shell_command_segment_spans(command)
+    segments = [str(entry.get("text") or "") for entry in segment_entries]
     artifact_segments = [
-        (index, segment)
-        for index, segment in enumerate(segments)
+        (index, entry, str(entry.get("text") or ""))
+        for index, entry in enumerate(segment_entries)
+        for segment in [str(entry.get("text") or "")]
         if _long_dependency_text_has_artifact_ref(segment, artifact_refs)
     ]
-    for index, segment in artifact_segments:
+
+    def later_sequential_operator_exists(entry_index: int) -> bool:
+        return any(
+            str(later_entry.get("after_operator") or "") in {";", "\n", "\r"}
+            for later_entry in segment_entries[entry_index:]
+        )
+
+    for index, entry, segment in artifact_segments:
+        before_operator = str(entry.get("before_operator") or "")
+        after_operator = str(entry.get("after_operator") or "")
         if (
             _long_dependency_segment_may_mutate_artifact(segment)
             or _long_dependency_segment_redirects_to_artifact(segment, artifact_refs)
             or _long_dependency_segment_suppresses_artifact_proof_output(segment)
-            or _long_dependency_segment_is_piped_in_raw_command(command, segment)
+            or before_operator == "|"
+            or after_operator == "|"
+            or before_operator == "||"
+            or after_operator == "||"
+            or (
+                index < len(segment_entries) - 1
+                and after_operator in {";", "\n", "\r"}
+                and (
+                    before_operator == "&&"
+                    or not _long_dependency_command_enforces_errexit(command[: int(entry.get("start") or 0)])
+                )
+            )
+            or (before_operator == "&&" and later_sequential_operator_exists(index))
+            or (after_operator == "&&" and later_sequential_operator_exists(index))
         ):
             continue
         proves_artifact = _long_dependency_segment_strictly_proves_artifact(
@@ -657,7 +744,25 @@ def _long_dependency_command_echoes_artifact_output(call: object, artifact: obje
         if invoked not in {"echo", "printf"}:
             continue
         rendered_arguments = " ".join(str(part or "") for part in parts[1:]).casefold()
-        if _long_dependency_text_has_artifact_ref(rendered_arguments, artifact_refs):
+        if not _long_dependency_text_has_artifact_ref(rendered_arguments, artifact_refs):
+            continue
+        if re.search(r"[bcdlps-][rwxstST-]{9}\s+.*" + _long_dependency_artifact_refs_pattern(artifact_refs), rendered_arguments):
+            return True
+        if re.search(r"\bexists=true\b.*" + _long_dependency_artifact_refs_pattern(artifact_refs), rendered_arguments):
+            return True
+        if re.search(_long_dependency_artifact_refs_pattern(artifact_refs) + r".*\bexists=true\b", rendered_arguments):
+            return True
+        if re.search(
+            _long_dependency_artifact_refs_pattern(artifact_refs)
+            + r".*\b(?:regular file|executable|elf|mach-o|script|smoke_ok)\b",
+            rendered_arguments,
+        ):
+            return True
+        if re.search(
+            r"\b(?:regular file|executable|elf|mach-o|script|smoke_ok)\b.*"
+            + _long_dependency_artifact_refs_pattern(artifact_refs),
+            rendered_arguments,
+        ):
             return True
     return False
 
@@ -686,6 +791,8 @@ def long_dependency_artifact_proven_by_call(call: object, artifact: object) -> b
         tool_call_cwd(call),
     ):
         return False
-    if any(marker in output_text for marker in ("does not exist", "missing", "no such file", "not found")):
+    artifact_refs = [ref.casefold() for ref in _long_dependency_artifact_command_refs(artifact, tool_call_cwd(call))]
+    artifact_pattern = _long_dependency_artifact_refs_pattern(artifact_refs)
+    if _long_dependency_output_reports_artifact_missing(output_text, artifact_pattern):
         return False
     return _long_dependency_command_strictly_proves_artifact(call, artifact)

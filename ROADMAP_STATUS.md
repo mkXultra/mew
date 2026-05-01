@@ -269,7 +269,7 @@ M6.24 resume condition:
   and `tool_call` ref compatibility may be dropped by flag-day cutover. Preserve
   safety invariants instead.
   Current selected chain:
-  `M6.24 -> long_dependency/toolchain gap -> compile-compcert speed_1 after Long-Build Substrate Phase 4`.
+  `M6.24 -> long_dependency/toolchain gap -> acceptance closeout evidence repair -> clean compile-compcert speed_1`.
 - M6.24 Long-Build Substrate Phase 4 is now implemented and reviewed:
   wall/recovery budget enforcement uses `LongBuildContract`, planned command
   stage classification, and `RecoveryDecision` budget policy instead of command
@@ -289,9 +289,21 @@ M6.24 resume condition:
   long-build/work-session/acceptance tests, one warning, 67 subtests, and
   scoped ruff. Codex-ultra review passed in
   `docs/REVIEW_2026-05-02_M6_24_STALE_STRATEGY_BLOCKER_CLEARING_CODEX.md`.
-  Next selected action is another same-shape `compile-compcert`
-  speed_1 requiring both external reward `1.0` and clean mew closeout; do not
-  jump to proof_5 or broad measurement before recording that rerun.
+  The stale-blocker same-shape rerun then externally passed again with reward
+  `1.0`, runner errors `0`, and runtime `31m 56s`, but still exposed a clean
+  internal closeout defect:
+  `long_dependency_final_artifact_evidence` rejected a valid multiline proof
+  command because a harmless artifact section label and an unrelated
+  `.note.GNU-stack` linker warning were treated as invalid artifact evidence.
+  `docs/M6_24_ACCEPTANCE_CLOSEOUT_EVIDENCE_REPAIR_2026-05-02.md` records the
+  accepted repair: harmless labels and unrelated missing warnings are allowed,
+  while proof-shaped echo/printf spoofing and masked shell proof segments remain
+  rejected. Codex-ultra review session
+  `019de48d-a6aa-7a32-9a70-d5cf4d943c2f` returned PASS. Next selected action
+  is another same-shape `compile-compcert` speed_1 requiring external reward
+  `1.0`, runner errors `0`, `command-transcript.json` exit code `0`, and clean
+  `mew-report.json` internal closeout; do not jump to proof_5 or broad
+  measurement before recording that rerun.
 - M6.24 Long-Build Substrate Phase 3 is implemented and reviewed:
   `RecoveryDecision` is derived/rendered for the approved narrow subset, stale
   build/runtime recovery failures are cleared by later successful proof, and
@@ -2476,7 +2488,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.24 improvement_phase -> acceptance_evidence_structure_repair_v1_5 -> compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
+`M6.24 improvement_phase -> acceptance closeout evidence repair -> clean compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
 
 Acceptable near-term work:
 
@@ -2484,9 +2496,10 @@ Acceptable near-term work:
   no-Terminal-Bench-specific-solver constraint
 - preserve the no-task-specific-acceptance-parser decision recorded in
   `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_REPAIR_2026-05-01.md`
-- after that structural repair, run one same-shape `compile-compcert` speed_1
-  with refreshable `~/.codex/auth.json`; escalate to sequential proof_5 only
-  after speed_1 shows the head is viable
+- after the acceptance closeout evidence repair, run one same-shape
+  `compile-compcert` speed_1 with refreshable `~/.codex/auth.json`; escalate
+  to sequential proof_5 only after speed_1 shows external reward `1.0`, runner
+  errors `0`, command transcript exit `0`, and clean `mew-report` closeout
 - if proof_5 misses the frozen `5/5` close target, read
   `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before selecting any next
   repair, and update `proof-artifacts/m6_24_gap_ledger.jsonl`
