@@ -4143,6 +4143,19 @@ _LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE = re.compile(
     r"\b(?:external|system|prebuilt)\s+(?:dependency|dependencies|library|libraries|package|packages)\b)",
     re.IGNORECASE,
 )
+_LONG_DEPENDENCY_CONFIGURE_HELP_PROBE_RE = re.compile(
+    r"(?:^|[\s;&|()])(?:\./)?configure\b[^\n;&|]*(?:--help|-help)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_CONFIGURE_HELP_REDIRECT_RE = re.compile(
+    r"(?:^|[\s;&|()])(?:\./)?configure\b[^\n;&|]*(?:--help|-help)[^\n;&|]*>\s*(?P<path>[^\s;&|]+)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_HELP_FILTER_RE = re.compile(r"\b(?:grep|egrep|fgrep|rg|awk|sed)\b", re.IGNORECASE)
+_LONG_DEPENDENCY_EXTERNAL_BRANCH_HELP_TERM_RE = re.compile(
+    r"(?:use[-_]external|external|prebuilt|system[-_]?(?:dep|lib|package)?|libraries?|packages?)",
+    re.IGNORECASE,
+)
 _LONG_DEPENDENCY_PACKAGE_MANAGER_PREBUILT_RE = re.compile(
     r"\b(?:apt(?:-get)?\s+install|apt-cache\s+(?:policy|search)|apt\s+(?:show|install)|"
     r"dnf\s+(?:install|info|search)|yum\s+(?:install|info|search)|apk\s+(?:add|info|search)|"
@@ -4157,6 +4170,16 @@ _LONG_DEPENDENCY_VERSION_PINNED_SOURCE_TOOLCHAIN_RE = re.compile(
 _LONG_DEPENDENCY_RETRIEVED_VERSIONED_SOURCE_TOOL_RE = re.compile(
     r"\bretrieved\s+[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+",
     re.IGNORECASE,
+)
+_LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_MARKERS = (
+    "requires a version",
+    "unsupported",
+    "version mismatch",
+    "not found in the current environment",
+    "undefined reference",
+    "symbol not found",
+    "dependency incompat",
+    "api incompat",
 )
 _LONG_DEPENDENCY_VENDORED_DEPENDENCY_PATH_PARTS = {
     "deps",
@@ -4392,6 +4415,70 @@ def _long_dependency_has_external_compatibility_branch_evidence(call):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return False
     return bool(_LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE.search(_runtime_artifact_call_text(call)))
+
+
+def _long_dependency_has_too_narrow_external_branch_help_probe(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    command = _long_dependency_call_command_text(call)
+    if not command or not _LONG_DEPENDENCY_CONFIGURE_HELP_PROBE_RE.search(command):
+        return False
+    if not _LONG_DEPENDENCY_HELP_FILTER_RE.search(command):
+        return False
+    if _LONG_DEPENDENCY_EXTERNAL_BRANCH_HELP_TERM_RE.search(command):
+        return False
+    if _long_dependency_has_external_compatibility_branch_evidence(call):
+        return False
+    return True
+
+
+def _long_dependency_configure_help_output_path(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return ""
+    command = _long_dependency_call_command_text(call)
+    if not command:
+        return ""
+    match = _LONG_DEPENDENCY_CONFIGURE_HELP_REDIRECT_RE.search(command)
+    if not match:
+        return ""
+    path = str(match.group("path") or "").strip()
+    return path.strip("'\"")
+
+
+def _long_dependency_filters_help_output_too_narrow(call, path):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    path = str(path or "").strip()
+    if not path:
+        return False
+    command = _long_dependency_call_command_text(call)
+    if path not in command:
+        return False
+    if not _LONG_DEPENDENCY_HELP_FILTER_RE.search(command):
+        return False
+    if _LONG_DEPENDENCY_EXTERNAL_BRANCH_HELP_TERM_RE.search(command):
+        return False
+    if _long_dependency_has_external_compatibility_branch_evidence(call):
+        return False
+    return True
+
+
+def _long_dependency_dependency_api_mismatch_seen(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    if any(marker in lowered for marker in _LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_MARKERS):
+        return True
+    return any(
+        blocker.get("code")
+        in {
+            "toolchain_version_constraint_mismatch",
+            "compatibility_override_probe_missing",
+            "version_pinned_source_toolchain_before_compatibility_override",
+        }
+        for blocker in _long_dependency_strategy_blockers(call)
+    )
 
 
 def _long_dependency_uses_prebuilt_package_manager_dependency(call):
@@ -5028,6 +5115,61 @@ def _long_dependency_compatibility_branch_budget_blocker(calls, missing_artifact
     return {}
 
 
+def _long_dependency_external_branch_help_probe_width_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    narrow_help_probe_call = {}
+    help_capture_call = {}
+    help_capture_path = ""
+    dependency_mismatch_seen = False
+    prebuilt_dependency_call = {}
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if (
+            not narrow_help_probe_call
+            and _long_dependency_has_too_narrow_external_branch_help_probe(call)
+        ):
+            narrow_help_probe_call = call
+        if not narrow_help_probe_call and not help_capture_call:
+            help_capture_path = _long_dependency_configure_help_output_path(call)
+            if help_capture_path:
+                help_capture_call = call
+        if (
+            not narrow_help_probe_call
+            and help_capture_call
+            and _long_dependency_filters_help_output_too_narrow(call, help_capture_path)
+        ):
+            narrow_help_probe_call = call
+        if narrow_help_probe_call and _long_dependency_dependency_api_mismatch_seen(call):
+            dependency_mismatch_seen = True
+        if not (
+            narrow_help_probe_call
+            and dependency_mismatch_seen
+            and _long_dependency_uses_version_pinned_source_toolchain(call)
+        ):
+            continue
+        command = _long_dependency_call_command_text(narrow_help_probe_call) or _runtime_artifact_call_text(
+            narrow_help_probe_call
+        )
+        return {
+            "code": "external_branch_help_probe_too_narrow_before_source_toolchain",
+            "layer": "profile_contract",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": clip_inline_text(command, 180),
+            "help_probe_tool_call_id": (help_capture_call or narrow_help_probe_call).get("id"),
+            "help_filter_tool_call_id": narrow_help_probe_call.get("id"),
+            "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id") if prebuilt_dependency_call else None,
+        }
+    return {}
+
+
 def _long_dependency_is_vendored_dependency_patch_call(call):
     if not isinstance(call, dict):
         return False
@@ -5353,6 +5495,18 @@ def build_long_dependency_build_state(task, calls, session=None):
             strategy_blockers.append(runtime_install_before_library)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
+    external_branch_help_probe_width = _long_dependency_external_branch_help_probe_width_blocker(
+        calls,
+        missing,
+    )
+    if external_branch_help_probe_width:
+        key = (
+            external_branch_help_probe_width.get("code"),
+            external_branch_help_probe_width.get("source_tool_call_id"),
+            external_branch_help_probe_width.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(external_branch_help_probe_width)
     compatibility_branch_budget = _long_dependency_compatibility_branch_budget_blocker(
         calls,
         missing,
@@ -5411,6 +5565,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "resume the existing source tree/toolchain state; do not restart package or source setup after a "
             "compatible path is found. If a configure step rejects an installed dependency version, inspect or try "
             "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
+            "When probing configure/project help through grep, rg, awk, sed, or another filter, include "
+            "external/use-external/prebuilt/system/library terms or inspect unfiltered help before concluding no "
+            "source-provided external/prebuilt branch exists. "
             "If prebuilt package-manager dependencies are available and a source-provided compatibility override is "
             "visible or likely, try that prebuilt dependency plus override path before starting version-pinned "
             "source-built dependency/toolchain installation; once source help or configure exposes an external/prebuilt "
@@ -10138,9 +10295,10 @@ def format_work_session_resume(resume):
             lines.append(f"long_dependency_latest_build_status: {long_dependency_build_state.get('latest_build_status')}")
         blocker_priority = {
             "vendored_dependency_patch_surgery_before_supported_branch": 0,
-            "compatibility_branch_budget_contract_missing": 1,
-            "external_dependency_source_provenance_unverified": 2,
-            "default_runtime_link_path_failed": 3,
+            "external_branch_help_probe_too_narrow_before_source_toolchain": 1,
+            "compatibility_branch_budget_contract_missing": 2,
+            "external_dependency_source_provenance_unverified": 3,
+            "default_runtime_link_path_failed": 4,
         }
         display_blockers = sorted(
             long_dependency_build_state.get("strategy_blockers") or [],

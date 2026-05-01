@@ -67,6 +67,8 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-01 | External-branch help-probe width repair implemented and reviewed. | `docs/M6_24_EXTERNAL_BRANCH_HELP_PROBE_WIDTH_REPAIR_2026-05-01.md`: `src/mew/work_session.py` now emits `external_branch_help_probe_too_narrow_before_source_toolchain` when filtered configure/project help omits external/prebuilt branch terms, dependency/API mismatch follows, final artifacts remain missing, and version-pinned source-toolchain work starts. It covers same-command and split `help > file` / `grep file` probes. `src/mew/work_loop.py` updates `LongDependencyProfile`. Validation passed: `tests/test_work_session.py` 850 passed, `tests/test_acceptance.py` 115 passed, ruff passed, `git diff --check` passed, and JSONL parse passed. `codex-ultra` reviewer session `019de2e0-cb86-7d00-a465-43db81e4f45d` returned PASS twice, including after the split-probe fix. | Run one same-shape `compile-compcert` speed_1 before proof_5 or broad measurement. | reviewed_speed_1_pending |
+| 2026-05-01 | Acceptance evidence structure speed rerun failed; select external-branch help-probe width repair. | `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-acceptance-evidence-structure-compile-compcert-1attempt-20260501-1750/result.json`: one trial, runner errors `0`, reward `0.0`, runtime about `30m 42s`. The external verifier failed because `/tmp/CompCert/ccomp` did not exist. The run used a narrow `configure --help` filter that omitted `external` / `use-external` / `prebuilt` terms, hit a dependency/API mismatch, then spent the remaining wall budget building version-pinned OPAM Coq instead of first broadening the source-provided compatibility-branch probe. | Implement generic `external_branch_help_probe_too_narrow_before_source_toolchain` in resume/profile guidance, validate and review it, then rerun one same-shape `compile-compcert` speed_1 before proof_5 or broad measurement. | repair_active |
 | 2026-05-01 | Reject task-specific acceptance parsing and align final-artifact proof with Codex / Claude Code style command evidence. | User explicitly challenged the `compile-compcert`-semantic parser direction as a bad decision. `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_REPAIR_2026-05-01.md` records the corrected structure: terminal-success tool evidence, real proof segments, exact path/token boundaries, post-proof mutation guards, conservative opaque-interpreter handling, and no benchmark-specific solver semantics. Validation passed: `tests/test_acceptance.py` 115 passed, targeted long-dependency work-session suite 24 passed, ruff passed, and `codex-ultra` reviewer session `019de270-4b79-7c90-9e32-ca7c46e81b8b` returned PASS. | Commit the structural acceptance evidence repair, then rerun one same-shape `compile-compcert` speed_1 before another resource-normalized proof_5. | reviewed_speed_1_pending |
 | 2026-05-01 | Vendored dependency patch surgery speed rerun passed. | `docs/M6_24_VENDORED_PATCH_SURGERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-vendored-patch-surgery-compile-compcert-1attempt-20260501-1450/result.json`: one trial, runner errors `0`, reward `1.0`, Harbor mean `1.000`, runtime `30m 16s`; external verifier passed `test_compcert_exists_and_executable`, `test_compcert_valid_and_functional`, and `test_compcert_rejects_unsupported_feature`. | Escalate to resource-normalized sequential `compile-compcert` proof_5 with `-k 5 -n 1` and refreshable `~/.codex/auth.json`. If proof_5 misses `5/5`, diagnose from `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md`, vendored patch surgery evidence, and speed evidence before another generic repair. | proof_5_pending |
 | 2026-05-01 | Runtime-link recovery proof_5 failed early; vendored dependency patch surgery repair selected. | `docs/M6_24_RUNTIME_LINK_RECOVERY_COMPILE_COMPCERT_PROOF_5_ABORTED_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-recovery-compile-compcert-5attempts-seq-20260501-1350/compile-compcert__yadJDAt/result.json`: first valid proof trial scored `0.0`; `/tmp/CompCert/ccomp` was missing. The run started from a VCS-generated CompCert archive fallback, configured against unsupported Coq `8.18.0`, then spent recovery attempts editing bundled Flocq proof-library files before timing out. The second sequential trial was manually cancelled after `5/5` became impossible. | Implement generic `vendored_dependency_patch_surgery_before_supported_branch`: when final artifacts are missing and source-provided external/prebuilt compatibility branch evidence exists, stop local vendored/third-party dependency proof surgery and switch to a supported dependency version or source-provided external/prebuilt branch. Validate, review, then run one same-shape `compile-compcert` speed_1 before proof_5. | vendored_patch_surgery_repair_active |
@@ -175,50 +177,24 @@ direction.
 
 `improvement_phase`
 
-The selected `long_dependency_toolchain_build_strategy_contract` speed rerun
-confirmed the post-SR-016 gap. Multiple bounded repairs improved continuity,
-toolchain ordering, wall-clock targeting, runtime link proof, default runtime
-install, source identity, and transient backend recovery. The v0.8
-source-archive identity / empty-response recovery repair passed its same-shape
-speed proof at `1/1`, but its resource-normalized proof reached only `4/5`
-against the frozen target `5/5`. The failed trial was a report/resume
-calibration miss: a timed-out final build was allowed to mark
-`/tmp/CompCert/ccomp` as proven even though the external verifier found it
-missing. The v0.9 timed-out artifact proof calibration repair is implemented
-and its same-shape speed rerun passed at `1/1`. The first resource-normalized
-proof_5 attempt was invalidated by `auth.plus.json` expiry. Codex OAuth
-refresh has since been validated by live smoke and by a same-shape proof rerun
-with no auth-expiry recurrence, but the close target still missed because a
-recoverable runtime-link failure consumed the remaining wall/model budget. The
-tool/runtime recovery-budget reserve for long build validation commands passed
-its same-shape speed proof at `1/1`, but the resource-normalized proof missed
-after a malformed structured JSON plan stopped one valid trial before task work.
-The one-shot malformed JSON plan recovery repair passed its same-shape speed
-proof at `1/1`, but its resource-normalized proof missed at `1/2` valid
-completed trials. The failed trial repeated the known runtime-library recovery
-path but lost the remaining budget to full-context model timeouts under a
-wall-clock timeout ceiling. The timeout-ceiling compact recovery repair passed
-its same-shape speed proof at `1/1`, but its resource-normalized proof missed
-at `2/3` valid completed trials. The failed valid trial found the correct
-`-use-external-Flocq` branch but only after serial compatibility probes
-consumed most of the wall budget, leaving the final long build capped and
-timed out before `/tmp/CompCert/ccomp` existed. Later source-acquisition and
-runtime-link recovery repairs each passed a same-shape speed proof at `1/1`.
-The runtime-link recovery speed gate passed, but its resource-normalized
-proof_5 missed on a different long-dependency failure shape:
-`docs/M6_24_RUNTIME_LINK_RECOVERY_COMPILE_COMPCERT_PROOF_5_ABORTED_2026-05-01.md`.
-The failed valid trial did not create `/tmp/CompCert/ccomp`; it started from a
-VCS-generated source archive fallback, configured against unsupported Coq
-`8.18.0`, then entered local bundled Flocq proof-library surgery before timing
-out. The current bounded repair is
-`vendored_dependency_patch_surgery_before_supported_branch`: when final
-artifacts are missing and source-provided external/prebuilt branch evidence is
-visible, mew should stop local dependency patch surgery and switch to a
-supported dependency version or source-provided external/prebuilt branch before
-another long rebuild. The repair is implemented and reviewed, and its
-same-shape speed proof passed at `1/1` with runner errors `0`. Escalate to
-resource-normalized proof_5 before another repair or broad measurement.
+The current selected gap remains
+`long_dependency_toolchain_build_strategy_contract` on `compile-compcert`.
+Broad measurement is paused.
+
+Latest same-shape speed rerun after the acceptance-evidence structure repair
+scored `0/1` with runner errors `0`:
+`docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`.
+The external verifier failed because `/tmp/CompCert/ccomp` did not exist. The
+failure shape was not acceptance evidence. It was an earlier long-dependency
+ordering miss: mew filtered configure help with `coq|menhir|ignore|version`,
+hid possible external/prebuilt branch wording, hit dependency/API mismatch,
+then started a heavy version-pinned OPAM Coq source-toolchain build and timed
+out before final artifact creation.
+
+Current bounded repair:
+`external_branch_help_probe_too_narrow_before_source_toolchain` is implemented
+and reviewed.
 
 Current selected next action:
 
-`M6.24 -> vendored_dependency_patch_surgery_before_supported_branch -> compile-compcert proof_5 with -k 5 -n 1`
+`M6.24 -> external_branch_help_probe_too_narrow_before_source_toolchain -> compile-compcert speed_1`

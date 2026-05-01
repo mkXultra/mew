@@ -5580,6 +5580,273 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("one coherent branch", text)
         self.assertIn("reserve enough wall budget", text)
 
+    def test_work_session_resume_flags_narrow_external_branch_help_probe_before_source_toolchain(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "Setting up coq 8.18.0\nSetting up libcoq-flocq\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "(./configure -help > /tmp/cc-help.txt || ./configure --help > /tmp/cc-help.txt || true); "
+                            "grep -Ei 'coq|menhir|ignore|version' /tmp/cc-help.txt"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "(./configure -help > /tmp/cc-help.txt || ./configure --help > /tmp/cc-help.txt || true); "
+                            "grep -Ei 'coq|menhir|ignore|version' /tmp/cc-help.txt"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "  -ignore-coq-version\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "COQC flocq/Calc/Bracket.v\n"
+                            "Error: The variable Z_div_mod_eq was not found in the current environment.\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y ocamlfind zarith menhir coq.8.16.1",
+                    },
+                    "result": {
+                        "command": "opam install -y ocamlfind zarith menhir coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "-> retrieved coq.8.16.1\ncommand timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        probe_blocker = next(
+            item for item in blockers
+            if item.get("code") == "external_branch_help_probe_too_narrow_before_source_toolchain"
+        )
+
+        self.assertEqual(probe_blocker["layer"], "profile_contract")
+        self.assertEqual(probe_blocker["prebuilt_dependency_tool_call_id"], 2)
+        self.assertEqual(probe_blocker["help_probe_tool_call_id"], 3)
+        self.assertEqual(probe_blocker["source_tool_call_id"], 5)
+
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_dependency_strategy_blocker: external_branch_help_probe_too_narrow_before_source_toolchain",
+            text,
+        )
+        self.assertIn("include external/use-external/prebuilt/system/library terms", text)
+        self.assertIn("source-provided external/prebuilt branch", text)
+
+    def test_work_session_resume_flags_split_narrow_external_branch_help_probe(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help > /tmp/cc-help.txt"},
+                    "result": {
+                        "command": "./configure --help > /tmp/cc-help.txt",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "grep -Ei 'coq|menhir|ignore|version' /tmp/cc-help.txt",
+                    },
+                    "result": {
+                        "command": "grep -Ei 'coq|menhir|ignore|version' /tmp/cc-help.txt",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-ignore-coq-version\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Testing dependency... UNSUPPORTED\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "opam install -y coq.8.16.1"},
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        probe_blocker = next(
+            item for item in blockers
+            if item.get("code") == "external_branch_help_probe_too_narrow_before_source_toolchain"
+        )
+
+        self.assertEqual(probe_blocker["help_probe_tool_call_id"], 2)
+        self.assertEqual(probe_blocker["help_filter_tool_call_id"], 3)
+        self.assertEqual(probe_blocker["source_tool_call_id"], 5)
+
+    def test_work_session_resume_does_not_flag_external_branch_help_probe_when_filter_includes_external(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq libcoq-flocq"},
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure --help | grep -Ei 'external|coq|ignore|version'",
+                    },
+                    "result": {
+                        "command": "./configure --help | grep -Ei 'external|coq|ignore|version'",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "  -ignore-coq-version\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Testing Coq... version 8.18.0 -- UNSUPPORTED\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "opam install -y coq.8.16.1"},
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("external_branch_help_probe_too_narrow_before_source_toolchain", codes)
+
     def test_work_session_resume_clears_late_external_branch_budget_after_artifact_proof(self):
         from mew.work_session import build_work_session_resume
 

@@ -20,21 +20,22 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> vendored_dependency_patch_surgery_before_supported_branch proof_5 -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> external_branch_help_probe_too_narrow_before_source_toolchain -> compile-compcert
 ```
 
 Broad measurement remains paused. The source-acquisition profile and
-runtime-link recovery repairs both passed one-trial same-shape speed proofs at
-`1/1`. The latest resource-normalized proof_5 missed on a new
-long-dependency/toolchain strategy shape: the failed valid trial started from a
-VCS-generated source archive fallback, configured against unsupported Coq
-`8.18.0`, then spent recovery attempts editing bundled Flocq proof-library
-files before timing out without `/tmp/CompCert/ccomp`. This is now a
-profile/contract consolidation point, not another narrow Flocq or CompCert
-prompt clause. The current repair is
-`vendored_dependency_patch_surgery_before_supported_branch`. Its one-trial
-same-shape speed proof passed at `1/1`; the next action is the
-resource-normalized `compile-compcert` proof_5.
+runtime-link recovery repairs both passed one-trial same-shape speed proofs.
+The vendored dependency patch surgery repair also passed its one-trial speed
+proof, but the later acceptance-evidence-structure speed rerun scored `0/1`.
+That latest miss is not an acceptance-evidence regression. It is an earlier
+source-build branch-discovery failure: mew filtered configure help with
+`coq|menhir|ignore|version`, hiding possible external/prebuilt branch wording,
+then after dependency/API mismatch started a heavy version-pinned OPAM Coq
+source-toolchain build and timed out before `/tmp/CompCert/ccomp` existed.
+The current repair is
+`external_branch_help_probe_too_narrow_before_source_toolchain`; it is
+implemented and reviewed. The next action is one same-shape `compile-compcert`
+speed_1 before another proof_5 or broad measurement.
 
 ## Repair Timeline
 
@@ -59,7 +60,9 @@ resource-normalized `compile-compcert` proof_5.
 | v1.3 compatibility branch budget | Commit earlier to coherent prebuilt/external dependency compatibility branches for long source-build tasks and avoid starting the final long build after serial probes consumed the wall budget. | profile/contract | Speed `1/1`; proof_5 pending. |
 | source acquisition profile | Surface VCS-generated archive fallback plus compatibility/toolchain surgery without authoritative source-channel evaluation. | source acquisition profile + detector/resume | Speed `1/1`; proof `0/1`; next failure default runtime link. |
 | default runtime link failure recovery | Surface failed default compile/link smoke after compiler build as a runtime-link recovery blocker. | runtime link proof + detector/resume | Speed `1/1`; proof `0/1`; next failure vendored dependency proof surgery before supported branch. |
-| v1.4 vendored dependency patch surgery | Stop local vendored/third-party dependency or proof-library mutation when source-provided external/prebuilt branch evidence exists and final artifacts are still missing. | profile/contract + detector/resume | Speed `1/1`; proof_5 pending. |
+| v1.4 vendored dependency patch surgery | Stop local vendored/third-party dependency or proof-library mutation when source-provided external/prebuilt branch evidence exists and final artifacts are still missing. | profile/contract + detector/resume | Speed `1/1`; proof_5 was superseded by the acceptance-evidence structure repair/rerun. |
+| v1.5 acceptance-evidence structure rerun | Generic command-evidence acceptance repair was reviewed, then same-shape speed rerun missed because final artifact was never built. | acceptance substrate evidence | Score `0/1`; new failure shape is narrow configure-help filtering before heavy source-toolchain build. |
+| v1.6 external-branch help-probe width | Detect filtered configure/project help probes that omit external/use-external/prebuilt/system/library terms before dependency/API mismatch and version-pinned source-toolchain build. | profile/contract + detector/resume | Implemented and reviewed; speed_1 pending. |
 
 ## Pattern Readout
 
@@ -141,6 +144,15 @@ resource-normalized `compile-compcert` proof_5.
   `/tmp/CompCert/ccomp`, verified source/config/runtime evidence, ran the
   default compile/link/run smoke, and the external verifier passed. Escalate to
   resource-normalized proof_5 before another repair or broad measurement.
+- The acceptance-evidence-structure speed rerun did not fail because of the
+  acceptance substrate. It failed before final artifact creation. The
+  differentiator is that a filtered configure-help probe omitted
+  external/prebuilt branch terms, so mew never surfaced the cheap
+  source-provided compatibility branch before switching to a heavy
+  version-pinned source-toolchain build.
+- The v1.6 repair covers both same-command help filters and split
+  `configure --help > file` followed by a narrow filter of that file. The next
+  evidence boundary is a same-shape speed rerun, not broad measurement.
 
 ## Preflight Before Next Repair
 
