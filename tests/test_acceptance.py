@@ -1,4 +1,5 @@
 from mew.acceptance import (
+    acceptance_done_gate_decision,
     acceptance_finish_blocker,
     coerce_acceptance_checks,
     exact_command_example_requirements,
@@ -886,7 +887,8 @@ def test_model_inference_output_task_classifier_covers_checkpoint_sampling():
 def test_long_dependency_toolchain_build_classifier_extracts_final_artifact():
     text = (
         "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
-        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp. "
+        "Keep the dependency/toolchain branch coherent and prove it is executable/invokable."
     )
 
     assert is_long_dependency_toolchain_build_task(text)
@@ -1009,6 +1011,225 @@ def test_acceptance_finish_blocker_accepts_long_dependency_artifact_proof_in_com
     )
 
     assert blocker == ""
+
+
+def test_acceptance_finish_blocker_rejects_timed_out_long_dependency_artifact_probe():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Tool #9 ran test -x /tmp/CompCert/ccomp and /tmp/CompCert/ccomp -version.",
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version"},
+                "result": {
+                    "exit_code": 0,
+                    "timed_out": True,
+                    "stdout": "command timed out before final artifact proof\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_long_dependency_structured_evidence_ref_only():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Final artifact proof completed.",
+            "evidence_refs": [{"kind": "tool_call", "id": 9}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Final artifact proof completed.",
+            "evidence_refs": [{"kind": "tool_call", "id": 9}],
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version"},
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "CompCert C compiler, version 3.13.1\n",
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+
+
+def test_acceptance_finish_blocker_preserves_structured_evidence_ref_before_long_evidence_clip():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    long_text = " ".join(f"detail{i}" for i in range(80))
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": long_text,
+            "evidence_refs": [{"kind": "tool_call", "id": 9}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": long_text,
+            "evidence_refs": [{"kind": "tool_call", "id": 9}],
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version"},
+                "result": {"exit_code": 0, "stdout": "CompCert C compiler, version 3.13.1\n"},
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+    coerced = coerce_acceptance_checks(checks)
+    assert "tool #9" in coerced[0]["evidence"]
+
+
+def test_acceptance_done_gate_blocks_invalid_evidence_ref():
+    text = "Ensure output exists."
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "test -s output.txt"},
+                "result": {"exit_code": 1, "stdout": "missing output.txt\n"},
+            }
+        ]
+    }
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Ensure output exists.",
+                "status": "verified",
+                "evidence": "Tool #4 checked output.txt.",
+                "evidence_refs": [{"kind": "tool_call", "id": 4}],
+            }
+        ],
+    }
+
+    decision = acceptance_done_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "acceptance_evidence_refs_invalid"
+    assert "tool_call#4 not terminal-success" in decision["reason"]
+    assert decision["invalid_evidence_refs"] == [
+        {
+            "kind": "tool_call",
+            "id": 4,
+            "reason": "not_terminal_success",
+            "status": "completed",
+            "exit_code": 1,
+            "timed_out": False,
+        }
+    ]
+    assert "deterministic done gate" in decision["continuation_prompt"]
+
+
+def test_acceptance_done_gate_blocks_missing_evidence_ref_for_verified_check():
+    decision = acceptance_done_gate_decision(
+        "Ensure output exists.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Ensure output exists.",
+                    "status": "verified",
+                    "evidence": "Checked the file.",
+                }
+            ],
+        },
+        session={"tool_calls": []},
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "acceptance_evidence_refs_missing"
+
+
+def test_acceptance_done_gate_allows_structured_terminal_evidence_ref():
+    decision = acceptance_done_gate_decision(
+        "Ensure output exists.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Ensure output exists.",
+                    "status": "verified",
+                    "evidence": "Tool checked output.txt.",
+                    "evidence_refs": [{"kind": "tool_call", "id": 4}],
+                }
+            ],
+        },
+        session={
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "test -s output.txt"},
+                    "result": {"exit_code": 0, "stdout": "ok\n"},
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "allow_complete"
 
 
 def test_acceptance_finish_blocker_rejects_model_inference_smoke_only_output():

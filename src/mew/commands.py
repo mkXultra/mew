@@ -18,7 +18,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .acceptance import acceptance_finish_blocker, is_model_inference_output_task
+from .acceptance import (
+    acceptance_done_gate_decision,
+    finish_blocker_code,
+    finish_continuation_prompt,
+    is_model_inference_output_task,
+)
 from .agent_runs import (
     build_ai_cli_run_command,
     create_agent_run,
@@ -3536,12 +3541,30 @@ def work_finish_blocker_allows_continue(finished_note):
     text = str(finished_note or "").casefold()
     if not text.startswith("finish blocked:"):
         return False
+    if any(
+        marker in text
+        for marker in (
+            "pending approval",
+            "unverified source-edit verification",
+            "required same-surface audit",
+            "side-dogfood",
+            "invalid side-dogfood",
+        )
+    ):
+        return False
     return any(
         marker in text
         for marker in (
             "acceptance constraints unchecked",
+            "acceptance evidence refs",
             "edit-scope acceptance evidence",
             "all-valid answer completeness evidence",
+            "external ground-truth",
+            "exact command",
+            "runtime final verifier artifact evidence",
+            "runtime artifact freshness unchecked",
+            "runtime visual artifact quality evidence",
+            "long dependency/toolchain final artifact evidence",
             "numeric artifact quality evidence",
             "query-only hidden-model",
             "model inference output quality evidence",
@@ -3630,20 +3653,48 @@ def apply_work_control_action(state, session, task, action):
             ):
                 acceptance_action = dict(action)
                 acceptance_action["task_done"] = True
-            acceptance_blocker = acceptance_finish_blocker(
+            acceptance_gate = acceptance_done_gate_decision(
                 (task or {}).get("description") or session.get("goal") or "",
                 acceptance_action,
                 session=session,
             )
-            if acceptance_blocker:
-                finish_blockers.append(acceptance_blocker)
+            if acceptance_gate.get("decision") != "allow_complete":
+                finish_blockers.extend(
+                    blocker.get("message") for blocker in acceptance_gate.get("blockers") or [] if blocker.get("message")
+                )
             finish_blockers.extend(side_dogfood_finish_blockers(session, task))
             if finish_blockers:
                 blocked_note = f"finish blocked: {', '.join(finish_blockers)}"
+                continuation_prompt = finish_continuation_prompt(finish_blockers)
+                finish_gate = {
+                    "decision": "block_continue",
+                    "blockers": [
+                        {
+                            "code": finish_blocker_code(blocker),
+                            "message": blocker,
+                        }
+                        for blocker in finish_blockers
+                    ],
+                    "continuation_prompt": continuation_prompt,
+                    "allow_continue": work_finish_blocker_allows_continue(blocked_note),
+                }
                 if task is not None:
                     append_task_note(task, f"Work session finish blocked: {blocked_note}")
                     task["updated_at"] = current_time
-                return {"finished_note": blocked_note, "task_done": False}
+                if continuation_prompt:
+                    add_work_session_note(
+                        session,
+                        continuation_prompt,
+                        source="finish_gate",
+                        current_time=current_time,
+                    )
+                return {
+                    "finished_note": blocked_note,
+                    "task_done": False,
+                    "finish_gate": finish_gate,
+                    "finish_blockers": finish_gate["blockers"],
+                    "continuation_prompt": finish_gate["continuation_prompt"],
+                }
             close_work_session(session)
         if task is not None:
             append_task_note(task, f"Work session finished: {note}")
@@ -7033,7 +7084,11 @@ def cmd_work_ai(args):
             finished_note = str(control_effect.get("finished_note") or "")
             if (
                 action_type == "finish"
-                and work_finish_blocker_allows_continue(finished_note)
+                and (
+                    bool((control_effect.get("finish_gate") or {}).get("allow_continue"))
+                    if isinstance(control_effect.get("finish_gate"), dict)
+                    else work_finish_blocker_allows_continue(finished_note)
+                )
                 and getattr(effective_args, "continue_after_remember", False)
                 and index < max_steps
             ):

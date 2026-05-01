@@ -461,6 +461,87 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("recent_read_images_observations", prompt_text)
         self.assertIn("reuse that observation instead of re-reading", prompt_text)
 
+    def test_work_think_prompt_sections_split_long_dependency_profile(self):
+        task = {
+            "id": 1,
+            "title": "Build source toolchain",
+            "description": "Compile the final executable from source.",
+            "status": "todo",
+            "kind": "coding",
+        }
+        session = {
+            "id": 7,
+            "task_id": task["id"],
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        from mew.work_loop import build_work_model_context, build_work_think_prompt_bundle
+
+        context = build_work_model_context({"tasks": [task]}, session, task, "2026-04-17T00:01:00Z")
+        prompt, metrics = build_work_think_prompt_bundle(context)
+        section_ids = [section["id"] for section in metrics["sections"]]
+
+        self.assertIn("[section:implementation_lane_base", prompt)
+        self.assertIn("[section:long_dependency_profile", prompt)
+        self.assertIn("[section:runtime_link_proof", prompt)
+        self.assertIn("[section:recovery_budget", prompt)
+        self.assertIn("[section:dynamic_failure_evidence", prompt)
+        self.assertIn("[section:compact_recovery", prompt)
+        self.assertIn("[section:context_json", prompt)
+        self.assertIn("work_session.resume.long_dependency_build_state", prompt)
+        self.assertIn("default lookup path", prompt)
+        self.assertIn("bounded run_command timeout", prompt)
+        self.assertIn("DynamicFailureEvidence", prompt)
+        self.assertIn("Context JSON:", prompt)
+        context_suffix = prompt.split("Context JSON:\n", 1)[1]
+        self.assertNotIn("[/section:context_json]", context_suffix)
+        self.assertEqual(json.loads(context_suffix)["work_session"]["id"], 7)
+        self.assertIn("long_dependency_profile", section_ids)
+        self.assertIn("runtime_link_proof", section_ids)
+        self.assertIn("dynamic_failure_evidence", section_ids)
+        self.assertEqual(metrics["contract_version"], "prompt_sections_v1")
+        self.assertGreater(metrics["cacheable_prefix_chars"], 0)
+        self.assertGreater(metrics["dynamic_chars"], 0)
+
+    def test_work_think_prompt_section_metrics_include_cache_hints(self):
+        task = {
+            "id": 1,
+            "title": "Fix source build",
+            "description": "Repair the source build.",
+            "status": "todo",
+            "kind": "coding",
+        }
+        session = {
+            "id": 8,
+            "task_id": task["id"],
+            "status": "active",
+            "title": task["title"],
+            "goal": task["description"],
+            "created_at": "2026-04-17T00:00:00Z",
+            "updated_at": "2026-04-17T00:01:00Z",
+            "tool_calls": [],
+            "model_turns": [],
+        }
+        from mew.work_loop import build_work_model_context, build_work_think_prompt_bundle
+
+        context = build_work_model_context({"tasks": [task]}, session, task, "2026-04-17T00:01:00Z")
+        _prompt, metrics = build_work_think_prompt_bundle(context)
+        by_id = {section["id"]: section for section in metrics["sections"]}
+
+        self.assertEqual(by_id["implementation_lane_base"]["cache_hint"], "cacheable_prefix")
+        self.assertEqual(by_id["long_dependency_profile"]["cache_policy"], "cacheable")
+        self.assertEqual(by_id["dynamic_failure_evidence"]["cache_hint"], "dynamic")
+        self.assertEqual(by_id["context_json"]["cache_policy"], "dynamic")
+        for section in metrics["sections"]:
+            self.assertGreater(section["chars"], 0)
+            self.assertTrue(section["hash"].startswith("sha256:"))
+            self.assertIn("cache_hint", section)
+
     def test_work_session_effort_budget_counts_steps_duration_and_warnings(self):
         session = {
             "id": 1,
@@ -25167,6 +25248,12 @@ class WorkSessionTests(unittest.TestCase):
                 metrics = session["model_turns"][0].get("model_metrics") or {}
                 self.assertGreater(metrics.get("context_chars", 0), 0)
                 self.assertGreater(metrics.get("think", {}).get("prompt_chars", 0), 0)
+                section_metrics = metrics.get("prompt_sections", {}).get("think", {})
+                self.assertEqual(section_metrics.get("contract_version"), "prompt_sections_v1")
+                self.assertIn(
+                    "long_dependency_profile",
+                    [section["id"] for section in section_metrics.get("sections", [])],
+                )
                 self.assertGreaterEqual(metrics.get("think", {}).get("elapsed_seconds", -1), 0)
                 self.assertEqual(metrics.get("reasoning_effort"), "low")
                 self.assertEqual(metrics.get("reasoning_policy", {}).get("work_type"), "exploration")
@@ -39492,6 +39579,11 @@ class WorkSessionTests(unittest.TestCase):
         close_session.assert_not_called()
         self.assertFalse(result["task_done"])
         self.assertIn("acceptance constraints unchecked", result["finished_note"])
+        self.assertEqual(result["finish_gate"]["decision"], "block_continue")
+        self.assertEqual(result["finish_blockers"][0]["code"], "acceptance_constraints_unchecked")
+        self.assertIn("deterministic done gate", result["continuation_prompt"])
+        self.assertEqual(session["notes"][-1]["source"], "finish_gate")
+        self.assertIn("deterministic done gate", session["notes"][-1]["text"])
         self.assertIn("Work session finish blocked", task["notes"])
 
     def test_work_finish_blocks_model_inference_handoff_without_task_done_when_equivalence_unknown(self):
@@ -39733,6 +39825,7 @@ class WorkSessionTests(unittest.TestCase):
                     "tool": "run_command",
                     "status": "completed",
                     "result": {
+                        "exit_code": 0,
                         "stdout": "Enumerated all legal moves; mates ['e2e4', 'g2g4']; no other mate moves."
                     },
                 },
@@ -39857,6 +39950,11 @@ class WorkSessionTests(unittest.TestCase):
             )
         )
         self.assertFalse(work_finish_blocker_allows_continue("finish blocked: pending approval"))
+        self.assertFalse(
+            work_finish_blocker_allows_continue(
+                "finish blocked: pending approval, acceptance constraints unchecked"
+            )
+        )
 
     def test_work_finish_blocks_numeric_artifact_without_independent_cross_check(self):
         from mew.commands import apply_work_control_action
@@ -40133,7 +40231,13 @@ class WorkSessionTests(unittest.TestCase):
             "goal": description,
             "tool_calls": [
                 {"id": 1, "tool": "read_file", "status": "completed", "result": {"text": "expected"}},
-                {"id": 2, "tool": "run_command", "status": "completed", "parameters": {"command": "cmp output.txt expected.json"}},
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "cmp output.txt expected.json"},
+                    "result": {"exit_code": 0},
+                },
             ],
         }
         task = {"id": 15, "title": "Compare output", "description": description, "status": "ready", "notes": ""}
@@ -40222,7 +40326,7 @@ class WorkSessionTests(unittest.TestCase):
                     "tool": "run_command",
                     "status": "completed",
                     "parameters": {"command": "validator --threshold 50 --format json output.txt"},
-                    "result": {"stdout": "validator ok"},
+                    "result": {"exit_code": 0, "stdout": "validator ok"},
                 }
             ],
         }
@@ -40271,7 +40375,7 @@ class WorkSessionTests(unittest.TestCase):
                     "parameters": {
                         "command": "oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 ACTGACTGACTGACTG"
                     },
-                    "result": {"stdout": "oligotm 61.02"},
+                    "result": {"exit_code": 0, "stdout": "oligotm 61.02"},
                 },
                 {"id": 2, "tool": "write_file", "status": "completed"},
             ],

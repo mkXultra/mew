@@ -156,9 +156,13 @@ Before any next repair in this gap class:
 ## Current Open Risk
 
 `prompt_profile_accretion_risk`: the long-dependency policy now has many
-detector plus guidance clauses. Another narrow prompt guidance repair should be
-treated as evidence for consolidation unless the failure is clearly new and
-low-risk.
+detector plus guidance clauses. v1 consolidation introduced prompt section
+registry support for normal work THINK prompts, with named sections for
+`ImplementationLaneBase`, `LongDependencyProfile`, `RuntimeLinkProof`,
+`RecoveryBudget`, `CompactRecovery`, `DynamicFailureEvidence`, schema, and
+context. Another narrow prompt guidance repair should update the relevant
+section or structural profile, not append inline THINK text, unless the failure
+is clearly new and low-risk.
 
 ## Non-Goals
 
