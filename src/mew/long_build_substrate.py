@@ -101,6 +101,10 @@ _RECOVERY_DECISION_FAILURE_CLASSES = {
     "build_system_target_surface_invalid",
     "budget_reserve_violation",
 }
+_SOURCE_AUTHORITY_BLOCKER_CODES = {
+    "external_dependency_source_provenance_unverified",
+    "source_archive_version_grounding_too_strict",
+}
 
 
 @dataclass(frozen=True)
@@ -947,7 +951,7 @@ def _command_pipes_remote_source_fetch_without_pipefail(command: object) -> bool
 def _command_enables_pipefail(command: object) -> bool:
     first_line = str(command or "").splitlines()[0] if str(command or "").splitlines() else ""
     first_command = first_line.split("#", 1)[0]
-    return bool(re.match(r"^\s*set\b(?=[^;\n]*\s-o\s+pipefail\b)", first_command))
+    return bool(re.match(r"^\s*set\b(?=[^;\n]*(?:\s-o\s+pipefail\b|\s-[A-Za-z]*o[A-Za-z]*\s+pipefail\b))", first_command))
 
 
 def _shell_logical_command_text(command: object) -> str:
@@ -1585,12 +1589,18 @@ def _active_strategy_blockers(
     runtime_policy = contract.get("runtime_proof") if isinstance(contract.get("runtime_proof"), Mapping) else {}
     runtime_required = runtime_policy.get("required") == "required"
     runtime_satisfied = (not runtime_required) or fresh_default_smoke
+    target_runtime_satisfied = target_proven and runtime_satisfied
     final_contract_satisfied = target_proven and runtime_satisfied and ((not source_required) or source_satisfied)
+    latest_diagnostic_failure_class = str((_latest_attempt_diagnostic_failure(attempts) or {}).get("failure_class") or "")
 
     active = []
     for blocker in blockers:
         code = str(blocker.get("code") or "")
         if code == "external_dependency_source_provenance_unverified" and source_satisfied:
+            continue
+        if target_runtime_satisfied and code not in _SOURCE_AUTHORITY_BLOCKER_CODES:
+            if latest_diagnostic_failure_class and _generic_failure_class(code) == latest_diagnostic_failure_class:
+                active.append(blocker)
             continue
         if final_contract_satisfied:
             continue
@@ -2080,6 +2090,7 @@ def _later_shell_segments_mask_artifact_failure(
     command: object,
 ) -> bool:
     errexit_active = _command_enables_errexit(command) and not _command_disables_errexit(command)
+    pipefail_active = _command_enables_pipefail(command) and not _command_disables_pipefail(command)
     for entry in segment_entries[index + 1 :]:
         if _shell_text_has_unquoted_background_operator(entry.get("text")):
             return True
@@ -2087,7 +2098,7 @@ def _later_shell_segments_mask_artifact_failure(
         after_operator = str(entry.get("after_operator") or "")
         if before_operator == "||" or after_operator == "||":
             return True
-        if before_operator == "|" or after_operator == "|":
+        if (before_operator == "|" or after_operator == "|") and not (errexit_active and pipefail_active):
             return True
         if after_operator in {";", "\n", "\r"} and not errexit_active:
             return True
@@ -2371,7 +2382,7 @@ def _clear_condition(code: object, contract: Mapping[str, object], missing: Iter
 
 
 def _has_source_blocker(blockers: Iterable[Mapping[str, object]]) -> bool:
-    return any("source" in str(item.get("code") or "") or "archive" in str(item.get("code") or "") for item in blockers or [])
+    return any(str(item.get("code") or "") in _SOURCE_AUTHORITY_BLOCKER_CODES for item in blockers or [])
 
 
 def _first_matching_line(text: object, pattern: str) -> str:

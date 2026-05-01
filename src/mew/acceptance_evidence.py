@@ -655,7 +655,12 @@ def _long_dependency_output_reports_artifact_missing(output_text: str, artifact_
     return False
 
 
-def _long_dependency_command_has_artifact_proof_segment(call: object, artifact: object) -> bool:
+def _long_dependency_command_has_artifact_proof_segment(
+    call: object,
+    artifact: object,
+    *,
+    allow_metadata_probes: bool = True,
+) -> bool:
     command = tool_call_command_text(call)
     artifact_text = str(artifact or "").strip()
     if not command or not artifact_text:
@@ -714,7 +719,7 @@ def _long_dependency_command_has_artifact_proof_segment(call: object, artifact: 
         except ValueError:
             parts = segment.split()
         invoked = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
-        proves_artifact = proves_artifact or invoked in {"file", "ls", "stat"}
+        proves_artifact = proves_artifact or (allow_metadata_probes and invoked in {"file", "ls", "stat"})
         if not proves_artifact:
             continue
         if any(
@@ -780,7 +785,14 @@ def long_dependency_artifact_proven_by_call(call: object, artifact: object) -> b
     artifact_lower = str(artifact or "").casefold()
     if not artifact_lower:
         return False
-    if _long_dependency_command_echoes_artifact_output(call, artifact):
+    if _long_dependency_command_echoes_artifact_output(
+        call,
+        artifact,
+    ) and not _long_dependency_command_has_artifact_proof_segment(
+        call,
+        artifact,
+        allow_metadata_probes=False,
+    ):
         return False
     if _long_dependency_output_proves_artifact(call, artifact):
         return True

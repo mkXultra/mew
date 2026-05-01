@@ -496,6 +496,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("[section:context_json", prompt)
         self.assertIn("SourceAcquisitionProfile", prompt)
         self.assertIn("authoritative source channel", prompt)
+        self.assertIn("Use a non-Python source fetch tool", prompt)
+        self.assertIn("install curl or wget", prompt)
         self.assertIn("VCS-generated tag/archive URLs", prompt)
         self.assertIn("work_session.resume.long_build_state", prompt)
         self.assertIn("default lookup path", prompt)

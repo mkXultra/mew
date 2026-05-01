@@ -142,6 +142,51 @@ def test_long_dependency_artifact_proof_matches_existing_helper_for_safety_cases
     ) is expected
 
 
+def test_long_dependency_artifact_proof_allows_status_echo_after_strict_artifact_proof():
+    command = (
+        "set -euo pipefail\n"
+        "test -f /tmp/FooCC/foocc\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "printf 'artifact_exists=true path=/tmp/FooCC/foocc\\n'\n"
+        "/tmp/FooCC/foocc --version\n"
+        "stat -c 'artifact_stat path=%n size=%s mode=%a' /tmp/FooCC/foocc\n"
+        "printf 'required_artifact_final_status=verified path=/tmp/FooCC/foocc kind=executable\\n'"
+    )
+    stdout = (
+        "artifact_exists=true path=/tmp/FooCC/foocc\n"
+        "FooCC version 1.0\n"
+        "artifact_stat path=/tmp/FooCC/foocc size=123 mode=755\n"
+        "required_artifact_final_status=verified path=/tmp/FooCC/foocc kind=executable\n"
+    )
+    call = _command_call(9, command, stdout=stdout)
+    evidence = synthesize_command_evidence_from_tool_calls([call])[0]
+
+    assert long_dependency_artifact_proven_by_call(call, "/tmp/FooCC/foocc")
+    assert long_dependency_artifact_proven_by_command_evidence(evidence, "/tmp/FooCC/foocc")
+
+
+@pytest.mark.parametrize(
+    "probe_command",
+    [
+        "ls /tmp/FooCC/foocc",
+        "stat /tmp/FooCC/foocc",
+        "file /tmp/FooCC/foocc",
+    ],
+)
+def test_long_dependency_artifact_proof_rejects_status_echo_after_metadata_probe_only(probe_command):
+    command = (
+        "set -e\n"
+        f"{probe_command}\n"
+        "printf '/tmp/FooCC/foocc exists=true executable\\n'"
+    )
+    stdout = "/tmp/FooCC/foocc exists=true executable\n"
+    call = _command_call(9, command, stdout=stdout)
+    evidence = synthesize_command_evidence_from_tool_calls([call])[0]
+
+    assert not long_dependency_artifact_proven_by_call(call, "/tmp/FooCC/foocc")
+    assert not long_dependency_artifact_proven_by_command_evidence(evidence, "/tmp/FooCC/foocc")
+
+
 def test_fresh_artifact_evidence_rejects_later_artifact_scope_mutation():
     evidences = synthesize_command_evidence_from_tool_calls(
         [
@@ -1546,6 +1591,66 @@ def test_default_smoke_rejects_and_chain_when_later_pipeline_masks_failure():
     assert attempts[1]["produced_artifacts"] == []
     assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
     assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_allows_later_pipefail_metadata_pipeline_after_strict_smoke():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jf2:long_build:1",
+    )
+    source_command = (
+        "set -e -o pipefail\n"
+        "curl -fL https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz -o /tmp/foocc.tgz\n"
+        "printf 'authority_archive_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n'"
+    )
+    final_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/FooCC\n"
+        "make -j4 foocc\n"
+        "test -f /tmp/FooCC/foocc\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "cat > /tmp/foocc-proof.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc /tmp/foocc-proof.c -o /tmp/foocc-proof\n"
+        "test -x /tmp/foocc-proof\n"
+        "/tmp/foocc-proof\n"
+        "stat -c 'artifact_stat path=%n size=%s mode=%a' /tmp/FooCC/foocc\n"
+        "sha256sum /tmp/FooCC/foocc | sed 's/^/artifact_sha256=/'\n"
+        "printf 'required_artifact_final_status=verified path=/tmp/FooCC/foocc\\n'"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                source_command,
+                stdout="authority_archive_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n",
+            ),
+            _command_call(
+                2,
+                final_command,
+                stdout=(
+                    "FooCC version 1.0\n"
+                    "artifact_stat path=/tmp/FooCC/foocc size=123 mode=755\n"
+                    "artifact_sha256=abc  /tmp/FooCC/foocc\n"
+                    "required_artifact_final_status=verified path=/tmp/FooCC/foocc\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[-1]["stage"] == "default_smoke"
+    assert attempts[-1]["produced_artifacts"] == [{"path": "/tmp/FooCC/foocc", "proof_evidence_id": 2}]
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+    assert state["status"] == "complete"
 
 
 def test_default_smoke_rejects_backgrounded_artifact_compile():
@@ -4291,6 +4396,162 @@ def test_reducer_clears_runtime_install_blocker_after_if_wrapped_default_smoke_a
         "runtime_install_before_runtime_library_build",
     ]
     assert state["status"] == "complete"
+
+
+def test_reducer_clears_non_source_strategy_blockers_after_target_and_runtime_proof():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12d:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "cd /tmp/FooCC\n"
+        "make -j4 foocc\n"
+        "test -f /tmp/FooCC/foocc\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "printf 'int main(void){return 0;}\\n' > /tmp/foocc-proof.c\n"
+        "/tmp/FooCC/foocc /tmp/foocc-proof.c -o /tmp/foocc-proof\n"
+        "test -x /tmp/foocc-proof\n"
+        "/tmp/foocc-proof\n"
+        "printf 'required_artifact_final_status=verified path=/tmp/FooCC/foocc kind=executable\\n'"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "FooCC version 1.0\n"
+                    "required_artifact_final_status=verified path=/tmp/FooCC/foocc kind=executable\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "package_source_or_name_mismatch",
+                "source_tool_call_id": 3,
+                "excerpt": "E: Unable to locate package old-streams",
+            },
+            {
+                "code": "compatibility_override_probe_missing",
+                "source_tool_call_id": 4,
+                "excerpt": "unsupported host branch",
+            },
+        ],
+    )
+
+    assert attempts[-1]["stage"] == "default_smoke"
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+    assert state["strategy_blockers"] == []
+    assert [item["code"] for item in state["cleared_strategy_blockers"]] == [
+        "package_source_or_name_mismatch",
+        "compatibility_override_probe_missing",
+    ]
+    assert state["status"] == "ready_for_final_proof"
+
+
+def test_reducer_surfaces_later_diagnostic_failure_instead_of_stale_non_source_blocker():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12e:long_build:1",
+    )
+    proof_command = (
+        "set -euo pipefail\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "printf 'int main(void){return 0;}\\n' > /tmp/foocc-proof.c\n"
+        "/tmp/FooCC/foocc /tmp/foocc-proof.c -o /tmp/foocc-proof\n"
+        "test -x /tmp/foocc-proof\n"
+        "/tmp/foocc-proof"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, proof_command, stdout="FooCC version 1.0\n"),
+            _command_call(
+                2,
+                "cc /tmp/other-proof.c -lmissing-runtime",
+                stderr="ld: cannot find -lmissing-runtime\n",
+                exit_code=1,
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "package_source_or_name_mismatch",
+                "source_tool_call_id": 3,
+                "excerpt": "E: Unable to locate package old-streams",
+            }
+        ],
+    )
+
+    assert attempts[-1]["diagnostics"][0]["failure_class"] == "runtime_link_failed"
+    assert state["current_failure"]["failure_class"] == "runtime_link_failed"
+    assert state["strategy_blockers"] == []
+    assert [item["code"] for item in state["cleared_strategy_blockers"]] == [
+        "package_source_or_name_mismatch",
+    ]
+    assert state["status"] == "blocked"
+
+
+def test_reducer_preserves_source_archive_grounding_blocker_after_target_and_runtime_proof():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12f:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "printf 'int main(void){return 0;}\\n' > /tmp/foocc-proof.c\n"
+        "/tmp/FooCC/foocc /tmp/foocc-proof.c -o /tmp/foocc-proof\n"
+        "test -x /tmp/foocc-proof\n"
+        "/tmp/foocc-proof"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls([_command_call(1, command, stdout="FooCC version 1.0\n")])
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "source_archive_version_grounding_too_strict",
+                "source_tool_call_id": 3,
+                "excerpt": "source archive version could not be grounded",
+            }
+        ],
+    )
+
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "source_authority", "required": True, "status": "blocked"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "source_authority_overconstrained"
+    assert state["current_failure"]["legacy_code"] == "source_archive_version_grounding_too_strict"
+    assert [item["code"] for item in state["strategy_blockers"]] == [
+        "source_archive_version_grounding_too_strict",
+    ]
+    assert state["status"] == "blocked"
 
 
 def test_reducer_does_not_clear_source_blocker_with_local_identity_only_output():
