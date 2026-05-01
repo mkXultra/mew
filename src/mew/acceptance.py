@@ -8,6 +8,10 @@ from .acceptance_evidence import (
     tool_call_evidence_ref,
     tool_call_terminal_success,
 )
+from .long_build_substrate import (
+    command_evidence_to_tool_call,
+    long_dependency_artifact_proven_by_command_evidence,
+)
 from .tasks import clip_output
 
 
@@ -824,11 +828,16 @@ def coerce_acceptance_checks(value: object, *, limit: int = 8) -> list[dict]:
             evidence_refs = _coerce_evidence_refs(item.get("evidence_refs") or item.get("evidence_ref"))
             if evidence_refs:
                 check["evidence_refs"] = evidence_refs
-                ref_text = " ".join(
-                    f"tool #{ref.get('id')}"
-                    for ref in evidence_refs
-                    if str(ref.get("kind") or "tool_call") == "tool_call" and ref.get("id") is not None
-                )
+                ref_labels = []
+                for ref in evidence_refs:
+                    kind = str(ref.get("kind") or "tool_call")
+                    if ref.get("id") is None:
+                        continue
+                    if kind == "tool_call":
+                        ref_labels.append(f"tool #{ref.get('id')}")
+                    elif kind == "command_evidence":
+                        ref_labels.append(f"command evidence #{ref.get('id')}")
+                ref_text = " ".join(ref_labels)
                 if ref_text and ref_text not in check["evidence"].casefold():
                     check["evidence"] = _clean_constraint_text(
                         f"Evidence refs: {ref_text}. {check['evidence']}".strip(),
@@ -855,6 +864,29 @@ def _completed_tool_calls(session: object) -> list[dict]:
         for call in calls
         if isinstance(call, dict) and str(call.get("status") or "").casefold() == "completed"
     ]
+
+
+def _command_evidence_by_id(session: object, evidence_id: int) -> dict | None:
+    if not isinstance(session, dict):
+        return None
+    evidences = session.get("command_evidence")
+    if not isinstance(evidences, list):
+        return None
+    for evidence in evidences:
+        if isinstance(evidence, dict) and evidence.get("id") == evidence_id:
+            return evidence
+    return None
+
+
+def _command_evidence_ref_summary(evidence: object) -> dict:
+    if not isinstance(evidence, dict):
+        return {}
+    pseudo_call = command_evidence_to_tool_call(evidence)
+    ref = tool_call_evidence_ref(pseudo_call)
+    ref["kind"] = "command_evidence"
+    ref["id"] = evidence.get("id")
+    ref["terminal_success"] = bool(evidence.get("terminal_success"))
+    return ref
 
 
 def _latest_completed_write_tool_id(session: object) -> int | None:
@@ -1111,8 +1143,7 @@ def _runtime_artifact_freshness_blocker(
 
 
 def _has_runtime_artifact_grounding_evidence(evidence: object, session: object, artifact: str) -> bool:
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if call and _runtime_artifact_created_by_call(call, artifact):
             return True
     return False
@@ -1150,7 +1181,7 @@ def _runtime_artifact_final_state_blocker(
                 f"{artifact} must be verified by a completed final verifier-shaped run "
                 "before task_done=true"
             )
-        if any(_has_runtime_artifact_grounding_evidence(check.get("evidence"), session, artifact) for check in matching_checks):
+        if any(_has_runtime_artifact_grounding_evidence(check, session, artifact) for check in matching_checks):
             continue
         return (
             "runtime final verifier artifact evidence ungrounded: "
@@ -1166,10 +1197,9 @@ def _has_runtime_visual_artifact_quality_marker(text: object) -> bool:
 
 
 def _has_runtime_visual_artifact_quality_evidence(evidence: object, session: object) -> bool:
-    if not _has_runtime_visual_artifact_quality_marker(evidence):
+    if not _has_runtime_visual_artifact_quality_marker(_evidence_semantic_text(evidence)):
         return False
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in _GROUNDING_TOOLS:
             continue
         if _has_runtime_visual_artifact_quality_marker(_tool_call_text(call)):
@@ -1204,7 +1234,7 @@ def _runtime_visual_artifact_quality_blocker(
             "or image tasks with expected/correct output must cite expected dimensions, "
             "reference similarity, or exact stdout/boot markers before task_done=true"
         )
-    if any(_has_runtime_visual_artifact_quality_evidence(check.get("evidence"), session) for check in visual_checks):
+    if any(_has_runtime_visual_artifact_quality_evidence(check, session) for check in visual_checks):
         return ""
     return (
         "runtime visual artifact quality evidence ungrounded: artifact existence, "
@@ -1263,20 +1293,30 @@ def _has_long_dependency_artifact_evidence(evidence: object, session: object, ar
         evidence_text = "\n".join(
             str(evidence.get(key) or "") for key in ("constraint", "evidence", "proof") if evidence.get(key)
         )
-        tool_ids = [int(ref.get("id")) for ref in _check_evidence_refs(evidence) if ref.get("id") is not None]
+        refs = _check_evidence_refs(evidence)
     else:
         evidence_text = str(evidence or "")
-        tool_ids = _evidence_tool_ids(evidence)
+        refs = [{"kind": "tool_call", "id": tool_id} for tool_id in _evidence_tool_ids(evidence)]
     text_proves_artifact = _long_dependency_artifact_proved_by_text(evidence_text, artifact)
     text_names_artifact = str(artifact or "").casefold() in evidence_text.casefold()
     if not text_proves_artifact and not text_names_artifact:
         return False
-    for tool_id in tool_ids:
-        call = _any_tool_call_by_id(session, tool_id)
-        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+    for ref in refs:
+        ref_id = ref.get("id")
+        if ref_id is None:
             continue
-        if long_dependency_artifact_proven_by_call(call, artifact):
-            return True
+        kind = str(ref.get("kind") or "tool_call")
+        if kind == "command_evidence":
+            command_evidence = _command_evidence_by_id(session, ref_id)
+            if command_evidence and long_dependency_artifact_proven_by_command_evidence(command_evidence, artifact):
+                return True
+            continue
+        if kind == "tool_call":
+            call = _any_tool_call_by_id(session, ref_id)
+            if not call or call.get("tool") not in {"run_command", "run_tests"}:
+                continue
+            if long_dependency_artifact_proven_by_call(call, artifact):
+                return True
     return False
 
 
@@ -1333,9 +1373,7 @@ def _has_stateful_output_assertion_marker(text: object) -> bool:
 def _stateful_output_evidence_texts(checks: list[dict[str, str]], session: object) -> list[str]:
     texts: list[str] = []
     for check in checks:
-        evidence = str(check.get("evidence") or "")
-        for tool_id in _evidence_tool_ids(evidence):
-            call = _tool_call_by_id(session, tool_id)
+        for call in _evidence_command_calls(check, session):
             if call and call.get("tool") in {"run_command", "run_tests"}:
                 result = call.get("result")
                 if isinstance(result, dict) and result.get("exit_code") not in (None, 0):
@@ -1538,8 +1576,7 @@ def _source_ref_matches_text(ref: object, text: object) -> bool:
 
 
 def _has_implementation_source_grounding_evidence(evidence: object, session: object, source_ref: object) -> bool:
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in _IMPLEMENTATION_SOURCE_GROUNDING_TOOLS:
             continue
         if _source_ref_matches_text(source_ref, _tool_call_text(call)):
@@ -1569,7 +1606,7 @@ def _implementation_contract_source_blocker(
     for requirement in requirements:
         source_ref = requirement.get("path")
         if any(
-            _has_implementation_source_grounding_evidence(check.get("evidence"), session, source_ref)
+            _has_implementation_source_grounding_evidence(check, session, source_ref)
             for check in verified_checks
         ):
             continue
@@ -1639,9 +1676,8 @@ def _command_example_call_matches(call: object, command: str) -> bool:
 
 
 def _has_exact_command_example_evidence(evidence: object, session: object, command: str) -> bool:
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
-        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+    for call in _evidence_command_calls(evidence, session):
+        if call.get("tool") not in {"run_command", "run_tests"}:
             continue
         if _command_example_call_matches(call, command):
             return True
@@ -1671,6 +1707,42 @@ def _check_evidence_refs(check: object) -> list[dict]:
     return refs
 
 
+def _evidence_command_calls(evidence: object, session: object) -> list[dict]:
+    if isinstance(evidence, dict):
+        refs = _check_evidence_refs(evidence)
+    else:
+        refs = [{"kind": "tool_call", "id": tool_id} for tool_id in _evidence_tool_ids(evidence)]
+    calls: list[dict] = []
+    seen: set[tuple[str, object]] = set()
+    for ref in refs:
+        ref_id = ref.get("id")
+        if ref_id is None:
+            continue
+        kind = str(ref.get("kind") or "tool_call")
+        key = (kind, ref_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        if kind == "command_evidence":
+            command_evidence = _command_evidence_by_id(session, ref_id)
+            if command_evidence:
+                calls.append(command_evidence_to_tool_call(command_evidence))
+            continue
+        if kind == "tool_call":
+            call = _tool_call_by_id(session, ref_id)
+            if call:
+                calls.append(call)
+    return calls
+
+
+def _evidence_semantic_text(evidence: object) -> str:
+    if isinstance(evidence, dict):
+        return "\n".join(
+            str(evidence.get(key) or "") for key in ("constraint", "evidence", "proof") if evidence.get(key)
+        )
+    return str(evidence or "")
+
+
 def _evidence_ref_findings_for_checks(checks: list[dict], session: object) -> dict:
     if not isinstance(session, dict):
         return {"blocker": "", "invalid_refs": []}
@@ -1695,6 +1767,33 @@ def _evidence_ref_findings_for_checks(checks: list[dict], session: object) -> di
         for ref in refs:
             kind = str(ref.get("kind") or "tool_call")
             ref_id = ref.get("id")
+            if kind == "command_evidence":
+                evidence = _command_evidence_by_id(session, ref_id)
+                if not evidence:
+                    check_invalid.append(f"command_evidence#{ref_id} missing")
+                    check_invalid_refs.append({"kind": "command_evidence", "id": ref_id, "reason": "missing"})
+                    continue
+                if not evidence.get("terminal_success"):
+                    evidence_ref = _command_evidence_ref_summary(evidence)
+                    check_invalid.append(
+                        "command_evidence#"
+                        f"{ref_id} not terminal-success "
+                        f"(status={evidence_ref.get('status')}, exit={evidence_ref.get('exit_code')}, "
+                        f"timed_out={evidence_ref.get('timed_out')})"
+                    )
+                    check_invalid_refs.append(
+                        {
+                            "kind": "command_evidence",
+                            "id": ref_id,
+                            "reason": "not_terminal_success",
+                            "status": evidence_ref.get("status"),
+                            "exit_code": evidence_ref.get("exit_code"),
+                            "timed_out": evidence_ref.get("timed_out"),
+                        }
+                    )
+                    continue
+                has_terminal_success_ref = True
+                continue
             if kind != "tool_call":
                 check_invalid.append(f"{kind}#{ref_id} unsupported")
                 check_invalid_refs.append({"kind": kind, "id": ref_id, "reason": "unsupported_evidence_kind"})
@@ -1760,10 +1859,33 @@ def _has_post_write_grounding_evidence(evidence: object, session: object) -> boo
     latest_write_id = _latest_completed_write_tool_id(session)
     if latest_write_id is None:
         return True
-    for tool_id in _evidence_tool_ids(evidence):
-        if tool_id <= latest_write_id:
+    refs = (
+        _check_evidence_refs(evidence)
+        if isinstance(evidence, dict)
+        else [{"kind": "tool_call", "id": tool_id} for tool_id in _evidence_tool_ids(evidence)]
+    )
+    for ref in refs:
+        kind = str(ref.get("kind") or "tool_call")
+        ref_id = ref.get("id")
+        if ref_id is None:
             continue
-        call = _tool_call_by_id(session, tool_id)
+        if kind == "command_evidence":
+            command_evidence = _command_evidence_by_id(session, ref_id)
+            if not command_evidence:
+                continue
+            try:
+                source_tool_call_id = int(command_evidence.get("source_tool_call_id") or 0)
+            except (TypeError, ValueError):
+                source_tool_call_id = 0
+            if source_tool_call_id and source_tool_call_id <= latest_write_id:
+                continue
+            call = command_evidence_to_tool_call(command_evidence)
+        elif kind == "tool_call":
+            if ref_id <= latest_write_id:
+                continue
+            call = _tool_call_by_id(session, ref_id)
+        else:
+            continue
         if call and call.get("tool") in _GROUNDING_TOOLS:
             return True
     return False
@@ -1807,10 +1929,9 @@ def _has_completeness_marker(text: object) -> bool:
 
 
 def _has_all_valid_answer_grounding_evidence(evidence: object, session: object) -> bool:
-    if not _has_completeness_marker(evidence):
+    if not _has_completeness_marker(_evidence_semantic_text(evidence)):
         return False
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in _GROUNDING_TOOLS:
             continue
         if _has_completeness_marker(_tool_call_text(call)):
@@ -1838,7 +1959,7 @@ def _all_valid_answer_grounding_blocker(
             "or completeness proof before task_done=true"
         )
     for check in completeness_checks:
-        if _has_all_valid_answer_grounding_evidence(check.get("evidence"), session):
+        if _has_all_valid_answer_grounding_evidence(check, session):
             return ""
     return (
         "all-valid answer completeness evidence ungrounded: completeness checks must "
@@ -1867,7 +1988,7 @@ def _edit_scope_grounding_blocker(
             "specified replacements, or do-not-edit surfaces must be checked explicitly"
         )
     for check in edit_scope_checks:
-        if _has_post_write_grounding_evidence(check.get("evidence"), session):
+        if _has_post_write_grounding_evidence(check, session):
             continue
         return (
             "edit-scope acceptance evidence ungrounded: constraints about only-allowed edits, "
@@ -1888,10 +2009,10 @@ def _has_numeric_independence_marker(text: object) -> bool:
 
 
 def _has_numeric_artifact_quality_evidence(evidence: object, session: object) -> bool:
-    if not (_has_numeric_check_marker(evidence) and _has_numeric_independence_marker(evidence)):
+    semantic_text = _evidence_semantic_text(evidence)
+    if not (_has_numeric_check_marker(semantic_text) and _has_numeric_independence_marker(semantic_text)):
         return False
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in _GROUNDING_TOOLS:
             continue
         tool_text = _tool_call_text(call)
@@ -2024,10 +2145,9 @@ def _has_passing_query_only_generalization_clause(text: object) -> bool:
 
 
 def _has_query_only_generalization_evidence(evidence: object, session: object) -> bool:
-    if not _has_passing_query_only_generalization_clause(evidence):
+    if not _has_passing_query_only_generalization_clause(_evidence_semantic_text(evidence)):
         return False
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in _GROUNDING_TOOLS:
             continue
         tool_text = _tool_call_text(call)
@@ -2060,7 +2180,7 @@ def _query_only_hidden_model_blocker(
             "query-only hidden-model generalization evidence missing: black-box model "
             "extraction tasks must cite synthetic, randomized, or holdout validation before task_done=true"
         )
-    if any(_has_query_only_generalization_evidence(check.get("evidence"), session) for check in verified_checks):
+    if any(_has_query_only_generalization_evidence(check, session) for check in verified_checks):
         return ""
     return (
         "query-only hidden-model generalization evidence ungrounded: visible fixture checks "
@@ -2247,19 +2367,19 @@ def _model_inference_generated_oracle_blocker_text() -> str:
 
 
 def _model_inference_self_derived_oracle_blocker(evidence: object, session: object) -> str:
-    if not _has_model_inference_oracle_success_clause(evidence):
+    semantic_text = _evidence_semantic_text(evidence)
+    if not _has_model_inference_oracle_success_clause(semantic_text):
         return ""
-    if _has_model_inference_ephemeral_oracle_source(evidence):
+    if _has_model_inference_ephemeral_oracle_source(semantic_text):
         return _model_inference_generated_oracle_blocker_text()
-    if _has_model_inference_self_derived_oracle(evidence):
+    if _has_model_inference_self_derived_oracle(semantic_text):
         return (
             "model inference oracle provenance ungrounded: a reference/oracle built from "
             "the current candidate implementation or same source is not independent; cite "
             "a completed tool using a task-provided, external, golden, or independently "
             "derived reference/expected-continuation check"
         )
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in {"run_command", "run_tests"}:
             continue
         result_text = _tool_call_result_text(call)
@@ -2278,14 +2398,14 @@ def _model_inference_self_derived_oracle_blocker(evidence: object, session: obje
 
 
 def _has_model_inference_output_quality_evidence(evidence: object, session: object) -> bool:
-    if not _has_model_inference_oracle_success_clause(evidence):
+    semantic_text = _evidence_semantic_text(evidence)
+    if not _has_model_inference_oracle_success_clause(semantic_text):
         return False
-    if _has_model_inference_ephemeral_oracle_source(evidence):
+    if _has_model_inference_ephemeral_oracle_source(semantic_text):
         return False
-    if _has_model_inference_self_derived_oracle(evidence):
+    if _has_model_inference_self_derived_oracle(semantic_text):
         return False
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
+    for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in {"run_command", "run_tests"}:
             continue
         if _has_model_inference_ephemeral_oracle_source(_tool_call_text(call)):
@@ -2320,10 +2440,10 @@ def _model_inference_output_quality_blocker(
             "logit, token-id, or expected-continuation validation before task_done=true"
         )
     for check in inference_checks:
-        if _has_model_inference_output_quality_evidence(check.get("evidence"), session):
+        if _has_model_inference_output_quality_evidence(check, session):
             return ""
     for check in inference_checks:
-        blocker = _model_inference_self_derived_oracle_blocker(check.get("evidence"), session)
+        blocker = _model_inference_self_derived_oracle_blocker(check, session)
         if blocker:
             return blocker
     return (
@@ -2407,9 +2527,8 @@ def _has_external_tool_grounding_evidence(evidence: object, session: object, req
     required_terms = [_normalized_command_text(term) for term in requirement.get("required_terms") or []]
     if not command:
         return True
-    for tool_id in _evidence_tool_ids(evidence):
-        call = _tool_call_by_id(session, tool_id)
-        if not call or call.get("tool") not in {"run_command", "run_tests"}:
+    for call in _evidence_command_calls(evidence, session):
+        if call.get("tool") not in {"run_command", "run_tests"}:
             continue
         command_text = _tool_call_external_command_text(call)
         if all(_external_command_text_contains_term(command_text, term) for term in required_terms):
@@ -2443,7 +2562,7 @@ def _external_tool_ground_truth_blocker(
                 "external ground-truth tool evidence missing: tasks that name an exact "
                 "ground-truth command/tool must cite that exact command and flags before task_done=true"
             )
-        if not any(_has_external_tool_grounding_evidence(check.get("evidence"), session, requirement) for check in matching_checks):
+        if not any(_has_external_tool_grounding_evidence(check, session, requirement) for check in matching_checks):
             return (
                 "external ground-truth tool evidence ungrounded: exact command/tool constraints "
                 "must cite a completed run_command or run_tests tool whose command/output contains "
@@ -2472,7 +2591,7 @@ def _exact_command_example_blocker(
                 "exact command example evidence missing: tasks that state a command can be run "
                 "must cite that exact command shape before task_done=true"
             )
-        if not any(_has_exact_command_example_evidence(check.get("evidence"), session, command) for check in verified_checks):
+        if not any(_has_exact_command_example_evidence(check, session, command) for check in verified_checks):
             return (
                 "exact command example evidence ungrounded: command-example constraints must "
                 "cite a completed run_command or run_tests tool that runs the advertised command "
@@ -2501,7 +2620,7 @@ def _numeric_artifact_quality_blocker(
             "before task_done=true"
         )
     for check in numeric_checks:
-        if _has_numeric_artifact_quality_evidence(check.get("evidence"), session):
+        if _has_numeric_artifact_quality_evidence(check, session):
             return ""
     return (
         "numeric artifact quality evidence ungrounded: numeric checks must cite a completed "

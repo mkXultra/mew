@@ -67,6 +67,7 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-01 | Long-Build Substrate Phase 1 implemented and reviewed. | Native `CommandEvidence` is now recorded for `run_command` and `run_tests` at start and completion, with command/cwd, env summary, ordering, timeout and wall-budget fields, status/exit/timeout, output head/tail, and source tool-call linkage. Acceptance resolves `command_evidence` refs as canonical terminal evidence, long-dependency artifact evidence, external ground-truth command evidence, exact command examples, runtime artifact grounding, and other command-output semantic validators while preserving legacy `tool_call` refs. Prompt/resume command surfaces expose `command_evidence_ref`, including id-divergence cases. Validation passed: `tests/test_long_build_substrate.py tests/test_acceptance.py` 141 passed, `tests/test_work_session.py` 857 passed plus 67 subtests and one fork deprecation warning, scoped ruff passed, and `git diff --check` passed. codex-ultra review session `019de38b-fc9b-72f1-846a-987ea63d6d58` returned `PASS` after two required-change rounds and one final follow-up PASS. | Move to Phase 2 contract extraction and state cutover from `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`. Do not run same-shape `compile-compcert` measurement yet; measurement gate remains Phase 3 or Phase 4 depending on budget behavior. | phase_2_pending |
 | 2026-05-01 | Long-Build Substrate Phase 0 implemented and reviewed. | `src/mew/long_build_substrate.py`, `tests/test_long_build_substrate.py`, and `docs/M6_24_LONG_BUILD_SUBSTRATE_PHASE_0_2026-05-01.md`. Validation passed: `tests/test_long_build_substrate.py` 19 passed, `tests/test_acceptance.py` long-dependency/done-gate subset 24 passed, combined `tests/test_long_build_substrate.py tests/test_acceptance.py` 134 passed, ruff passed, and `git diff --check` passed. codex-ultra reviewer session `019de374-2a67-7620-90b1-967d6e0d2b12` returned `PASS` after Phase 0 scope was narrowed to schema helpers plus command-evidence synthesis/parity and `CommandEvidence.terminal_success` was made a necessary artifact-proof condition. | Move to Phase 1 native `CommandEvidence` cutover from `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`. Do not run same-shape `compile-compcert` measurement yet; measurement gate remains Phase 3 or Phase 4 depending on budget behavior. | phase_1_pending |
 | 2026-05-01 | Adopt `Long-Build Substrate` flag-day redesign; implement the substrate phases before measurement resumes. | Reference divergence report `docs/REVIEW_2026-05-01_M6_24_LONG_DEPENDENCY_REFERENCE_DIVERGENCE.md` concluded that Codex and Claude Code do not carry a hidden `compile-compcert` strategy; their transferable advantage is durable command/evidence substrate. Design `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md` was authored by codex-ultra and round-2 reviewed by codex-ultra, claude-ultra, and `oc-zai-coding-plan/glm-5.1`; all three returned `APPROVE` with no required fixes. User decision: mew is unreleased, so backward compatibility for old internal `long_dependency_build_state` and old `tool_call` ref shapes is not required; use flag-day cutover while preserving deterministic acceptance evidence, terminal-success proof, timeout/masked/spoofed/path-prefix rejection, post-proof mutation guard, wall/recovery budget, transfer fixtures, and anti-accretion enforcement. Phase 0 is only the next implementation slice, not a measurement gate. | Implement `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md` in order. Next slice is Phase 0: schema helpers plus safety-parity harness for `CommandEvidence`, `LongBuildContract`, `BuildAttempt`, `LongBuildState`, and `RecoveryDecision`. Do not run another `compile-compcert` proof_5 or broad measurement after Phase 0 alone. Same-shape `compile-compcert` speed_1 may run after Phase 3 if unit/fixture tests pass; because Phase 4 changes recovery-budget enforcement, prefer completing Phase 4 before measurement when budget behavior changed. | long_build_substrate_phase_0_active_measurement_gate_phase_3_or_4 |
 | 2026-05-01 | Runtime subdir target path repair implemented and reviewed. | `docs/M6_24_RUNTIME_SUBDIR_TARGET_REPAIR_2026-05-01.md`: `src/mew/work_session.py` now emits `runtime_library_subdir_target_path_invalid` only for real `make` invocations with explicit `runtime/...lib*.a` target failures, suppresses the broad dependency-generation blocker for that narrower case, and exempts `make -C runtime all/install` continuations from untargeted-build blockers. `src/mew/work_loop.py` updates `RuntimeLinkProof`. Validation passed: `tests/test_work_session.py` 854 passed, `tests/test_acceptance.py` 115 passed, ruff passed, `git diff --check` passed, and gap-ledger JSON parse passed. `codex-ultra` session `019de311-1fef-7de3-9e47-cca79922a088` returned REQUIRED_CHANGES, then PASS after stale-blocker and `cmake` false-positive fixes. | Run one same-shape `compile-compcert` speed_1 before proof_5 or broad measurement. | reviewed_speed_1_pending |
@@ -185,18 +186,11 @@ The current selected gap remains
 `long_dependency_toolchain_build_strategy_contract` on `compile-compcert`.
 Broad measurement is paused.
 
-Latest same-shape speed rerun after the external-branch help-probe width repair
-scored `0/1` with runner errors `0`:
-`docs/M6_24_EXTERNAL_BRANCH_HELP_PROBE_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`.
-The repair worked far enough to build a real `/tmp/CompCert/ccomp`; the
-remaining failure is runtime-link recovery. The verifier failed default
-compile/link with `cannot find -lcompcert`, and mew then tried invalid parent
-Makefile target `runtime/libcompcert.a` instead of using the runtime
-subdirectory's own `all/install` rules.
-
-Current bounded repair:
-`runtime_library_subdir_target_path_invalid` is implemented and reviewed.
+The runtime-subdir repair speed rerun was superseded by the accepted
+Long-Build Substrate flag-day redesign. Phase 0 and Phase 1 are implemented and
+reviewed. Measurement remains paused until the substrate reaches the recorded
+measurement gate.
 
 Current selected next action:
 
-`M6.24 -> runtime_library_subdir_target_path_invalid -> compile-compcert speed_1`
+`M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 2`

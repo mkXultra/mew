@@ -1797,6 +1797,100 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("memory_next: Continue with the focused verifier.", text)
         self.assertIn("memory_verified: echo passed", text)
 
+    def test_run_command_records_native_command_evidence_start_and_finish(self):
+        state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+        session = {"id": 1, "task_id": 1, "tool_calls": []}
+        state["work_sessions"].append(session)
+
+        call = start_work_tool_call(
+            state,
+            session,
+            "run_command",
+            {"command": "echo hi", "cwd": ".", "timeout": 12, "env": {"CC": "clang", "OPENAI_API_KEY": "secret"}},
+        )
+
+        self.assertEqual(call["command_evidence_ref"], {"kind": "command_evidence", "id": 1})
+        self.assertEqual(len(session["command_evidence"]), 1)
+        started = session["command_evidence"][0]
+        self.assertEqual(started["source"], "native_command")
+        self.assertEqual(started["status"], "running")
+        self.assertEqual(started["command"], "echo hi")
+        self.assertEqual(started["requested_timeout_seconds"], 12)
+        self.assertEqual(started["env_summary"]["items"], [{"name": "CC", "value": "clang"}])
+
+        finish_work_tool_call(
+            state,
+            1,
+            call["id"],
+            result={"command": "echo hi", "cwd": ".", "exit_code": 0, "stdout": "hi\n", "duration_seconds": 0.5},
+        )
+
+        finished = session["command_evidence"][0]
+        self.assertEqual(finished["status"], "completed")
+        self.assertEqual(finished["exit_code"], 0)
+        self.assertTrue(finished["terminal_success"])
+        self.assertEqual(finished["stdout_tail"], "hi\n")
+        self.assertGreater(finished["finish_order"], finished["start_order"])
+
+    def test_command_evidence_ref_is_visible_when_tool_and_evidence_ids_diverge(self):
+        from mew.work_session import build_work_session_command_entries, format_work_session_commands
+        from mew.work_loop import work_tool_call_for_model
+
+        state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+        session = {"id": 1, "task_id": 1, "tool_calls": []}
+        state["work_sessions"].append(session)
+
+        start_work_tool_call(state, session, "read_file", {"path": "README.md"})
+        call = start_work_tool_call(
+            state,
+            session,
+            "run_command",
+            {"command": "validator --strict output.txt", "cwd": ".", "timeout": 12},
+        )
+        finish_work_tool_call(
+            state,
+            1,
+            call["id"],
+            result={
+                "command": "validator --strict output.txt",
+                "cwd": ".",
+                "exit_code": 0,
+                "stdout": "ok\n",
+            },
+        )
+
+        self.assertEqual(call["id"], 2)
+        self.assertEqual(call["command_evidence_ref"], {"kind": "command_evidence", "id": 1})
+        self.assertNotEqual(call["id"], call["command_evidence_ref"]["id"])
+
+        model_item = work_tool_call_for_model(call)
+        self.assertEqual(model_item["command_evidence_ref"], {"kind": "command_evidence", "id": 1})
+
+        resume = build_work_session_resume(session)
+        self.assertEqual(resume["commands"][0]["command_evidence_ref"], {"kind": "command_evidence", "id": 1})
+        text = format_work_session_resume(resume)
+        self.assertIn("command_evidence=#1", text)
+        command_entries = build_work_session_command_entries(session)
+        self.assertEqual(command_entries[0]["command_evidence_ref"], {"kind": "command_evidence", "id": 1})
+        command_text = format_work_session_commands(session)
+        self.assertIn("command_evidence=#1", command_text)
+
+    def test_write_tool_verify_command_is_not_native_command_evidence(self):
+        state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+        session = {"id": 1, "task_id": 1, "tool_calls": []}
+        state["work_sessions"].append(session)
+
+        call = start_work_tool_call(
+            state,
+            session,
+            "write_file",
+            {"path": "README.md", "content": "x", "apply": True, "verify_command": "test -x /tmp/FooCC/foocc"},
+        )
+        finish_work_tool_call(state, 1, call["id"], result={"path": "README.md", "changed": True})
+
+        self.assertNotIn("command_evidence_ref", call)
+        self.assertEqual(session.get("command_evidence"), None)
+
     def test_work_action_batch_displays_read_window_fields(self):
         text = format_work_action(
             {

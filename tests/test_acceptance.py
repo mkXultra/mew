@@ -392,6 +392,41 @@ def test_acceptance_finish_blocker_rejects_runtime_command_pass_without_artifact
     assert "/tmp/frame.bmp" in blocker
 
 
+def test_acceptance_finish_blocker_accepts_runtime_artifact_command_evidence_ref():
+    text = "A fresh VM run will write /tmp/frame.bmp during execution."
+    checks = [
+        {
+            "constraint": "fresh VM run created /tmp/frame.bmp",
+            "status": "verified",
+            "evidence": "Command evidence #4 created /tmp/frame.bmp.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 4}],
+        }
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 4,
+                "ref": {"kind": "command_evidence", "id": 4},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": "node vm.js && test -s /tmp/frame.bmp",
+                "cwd": ".",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "created /tmp/frame.bmp exists=true\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert blocker == ""
+
+
 def test_acceptance_finish_blocker_rejects_wrong_runtime_artifact_path():
     text = (
         "Implement a MIPS interpreter called vm.js so I can run `node vm.js`. "
@@ -1095,6 +1130,54 @@ def test_acceptance_finish_blocker_accepts_long_dependency_structured_evidence_r
     assert blocker == ""
 
 
+def test_acceptance_finish_blocker_accepts_long_dependency_command_evidence_ref_only():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Final artifact proof completed.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 9}],
+        },
+        {
+            "constraint": "Build the CompCert C verified compiler from source.",
+            "status": "verified",
+            "evidence": "Final artifact proof completed.",
+            "evidence_refs": [{"kind": "command_evidence", "id": 9}],
+        },
+    ]
+    session = {
+        "command_evidence": [
+            {
+                "schema_version": 1,
+                "id": 9,
+                "ref": {"kind": "command_evidence", "id": 9},
+                "source": "native_command",
+                "tool": "run_command",
+                "command": "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+                "cwd": "/tmp/CompCert",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "terminal_success": True,
+                "stdout_tail": "CompCert C compiler, version 3.13.1\n",
+                "stderr_tail": "",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert blocker == ""
+
+
 def test_acceptance_finish_blocker_preserves_structured_evidence_ref_before_long_evidence_clip():
     text = (
         "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
@@ -1232,6 +1315,172 @@ def test_acceptance_done_gate_allows_structured_terminal_evidence_ref():
     )
 
     assert decision["decision"] == "allow_complete"
+
+
+def test_acceptance_done_gate_allows_structured_command_evidence_ref():
+    decision = acceptance_done_gate_decision(
+        "Ensure output exists.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Ensure output exists.",
+                    "status": "verified",
+                    "evidence": "Command evidence checked output.txt.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": 4}],
+                }
+            ],
+        },
+        session={
+            "command_evidence": [
+                {
+                    "schema_version": 1,
+                    "id": 4,
+                    "ref": {"kind": "command_evidence", "id": 4},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "test -s output.txt",
+                    "cwd": ".",
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "terminal_success": True,
+                    "stdout_tail": "ok\n",
+                    "stderr_tail": "",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_acceptance_done_gate_allows_external_ground_truth_command_evidence_ref():
+    decision = acceptance_done_gate_decision(
+        "Use the ground truth command `validator --threshold 50 --format json` to verify output.txt.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Run validator ground truth command.",
+                    "status": "verified",
+                    "evidence": "Command evidence #1 ran validator with the required flags.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": 1}],
+                }
+            ],
+        },
+        session={
+            "command_evidence": [
+                {
+                    "schema_version": 1,
+                    "id": 1,
+                    "ref": {"kind": "command_evidence", "id": 1},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "validator --threshold 50 --format json output.txt",
+                    "cwd": ".",
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "terminal_success": True,
+                    "stdout_tail": "validator ok\n",
+                    "stderr_tail": "",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_acceptance_done_gate_allows_exact_command_example_command_evidence_ref():
+    decision = acceptance_done_gate_decision(
+        "After writing output.txt, the user can run `validator --strict output.txt` from the task cwd.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Advertised validator command works.",
+                    "status": "verified",
+                    "evidence": "Command evidence #2 ran the exact advertised command.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": 2}],
+                }
+            ],
+        },
+        session={
+            "command_evidence": [
+                {
+                    "schema_version": 1,
+                    "id": 2,
+                    "ref": {"kind": "command_evidence", "id": 2},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "validator --strict output.txt",
+                    "cwd": ".",
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "terminal_success": True,
+                    "stdout_tail": "ok\n",
+                    "stderr_tail": "",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_acceptance_done_gate_blocks_non_terminal_command_evidence_ref():
+    decision = acceptance_done_gate_decision(
+        "Ensure output exists.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Ensure output exists.",
+                    "status": "verified",
+                    "evidence": "Command evidence checked output.txt.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": 4}],
+                }
+            ],
+        },
+        session={
+            "command_evidence": [
+                {
+                    "schema_version": 1,
+                    "id": 4,
+                    "ref": {"kind": "command_evidence", "id": 4},
+                    "source": "native_command",
+                    "tool": "run_command",
+                    "command": "test -s output.txt",
+                    "cwd": ".",
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "terminal_success": False,
+                    "stdout_tail": "ok\n",
+                    "stderr_tail": "",
+                }
+            ]
+        },
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["invalid_evidence_refs"] == [
+        {
+            "kind": "command_evidence",
+            "id": 4,
+            "reason": "not_terminal_success",
+            "status": "completed",
+            "exit_code": 0,
+            "timed_out": False,
+        }
+    ]
 
 
 def test_acceptance_done_gate_allows_extra_failed_refs_when_success_ref_present():

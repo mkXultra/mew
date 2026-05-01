@@ -11,7 +11,7 @@ from .acceptance import (
     is_long_dependency_toolchain_build_task,
     long_dependency_final_artifacts,
 )
-from .acceptance_evidence import long_dependency_artifact_proven_by_call
+from .acceptance_evidence import COMMAND_EVIDENCE_TOOLS, long_dependency_artifact_proven_by_call
 from .cli_command import mew_command, mew_executable
 from .data_tools import analyze_table
 from .read_tools import (
@@ -25,6 +25,7 @@ from .read_tools import (
     summarize_read_result,
 )
 from .image_tools import read_image_with_model, read_images_with_model
+from .long_build_substrate import command_evidence_from_tool_call
 from .state import next_id
 from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
@@ -2000,6 +2001,7 @@ def mark_work_tool_call_interrupted(session, tool_call_id, current_time=None):
     call["error"] = call.get("error") or "Interrupted before the work tool completed."
     call["summary"] = call.get("summary") or "interrupted work tool call"
     call["recovery_hint"] = recovery_hint
+    _record_command_evidence_finish(session, call)
     session["updated_at"] = current_time
     return [
         {
@@ -2043,6 +2045,7 @@ def start_work_tool_call(state, session, tool, parameters):
     if write_intent_error:
         tool_call["write_intent_error"] = write_intent_error
     session.setdefault("tool_calls", []).append(tool_call)
+    _record_command_evidence_start(session, tool_call)
     session["last_tool_call_id"] = tool_call["id"]
     session["updated_at"] = current_time
     return tool_call
@@ -9506,6 +9509,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             running_output = call.get("running_output") or {}
             command_record = {
                 "tool_call_id": call.get("id"),
+                "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "tool": call.get("tool"),
                 "command": result.get("command") or parameters.get("command"),
                 "cwd": result.get("cwd") or parameters.get("cwd"),
@@ -10479,9 +10483,16 @@ def format_work_session_resume(resume):
     commands = resume.get("commands") or []
     if commands:
         for command in commands:
+            command_evidence_ref = command.get("command_evidence_ref") or {}
+            evidence_suffix = (
+                f" command_evidence=#{command_evidence_ref.get('id')}"
+                if command_evidence_ref.get("id") is not None
+                else ""
+            )
             lines.append(
                 f"#{command.get('tool_call_id')} {command.get('tool')} "
-                f"exit={format_exit_code(command.get('exit_code'))} {command.get('command') or ''}"
+                f"exit={format_exit_code(command.get('exit_code'))}{evidence_suffix} "
+                f"{command.get('command') or ''}"
             )
             if command.get("stdout"):
                 lines.append("  stdout:")
@@ -11169,6 +11180,93 @@ def format_work_action(action, parameters=None, tool_call_id=None):
     return "\n".join(lines)
 
 
+def _next_command_evidence_id(session):
+    latest = 0
+    for evidence in (session or {}).get("command_evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        try:
+            latest = max(latest, int(evidence.get("id") or 0))
+        except (TypeError, ValueError):
+            continue
+    return latest + 1
+
+
+def _next_command_evidence_order(session):
+    latest = 0
+    for evidence in (session or {}).get("command_evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        for key in ("start_order", "finish_order"):
+            try:
+                latest = max(latest, int(evidence.get(key) or 0))
+            except (TypeError, ValueError):
+                continue
+    return latest + 1
+
+
+def _find_command_evidence_for_tool_call(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    ref = tool_call.get("command_evidence_ref") if isinstance(tool_call.get("command_evidence_ref"), dict) else {}
+    ref_id = ref.get("id")
+    for evidence in session.get("command_evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        if ref_id is not None and str(evidence.get("id")) == str(ref_id):
+            return evidence
+        if str(evidence.get("source_tool_call_id")) == str(tool_call.get("id")):
+            return evidence
+    return None
+
+
+def _record_command_evidence_start(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    if tool_call.get("tool") not in COMMAND_EVIDENCE_TOOLS:
+        return None
+    evidence = command_evidence_from_tool_call(
+        tool_call,
+        evidence_id=_next_command_evidence_id(session),
+        start_order=_next_command_evidence_order(session),
+        finish_order=0,
+        source="native_command",
+    )
+    if not evidence:
+        return None
+    evidence_dict = evidence.to_dict()
+    session.setdefault("command_evidence", []).append(evidence_dict)
+    tool_call["command_evidence_ref"] = dict(evidence.ref)
+    return evidence_dict
+
+
+def _record_command_evidence_finish(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    if tool_call.get("tool") not in COMMAND_EVIDENCE_TOOLS:
+        return None
+    existing = _find_command_evidence_for_tool_call(session, tool_call)
+    evidence_id = int((existing or {}).get("id") or _next_command_evidence_id(session))
+    start_order = int((existing or {}).get("start_order") or _next_command_evidence_order(session))
+    evidence = command_evidence_from_tool_call(
+        tool_call,
+        evidence_id=evidence_id,
+        start_order=start_order,
+        finish_order=_next_command_evidence_order(session),
+        source="native_command",
+    )
+    if not evidence:
+        return None
+    evidence_dict = evidence.to_dict()
+    if existing is not None:
+        existing.clear()
+        existing.update(evidence_dict)
+    else:
+        session.setdefault("command_evidence", []).append(evidence_dict)
+    tool_call["command_evidence_ref"] = dict(evidence.ref)
+    return evidence_dict
+
+
 def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""):
     session = find_work_session(state, session_id)
     tool_call = find_work_tool_call(session, tool_call_id)
@@ -11190,6 +11288,7 @@ def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""
         tool_call["summary"] = clip_output(summarize_work_tool_result(tool_call.get("tool"), result or {}), 4000)
     tool_call.pop("running_output", None)
     tool_call["finished_at"] = finished_at
+    _record_command_evidence_finish(session, tool_call)
     if session:
         session["updated_at"] = finished_at
     return tool_call
@@ -11304,6 +11403,7 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
         entries.append(
             {
                 "tool_call_id": call.get("id"),
+                "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "status": call.get("status") or "unknown",
                 "tool": call.get("tool") or "unknown",
                 "path": result.get("path") or parameters.get("path") or "",
@@ -11443,6 +11543,7 @@ def build_work_session_command_entries(session, limit=8, max_chars=1200, include
         entries.append(
             {
                 "tool_call_id": call.get("id"),
+                "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "status": call.get("status") or "unknown",
                 "tool": call.get("tool") or "unknown",
                 "command": result.get("command") or parameters.get("command") or "",
@@ -11470,9 +11571,15 @@ def format_work_session_commands(session, task=None, limit=8, include_tests=True
         lines.append("(none)")
         return "\n".join(lines)
     for entry in entries:
+        command_evidence_ref = entry.get("command_evidence_ref") or {}
+        evidence_suffix = (
+            f" command_evidence=#{command_evidence_ref.get('id')}"
+            if command_evidence_ref.get("id") is not None
+            else ""
+        )
         lines.append(
             f"#{entry.get('tool_call_id')} [{entry.get('status')}] {entry.get('tool')} "
-            f"exit={format_exit_code(entry.get('exit_code'))} {entry.get('command') or ''}"
+            f"exit={format_exit_code(entry.get('exit_code'))}{evidence_suffix} {entry.get('command') or ''}"
         )
         if entry.get("cwd"):
             lines.append(f"cwd: {entry.get('cwd')}")

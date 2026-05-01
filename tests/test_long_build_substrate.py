@@ -8,6 +8,7 @@ from mew.long_build_substrate import (
     LongBuildContract,
     LongBuildState,
     RecoveryDecision,
+    command_evidence_from_tool_call,
     command_evidence_to_tool_call,
     fresh_long_dependency_artifact_evidence,
     long_dependency_artifact_proven_by_command_evidence,
@@ -200,6 +201,45 @@ def test_command_evidence_preserves_non_stdout_output_surfaces_used_by_existing_
     assert "/tmp/FooCC/foocc exists=true" in evidence.output_tail
     assert "FooCC version 1.0" in evidence.output_tail
     assert long_dependency_artifact_proven_by_command_evidence(evidence, "/tmp/FooCC/foocc")
+
+
+def test_native_command_evidence_records_wall_timeout_ceiling_fields():
+    call = {
+        "id": 9,
+        "tool": "run_command",
+        "status": "completed",
+        "parameters": {
+            "command": "make -j2 foocc",
+            "cwd": "/tmp/FooCC",
+            "timeout": 840,
+            "wall_timeout_ceiling": {
+                "remaining_seconds": 900.4,
+                "requested_timeout_seconds": 1800,
+                "capped_timeout_seconds": 840,
+            },
+        },
+        "result": {
+            "command": "make -j2 foocc",
+            "cwd": "/tmp/FooCC",
+            "exit_code": 0,
+            "duration_seconds": 100.8,
+            "stdout": "built\n",
+        },
+    }
+
+    evidence = command_evidence_from_tool_call(
+        call,
+        evidence_id=2,
+        start_order=3,
+        finish_order=4,
+    )
+
+    assert evidence is not None
+    assert evidence.source == "native_command"
+    assert evidence.requested_timeout_seconds == 1800
+    assert evidence.effective_timeout_seconds == 840
+    assert evidence.wall_budget_before_seconds == 900
+    assert evidence.wall_budget_after_seconds == 799
 
 
 def test_command_evidence_terminal_success_is_required_for_artifact_proof():

@@ -51,6 +51,10 @@ class CommandEvidence:
     started_at: str
     finished_at: str
     duration_seconds: float | None
+    requested_timeout_seconds: int | None
+    effective_timeout_seconds: int | None
+    wall_budget_before_seconds: int | None
+    wall_budget_after_seconds: int | None
     status: str
     exit_code: int | None
     timed_out: bool
@@ -93,6 +97,10 @@ class CommandEvidence:
             started_at=str(data.get("started_at") or ""),
             finished_at=str(data.get("finished_at") or ""),
             duration_seconds=_coerce_float(data.get("duration_seconds")),
+            requested_timeout_seconds=_coerce_int(data.get("requested_timeout_seconds")),
+            effective_timeout_seconds=_coerce_int(data.get("effective_timeout_seconds")),
+            wall_budget_before_seconds=_coerce_int(data.get("wall_budget_before_seconds")),
+            wall_budget_after_seconds=_coerce_int(data.get("wall_budget_after_seconds")),
             status=str(data.get("status") or ""),
             exit_code=_coerce_int(data.get("exit_code")),
             timed_out=bool(data.get("timed_out")),
@@ -246,6 +254,23 @@ def synthesize_command_evidence_from_tool_call(
     call_order: int,
     source: str = "synthesized_fixture",
 ) -> CommandEvidence | None:
+    return command_evidence_from_tool_call(
+        call,
+        evidence_id=evidence_id,
+        start_order=call_order * 2 - 1,
+        finish_order=call_order * 2,
+        source=source,
+    )
+
+
+def command_evidence_from_tool_call(
+    call: Mapping[str, object],
+    *,
+    evidence_id: int,
+    start_order: int,
+    finish_order: int,
+    source: str = "native_command",
+) -> CommandEvidence | None:
     if not isinstance(call, Mapping):
         return None
     tool = str(call.get("tool") or "")
@@ -261,6 +286,12 @@ def synthesize_command_evidence_from_tool_call(
     output_bytes = len(output.encode("utf-8")) if output else None
     timed_out = bool(result.get("timed_out"))
     exit_code = _coerce_int(result.get("exit_code"))
+    wall_ceiling = _dict_value(parameters.get("wall_timeout_ceiling") or result.get("wall_timeout_ceiling"))
+    requested_timeout = _coerce_int(wall_ceiling.get("requested_timeout_seconds"), default=_coerce_int(parameters.get("timeout")))
+    effective_timeout = _coerce_int(
+        wall_ceiling.get("capped_timeout_seconds"),
+        default=_coerce_int(result.get("timeout"), default=_coerce_int(parameters.get("timeout"))),
+    )
     return CommandEvidence(
         schema_version=LONG_BUILD_SCHEMA_VERSION,
         id=int(evidence_id),
@@ -270,11 +301,22 @@ def synthesize_command_evidence_from_tool_call(
         command=command,
         cwd=cwd,
         env_summary=summarize_env(parameters.get("env") or result.get("env")),
-        start_order=call_order * 2 - 1,
-        finish_order=call_order * 2,
+        start_order=int(start_order),
+        finish_order=int(finish_order),
         started_at=str(call.get("started_at") or result.get("started_at") or "unknown"),
         finished_at=str(call.get("finished_at") or result.get("finished_at") or "unknown"),
         duration_seconds=_coerce_float(result.get("duration_seconds") or call.get("duration_seconds")),
+        requested_timeout_seconds=requested_timeout,
+        effective_timeout_seconds=effective_timeout,
+        wall_budget_before_seconds=_coerce_int(
+            wall_ceiling.get("remaining_seconds")
+            or parameters.get("wall_budget_before_seconds")
+            or result.get("wall_budget_before_seconds")
+        ),
+        wall_budget_after_seconds=_coerce_int(
+            result.get("wall_budget_after_seconds"),
+            default=_wall_budget_after_seconds(wall_ceiling, result),
+        ),
         status=str(call.get("status") or ""),
         exit_code=exit_code,
         timed_out=timed_out,
@@ -406,6 +448,16 @@ def _coerce_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _wall_budget_after_seconds(wall_ceiling: Mapping[str, object], result: Mapping[str, object]) -> int | None:
+    before = _coerce_float(wall_ceiling.get("remaining_seconds"))
+    if before is None:
+        return None
+    duration = _coerce_float(result.get("duration_seconds"))
+    if duration is None:
+        return None
+    return max(0, int(before - duration))
 
 
 def _command_may_mutate_artifact_scope(command: object, artifact: object, cwd: object = "") -> bool:
