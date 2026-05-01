@@ -33,8 +33,11 @@ Authoritative design:
 
 This supersedes the local `compile-compcert` detector/profile patch chain for
 now. The latest local repair may remain as evidence, but do not spend another
-`compile-compcert` proof_5 or broad measurement run before the selected
-long-build substrate cutover begins.
+`compile-compcert` proof_5 or broad measurement run after Phase 0 alone.
+Phase 0 is the next implementation slice, not the measurement gate. Same-shape
+`compile-compcert` speed_1 may run after Phase 3 if unit/fixture tests pass;
+because Phase 4 changes recovery-budget enforcement, prefer completing Phase 4
+before measurement when budget behavior changed.
 
 ## Loop
 

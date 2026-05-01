@@ -293,8 +293,12 @@ M6.24 resume condition:
   `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`. Phase 0 is selected:
   schema helpers and safety-parity harness for `CommandEvidence`,
   `LongBuildContract`, `BuildAttempt`, `LongBuildState`, and
-  `RecoveryDecision`. Do not resume `compile-compcert` proof_5 or broad
-  measurement until this path is implemented and validated.
+  `RecoveryDecision`. Phase 0 is the next implementation slice only, not the
+  measurement gate. Do not resume `compile-compcert` proof_5 or broad
+  measurement after Phase 0 alone. Same-shape `compile-compcert` speed_1 may
+  run after Phase 3 if unit/fixture tests pass; because Phase 4 changes
+  recovery-budget enforcement, prefer completing Phase 4 before measurement
+  when budget behavior changed.
 
 Historical selected gap class:
   `hard_task_implementation_strategy_contract_retention`, recorded in
