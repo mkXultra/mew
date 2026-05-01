@@ -269,15 +269,21 @@ M6.24 resume condition:
   and `tool_call` ref compatibility may be dropped by flag-day cutover. Preserve
   safety invariants instead.
   Current selected chain:
-  `M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 4`.
-- M6.24 Long-Build Substrate Phase 3 is now implemented and reviewed:
+  `M6.24 -> long_dependency/toolchain gap -> compile-compcert speed_1 after Long-Build Substrate Phase 4`.
+- M6.24 Long-Build Substrate Phase 4 is now implemented and reviewed:
+  wall/recovery budget enforcement uses `LongBuildContract`, planned command
+  stage classification, and `RecoveryDecision` budget policy instead of command
+  marker heuristics. Validation passed with 64 scoped long-build/wall-budget
+  tests, ruff, diff check, and codex-ultra review PASS in session
+  `019de42b-0c04-7010-b73e-19f41071fbc1`. Next selected action is one
+  same-shape `compile-compcert` speed_1 with refreshable `~/.codex/auth.json`;
+  do not jump to proof_5 or broad measurement before recording that speed rerun.
+- M6.24 Long-Build Substrate Phase 3 is implemented and reviewed:
   `RecoveryDecision` is derived/rendered for the approved narrow subset, stale
   build/runtime recovery failures are cleared by later successful proof, and
   static prompt profile size stays stable while dynamic recovery state moves
   through Context JSON. Validation passed with 1036 scoped tests plus codex-ultra
-  review PASS in session `019de40c-42a8-71c1-955b-07022e84f1ec`. Next selected
-  action is Phase 4 budget enforcement before measurement because the current
-  gap repeatedly involves wall/recovery budget behavior.
+  review PASS in session `019de40c-42a8-71c1-955b-07022e84f1ec`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -312,12 +318,12 @@ M6.24 resume condition:
   `LongBuildContract` extraction and `LongBuildState` reducer cutover replace
   old `long_dependency_build_state` resume output with `long_build_state`;
   codex-ultra review passed in session
-  `019de3ab-47b6-71c3-849d-db3f089e1ecd`. Phase 3 is now selected:
+  `019de3ab-47b6-71c3-849d-db3f089e1ecd`. Phase 3 is complete:
   `RecoveryDecision` derivation/rendering for the narrow failure classes in the
-  design. Do not resume `compile-compcert` proof_5 or broad measurement yet.
-  Same-shape `compile-compcert` speed_1 may run after Phase 3 if unit/fixture
-  tests pass; because Phase 4 changes recovery-budget enforcement, prefer
-  completing Phase 4 before measurement when budget behavior changed.
+  design. Phase 4 is complete: budget enforcement now keys off the typed
+  contract/state/recovery decision substrate. The current measurement gate is a
+  same-shape `compile-compcert` speed_1; do not resume proof_5 or broad
+  measurement before that rerun is recorded.
 
 Historical selected gap class:
   `hard_task_implementation_strategy_contract_retention`, recorded in

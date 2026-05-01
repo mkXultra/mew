@@ -9528,7 +9528,10 @@ class WorkSessionTests(unittest.TestCase):
                                             "work",
                                             "--oneshot",
                                             "--instruction",
-                                            "Under /tmp/CompCert, build the CompCert compiler from source and verify it works.",
+                                            (
+                                                "Under /tmp/CompCert, build the CompCert compiler from source. "
+                                                "Ensure /tmp/CompCert/ccomp can compile and link a program by default."
+                                            ),
                                             "--cwd",
                                             str(workspace),
                                             "--auth",
@@ -9565,19 +9568,32 @@ class WorkSessionTests(unittest.TestCase):
     def test_long_build_recovery_command_can_spend_reserved_budget_after_linker_failure(self):
         task = {
             "title": "Build CompCert compiler",
-            "description": "Build the compiler from source and verify the runtime link path.",
+            "description": (
+                "Under /tmp/CompCert, build the CompCert compiler from source. "
+                "Ensure /tmp/CompCert/ccomp can compile and link a program by default."
+            ),
         }
         session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "updated_at": "now",
             "tool_calls": [
                 {
+                    "id": 20,
                     "tool": "run_command",
                     "status": "completed",
+                    "parameters": {"command": "/tmp/CompCert/ccomp /tmp/probe.c -o /tmp/probe", "cwd": "/tmp/CompCert"},
                     "result": {
+                        "command": "/tmp/CompCert/ccomp /tmp/probe.c -o /tmp/probe",
+                        "cwd": "/tmp/CompCert",
                         "exit_code": 2,
                         "stderr": "/usr/bin/ld: cannot find -lcompcert: No such file or directory\nlinker command failed\n",
                     },
                 }
-            ]
+            ],
+            "model_turns": [],
         }
         parameters = {
             "timeout": 600,
@@ -9590,6 +9606,11 @@ class WorkSessionTests(unittest.TestCase):
             ),
         }
 
+        from mew.work_session import build_work_session_resume
+
+        resume = build_work_session_resume(session, task=task)
+        self.assertEqual(resume["long_build_state"]["recovery_decision"]["failure_class"], "runtime_link_failed")
+        self.assertTrue(resume["long_build_state"]["recovery_decision"]["budget"]["may_spend_reserve"])
         self.assertEqual(
             commands.work_tool_recovery_reserve_seconds(
                 "run_command",
@@ -9600,22 +9621,84 @@ class WorkSessionTests(unittest.TestCase):
             0.0,
         )
 
+    def test_unrelated_long_command_preserves_reserve_after_linker_failure(self):
+        task = {
+            "title": "Build CompCert compiler",
+            "description": (
+                "Under /tmp/CompCert, build the CompCert compiler from source. "
+                "Ensure /tmp/CompCert/ccomp can compile and link a program by default."
+            ),
+        }
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 20,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "/tmp/CompCert/ccomp /tmp/probe.c -o /tmp/probe", "cwd": "/tmp/CompCert"},
+                    "result": {
+                        "command": "/tmp/CompCert/ccomp /tmp/probe.c -o /tmp/probe",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "/usr/bin/ld: cannot find -lcompcert: No such file or directory\n",
+                    },
+                }
+            ],
+            "model_turns": [],
+        }
+        parameters = {
+            "timeout": 600,
+            "command": "curl -L https://example.invalid/CompCert.tar.gz -o /tmp/CompCert.tar.gz",
+        }
+
+        from mew.work_session import build_work_session_resume
+
+        resume = build_work_session_resume(session, task=task)
+        self.assertTrue(resume["long_build_state"]["recovery_decision"]["budget"]["may_spend_reserve"])
+        self.assertEqual(
+            commands.work_tool_recovery_reserve_seconds(
+                "run_command",
+                parameters,
+                task=task,
+                session=session,
+            ),
+            commands.WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS,
+        )
+
     def test_long_build_recovery_command_can_spend_reserved_budget_after_runtime_install_failure(self):
         task = {
             "title": "Build CompCert compiler",
-            "description": "Build the compiler from source and verify the runtime install path.",
+            "description": (
+                "Under /tmp/CompCert, build the CompCert compiler from source. "
+                "Ensure /tmp/CompCert/ccomp can compile and link a program by default."
+            ),
         }
         session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "updated_at": "now",
             "tool_calls": [
                 {
+                    "id": 31,
                     "tool": "run_command",
                     "status": "completed",
+                    "parameters": {"command": "make -C runtime install", "cwd": "/tmp/CompCert"},
                     "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/CompCert",
                         "exit_code": 2,
                         "stdout": "install: cannot stat 'libcompcert.a': No such file or directory\n",
                     },
                 }
-            ]
+            ],
+            "model_turns": [],
         }
         parameters = {
             "timeout": 600,
@@ -9628,6 +9711,163 @@ class WorkSessionTests(unittest.TestCase):
             ),
         }
 
+        from mew.work_session import build_work_session_resume
+
+        resume = build_work_session_resume(session, task=task)
+        self.assertEqual(
+            resume["long_build_state"]["recovery_decision"]["failure_class"],
+            "runtime_install_before_build",
+        )
+        self.assertTrue(resume["long_build_state"]["recovery_decision"]["budget"]["may_spend_reserve"])
+        self.assertEqual(
+            commands.work_tool_recovery_reserve_seconds(
+                "run_command",
+                parameters,
+                task=task,
+                session=session,
+            ),
+            0.0,
+        )
+
+    def test_budget_reserve_violation_preserves_reserve_for_non_build_long_command(self):
+        task = {
+            "title": "Build CompCert compiler",
+            "description": (
+                "Under /tmp/CompCert, build the CompCert compiler from source. "
+                "Ensure /tmp/CompCert/ccomp can compile and link a program by default."
+            ),
+        }
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get update && apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get update && apt-get install -y coq libcoq-flocq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "Setting up coq 8.18.0\nSetting up libcoq-flocq\n",
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help | grep -E 'external|ignore'"},
+                    "result": {
+                        "command": "./configure --help | grep -E 'external|ignore'",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "  -ignore-coq-version\n  -use-external-Flocq\n  -use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j4 ccomp runtime"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux && make -j4 ccomp runtime"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "COQC backend/Asmgenproof0.v\ncommand timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+        parameters = {
+            "timeout": 600,
+            "command": "curl -L https://example.invalid/CompCert.tar.gz -o /tmp/CompCert.tar.gz",
+        }
+
+        from mew.work_session import build_work_session_resume
+
+        resume = build_work_session_resume(session, task=task)
+        self.assertEqual(
+            resume["long_build_state"]["recovery_decision"]["failure_class"],
+            "budget_reserve_violation",
+        )
+        self.assertEqual(
+            commands.work_tool_recovery_reserve_seconds(
+                "run_command",
+                parameters,
+                task=task,
+                session=session,
+            ),
+            commands.WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS,
+        )
+
+    def test_runtime_target_surface_recovery_with_final_smoke_can_spend_reserve(self):
+        task = {
+            "title": "Build CompCert compiler",
+            "description": (
+                "Under /tmp/CompCert, build the CompCert compiler from source. "
+                "Ensure /tmp/CompCert/ccomp can compile and link a program by default."
+            ),
+        }
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j10 ccomp runtime/libcompcert.a",
+                    },
+                    "result": {
+                        "command": "make -j10 ccomp runtime/libcompcert.a",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "make: *** No rule to make target 'runtime/libcompcert.a'. Stop.\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+        parameters = {
+            "timeout": 600,
+            "command": (
+                "make -C runtime all install && "
+                "/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke && /tmp/smoke"
+            ),
+            "cwd": "/tmp/CompCert",
+        }
+
+        from mew.work_session import build_work_session_resume
+
+        resume = build_work_session_resume(session, task=task)
+        self.assertEqual(
+            resume["long_build_state"]["recovery_decision"]["failure_class"],
+            "build_system_target_surface_invalid",
+        )
+        self.assertTrue(resume["long_build_state"]["recovery_decision"]["budget"]["may_spend_reserve"])
         self.assertEqual(
             commands.work_tool_recovery_reserve_seconds(
                 "run_command",

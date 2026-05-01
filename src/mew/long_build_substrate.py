@@ -573,6 +573,38 @@ def command_evidence_from_tool_call(
     )
 
 
+def planned_long_build_command_stage(
+    action_type: object,
+    parameters: Mapping[str, object] | None,
+    contract: Mapping[str, object],
+) -> str:
+    """Classify a planned command with the same stage logic used for recorded attempts."""
+    if str(action_type or "") not in COMMAND_EVIDENCE_TOOLS:
+        return ""
+    parameters = dict(parameters or {})
+    call = {
+        "id": "planned",
+        "tool": str(action_type or ""),
+        "status": "completed",
+        "parameters": parameters,
+        "result": {
+            "command": parameters.get("command") or "",
+            "cwd": parameters.get("cwd") or "",
+            "exit_code": 0,
+        },
+    }
+    evidence = command_evidence_from_tool_call(
+        call,
+        evidence_id=0,
+        start_order=0,
+        finish_order=0,
+        source="planned_timeout_policy",
+    )
+    if evidence is None:
+        return ""
+    return _command_stage(evidence, contract)
+
+
 def command_evidence_to_tool_call(evidence: CommandEvidence | Mapping[str, object]) -> dict:
     if isinstance(evidence, CommandEvidence):
         evidence = evidence.to_dict()

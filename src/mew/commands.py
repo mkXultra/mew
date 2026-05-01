@@ -23,6 +23,8 @@ from .acceptance import (
     finish_blocker_code,
     finish_continuation_prompt,
     is_model_inference_output_task,
+    is_long_dependency_toolchain_build_task,
+    long_dependency_final_artifacts,
 )
 from .agent_runs import (
     build_ai_cli_run_command,
@@ -84,6 +86,7 @@ from .implementation_lane_baseline import (
     format_implementation_lane_baseline_report,
     summarize_implementation_lane_baseline,
 )
+from .long_build_substrate import build_long_build_contract, planned_long_build_command_stage
 from .memory import add_deep_memory, compact_memory, recall_memory
 from .metrics import DEFAULT_SAMPLE_LIMIT, build_observation_metrics, format_observation_metrics
 from .mew_first_calibration import (
@@ -6123,32 +6126,103 @@ def _work_text_for_timeout_policy(task=None, session=None):
     )
 
 
-def _work_session_has_recent_long_dependency_recovery_blocker(session=None):
+_LONG_BUILD_RESERVE_PRESERVING_STAGES = {
+    "artifact_proof",
+    "build",
+    "custom_runtime_smoke",
+    "default_smoke",
+    "runtime_build",
+    "runtime_install",
+}
+
+_LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES = {
+    "build_system_target_surface_probe": {"artifact_proof", "build", "default_smoke", "runtime_build", "runtime_install"},
+    "budget_preserving_recovery": set(),
+    "continue_or_resume_build": {"artifact_proof", "build", "default_smoke", "runtime_build", "runtime_install"},
+    "default_runtime_smoke": {"default_smoke"},
+    "runtime_build_or_install": {"build", "default_smoke", "runtime_build", "runtime_install"},
+    "runtime_build_then_install": {"build", "default_smoke", "runtime_build", "runtime_install"},
+    "target_build_or_artifact_proof": {"artifact_proof", "build", "default_smoke"},
+}
+
+
+def _work_session_long_build_state_for_timeout_policy(task=None, session=None):
     if not isinstance(session, dict):
-        return False
-    calls = session.get("tool_calls") or []
-    if not isinstance(calls, list):
-        return False
-    try:
-        recent_text = json.dumps(calls[-8:], sort_keys=True, default=str).casefold()
-    except (TypeError, ValueError):
-        recent_text = str(calls[-8:]).casefold()
-    if any(
-        marker in recent_text
-        for marker in (
-            "runtime_link_library_missing",
-            "runtime_install_before_runtime_library_build",
-            "default_runtime_link_path_unproven",
-            "cannot find -l",
-            "linker command failed",
-        )
-    ):
-        return True
-    return (
-        "install" in recent_text
-        and any(marker in recent_text for marker in ("cannot stat", "no such file", "not found", "missing"))
-        and any(marker in recent_text for marker in ("libcompcert", "runtime"))
+        return {}
+    resume = build_work_session_resume(session, task=task)
+    state = resume.get("long_build_state") if isinstance(resume, dict) else {}
+    return state if isinstance(state, dict) else {}
+
+
+def _long_build_contract_for_timeout_policy(task=None, session=None, long_build_state=None):
+    long_build_state = long_build_state if isinstance(long_build_state, dict) else {}
+    contract = long_build_state.get("contract")
+    if isinstance(contract, dict) and contract.get("required_artifacts"):
+        return contract
+    text = _work_text_for_timeout_policy(task=task, session=session)
+    if not is_long_dependency_toolchain_build_task(text):
+        return {}
+    artifacts = long_dependency_final_artifacts(text)
+    if not artifacts:
+        return {}
+    session = session if isinstance(session, dict) else {}
+    acceptance_constraints = [
+        item.get("constraint") if isinstance(item, dict) else item
+        for item in (session.get("acceptance_constraints") or [])
+    ]
+    return build_long_build_contract(
+        text,
+        artifacts,
+        contract_id=f"work_session:{session.get('id') or 'unknown'}:long_build:1",
+        acceptance_constraints=acceptance_constraints,
     )
+
+
+def _long_build_recovery_decision_for_timeout_policy(long_build_state):
+    if not isinstance(long_build_state, dict):
+        return {}
+    decision = long_build_state.get("recovery_decision")
+    return decision if isinstance(decision, dict) else {}
+
+
+def _long_build_recovery_may_spend_reserve(recovery_decision):
+    if not isinstance(recovery_decision, dict):
+        return False
+    if recovery_decision.get("decision") == "block_for_budget":
+        return False
+    budget = recovery_decision.get("budget")
+    return bool(isinstance(budget, dict) and budget.get("may_spend_reserve"))
+
+
+def _long_build_recovery_action_allows_stage(recovery_decision, stage):
+    if not isinstance(recovery_decision, dict):
+        return False
+    allowed_next = recovery_decision.get("allowed_next_action")
+    if not isinstance(allowed_next, dict):
+        return False
+    allowed_stage = str(allowed_next.get("stage") or "")
+    if not allowed_stage:
+        return False
+    allowed_stages = _LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES.get(allowed_stage)
+    if allowed_stages is None:
+        allowed_stages = {allowed_stage}
+    return str(stage or "") in allowed_stages
+
+
+def _long_build_reserve_seconds(contract, recovery_decision):
+    if isinstance(recovery_decision, dict):
+        budget = recovery_decision.get("budget")
+        if isinstance(budget, dict):
+            reserve = _positive_float_or_none(budget.get("reserve_seconds"))
+            if reserve is not None:
+                return reserve
+    if isinstance(contract, dict):
+        budget = contract.get("budget")
+        if isinstance(budget, dict):
+            reserve = _positive_float_or_none(budget.get("final_proof_reserve_seconds"))
+            if reserve is not None:
+                return reserve
+    return WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS
 
 
 def work_tool_recovery_reserve_seconds(action_type, parameters, *, task=None, session=None):
@@ -6162,43 +6236,26 @@ def work_tool_recovery_reserve_seconds(action_type, parameters, *, task=None, se
     command = str(parameters.get("command") or "")
     if not command:
         return 0.0
-    if _work_session_has_recent_long_dependency_recovery_blocker(session):
-        return 0.0
-    context = f"{_work_text_for_timeout_policy(task=task, session=session)}\n{command}".casefold()
-    long_dependency_markers = (
-        "build",
-        "from source",
-        "configure",
-        "compiler",
-        "toolchain",
-        "dependency",
-        "runtime",
+    long_build_state = _work_session_long_build_state_for_timeout_policy(task=task, session=session)
+    contract = _long_build_contract_for_timeout_policy(
+        task=task,
+        session=session,
+        long_build_state=long_build_state,
     )
-    build_command_markers = (
-        "make ",
-        "cmake",
-        "cargo build",
-        "npm run build",
-        "pip install",
-        "opam ",
-    )
-    final_validation_markers = (
-        "smoke",
-        "-version",
-        "--version",
-        "test -x",
-        "compile",
-        "link",
-        "verif",
-    )
-    if not any(marker in context for marker in long_dependency_markers):
+    if not contract:
         return 0.0
-    command_lower = command.casefold()
-    if not any(marker in command_lower for marker in build_command_markers):
+    recovery_decision = _long_build_recovery_decision_for_timeout_policy(long_build_state)
+    stage = planned_long_build_command_stage(action_type, parameters, contract)
+    if recovery_decision:
+        if (
+            _long_build_recovery_may_spend_reserve(recovery_decision)
+            and _long_build_recovery_action_allows_stage(recovery_decision, stage)
+        ):
+            return 0.0
+        return _long_build_reserve_seconds(contract, recovery_decision)
+    if stage not in _LONG_BUILD_RESERVE_PRESERVING_STAGES:
         return 0.0
-    if not any(marker in command_lower for marker in final_validation_markers):
-        return 0.0
-    return WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS
+    return _long_build_reserve_seconds(contract, recovery_decision)
 
 
 def apply_work_tool_wall_timeout_ceiling(
