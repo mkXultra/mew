@@ -1689,27 +1689,30 @@ def _evidence_ref_findings_for_checks(checks: list[dict], session: object) -> di
         if not refs:
             missing.append(_clean_constraint_text(check.get("constraint"), limit=80) or "unnamed acceptance check")
             continue
+        check_invalid: list[str] = []
+        check_invalid_refs: list[dict] = []
+        has_terminal_success_ref = False
         for ref in refs:
             kind = str(ref.get("kind") or "tool_call")
             ref_id = ref.get("id")
             if kind != "tool_call":
-                invalid.append(f"{kind}#{ref_id} unsupported")
-                invalid_refs.append({"kind": kind, "id": ref_id, "reason": "unsupported_evidence_kind"})
+                check_invalid.append(f"{kind}#{ref_id} unsupported")
+                check_invalid_refs.append({"kind": kind, "id": ref_id, "reason": "unsupported_evidence_kind"})
                 continue
             call = _any_tool_call_by_id(session, ref_id)
             if not call:
-                invalid.append(f"tool_call#{ref_id} missing")
-                invalid_refs.append({"kind": "tool_call", "id": ref_id, "reason": "missing"})
+                check_invalid.append(f"tool_call#{ref_id} missing")
+                check_invalid_refs.append({"kind": "tool_call", "id": ref_id, "reason": "missing"})
                 continue
             if not tool_call_terminal_success(call):
                 evidence = tool_call_evidence_ref(call)
-                invalid.append(
+                check_invalid.append(
                     "tool_call#"
                     f"{ref_id} not terminal-success "
                     f"(status={evidence.get('status')}, exit={evidence.get('exit_code')}, "
                     f"timed_out={evidence.get('timed_out')})"
                 )
-                invalid_refs.append(
+                check_invalid_refs.append(
                     {
                         "kind": "tool_call",
                         "id": ref_id,
@@ -1719,6 +1722,23 @@ def _evidence_ref_findings_for_checks(checks: list[dict], session: object) -> di
                         "timed_out": evidence.get("timed_out"),
                     }
                 )
+                continue
+            has_terminal_success_ref = True
+        # Models sometimes cite the whole exploration chain in a verified
+        # acceptance check. If the check also cites terminal-success evidence,
+        # semantic blockers decide whether that evidence is sufficient; earlier
+        # failed tool refs are noisy but should not force an extra model turn.
+        # Missing or unsupported refs stay blocking because they indicate
+        # malformed or hallucinated evidence, not merely historical exploration.
+        if has_terminal_success_ref:
+            for message, ref in zip(check_invalid, check_invalid_refs):
+                if ref.get("reason") == "not_terminal_success":
+                    continue
+                invalid.append(message)
+                invalid_refs.append(ref)
+        else:
+            invalid.extend(check_invalid)
+            invalid_refs.extend(check_invalid_refs)
     if missing:
         return {
             "blocker": (

@@ -12,6 +12,7 @@ from mew.acceptance import (
     is_runtime_visual_artifact_task,
     long_dependency_final_artifacts,
 )
+from mew.acceptance_evidence import long_dependency_artifact_proven_by_call
 
 
 def test_extract_acceptance_constraints_keeps_output_and_edit_scope_rules():
@@ -955,6 +956,7 @@ def test_acceptance_finish_blocker_accepts_long_dependency_final_artifact_eviden
                 "id": 9,
                 "tool": "run_command",
                 "status": "completed",
+                "parameters": {"command": "ls -l /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version"},
                 "result": {
                     "exit_code": 0,
                     "stdout": "-rwxr-xr-x /tmp/CompCert/ccomp\nCompCert version 3.13\nSMOKE_OK\n",
@@ -1230,6 +1232,494 @@ def test_acceptance_done_gate_allows_structured_terminal_evidence_ref():
     )
 
     assert decision["decision"] == "allow_complete"
+
+
+def test_acceptance_done_gate_allows_extra_failed_refs_when_success_ref_present():
+    decision = acceptance_done_gate_decision(
+        "Ensure output exists.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Ensure output exists.",
+                    "status": "verified",
+                    "evidence": "Tool #4 tried an earlier probe; tool #5 checked output.txt.",
+                    "evidence_refs": [{"kind": "tool_call", "id": 4}, {"kind": "tool_call", "id": 5}],
+                }
+            ],
+        },
+        session={
+            "tool_calls": [
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "test -s output.txt"},
+                    "result": {"exit_code": 1, "stdout": "missing output.txt\n"},
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": "test -s output.txt"},
+                    "result": {"exit_code": 0, "stdout": "ok\n"},
+                },
+            ]
+        },
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_acceptance_done_gate_blocks_missing_or_unsupported_refs_even_with_success_ref():
+    for extra_ref in ({"kind": "tool_call", "id": 999}, {"kind": "file", "id": 5}):
+        decision = acceptance_done_gate_decision(
+            "Ensure output exists.",
+            {
+                "type": "finish",
+                "task_done": True,
+                "acceptance_checks": [
+                    {
+                        "constraint": "Ensure output exists.",
+                        "status": "verified",
+                        "evidence": "Tool #5 checked output.txt.",
+                        "evidence_refs": [{"kind": "tool_call", "id": 5}, extra_ref],
+                    }
+                ],
+            },
+            session={
+                "tool_calls": [
+                    {
+                        "id": 5,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {"command": "test -s output.txt"},
+                        "result": {"exit_code": 0, "stdout": "ok\n"},
+                    },
+                ]
+            },
+        )
+
+        assert decision["decision"] == "block_continue"
+        assert decision["blockers"][0]["code"] == "acceptance_evidence_refs_invalid"
+
+
+def test_acceptance_done_gate_allows_multiline_long_dependency_final_proof_with_extra_failed_refs():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp. "
+        "CompCert must be freshly built from source and fully functional."
+    )
+    session = {
+        "tool_calls": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "make ccomp"},
+                "result": {"exit_code": 2, "stdout": "partial build failed\n"},
+            },
+            {
+                "id": 12,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": (
+                        "set -euxo pipefail\n"
+                        "make runtime/libcompcert.a\n"
+                        "make install\n"
+                        "/tmp/CompCert/ccomp /tmp/compcert_smoke.c -o /tmp/compcert_smoke | tee /tmp/log\n"
+                        "ls -l /tmp/CompCert/ccomp\n"
+                    )
+                },
+                "result": {
+                    "exit_code": 0,
+                    "stdout": (
+                        "Functional default compile/link smoke after runtime install:\n"
+                        "smoke:120\n"
+                        "Final artifact proof:\n"
+                        "ls -l /tmp/CompCert/ccomp\n"
+                        "-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n"
+                    ),
+                },
+            },
+        ]
+    }
+
+    decision = acceptance_done_gate_decision(
+        text,
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Build the CompCert C verified compiler from source.",
+                    "status": "verified",
+                    "evidence": "Tool #4 was an earlier failure; tool #12 completed final artifact proof.",
+                    "evidence_refs": [{"kind": "tool_call", "id": 4}, {"kind": "tool_call", "id": 12}],
+                },
+                {
+                    "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+                    "status": "verified",
+                    "evidence": "Tool #12 proved /tmp/CompCert/ccomp is executable.",
+                    "evidence_refs": [{"kind": "tool_call", "id": 12}],
+                },
+                {
+                    "constraint": "CompCert must be freshly built from source and fully functional.",
+                    "status": "verified",
+                    "evidence": "Tool #12 ran a default compile/link smoke and produced smoke:120.",
+                    "evidence_refs": [{"kind": "tool_call", "id": 12}],
+                },
+            ],
+        },
+        session=session,
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_long_dependency_final_artifact_proof_is_generic_not_task_semantic():
+    assert long_dependency_artifact_proven_by_call(
+        {
+            "tool": "run_command",
+            "status": "completed",
+            "parameters": {"command": "make install\nls -l /opt/widget/bin/widget"},
+            "result": {
+                "exit_code": 0,
+                "stdout": "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /opt/widget/bin/widget\n",
+            },
+        },
+        "/opt/widget/bin/widget",
+    )
+    assert long_dependency_artifact_proven_by_call(
+        {
+            "tool": "run_command",
+            "status": "completed",
+            "parameters": {"command": "make install\nfile /opt/widget/bin/widget"},
+            "result": {
+                "exit_code": 0,
+                "stdout": "/opt/widget/bin/widget: ELF 64-bit LSB executable\n",
+            },
+        },
+        "/opt/widget/bin/widget",
+    )
+
+
+def test_long_dependency_final_artifact_proof_rejects_suppressed_probe_plus_faked_output():
+    assert not long_dependency_artifact_proven_by_call(
+        {
+            "tool": "run_command",
+            "status": "completed",
+            "parameters": {
+                "command": (
+                    "ls -l /opt/widget/bin/widget >/dev/null; "
+                    "printf 'Final artifact proof:\\n-rwxr-xr-x 1 root root 123 /opt/widget/bin/widget\\n'"
+                )
+            },
+            "result": {
+                "exit_code": 0,
+                "stdout": "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /opt/widget/bin/widget\n",
+            },
+        },
+        "/opt/widget/bin/widget",
+    )
+
+
+def test_long_dependency_final_artifact_proof_rejects_relative_basename_echo_spoof():
+    for command, stdout in (
+        ("printf 'exists=true widget\\n'", "exists=true widget\n"),
+        ("echo 'regular file widget'", "regular file widget\n"),
+        ("printf 'exists=true ./widget\\n'", "exists=true ./widget\n"),
+    ):
+        assert not long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"cwd": "/opt/widget/bin", "command": command},
+                "result": {"cwd": "/opt/widget/bin", "exit_code": 0, "stdout": stdout},
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_rejects_generated_marker_output_without_real_probe():
+    for command, stdout in (
+        (
+            "awk 'BEGIN{print \"exists=true /opt/widget/bin/widget\"}'",
+            "exists=true /opt/widget/bin/widget\n",
+        ),
+        (
+            "python -c 'print(\"exists=true widget\")'",
+            "exists=true widget\n",
+        ),
+        (
+            "sh -c 'printf \"regular file ./widget\\n\"'",
+            "regular file ./widget\n",
+        ),
+    ):
+        assert not long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"cwd": "/opt/widget/bin", "command": command},
+                "result": {"cwd": "/opt/widget/bin", "exit_code": 0, "stdout": stdout},
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_rejects_parent_glob_mutation_after_probe():
+    for command, cwd in (
+        ("ls -l /opt/widget/bin/widget && rm /opt/widget/bin/*", None),
+        ("ls -l /opt/widget/bin/widget && truncate -s 0 /opt/widget/bin/*", None),
+        ("ls -l widget && rm *", "/opt/widget/bin"),
+    ):
+        parameters = {"command": command}
+        result = {
+            "exit_code": 0,
+            "stdout": "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /opt/widget/bin/widget\n",
+        }
+        if cwd:
+            parameters["cwd"] = cwd
+            result["cwd"] = cwd
+        assert not long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": parameters,
+                "result": result,
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_rejects_nested_interpreter_mutation_after_probe():
+    for command in (
+        "ls -l /opt/widget/bin/widget && sh -c 'rm /opt/widget/bin/widget'",
+        "ls -l /opt/widget/bin/widget && python -c 'import os; os.remove(\"/opt/widget/bin/widget\")'",
+        "ls -l /opt/widget/bin/widget && perl -e 'unlink \"/opt/widget/bin/widget\"'",
+        "ls -l /opt/widget/bin/widget && sh -c 'rm /opt/widget/bin/*'",
+        (
+            "ls -l /opt/widget/bin/widget && "
+            "python -c 'from pathlib import Path; Path(\"/opt/widget/bin/widget\").unlink()'"
+        ),
+        "ls -l /opt/widget/bin/widget && python -c 'import os; os.rename(\"/opt/widget/bin/widget\", \"/tmp/widget\")'",
+        "ls -l /opt/widget/bin/widget && python -c 'open(\"/opt/widget/bin/widget\", \"w\").close()'",
+        "ls -l /opt/widget/bin/widget && uv run python -c 'open(\"/opt/widget/bin/widget\", \"w\").close()'",
+        "ls -l /opt/widget/bin/widget && sudo python -c 'open(\"/opt/widget/bin/widget\", \"w\").close()'",
+        "ls -l /opt/widget/bin/widget && python3.12 -c 'open(\"/opt/widget/bin/widget\", \"w\").close()'",
+    ):
+        assert not long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": command},
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /opt/widget/bin/widget\n",
+                },
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_rejects_path_prefix_match():
+    for command, stdout in (
+        (
+            "ls -l /opt/widget/bin/widget.old",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /opt/widget/bin/widget.old\n",
+        ),
+        (
+            "file /opt/widget/bin/widget.old",
+            "/opt/widget/bin/widget.old: ELF 64-bit LSB executable\n",
+        ),
+        (
+            "stat -c '%F %n' /opt/widget/bin/widget.old",
+            "regular file /opt/widget/bin/widget.old\n",
+        ),
+        (
+            "test -x /opt/widget/bin/widget.old",
+            "exists=true /opt/widget/bin/widget.old\n",
+        ),
+        (
+            "mv /opt/widget/bin/widget /opt/widget/bin/widget.old && file /opt/widget/bin/widget.old",
+            "/opt/widget/bin/widget.old: ELF 64-bit LSB executable\n",
+        ),
+    ):
+        assert not long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": command},
+                "result": {"exit_code": 0, "stdout": stdout},
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_rejects_unrelated_absolute_basename_match():
+    for command, stdout in (
+        ("file /tmp/widget", "/tmp/widget: ELF 64-bit LSB executable\n"),
+        ("stat -c '%F %n' /tmp/widget", "regular file /tmp/widget\n"),
+        ("test -x /tmp/widget", "exists=true /tmp/widget\n"),
+    ):
+        assert not long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"cwd": "/opt/widget/bin", "command": command},
+                "result": {"cwd": "/opt/widget/bin", "exit_code": 0, "stdout": stdout},
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_allows_relative_basename_from_artifact_cwd():
+    for command, stdout in (
+        ("file ./widget", "./widget: ELF 64-bit LSB executable\n"),
+        ("stat -c '%F %n' widget", "regular file widget\n"),
+        ("test -x widget", ""),
+        ("[ -x ./widget ]", ""),
+    ):
+        assert long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"cwd": "/opt/widget/bin", "command": command},
+                "result": {"cwd": "/opt/widget/bin", "exit_code": 0, "stdout": stdout},
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_rejects_test_x_extra_operands():
+    for command in (
+        "test -x /opt/widget/bin/widget -o 1 = 1",
+        "test -x widget -o 1 = 1",
+        "[ -x widget -o 1 = 1 ]",
+    ):
+        assert not long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"cwd": "/opt/widget/bin", "command": command},
+                "result": {"cwd": "/opt/widget/bin", "exit_code": 0, "stdout": ""},
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_long_dependency_final_artifact_proof_allows_mutation_before_final_probe():
+    for command in (
+        "install build/widget /opt/widget/bin/widget && ls -l /opt/widget/bin/widget",
+        "cp build/widget /opt/widget/bin/widget && stat -c '%F %n' /opt/widget/bin/widget",
+        "chmod +x /opt/widget/bin/widget && file /opt/widget/bin/widget",
+    ):
+        assert long_dependency_artifact_proven_by_call(
+            {
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": command},
+                "result": {
+                    "exit_code": 0,
+                    "stdout": "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /opt/widget/bin/widget\n",
+                },
+            },
+            "/opt/widget/bin/widget",
+        )
+
+
+def test_acceptance_finish_blocker_rejects_header_only_or_masked_long_dependency_output_proof():
+    text = (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+    checks = [
+        {
+            "constraint": "CompCert can be invoked through /tmp/CompCert/ccomp.",
+            "status": "verified",
+            "evidence": "Tool #9 completed final artifact proof for /tmp/CompCert/ccomp.",
+            "evidence_refs": [{"kind": "tool_call", "id": 9}],
+        }
+    ]
+    cases = [
+        (
+            "set -x; test -x /tmp/CompCert/ccomp || true; echo 'functional smoke'",
+            "+ test -x /tmp/CompCert/ccomp\nfunctional smoke\n",
+        ),
+        (
+            "printf 'Final artifact proof:\\nls -l /tmp/CompCert/ccomp\\n'",
+            "Final artifact proof:\nls -l /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "printf 'Final artifact proof:\\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\\n'",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "printf 'Final artifact proof:\\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\\n' && true",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "true && printf 'Final artifact proof:\\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\\n'",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "printf 'Final artifact proof:\\n-rwxr-xr-x 1 root root 123 /tmp/'\"CompCert\"'/ccomp\\n'",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "p=/tmp/CompCert/ccomp; printf 'Final artifact proof:\\n-rwxr-xr-x 1 root root 123 %s\\n' \"$p\"",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "ls -l /tmp/CompCert/ccomp && rm -f /tmp/CompCert/ccomp",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "stat -c '%F %n' /tmp/CompCert/ccomp && mv /tmp/CompCert/ccomp /tmp/CompCert/ccomp.old",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "ls -l /tmp/CompCert/ccomp && chmod -x /tmp/CompCert/ccomp",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "ls -l /tmp/CompCert/ccomp && : > /tmp/CompCert/ccomp",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "ls -l /tmp/CompCert/ccomp && cp /tmp/other /tmp/CompCert/ccomp",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "ls -l /tmp/CompCert/ccomp && install /tmp/other /tmp/CompCert/ccomp",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+        (
+            "ls -l /tmp/CompCert/ccomp && dd if=/tmp/other of=/tmp/CompCert/ccomp",
+            "Final artifact proof:\n-rwxr-xr-x 1 root root 123 /tmp/CompCert/ccomp\n",
+        ),
+    ]
+
+    for command, stdout in cases:
+        blocker = acceptance_finish_blocker(
+            text,
+            {"type": "finish", "task_done": True, "acceptance_checks": checks},
+            session={
+                "tool_calls": [
+                    {
+                        "id": 9,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {"command": command},
+                        "result": {"exit_code": 0, "stdout": stdout},
+                    }
+                ]
+            },
+        )
+
+        assert "long dependency/toolchain final artifact evidence ungrounded" in blocker
 
 
 def test_acceptance_finish_blocker_rejects_model_inference_smoke_only_output():

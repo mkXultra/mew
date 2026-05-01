@@ -245,8 +245,19 @@ M6.24 resume condition:
   Harbor mean `1.000`, runtime `30m 16s`, and all three external verifier
   checks passed
   (`docs/M6_24_VENDORED_PATCH_SURGERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`).
+  The follow-on proof attempt exposed an internal acceptance false-negative:
+  valid external PASS trials could still be blocked by multiline final-artifact
+  proof and earlier failed evidence refs. User rejected the initial
+  task-semantic parser direction as a bad structural decision. The active
+  repair is now the provider-neutral acceptance evidence structure in
+  `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_REPAIR_2026-05-01.md`: terminal
+  success, real proof segments, exact path/token boundaries, conservative
+  opaque-interpreter handling, and post-proof mutation guards, without
+  benchmark-specific acceptance semantics. Codex-ultra reviewer session
+  `019de270-4b79-7c90-9e32-ca7c46e81b8b` returned PASS after false-positive
+  and false-negative fixes.
   Current selected chain:
-  `M6.24 -> vendored_dependency_patch_surgery_before_supported_branch -> compile-compcert proof_5 with -k 5 -n 1`.
+  `M6.24 -> acceptance_evidence_structure_repair_v1_5 -> compile-compcert speed_1`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -2398,15 +2409,14 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.24 improvement_phase -> acceptance_substrate_v1 -> compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
+`M6.24 improvement_phase -> acceptance_evidence_structure_repair_v1_5 -> compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
 
 Acceptable near-term work:
 
 - keep `mew work --oneshot` as the implementation path and preserve the
   no-Terminal-Bench-specific-solver constraint
-- finish and validate acceptance substrate v1: shared terminal evidence helpers,
-  shared long-dependency final-artifact proof authority for acceptance and
-  resume state, structured finish blockers, and blocked-continuation prompts
+- preserve the no-task-specific-acceptance-parser decision recorded in
+  `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_REPAIR_2026-05-01.md`
 - after that structural repair, run one same-shape `compile-compcert` speed_1
   with refreshable `~/.codex/auth.json`; escalate to sequential proof_5 only
   after speed_1 shows the head is viable
