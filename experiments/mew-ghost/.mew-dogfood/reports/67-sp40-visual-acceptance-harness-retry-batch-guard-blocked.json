@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "task_id": 67,
+  "session_id": 98,
+  "side_project": "mew-wisp",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-ghost",
+  "task_summary": "SP40 cat visual acceptance harness retry reproduced the same nested batch write-root guard before any tests-only product patch could land.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": null,
+  "read_turns_before_edit": 6,
+  "files_changed": [],
+  "tests_run": [
+    {
+      "command": "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-ghost/tests/test_mew_ghost.py",
+      "result": "not reached; retry stopped at the same batch guard before product edits"
+    },
+    {
+      "command": "git diff --stat -- experiments/mew-ghost",
+      "result": "empty; no product diff persisted"
+    },
+    {
+      "command": "gh issue comment 3",
+      "result": "added SP40 recurrence evidence to issue #3"
+    },
+    {
+      "command": "gh issue reopen 3",
+      "result": "reopened issue #3 for the same-path batch guard recurrence"
+    }
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 0,
+  "rescue_edits": 0,
+  "outcome": "failed",
+  "failure_class": "same_path_edit_hunks_batch_guard_recurrence_before_sp40_visual_harness",
+  "repair_required": true,
+  "proof_artifacts": [
+    "/tmp/mew-wisp-sp40-visual-acceptance-harness-retry-report.json",
+    "task #67/session #98 stop_reason=tool_failed",
+    "last step failed with: batch requires write/edit tools inside the declared allowed write roots",
+    "session #98 produced a focused tests-only patch shape under experiments/mew-ghost/tests/test_mew_ghost.py, but the batch guard rejected the nested edit_file_hunks dry-run",
+    "GitHub issue #3 comment: https://github.com/mkXultra/mew/issues/3#issuecomment-4357352639"
+  ],
+  "commit": "",
+  "notes": "After two focused mew-first attempts hit the same failure class, the operator stopped instead of applying the proposed test patch by hand. SP40 remains blocked on issue #3; product-code rescue edits remain zero."
+}

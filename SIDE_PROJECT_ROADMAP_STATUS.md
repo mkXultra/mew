@@ -50,10 +50,11 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 | SP37 mew-wisp Cat Sprite Eye and Foreleg Polish | `done` | Task #61/session #92 improved the left eye but fused the front legs; reviewer rejected that visual result. Task #62/session #93 repaired only the foreleg rows into two separated strokes, preserved the left-eye improvement, and added focused regression tests. Issue #35 records the verifier/visual-acceptance polish finding. |
 | SP38 mew-wisp Cat Left-Eye Balance Repair | `done` | Task #63/session #94 made the upper left eye match the right eye but left a lower isolated dot; reviewer rejected that visual result. Task #64/session #95 removed the lower tear-like dot, preserved the balanced eye width and SP37 forelegs, and added focused regression tests. Issue #35 was updated with the repeated visual-acceptance evidence. |
 | SP39 mew-wisp Cat Right-Eye Height Repair | `done` | Task #65/session #96 removed the lower right-eye extension so the right eye no longer appears one row taller than the left eye, preserved the SP38/SP37 sprite repairs, and added a focused lower-right-eye regression check. |
+| SP40 mew-wisp Cat Visual Acceptance Harness | `blocked` | Tasks #66/#67 sessions #97/#98 both reached a plausible tests-only reusable visual contract patch but stopped before product edits when the nested same-file `edit_file_hunks` dry-run batch was rejected by the write-root guard. Ledger rows 66/67 record the failed attempts with rescue edits `0`; issue #3 is reopened. |
 
 ## Active Focus
 
-Active side-project focus: **SP39 mew-wisp Cat Right-Eye Height Repair is done; choose the next terminal-first `mew-wisp` milestone before reconnecting to deeper mew state**.
+Active side-project focus: **SP40 mew-wisp Cat Visual Acceptance Harness is blocked on issue #3; resume SP40 after the same-file batch guard recurrence is repaired**.
 
 Current target:
 
@@ -349,6 +350,17 @@ Current target:
   focused verifier passed (`55 passed`), `git diff --check` passed, fixture
   terminal smoke was inspected at `MEW_GHOST_TERMINAL_WIDTH=50`, and rescue
   edits remain `0`.
+- SP40 task `#66` / session `#97` and retry task `#67` / session `#98` both
+  stopped before product edits while trying to add a tests-only reusable visual
+  acceptance harness for the cat sprite. Mew reached a focused patch shape for
+  `experiments/mew-ghost/tests/test_mew_ghost.py`, but the nested same-file
+  `edit_file_hunks` dry-run batch failed with `batch requires write/edit tools
+  inside the declared allowed write roots`. The worktree stayed clean, focused
+  pytest was not reached, rescue edits remain `0`, local reports
+  `66-sp40-visual-acceptance-harness-batch-guard-blocked.json` and
+  `67-sp40-visual-acceptance-harness-retry-batch-guard-blocked.json` were
+  appended as ledger rows `66` and `67`, and issue `#3` was reopened with the
+  recurrence evidence.
 - `mew chat` and `mew code` are represented as explicit command arrays
 - launcher state remains dry-run by default with `side_effects: "none"` and
   `execution.status: "dry_run"`
@@ -1057,6 +1069,8 @@ Current target:
   keeps deterministic fixture display available.
 - SP27 is closed: the terminal speech bubble has breathing room and now speaks
   honest live/local wording depending on whether live desk data is present.
+- SP40 is blocked: the visual acceptance harness did not land because issue
+  `#3` recurred in tasks `#66`/`#67` before any product/test diff was applied.
 - Real local execution of `--execute-launchers` is intentionally unverified by
   automation because it would spawn `mew chat` and `mew code`; the opt-in gate
   is covered by injected-runner tests and dry-run output proof.
@@ -1076,8 +1090,9 @@ Current target:
 
 Choose the next side-project move:
 
-1. define the next mew-wisp milestone after SP36, keeping terminal-first
-   resident polish ahead of deeper mew state reconnection
+1. repair or wait for issue `#3`, then resume SP40 with mew as first
+   implementer so the reusable cat visual contract can land without supervisor
+   product-code rescue
 2. keep state/JSON output as the machine-readable proof path while preserving
    the text-based human terminal speech bubble
 3. preserve the old `mew-ghost` name only where it is historical evidence for

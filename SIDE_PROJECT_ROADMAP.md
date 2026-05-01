@@ -755,3 +755,24 @@ Done when:
 - a fixture terminal smoke render is inspected at the narrow resident width
 - no hidden monitoring, launcher execution, shell execution, broad refactors,
   live adapter changes, or core imports are introduced
+
+### SP40: mew-wisp Cat Visual Acceptance Harness
+
+Turn the recent visual sprite repairs into a reusable deterministic acceptance
+harness so broad `cat.png` similarity alone cannot miss issue #35-style
+regressions.
+
+Done when:
+
+- the fixture terminal cat render is checked through one reusable visual
+  contract helper instead of scattered ad hoc assertions
+- the contract asserts symmetric eye shape, no lower-left tear dot, no
+  lower-right eye extension, separated forelegs, and no fused or three-bar
+  foreleg regression
+- the existing reference-mask similarity contract remains in place as a broad
+  likeness check, while the new contract covers localized visual semantics
+- focused tests cover the deterministic fixture path without changing runtime
+  product behavior
+- a fixture terminal smoke render is inspected at the narrow resident width
+- no hidden monitoring, launcher execution, shell execution, broad refactors,
+  live adapter changes, or core imports are introduced
