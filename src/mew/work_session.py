@@ -4382,12 +4382,15 @@ def _long_dependency_untargeted_make_blocker(call, expected_artifacts):
         for artifact in expected_artifacts or []
         if Path(str(artifact or "")).name
     }
+    cwd = result.get("cwd") or parameters.get("cwd") or ""
     for invocation in _long_dependency_make_invocations(command):
         try:
             parts = shlex.split(invocation, posix=True) if invocation else []
         except ValueError:
             parts = invocation.split()
         if not parts or parts[0] != "make":
+            continue
+        if _long_dependency_make_invocation_is_runtime_library_continuation(parts, cwd):
             continue
         explicit_targets = _make_explicit_targets(parts)
         target_names = {Path(str(target or "")).name.casefold() for target in explicit_targets}
@@ -4957,6 +4960,63 @@ def _long_dependency_runtime_install_missing_library_failure(call):
     }
 
 
+def _long_dependency_runtime_library_subdir_target_failure(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return {}
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    if "no rule to make target" not in lowered:
+        return {}
+    if "runtime/" not in lowered and "runtime\\" not in lowered:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("exit_code") in (None, 0):
+        return {}
+    command = _long_dependency_call_command_text(call)
+    make_invocations = _long_dependency_make_invocations(command)
+    if not make_invocations:
+        return {}
+    has_runtime_library_target = False
+    for invocation in make_invocations:
+        try:
+            parts = shlex.split(invocation, posix=True) if invocation else []
+        except ValueError:
+            parts = invocation.split()
+        for target in _make_explicit_targets(parts):
+            normalized = str(target or "").replace("\\", "/")
+            if "runtime/" in normalized and _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE.search(normalized):
+                has_runtime_library_target = True
+                break
+        if has_runtime_library_target:
+            break
+    if not has_runtime_library_target:
+        return {}
+    excerpt = ""
+    artifact_match = None
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line_lower = line.casefold()
+        if "no rule to make target" not in line_lower:
+            continue
+        line_artifact_match = _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE.search(line)
+        if line_artifact_match:
+            artifact_match = line_artifact_match
+            excerpt = clip_inline_text(line, 180)
+            break
+    if not artifact_match:
+        return {}
+    return {
+        "code": "runtime_library_subdir_target_path_invalid",
+        "layer": "runtime_link_proof",
+        "source_tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "excerpt": excerpt or clip_inline_text(command, 180),
+        "missing_runtime_library": artifact_match.group(0),
+    }
+
+
 def _long_dependency_make_runtime_directory(parts, cwd):
     cwd_name = Path(str(cwd or "")).name.casefold()
     if cwd_name == "runtime":
@@ -4977,6 +5037,28 @@ def _long_dependency_make_runtime_directory(parts, cwd):
                 return True
         index += 1
     return False
+
+
+def _long_dependency_make_invocation_is_runtime_library_continuation(parts, cwd):
+    if not parts or Path(str(parts[0] or "")).name.casefold() != "make":
+        return False
+    if not _long_dependency_make_runtime_directory(parts, cwd):
+        return False
+    targets = [str(target or "") for target in _make_explicit_targets(parts)]
+    if not targets:
+        return True
+    allowed_plain_targets = {"all", "install"}
+    for target in targets:
+        lowered = target.casefold()
+        if lowered in allowed_plain_targets:
+            continue
+        normalized = target.replace("\\", "/")
+        if "/" in normalized:
+            return False
+        if _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE.fullmatch(normalized):
+            continue
+        return False
+    return True
 
 
 def _long_dependency_make_invocation_is_runtime_install_retry(invocation, cwd):
@@ -5056,6 +5138,25 @@ def _long_dependency_runtime_install_before_library_blocker(calls, expected_arti
             missing_library = ""
             continue
         failure = _long_dependency_runtime_install_missing_library_failure(call)
+        if failure:
+            blocker = failure
+            missing_library = str(failure.get("missing_runtime_library") or "")
+    return blocker
+
+
+def _long_dependency_runtime_library_subdir_target_blocker(calls, expected_artifacts):
+    blocker = {}
+    missing_library = ""
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            return {}
+        if blocker and _long_dependency_runtime_library_or_install_proven_by_call(call, missing_library):
+            blocker = {}
+            missing_library = ""
+            continue
+        failure = _long_dependency_runtime_library_subdir_target_failure(call)
         if failure:
             blocker = failure
             missing_library = str(failure.get("missing_runtime_library") or "")
@@ -5332,6 +5433,8 @@ def _long_dependency_strategy_blockers(call, expected_artifacts=None):
     for code, markers in _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS:
         if not any(marker in lowered for marker in markers):
             continue
+        if code == "dependency_generation_order_issue" and _long_dependency_runtime_library_subdir_target_failure(call):
+            continue
         excerpt = ""
         for raw_line in str(text or "").splitlines():
             line = raw_line.strip()
@@ -5493,6 +5596,18 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(runtime_install_before_library)
+    runtime_subdir_target_failure = _long_dependency_runtime_library_subdir_target_blocker(
+        calls,
+        expected_artifacts,
+    )
+    if runtime_subdir_target_failure:
+        key = (
+            runtime_subdir_target_failure.get("code"),
+            runtime_subdir_target_failure.get("source_tool_call_id"),
+            runtime_subdir_target_failure.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(runtime_subdir_target_failure)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
     external_branch_help_probe_width = _long_dependency_external_branch_help_probe_width_blocker(
@@ -5592,7 +5707,9 @@ def build_long_dependency_build_state(task, calls, session=None):
             "only works with custom runtime/library path flags, install or configure that runtime into the "
             "default lookup path and rerun a default invocation proof before finish. If runtime install reports "
             "a missing library artifact, build the shortest explicit runtime-library target first, then retry "
-            "install and the default-link smoke. Do not retry "
+            "install and the default-link smoke. If parent make reports no rule for a runtime/lib*.a or similar "
+            "subdir library target, switch to the runtime subdirectory's own Makefile with make -C <runtime-dir> "
+            "all/install instead of retrying the invalid parent target path. Do not retry "
             "invalidated toolchain/package paths. Allocate remaining wall budget to the shortest idempotent "
             "continuation command that produces the missing final artifact, then prove it exists and is "
             "executable/invokable."
@@ -10299,6 +10416,7 @@ def format_work_session_resume(resume):
             "compatibility_branch_budget_contract_missing": 2,
             "external_dependency_source_provenance_unverified": 3,
             "default_runtime_link_path_failed": 4,
+            "runtime_library_subdir_target_path_invalid": 5,
         }
         display_blockers = sorted(
             long_dependency_build_state.get("strategy_blockers") or [],

@@ -20,22 +20,22 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> profile_contract -> external_branch_help_probe_too_narrow_before_source_toolchain -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> runtime_link_proof -> runtime_library_subdir_target_path_invalid -> compile-compcert
 ```
 
 Broad measurement remains paused. The source-acquisition profile and
 runtime-link recovery repairs both passed one-trial same-shape speed proofs.
 The vendored dependency patch surgery repair also passed its one-trial speed
-proof, but the later acceptance-evidence-structure speed rerun scored `0/1`.
-That latest miss is not an acceptance-evidence regression. It is an earlier
-source-build branch-discovery failure: mew filtered configure help with
-`coq|menhir|ignore|version`, hiding possible external/prebuilt branch wording,
-then after dependency/API mismatch started a heavy version-pinned OPAM Coq
-source-toolchain build and timed out before `/tmp/CompCert/ccomp` existed.
-The current repair is
-`external_branch_help_probe_too_narrow_before_source_toolchain`; it is
-implemented and reviewed. The next action is one same-shape `compile-compcert`
-speed_1 before another proof_5 or broad measurement.
+proof. The external-branch help-probe repair then moved the run past source
+branch selection: mew used official source, external Flocq/Menhir, `make
+depend`, and built `/tmp/CompCert/ccomp`. The latest speed rerun still scored
+`0/1`, but the failure moved to runtime-link recovery: default compile/link
+failed with `cannot find -lcompcert`, and mew tried invalid parent Makefile
+target `runtime/libcompcert.a` instead of the runtime subdirectory's own
+`all/install` target. The current repair is
+`runtime_library_subdir_target_path_invalid`. The repair is implemented and
+reviewed. The next action is one same-shape `compile-compcert` speed_1 before
+another proof_5 or broad measurement.
 
 ## Repair Timeline
 
@@ -62,7 +62,8 @@ speed_1 before another proof_5 or broad measurement.
 | default runtime link failure recovery | Surface failed default compile/link smoke after compiler build as a runtime-link recovery blocker. | runtime link proof + detector/resume | Speed `1/1`; proof `0/1`; next failure vendored dependency proof surgery before supported branch. |
 | v1.4 vendored dependency patch surgery | Stop local vendored/third-party dependency or proof-library mutation when source-provided external/prebuilt branch evidence exists and final artifacts are still missing. | profile/contract + detector/resume | Speed `1/1`; proof_5 was superseded by the acceptance-evidence structure repair/rerun. |
 | v1.5 acceptance-evidence structure rerun | Generic command-evidence acceptance repair was reviewed, then same-shape speed rerun missed because final artifact was never built. | acceptance substrate evidence | Score `0/1`; new failure shape is narrow configure-help filtering before heavy source-toolchain build. |
-| v1.6 external-branch help-probe width | Detect filtered configure/project help probes that omit external/use-external/prebuilt/system/library terms before dependency/API mismatch and version-pinned source-toolchain build. | profile/contract + detector/resume | Implemented and reviewed; speed_1 pending. |
+| v1.6 external-branch help-probe width | Detect filtered configure/project help probes that omit external/use-external/prebuilt/system/library terms before dependency/API mismatch and version-pinned source-toolchain build. | profile/contract + detector/resume | Speed `0/1`; failure moved later to runtime subdir target recovery after `ccomp` was built. |
+| v1.7 runtime subdir target path | Detect parent Makefile `No rule to make target 'runtime/lib*.a'` failures and steer to the runtime subdirectory Makefile's `all/install` continuation. | runtime link proof + detector/resume | Implemented and reviewed; speed_1 pending. |
 
 ## Pattern Readout
 
@@ -151,8 +152,12 @@ speed_1 before another proof_5 or broad measurement.
   source-provided compatibility branch before switching to a heavy
   version-pinned source-toolchain build.
 - The v1.6 repair covers both same-command help filters and split
-  `configure --help > file` followed by a narrow filter of that file. The next
-  evidence boundary is a same-shape speed rerun, not broad measurement.
+  `configure --help > file` followed by a narrow filter of that file. Its
+  speed rerun moved the failure later, proving the repair direction was useful.
+- The latest miss is not another external-branch discovery issue. The run built
+  `ccomp` and failed default runtime link. The narrower blocker is an invalid
+  parent Makefile target path for a runtime library that is actually declared
+  inside the runtime subdirectory Makefile.
 
 ## Preflight Before Next Repair
 

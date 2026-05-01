@@ -6884,6 +6884,205 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertNotIn("runtime_install_before_runtime_library_build", codes)
 
+    def test_work_session_resume_flags_invalid_parent_runtime_library_target_path(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j10 ccomp runtime/libcompcert.a",
+                    },
+                    "result": {
+                        "command": "make -j10 ccomp runtime/libcompcert.a",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "make: *** No rule to make target 'runtime/libcompcert.a'. Stop.\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_dependency_build_state"].get("strategy_blockers", [])
+        codes = [item["code"] for item in blockers]
+
+        self.assertIn("runtime_library_subdir_target_path_invalid", codes)
+        blocker = next(item for item in blockers if item["code"] == "runtime_library_subdir_target_path_invalid")
+        self.assertIn("runtime/libcompcert.a", blocker["excerpt"])
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_dependency_strategy_blocker: runtime_library_subdir_target_path_invalid",
+            text,
+        )
+        self.assertIn("make -C <runtime-dir>", text)
+
+    def test_work_session_resume_clears_invalid_parent_runtime_library_target_after_subdir_build(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "make -j10 ccomp runtime/libcompcert.a",
+                    },
+                    "result": {
+                        "command": "make -j10 ccomp runtime/libcompcert.a",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "make: *** No rule to make target 'runtime/libcompcert.a'. Stop.\n",
+                    },
+                },
+                {
+                    "id": 32,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime all"},
+                    "result": {
+                        "command": "make -C runtime all",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "AR libcompcert.a\nRANLIB libcompcert.a\n",
+                    },
+                },
+                {
+                    "id": 33,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make -C runtime install"},
+                    "result": {
+                        "command": "make -C runtime install",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "install -m 0644 libcompcert.a /tmp/CompCert/lib/compcert\n",
+                    },
+                },
+                {
+                    "id": 34,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke && /tmp/smoke",
+                    },
+                    "result": {
+                        "command": "/tmp/CompCert/ccomp /tmp/smoke.c -o /tmp/smoke && /tmp/smoke",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "smoke ok\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("runtime_library_subdir_target_path_invalid", codes)
+        self.assertNotIn("dependency_generation_order_issue", codes)
+        self.assertNotIn("untargeted_full_project_build_for_specific_artifact", codes)
+
+    def test_work_session_resume_ignores_unrelated_invalid_subdir_target_path(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "make runtime/README"},
+                    "result": {
+                        "command": "make runtime/README",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stderr": "make: *** No rule to make target 'runtime/README'. Stop.\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("runtime_library_subdir_target_path_invalid", codes)
+
+    def test_work_session_resume_ignores_cmake_runtime_library_target_path_failure(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/Toolchain/, build the source compiler from source. "
+                "Ensure that it can be invoked through /tmp/Toolchain/ccomp and is fully functional."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 31,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/Toolchain",
+                        "command": "cmake --build . --target runtime/libfoo.a",
+                    },
+                    "result": {
+                        "command": "cmake --build . --target runtime/libfoo.a",
+                        "cwd": "/tmp/Toolchain",
+                        "exit_code": 2,
+                        "stderr": "gmake: *** No rule to make target 'runtime/libfoo.a'. Stop.\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_dependency_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("runtime_library_subdir_target_path_invalid", codes)
+
     def test_work_session_resume_ignores_unrelated_missing_file_during_runtime_install(self):
         from mew.work_session import build_work_session_resume
 
@@ -38015,6 +38214,8 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("custom runtime/library flags", prompt)
         self.assertIn("rerun the same compile/link smoke without those custom path flags", prompt)
         self.assertIn("build the shortest explicit runtime-library target first", prompt)
+        self.assertIn("parent make reports no rule for a runtime/lib*.a", prompt)
+        self.assertIn("make -C <runtime-dir> all/install", prompt)
         self.assertIn("set a bounded run_command timeout", prompt)
         self.assertIn("optional run_tests/run_command timeout seconds", prompt)
         self.assertIn("Do not restart package-manager or source-tree setup", prompt)

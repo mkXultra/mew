@@ -67,6 +67,8 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-01 | Runtime subdir target path repair implemented and reviewed. | `docs/M6_24_RUNTIME_SUBDIR_TARGET_REPAIR_2026-05-01.md`: `src/mew/work_session.py` now emits `runtime_library_subdir_target_path_invalid` only for real `make` invocations with explicit `runtime/...lib*.a` target failures, suppresses the broad dependency-generation blocker for that narrower case, and exempts `make -C runtime all/install` continuations from untargeted-build blockers. `src/mew/work_loop.py` updates `RuntimeLinkProof`. Validation passed: `tests/test_work_session.py` 854 passed, `tests/test_acceptance.py` 115 passed, ruff passed, `git diff --check` passed, and gap-ledger JSON parse passed. `codex-ultra` session `019de311-1fef-7de3-9e47-cca79922a088` returned REQUIRED_CHANGES, then PASS after stale-blocker and `cmake` false-positive fixes. | Run one same-shape `compile-compcert` speed_1 before proof_5 or broad measurement. | reviewed_speed_1_pending |
+| 2026-05-01 | External-branch help-probe speed rerun moved the failure to runtime subdir target recovery; select `runtime_library_subdir_target_path_invalid`. | `docs/M6_24_EXTERNAL_BRANCH_HELP_PROBE_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-external-branch-help-probe-compile-compcert-1attempt-20260501-1841/result.json`: one trial, runner errors `0`, reward `0.0`, runtime about `30m22s`. The prior repair worked: mew used official CompCert source, external Flocq/Menhir, `make depend`, and built `/tmp/CompCert/ccomp`. The verifier passed executable and unsupported-feature checks but failed default functional link with `cannot find -lcompcert`. Runtime recovery then tried invalid parent target `runtime/libcompcert.a`; parent make reported no rule, and the remaining compact-recovery turns timed out before `make -C runtime all/install`. | Implement generic `runtime_library_subdir_target_path_invalid` in resume/runtime-link guidance, validate and review it, then rerun one same-shape `compile-compcert` speed_1 before proof_5 or broad measurement. | repair_active |
 | 2026-05-01 | External-branch help-probe width repair implemented and reviewed. | `docs/M6_24_EXTERNAL_BRANCH_HELP_PROBE_WIDTH_REPAIR_2026-05-01.md`: `src/mew/work_session.py` now emits `external_branch_help_probe_too_narrow_before_source_toolchain` when filtered configure/project help omits external/prebuilt branch terms, dependency/API mismatch follows, final artifacts remain missing, and version-pinned source-toolchain work starts. It covers same-command and split `help > file` / `grep file` probes. `src/mew/work_loop.py` updates `LongDependencyProfile`. Validation passed: `tests/test_work_session.py` 850 passed, `tests/test_acceptance.py` 115 passed, ruff passed, `git diff --check` passed, and JSONL parse passed. `codex-ultra` reviewer session `019de2e0-cb86-7d00-a465-43db81e4f45d` returned PASS twice, including after the split-probe fix. | Run one same-shape `compile-compcert` speed_1 before proof_5 or broad measurement. | reviewed_speed_1_pending |
 | 2026-05-01 | Acceptance evidence structure speed rerun failed; select external-branch help-probe width repair. | `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-acceptance-evidence-structure-compile-compcert-1attempt-20260501-1750/result.json`: one trial, runner errors `0`, reward `0.0`, runtime about `30m 42s`. The external verifier failed because `/tmp/CompCert/ccomp` did not exist. The run used a narrow `configure --help` filter that omitted `external` / `use-external` / `prebuilt` terms, hit a dependency/API mismatch, then spent the remaining wall budget building version-pinned OPAM Coq instead of first broadening the source-provided compatibility-branch probe. | Implement generic `external_branch_help_probe_too_narrow_before_source_toolchain` in resume/profile guidance, validate and review it, then rerun one same-shape `compile-compcert` speed_1 before proof_5 or broad measurement. | repair_active |
 | 2026-05-01 | Reject task-specific acceptance parsing and align final-artifact proof with Codex / Claude Code style command evidence. | User explicitly challenged the `compile-compcert`-semantic parser direction as a bad decision. `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_REPAIR_2026-05-01.md` records the corrected structure: terminal-success tool evidence, real proof segments, exact path/token boundaries, post-proof mutation guards, conservative opaque-interpreter handling, and no benchmark-specific solver semantics. Validation passed: `tests/test_acceptance.py` 115 passed, targeted long-dependency work-session suite 24 passed, ruff passed, and `codex-ultra` reviewer session `019de270-4b79-7c90-9e32-ca7c46e81b8b` returned PASS. | Commit the structural acceptance evidence repair, then rerun one same-shape `compile-compcert` speed_1 before another resource-normalized proof_5. | reviewed_speed_1_pending |
@@ -181,20 +183,18 @@ The current selected gap remains
 `long_dependency_toolchain_build_strategy_contract` on `compile-compcert`.
 Broad measurement is paused.
 
-Latest same-shape speed rerun after the acceptance-evidence structure repair
+Latest same-shape speed rerun after the external-branch help-probe width repair
 scored `0/1` with runner errors `0`:
-`docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`.
-The external verifier failed because `/tmp/CompCert/ccomp` did not exist. The
-failure shape was not acceptance evidence. It was an earlier long-dependency
-ordering miss: mew filtered configure help with `coq|menhir|ignore|version`,
-hid possible external/prebuilt branch wording, hit dependency/API mismatch,
-then started a heavy version-pinned OPAM Coq source-toolchain build and timed
-out before final artifact creation.
+`docs/M6_24_EXTERNAL_BRANCH_HELP_PROBE_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md`.
+The repair worked far enough to build a real `/tmp/CompCert/ccomp`; the
+remaining failure is runtime-link recovery. The verifier failed default
+compile/link with `cannot find -lcompcert`, and mew then tried invalid parent
+Makefile target `runtime/libcompcert.a` instead of using the runtime
+subdirectory's own `all/install` rules.
 
 Current bounded repair:
-`external_branch_help_probe_too_narrow_before_source_toolchain` is implemented
-and reviewed.
+`runtime_library_subdir_target_path_invalid` is implemented and reviewed.
 
 Current selected next action:
 
-`M6.24 -> external_branch_help_probe_too_narrow_before_source_toolchain -> compile-compcert speed_1`
+`M6.24 -> runtime_library_subdir_target_path_invalid -> compile-compcert speed_1`
