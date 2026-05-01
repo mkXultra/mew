@@ -22,6 +22,20 @@ Do not resume new broad Terminal-Bench measurement until this controller or the
 decision ledger records why measurement is higher value than repairing the
 selected gap class.
 
+Current selected gap class:
+`long_dependency_toolchain_build_strategy_contract`.
+
+Current selected next action:
+`M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 0 schema + safety-parity harness`.
+
+Authoritative design:
+`docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`.
+
+This supersedes the local `compile-compcert` detector/profile patch chain for
+now. The latest local repair may remain as evidence, but do not spend another
+`compile-compcert` proof_5 or broad measurement run before the selected
+long-build substrate cutover begins.
+
 ## Loop
 
 For every candidate gap, run this decision chain:

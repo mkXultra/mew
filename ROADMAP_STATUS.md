@@ -256,8 +256,20 @@ M6.24 resume condition:
   benchmark-specific acceptance semantics. Codex-ultra reviewer session
   `019de270-4b79-7c90-9e32-ca7c46e81b8b` returned PASS after false-positive
   and false-negative fixes.
+  That local patch chain was later superseded by an accepted structural
+  blocker: repeated `compile-compcert` repairs were improving the same task
+  family through detector/profile accretion instead of proving transferable
+  long-build reliability. `docs/REVIEW_2026-05-01_M6_24_LONG_DEPENDENCY_REFERENCE_DIVERGENCE.md`
+  concluded that the right import from Codex / Claude Code is durable
+  command/evidence substrate, not another `compile-compcert` recovery rule.
+  `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md` is now the selected
+  repair path. It was authored by codex-ultra and round-2 reviewed by
+  codex-ultra, claude-ultra, and `oc-zai-coding-plan/glm-5.1`; all approved.
+  User decision: mew is unreleased, so old internal `long_dependency_build_state`
+  and `tool_call` ref compatibility may be dropped by flag-day cutover. Preserve
+  safety invariants instead.
   Current selected chain:
-  `M6.24 -> acceptance_evidence_structure_repair_v1_5 -> compile-compcert speed_1`.
+  `M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 0`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the
@@ -275,6 +287,16 @@ M6.24 resume condition:
   the decision ledger to resume measurement with evidence. New broad benchmark
   measurement is drift until the controller says otherwise.
 - Current selected gap class:
+  `long_dependency_toolchain_build_strategy_contract`, governed by
+  `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md`,
+  `docs/REVIEW_2026-05-01_M6_24_LONG_DEPENDENCY_REFERENCE_DIVERGENCE.md`, and
+  `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`. Phase 0 is selected:
+  schema helpers and safety-parity harness for `CommandEvidence`,
+  `LongBuildContract`, `BuildAttempt`, `LongBuildState`, and
+  `RecoveryDecision`. Do not resume `compile-compcert` proof_5 or broad
+  measurement until this path is implemented and validated.
+
+Historical selected gap class:
   `hard_task_implementation_strategy_contract_retention`, recorded in
   `docs/M6_24_GAP_CLASS_PLAN_2026-04-29.md` and
   `proof-artifacts/m6_24_gap_ledger.jsonl`. The v0 reference-backed repair is
