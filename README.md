@@ -38,6 +38,8 @@ For application and review context, start here:
 - [Application Evidence Index](docs/APPLICATION_EVIDENCE_INDEX.md)
 - [Security and Privacy Notes](docs/SECURITY_AND_PRIVACY.md)
 - [Roadmap Status](ROADMAP_STATUS.md)
+- Demo tapes: `vhs scripts/demo_primary.tape` and
+  `vhs scripts/demo_short.tape` generate reviewer GIFs under `docs/assets/`.
 
 ## Quick Start
 

@@ -26,6 +26,17 @@ Current application framing:
 - Side-project dogfood: `67` attempts, `51` clean or practical, `0`
   product-code rescue edits
 
+## Reviewer Demo Tapes
+
+The repository includes VHS source tapes for short reviewer demos. Generated
+GIFs are local artifacts under `docs/assets/` and are ignored by git.
+
+- `vhs scripts/demo_primary.tape`: generates `docs/assets/demo_primary.gif`
+  and shows resident work-session resume, inspectable timeline/test evidence,
+  and the public Terminal-Bench gap ledger.
+- `vhs scripts/demo_short.tape`: generates `docs/assets/demo_short.gif` and
+  shows scoped active memory plus work-session reentry.
+
 ## Roadmap Evidence
 
 - [ROADMAP_STATUS.md](../ROADMAP_STATUS.md): compact current status and active
