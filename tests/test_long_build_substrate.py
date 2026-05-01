@@ -967,6 +967,683 @@ def test_default_smoke_rejects_echoed_compile_command_text():
     assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
 
 
+def test_default_smoke_rejects_if_wrapped_echoed_compile_command_text():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j2:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "if echo /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then echo printed; fi",
+                stdout="/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe\n",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_negated_required_artifact_invocation():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j4:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "! /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe",
+                stdout="compiler failed as expected\n",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_if_negated_required_artifact_invocation():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j5:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "if ! /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then echo expected failure; fi",
+                stdout="expected failure\n",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_if_wrapped_without_failure_exit_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j6:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "if /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then echo ok; fi",
+                stdout="",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_if_wrapped_with_unrelated_printed_failure_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j6b:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "printf 'else exit 1\\n'\nif /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then echo ok; fi",
+                stdout="else exit 1\n",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_if_wrapped_with_unrelated_one_line_failure_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j6c:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                (
+                    "if echo /tmp/x.c -o /tmp/x; then :; else :; exit 1; fi\n"
+                    "if /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then echo ok; fi"
+                ),
+                stdout="",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_if_wrapped_with_nested_unrelated_failure_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j6d:long_build:1",
+    )
+    command = (
+        "if /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then\n"
+        "  if true; then\n"
+        "    :\n"
+        "  else\n"
+        "    exit 1\n"
+        "  fi\n"
+        "fi"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, command, stdout=""),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_if_wrapped_with_prefixed_nested_failure_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j6e:long_build:1",
+    )
+    command = (
+        "if /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then\n"
+        "  true && if true; then\n"
+        "    :\n"
+        "  else\n"
+        "    exit 1\n"
+        "  fi\n"
+        "fi"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, command, stdout=""),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_while_wrapped_required_artifact_invocation():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j7:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "while /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; do break; done",
+                stdout="",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_unreachable_elif_wrapped_artifact_invocation():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j8:long_build:1",
+    )
+    command = (
+        "if true; then\n"
+        "  :\n"
+        "elif /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; then\n"
+        "  :\n"
+        "else\n"
+        "  exit 1\n"
+        "fi"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, command, stdout=""),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_required_artifact_after_or_short_circuit():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j9:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, "true || /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe", stdout=""),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_or_short_circuit_when_segment_text_was_printed_earlier():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j9b:long_build:1",
+    )
+    smoke = "/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, f"printf '{smoke}\\n'\ntrue || {smoke}", stdout=f"{smoke}\n"),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_required_artifact_after_and_short_circuit():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10ja:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, "false && /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe", stdout=""),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_required_artifact_after_dynamic_and_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jaa:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, "test -f /tmp/missing && /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; echo done"),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_required_artifact_when_failure_is_masked():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jb:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, "/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe || true", stdout=""),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_required_artifact_when_semicolon_masks_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jc:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, "/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe; echo done", stdout="done\n"),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_required_artifact_when_pipe_masks_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jd:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, "set -e\n/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe | cat; echo done", stdout="done\n"),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_and_chain_when_later_semicolon_masks_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10je:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe && /tmp/probe; echo done",
+                stdout="done\n",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_and_chain_when_later_pipeline_masks_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jf:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "set -e\n"
+                "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe && /tmp/probe | cat; echo done",
+                stdout="done\n",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_backgrounded_artifact_compile():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jg:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, "set -e\n/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe & echo done", stdout="done\n"),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_rejects_backgrounded_followup_probe():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jh:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                "set -e\n"
+                "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe && /tmp/probe & echo done",
+                stdout="done\n",
+            ),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert attempts[1]["produced_artifacts"] == []
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
+def test_default_smoke_does_not_clear_successful_if_with_runtime_link_failure_output():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j3:long_build:1",
+    )
+    command = (
+        "if /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe > /tmp/probe.log 2>&1; then\n"
+        "  cat /tmp/probe.log\n"
+        "else\n"
+        "  cat /tmp/probe.log\n"
+        "fi"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(
+                2,
+                command,
+                stdout="/usr/bin/ld: cannot find -lfoocc: No such file or directory\n",
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "default_smoke"
+    assert attempts[1]["diagnostics"][0]["failure_class"] == "runtime_link_failed"
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_link_failed"
+
+
 def test_source_authority_signal_is_preserved_and_required_for_completion():
     contract = build_long_build_contract(
         "Under /tmp/WidgetCLI, build the Widget CLI from source. "
@@ -1153,6 +1830,2003 @@ def test_source_authority_rejects_echoed_model_assertion():
     assert state["artifacts"][0]["status"] == "proven"
     assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
     assert state["status"] == "ready_for_final_proof"
+
+
+def test_source_authority_rejects_local_printed_url_without_remote_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l2:long_build:1",
+    )
+    command = (
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "printf 'url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_non_fetch_curl_command():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3:long_build:1",
+    )
+    command = (
+        "curl --version\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "curl 8.5.0\nCHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_that_does_not_match_fetched_url():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3a:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "curl -fL https://example.com/robots.txt -o /tmp/robots.txt\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_that_only_appears_in_curl_header():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3aa:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "curl -fL https://example.com/robots.txt "
+        "-H 'Referer: https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz' "
+        "-o /tmp/robots.txt\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_that_only_appears_as_curl_output_path():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3ab:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "curl -fL -o https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz "
+        "https://example.com/robots.txt\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    "fetch_command",
+    [
+        "curl -fL -r 0-0 https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli.tgz",
+        "curl -fL --range 0-0 https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli.tgz",
+        "wget --header 'Range: bytes=0-0' https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -O /tmp/widgetcli.tgz",
+    ],
+)
+def test_source_authority_rejects_partial_range_archive_fetch(fetch_command):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3ac:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        f"{fetch_command}\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    "fetch_command",
+    [
+        "curl -XHEAD https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz",
+        "curl -fLXHEAD https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz",
+    ],
+)
+def test_source_authority_rejects_attached_head_request(fetch_command):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3ad:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        f"{fetch_command}\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_masked_failed_curl_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3b:long_build:1",
+    )
+    command = (
+        "curl -fL https://bad.example.invalid/widget.tgz -o /tmp/widgetcli.tgz || true\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_line_continued_masked_curl_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3ba:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "curl -fL https://bad.example.invalid/widget.tgz \\\n"
+        "  -o /tmp/widgetcli.tgz || true\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_or_short_circuited_curl_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3bb:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "true || curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli.tgz\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_and_short_circuited_curl_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3bc:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "false && curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli.tgz\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_multiline_curl_without_errexit():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3c:long_build:1",
+    )
+    command = (
+        "curl -fL https://bad.example.invalid/widget.tgz -o /tmp/widgetcli.tgz\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_when_errexit_starts_after_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3d:long_build:1",
+    )
+    command = (
+        "curl -fL https://bad.example.invalid/widget.tgz -o /tmp/widgetcli.tgz\n"
+        "set -e\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_errexit_disabled_before_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3e:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "set +e\n"
+        "curl -fL https://bad.example.invalid/widget.tgz -o /tmp/widgetcli.tgz\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_errexit_disabled_with_set_o_before_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3ea:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "set +o errexit\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli.tgz\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_fetch_pipeline_without_pipefail():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3f:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "curl -fL https://bad.example.invalid/widget.tgz | tar -xz -C /tmp\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_masked_gh_release_download():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3g:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "gh release download v1.0.0 -R example/WidgetCLI -p '*.tar.gz' || true\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_and_list_fetch_exception():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3h:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "curl -fL https://bad.example.invalid/widget.tgz -o /tmp/widgetcli.tgz && echo fetched\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/local-widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_fake_pipefail_mention():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3i:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "printf 'pipefail\\n'\n"
+        "curl -fL https://bad.example.invalid/widget.tgz | tar -xz -C /tmp\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "pipefail\nCHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_pipefail_disabled_before_pipeline():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3ia:long_build:1",
+    )
+    command = (
+        "set -e -o pipefail\n"
+        "set +o pipefail\n"
+        "curl -fL https://bad.example.invalid/widget.tgz | cat > /tmp/widgetcli.tgz\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_pipefail_comment_on_set_line():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l3j:long_build:1",
+    )
+    command = (
+        "set -e # pipefail mentioned only\n"
+        "curl -fL https://bad.example.invalid/widget.tgz | tar -xz -C /tmp\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\nWidget usage\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_python_textual_fetch_spoof():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l4:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "# urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "if False:\n"
+        "    urllib.request.urlopen()\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_python_triple_quoted_fetch_spoof():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l5:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "\"\"\"\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "\"\"\"\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_printed_url_after_swallowed_python_fetch_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l6:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_before_swallowed_python_fetch_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l7:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "    urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_dead_python_fetch_in_try():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l8:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    if False:\n"
+        "        urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_never_called_python_fetch_in_try():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10l9:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    def never_called():\n"
+        "        urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_lambda_python_fetch_in_try():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10la:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    never_called = lambda: urllib.request.urlopen("
+        "'https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_top_level_never_called_python_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lb:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "def never_called():\n"
+        "    urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_top_level_lambda_python_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lc:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "never_called = lambda: urllib.request.urlopen("
+        "'https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_python_short_circuit_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10ld:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "False and urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_python_literal_true_else_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lh:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "if True:\n"
+        "    pass\n"
+        "else:\n"
+        "    urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_empty_comprehension_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10le:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "[urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz') for _ in []]\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_short_circuit_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lf:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    False and urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_literal_true_else_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10li:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    if 1:\n"
+        "        pass\n"
+        "    else:\n"
+        "        urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_empty_if_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lj:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    if []:\n"
+        "        urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_empty_for_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lk:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    for _ in []:\n"
+        "        urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_empty_dict_for_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10ll:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    for _ in {}:\n"
+        "        urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_empty_string_for_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lm:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    for _ in '':\n"
+        "        urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_unconditional_raise():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10ln:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    raise RuntimeError('skip')\n"
+        "    urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_python_sys_exit_before_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lo:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import sys\n"
+        "import urllib.request\n"
+        "sys.exit(0)\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_shell_archive_print_after_failed_python_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://bad.example.invalid/widget.tgz')\n"
+        "PY\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(
+                    1,
+                    command,
+                    stdout=stdout,
+                    stderr="urllib.error.URLError: <urlopen error [Errno -3] Temporary failure in name resolution>\n",
+                ),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_python_fetch_archive_without_errexit_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp2:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "PY\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_python_fetch_archive_with_errexit_masked_by_or_true():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp3:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "python3 - <<'PY' || true\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "PY\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_python_fetch_archive_with_pipeline_without_pipefail():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp4:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "python3 - <<'PY' | cat > /tmp/fetch.log\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "PY\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_python_fetch_archive_when_used_as_if_condition():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp5:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "if python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "PY\n"
+        "then :; else true; fi\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_python_fetch_archive_when_wrapped_as_if_condition():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp5b:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "if env python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "PY\n"
+        "then :; else true; fi\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_python_fetch_archive_inside_shell_function_condition():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp5c:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "fetch_src() {\n"
+        "  python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "PY\n"
+        "}\n"
+        "if fetch_src; then :; else true; fi\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_python_fetch_archive_when_negated_by_shell():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lp6:long_build:1",
+    )
+    command = (
+        "set -e\n"
+        "! python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "PY\n"
+        "printf 'ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "printf 'CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_python_aliased_sys_exit_before_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lq:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "from sys import exit as done\n"
+        "import urllib.request\n"
+        "done(0)\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_python_module_alias_exit_before_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lr:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import sys as s\n"
+        "import urllib.request\n"
+        "s.exit(0)\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_python_ordinary_raising_call_before_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10ls:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "int('x')\n"
+        "urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_archive_print_after_try_body_empty_comprehension_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10lg:long_build:1",
+    )
+    command = (
+        "python3 - <<'PY'\n"
+        "import urllib.request\n"
+        "try:\n"
+        "    [urllib.request.urlopen('https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz') for _ in []]\n"
+        "    print('ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789')\n"
+        "except Exception:\n"
+        "    pass\n"
+        "print('CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz')\n"
+        "PY\n"
+        "tar -xzf /tmp/widgetcli.tgz -C /tmp\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help"
+    )
+    stdout = (
+        "ARCHIVE /tmp/local.tgz bytes=12345 "
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "CHOSEN https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
 
 
 def test_source_authority_accepts_package_manager_metadata_probe():
@@ -1526,6 +4200,95 @@ def test_reducer_clears_stale_strategy_blockers_after_final_contract_proof():
     assert [item["code"] for item in state["cleared_strategy_blockers"]] == [
         "external_dependency_source_provenance_unverified",
         "vendored_dependency_patch_surgery_before_supported_branch",
+    ]
+    assert state["status"] == "complete"
+
+
+def test_reducer_clears_runtime_install_blocker_after_if_wrapped_default_smoke_and_direct_source_url():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12c:long_build:1",
+    )
+    source_command = (
+        "set -e\n"
+        "curl -fL https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz -o /tmp/foocc.tgz\n"
+        "printf 'authority_archive_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n'\n"
+        "printf 'remote_sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\\n'\n"
+        "tar -xzf /tmp/foocc.tgz -C /tmp"
+    )
+    final_command = (
+        "set -e\n"
+        "printf 'Source/provenance\\n'\n"
+        "cat /tmp/foocc-source-provenance.txt\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "make -C runtime libfoocc.a\n"
+        "make install\n"
+        "cat > /tmp/foocc_smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "if /tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke > /tmp/foocc-build.log 2>&1; then\n"
+        "  cat /tmp/foocc-build.log\n"
+        "else\n"
+        "  cat /tmp/foocc-build.log\n"
+        "  exit 1\n"
+        "fi\n"
+        "/tmp/foocc_smoke\n"
+        "printf 'smoke_exit=0\\n'"
+    )
+    final_stdout = (
+        "Source/provenance\n"
+        "url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+        "FooCC version 1.2.3\n"
+        "AR libfoocc.a\n"
+        "install -m 0644 libfoocc.a /usr/local/lib/foocc\n"
+        "smoke_exit=0\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "make install",
+                stdout="install: cannot stat 'libfoocc.a': No such file or directory\n",
+                exit_code=2,
+            ),
+            _command_call(2, "make depend", stdout="Error: cannot determine dependency library\n", exit_code=2),
+            _command_call(
+                3,
+                source_command,
+                stdout=(
+                    "authority_archive_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+                    "remote_sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n"
+                ),
+            ),
+            _command_call(4, final_command, stdout=final_stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "runtime_install_before_runtime_library_build",
+                "source_tool_call_id": 1,
+                "excerpt": "install: cannot stat 'libfoocc.a': No such file or directory",
+            }
+        ],
+    )
+
+    assert attempts[-1]["stage"] == "default_smoke"
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "dependency_generation", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+    assert state["strategy_blockers"] == []
+    assert [item["code"] for item in state["cleared_strategy_blockers"]] == [
+        "runtime_install_before_runtime_library_build",
     ]
     assert state["status"] == "complete"
 

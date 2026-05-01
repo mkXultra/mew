@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ from .acceptance_evidence import (
     _long_dependency_invoked_command_token,
     _long_dependency_segment_may_mutate_artifact_scope,
     long_dependency_artifact_proven_by_call,
+    split_unquoted_shell_command_segment_spans,
     split_unquoted_shell_command_segments,
     tool_call_output_text,
     tool_call_terminal_success,
@@ -60,7 +62,11 @@ _PACKAGE_METADATA_OUTPUT_RE = re.compile(
 _PACKAGE_METADATA_ASSERTION_RE = re.compile(r"(?:https?://\S+|sha(?:256|512)-\S+)", re.I)
 _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE = re.compile(
     r"(?:^upstream_(?:ref|ref_url)=|^authority_(?:archive_)?url=https?://|"
-    r"^matched_authority_url=https?://)",
+    r"^matched_authority_url=https?://|^url=https?://|^CHOSEN https?://)",
+    re.I | re.M,
+)
+_PYTHON_SOURCE_ARCHIVE_OUTPUT_RE = re.compile(
+    r"^ARCHIVE\s+\S+\s+bytes=\d+\s+sha256=[0-9a-f]{32,128}\b",
     re.I | re.M,
 )
 _CONFIGURE_RE = re.compile(r"(?:\./configure|\bcmake\b|\bmeson\b|\bautoconf\b|\bconfigure\b)", re.I)
@@ -798,7 +804,26 @@ def _source_authority_signal(evidence: CommandEvidence) -> bool:
     text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     if _command_uses_direct_source_acquisition_tool(evidence.command):
-        if _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text):
+        has_direct_source_authority = bool(_DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text))
+        direct_authority_urls = _direct_source_authority_output_urls(output_text)
+        remote_source_urls = _command_remote_source_urls(evidence.command)
+        direct_authority_url_matches_fetch = not direct_authority_urls or bool(direct_authority_urls & remote_source_urls)
+        non_python_remote = _command_has_strict_non_python_remote_source_acquisition(evidence.command)
+        python_remote = _command_uses_python_remote_source_acquisition_tool(evidence.command)
+        if (
+            has_direct_source_authority
+            and direct_authority_url_matches_fetch
+            and (
+                non_python_remote
+                or (
+                    python_remote
+                    and _command_enables_errexit(evidence.command)
+                    and not _command_disables_errexit(evidence.command)
+                    and not _command_masks_python_source_fetch_failure(evidence.command)
+                    and _PYTHON_SOURCE_ARCHIVE_OUTPUT_RE.search(output_text)
+                )
+            )
+        ):
             return True
         if _command_has_assertion_only_source_authority_segment(evidence.command):
             return False
@@ -812,9 +837,12 @@ def _source_authority_signal(evidence: CommandEvidence) -> bool:
 
 def _source_authority_excerpt(evidence: CommandEvidence) -> str:
     text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    if _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text):
+        return _first_matching_line(output_text, _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.pattern)
     if _SOURCE_AUTHORITY_RE.search(text):
         return _first_matching_line(text, _SOURCE_AUTHORITY_RE.pattern)
-    return _first_matching_line(f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}", _PACKAGE_METADATA_OUTPUT_RE.pattern)
+    return _first_matching_line(output_text, _PACKAGE_METADATA_OUTPUT_RE.pattern)
 
 
 def _command_has_assertion_only_source_authority_segment(command: object) -> bool:
@@ -840,6 +868,553 @@ def _command_uses_direct_source_acquisition_tool(command: object) -> bool:
     return any(_segment_uses_direct_source_acquisition_tool(segment) for segment in split_unquoted_shell_command_segments(command))
 
 
+def _command_uses_remote_source_acquisition_tool(command: object) -> bool:
+    return _command_uses_non_python_remote_source_acquisition_tool(command) or _command_uses_python_remote_source_acquisition_tool(
+        command
+    )
+
+
+def _command_uses_non_python_remote_source_acquisition_tool(command: object) -> bool:
+    return any(_segment_uses_remote_source_acquisition_tool(segment) for segment in split_unquoted_shell_command_segments(command))
+
+
+def _command_has_strict_non_python_remote_source_acquisition(command: object) -> bool:
+    command_text = str(command or "")
+    return bool(
+        _command_uses_non_python_remote_source_acquisition_tool(command_text)
+        and _command_enables_errexit(command_text)
+        and not _command_disables_errexit(command_text)
+        and not _command_disables_pipefail(command_text)
+        and not _command_masks_remote_source_fetch_failure(command_text)
+        and not _command_pipes_remote_source_fetch_without_pipefail(command_text)
+    )
+
+
+def _command_masks_remote_source_fetch_failure(command: object) -> bool:
+    command_text = _shell_logical_command_text(command)
+    return bool(
+        re.search(r"\b(?:curl|wget)\b[^\n;]*https?://[^\n;]*(?:\|\||&&[^\n;]*|&(?!&)|;\s*(?:true|:)\b)", command_text)
+        or re.search(r"\|\|\s*\b(?:curl|wget)\b[^\n;]*https?://", command_text)
+        or re.search(r"&&\s*\b(?:curl|wget)\b[^\n;]*https?://", command_text)
+        or re.search(r"\bgh\s+(?:release\s+download|repo\s+clone)\b[^\n;]*(?:\|\||&&[^\n;]*|&(?!&)|;\s*(?:true|:)\b)", command_text)
+        or re.search(r"\|\|\s*\bgh\s+(?:release\s+download|repo\s+clone)\b", command_text)
+        or re.search(r"&&\s*\bgh\s+(?:release\s+download|repo\s+clone)\b", command_text)
+        or re.search(r"\bgit\s+(?:clone|fetch|ls-remote)\b[^\n;]*(?:\|\||&&[^\n;]*|&(?!&)|;\s*(?:true|:)\b)", command_text)
+        or re.search(r"\|\|\s*\bgit\s+(?:clone|fetch|ls-remote)\b", command_text)
+        or re.search(r"&&\s*\bgit\s+(?:clone|fetch|ls-remote)\b", command_text)
+    )
+
+
+def _command_masks_python_source_fetch_failure(command: object) -> bool:
+    command_text = _shell_logical_command_text(command)
+    return bool(
+        re.search(r"(?:\|\||&&)\s*\bpython3?\b", command_text)
+        or re.search(r"\bpython3?\b[\s\S]{0,4000}(?:\|\||&&)", command_text)
+        or (not _command_enables_pipefail(command_text) and re.search(r"\bpython3?\b[\s\S]{0,4000}\|(?!\|)", command_text))
+        or re.search(r"(?:^|[;&|\n])\s*(?:if|while|until)\b", command_text)
+        or re.search(r"(?:^|[;&|\n])\s*!", command_text)
+        or re.search(r"(?:^|[;&|\n])\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{", command_text)
+    )
+
+
+def _command_enables_errexit(command: object) -> bool:
+    return bool(re.match(r"^\s*set\s+-[A-Za-z]*e[A-Za-z]*\b", str(command or "")))
+
+
+def _command_disables_errexit(command: object) -> bool:
+    command_text = str(command or "")
+    return bool(
+        re.search(r"(?:^|[;&|\n])\s*set\s+\+[A-Za-z]*e[A-Za-z]*\b", command_text)
+        or re.search(r"(?:^|[;&|\n])\s*set\s+\+o\s+errexit\b", command_text)
+    )
+
+
+def _command_disables_pipefail(command: object) -> bool:
+    return bool(re.search(r"(?:^|[;&|\n])\s*set\s+\+o\s+pipefail\b", str(command or "")))
+
+
+def _command_pipes_remote_source_fetch_without_pipefail(command: object) -> bool:
+    command_text = _shell_logical_command_text(command)
+    if _command_enables_pipefail(command_text):
+        return False
+    return bool(
+        re.search(r"\b(?:curl|wget)\b[^\n;|]*https?://[^\n;|]*\|(?!\|)", command_text)
+        or re.search(r"\bgh\s+(?:release\s+download|repo\s+clone)\b[^\n;|]*\|(?!\|)", command_text)
+        or re.search(r"\bgit\s+(?:clone|fetch|ls-remote)\b[^\n;|]*\|(?!\|)", command_text)
+    )
+
+
+def _command_enables_pipefail(command: object) -> bool:
+    first_line = str(command or "").splitlines()[0] if str(command or "").splitlines() else ""
+    first_command = first_line.split("#", 1)[0]
+    return bool(re.match(r"^\s*set\b(?=[^;\n]*\s-o\s+pipefail\b)", first_command))
+
+
+def _shell_logical_command_text(command: object) -> str:
+    return re.sub(r"\\\s*\n\s*", " ", str(command or ""))
+
+
+def _direct_source_authority_output_urls(output_text: str) -> set[str]:
+    urls: set[str] = set()
+    for match in re.finditer(
+        r"^(?:upstream_(?:ref|ref_url)=|authority_(?:archive_)?url=|matched_authority_url=|url=)(https?://\S+)|^CHOSEN\s+(https?://\S+)",
+        output_text,
+        re.I | re.M,
+    ):
+        urls.add((match.group(1) or match.group(2)).rstrip("'\""))
+    return urls
+
+
+def _command_remote_source_urls(command: object) -> set[str]:
+    urls: set[str] = set()
+    for segment in split_unquoted_shell_command_segments(command):
+        if _segment_uses_remote_source_acquisition_tool(segment):
+            urls.update(_segment_remote_source_fetch_urls(segment))
+    return {url.rstrip("'\"") for url in urls}
+
+
+def _segment_remote_source_fetch_urls(segment: object) -> set[str]:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+    if token in {"curl", "wget"}:
+        if _curl_wget_uses_no_download_mode(parts):
+            return set()
+        option_value_flags = {
+            "-o",
+            "--output",
+            "-O" if token == "wget" else "",
+            "--output-document",
+            "-H",
+            "--header",
+            "-e",
+            "--referer",
+            "-A",
+            "--user-agent",
+            "-d",
+            "--data",
+            "--data-binary",
+            "--url-query",
+        }
+        urls: set[str] = set()
+        skip_next = False
+        for part in parts[1:]:
+            part_text = str(part or "")
+            if skip_next:
+                skip_next = False
+                continue
+            if part_text in option_value_flags:
+                skip_next = True
+                continue
+            if any(part_text.startswith(f"{flag}=") for flag in option_value_flags if flag):
+                continue
+            if part_text.startswith("-"):
+                continue
+            if part_text.startswith(("http://", "https://")):
+                urls.add(part_text.rstrip("'\""))
+        return urls
+    if token == "git" and any(str(part or "").casefold() in {"clone", "fetch", "ls-remote"} for part in parts[1:3]):
+        return {str(part or "").rstrip("'\"") for part in parts[1:] if str(part or "").startswith(("http://", "https://"))}
+    return set()
+
+
+def _python_remote_source_urls(code: str) -> set[str]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return set()
+    urls: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _python_call_name(node.func) not in {
+            "urllib.request.urlopen",
+            "urllib.request.urlretrieve",
+            "requests.get",
+            "requests.head",
+            "httpx.get",
+            "httpx.head",
+        }:
+            continue
+        for arg in node.args[:1]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and arg.value.startswith(("http://", "https://")):
+                urls.add(arg.value.rstrip("'\""))
+    return urls
+
+
+def _command_uses_python_remote_source_acquisition_tool(command: object) -> bool:
+    return False
+
+
+def _command_has_plain_python_heredoc_source(command: object) -> bool:
+    for line in str(command or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^set\b", stripped):
+            continue
+        return bool(re.match(r"^python3?\b[^\n|&;]*<<[^\n|&;]*$", stripped))
+    return False
+
+
+def _command_has_python_remote_source_call(command: object) -> bool:
+    for code in _python_heredoc_bodies(command):
+        if _python_code_has_remote_source_call(code):
+            return True
+    return False
+
+
+def _python_heredoc_bodies(command: object) -> list[str]:
+    bodies: list[str] = []
+    lines = str(command or "").splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
+        if not match or not re.search(r"\bpython3?\b", line):
+            index += 1
+            continue
+        delimiter = match.group(1)
+        index += 1
+        body: list[str] = []
+        while index < len(lines) and lines[index].strip() != delimiter:
+            body.append(lines[index])
+            index += 1
+        bodies.append("\n".join(body))
+        index += 1
+    return bodies
+
+
+def _python_code_has_remote_source_call(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    if _python_code_has_ambiguous_source_flow(tree):
+        return False
+
+    class RemoteSourceCallVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.found = False
+            self.archive_success_after_remote = False
+            self.http_vars: set[str] = set()
+            self.http_list_vars: set[str] = set()
+            self.request_vars: set[str] = set()
+
+        def visit_If(self, node: ast.If) -> None:  # noqa: N802
+            truth_value = _python_static_truth_value(node.test)
+            if truth_value is False:
+                for item in node.orelse:
+                    self.visit(item)
+                return
+            if truth_value is True:
+                for item in node.body:
+                    self.visit(item)
+                return
+            for item in node.body:
+                self.visit(item)
+            for item in node.orelse:
+                self.visit(item)
+
+        def visit_Try(self, node: ast.Try) -> None:  # noqa: N802
+            if self._try_body_has_remote_archive_success(node.body):
+                self.found = True
+                return
+            for item in node.orelse:
+                self.visit(item)
+            for item in node.finalbody:
+                self.visit(item)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+            return
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+            return
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+            return
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+            return
+
+        def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+            target_names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if _python_expr_is_http_literal(node.value):
+                self.http_vars.update(target_names)
+            if _python_expr_is_http_literal_list(node.value):
+                self.http_list_vars.update(target_names)
+            if isinstance(node.value, ast.Call):
+                if self._node_has_remote_fetch(node.value):
+                    self.found = True
+                    return
+                if (
+                    _python_call_name(node.value.func) == "urllib.request.Request"
+                    and node.value.args
+                    and self._expr_is_http_url(node.value.args[0])
+                ):
+                    self.request_vars.update(target_names)
+
+        def visit_Expr(self, node: ast.Expr) -> None:  # noqa: N802
+            if isinstance(node.value, ast.Call) and self._node_has_remote_fetch(node.value):
+                self.found = True
+                return
+            if self.found and self._call_prints_archive_success(node.value):
+                self.archive_success_after_remote = True
+
+        def _call_prints_archive_success(self, node: ast.AST) -> bool:
+            if not isinstance(node, ast.Call) or _python_call_name(node.func) != "print":
+                return False
+            output = " ".join(_python_static_text(arg) for arg in node.args)
+            return "ARCHIVE" in output and "sha256" in output
+
+        def visit_For(self, node: ast.For) -> None:  # noqa: N802
+            if _python_iter_is_static_empty(node.iter):
+                for item in node.orelse:
+                    self.visit(item)
+                return
+            added: str | None = None
+            if isinstance(node.target, ast.Name) and (
+                _python_expr_is_http_literal_list(node.iter)
+                or (isinstance(node.iter, ast.Name) and node.iter.id in self.http_list_vars)
+                or (
+                    isinstance(node.iter, ast.Name)
+                    and node.iter.id in {"candidate", "candidates", "url", "urls"}
+                    and bool(self.http_list_vars)
+                )
+            ):
+                added = node.target.id
+                self.http_vars.add(added)
+            for item in node.body:
+                self.visit(item)
+            if added:
+                self.http_vars.discard(added)
+            for item in node.orelse:
+                self.visit(item)
+
+        def _expr_is_http_url(self, node: ast.AST) -> bool:
+            if _python_expr_is_http_literal(node):
+                return True
+            if isinstance(node, ast.Name) and node.id in self.http_vars:
+                return True
+            if isinstance(node, ast.Name) and node.id in self.request_vars:
+                return True
+            if _python_call_name(getattr(node, "func", ast.Name(id="", ctx=ast.Load()))) == "urllib.request.Request":
+                args = getattr(node, "args", [])
+                return bool(args and self._expr_is_http_url(args[0]))
+            return False
+
+        def _try_body_has_remote_archive_success(self, body: list[ast.stmt]) -> bool:
+            has_remote = False
+            for statement in body:
+                if self._statement_binds_http_request(statement):
+                    continue
+                if self._statement_has_remote_fetch(statement):
+                    has_remote = True
+                if has_remote and self._statement_has_archive_success_print(statement):
+                    return True
+            return False
+
+        def _statement_binds_http_request(self, statement: ast.stmt) -> bool:
+            if not isinstance(statement, ast.Assign) or not isinstance(statement.value, ast.Call):
+                return False
+            if _python_call_name(statement.value.func) != "urllib.request.Request":
+                return False
+            if not statement.value.args or not self._expr_is_http_url(statement.value.args[0]):
+                return False
+            self.request_vars.update(target.id for target in statement.targets if isinstance(target, ast.Name))
+            return True
+
+        def _statement_has_remote_fetch(self, statement: ast.stmt) -> bool:
+            return any(self._node_has_remote_fetch(node) for node in _python_reachable_statement_nodes(statement))
+
+        def _statement_has_archive_success_print(self, statement: ast.stmt) -> bool:
+            for node in _python_reachable_statement_nodes(statement):
+                if not isinstance(node, ast.Call) or _python_call_name(node.func) != "print":
+                    continue
+                output = " ".join(_python_static_text(arg) for arg in node.args)
+                if "ARCHIVE" in output and "sha256" in output:
+                    return True
+            return False
+
+        def _node_has_remote_fetch(self, node: ast.AST) -> bool:
+            if not isinstance(node, ast.Call):
+                return False
+            return _python_call_name(node.func) in {
+                "urllib.request.urlopen",
+                "urllib.request.urlretrieve",
+                "requests.get",
+                "requests.head",
+                "httpx.get",
+                "httpx.head",
+            } and any(self._expr_is_http_url(arg) for arg in node.args)
+
+    visitor = RemoteSourceCallVisitor()
+    visitor.visit(tree)
+    return bool(visitor.found and visitor.archive_success_after_remote)
+
+
+def _python_code_has_ambiguous_source_flow(tree: ast.AST) -> bool:
+    match_type = getattr(ast, "Match", None)
+    ambiguous_types = (
+        ast.If,
+        ast.For,
+        ast.AsyncFor,
+        ast.While,
+        ast.Try,
+        ast.Raise,
+        ast.Assert,
+        ast.BinOp,
+        ast.With,
+        ast.AsyncWith,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Lambda,
+        ast.BoolOp,
+        ast.IfExp,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+    )
+    return any(
+        isinstance(node, ambiguous_types)
+        or (match_type is not None and isinstance(node, match_type))
+        or (
+            isinstance(node, ast.Call)
+            and (
+                _python_call_name(node.func) not in {
+                    "urllib.request.urlopen",
+                    "urllib.request.urlretrieve",
+                    "requests.get",
+                    "requests.head",
+                    "httpx.get",
+                    "httpx.head",
+                    "print",
+                }
+                or _python_call_name(node.func) in {"sys.exit", "os._exit", "exit", "quit"}
+                or _python_call_name(node.func).endswith(".exit")
+            )
+        )
+        or (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "sys"
+            and any(alias.name == "exit" for alias in node.names)
+        )
+        or (
+            isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+            and any(
+                _python_call_name(target)
+                in {
+                    "urllib.request.urlopen",
+                    "urllib.request.urlretrieve",
+                    "requests.get",
+                    "requests.head",
+                    "httpx.get",
+                    "httpx.head",
+                }
+                for target in ([node.target] if isinstance(node, (ast.AnnAssign, ast.AugAssign)) else node.targets)
+            )
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def _python_expr_is_http_literal(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith(("http://", "https://"))
+
+
+def _python_expr_is_http_literal_list(node: ast.AST) -> bool:
+    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return False
+    return any(_python_expr_is_http_literal(item) for item in node.elts)
+
+
+def _python_reachable_statement_nodes(statement: ast.stmt) -> list[ast.AST]:
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return []
+    if isinstance(statement, ast.If):
+        truth_value = _python_static_truth_value(statement.test)
+        if truth_value is False:
+            return [node for item in statement.orelse for node in _python_reachable_statement_nodes(item)]
+        if truth_value is True:
+            return [node for item in statement.body for node in _python_reachable_statement_nodes(item)]
+    if isinstance(statement, ast.For) and _python_iter_is_static_empty(statement.iter):
+        return [node for item in statement.orelse for node in _python_reachable_statement_nodes(item)]
+    if isinstance(statement, ast.Try):
+        return []
+    nodes: list[ast.AST] = []
+
+    def visit(node: ast.AST) -> None:
+        if isinstance(
+            node,
+            (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
+                ast.ClassDef,
+                ast.Lambda,
+                ast.BoolOp,
+                ast.IfExp,
+                ast.ListComp,
+                ast.SetComp,
+                ast.DictComp,
+                ast.GeneratorExp,
+            ),
+        ):
+            return
+        nodes.append(node)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    visit(statement)
+    return nodes
+
+
+def _python_static_truth_value(node: ast.AST) -> bool | None:
+    if isinstance(node, ast.Constant):
+        value = node.value
+        if value is None:
+            return False
+        if isinstance(value, (bool, int, float, complex, str, bytes)):
+            return bool(value)
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return bool(node.elts)
+    if isinstance(node, ast.Dict):
+        return bool(node.keys)
+    return None
+
+
+def _python_iter_is_static_empty(node: ast.AST) -> bool:
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return not node.elts
+    if isinstance(node, ast.Dict):
+        return not node.keys
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+        return not bool(node.value)
+    return False
+
+
+def _python_static_text(node: ast.AST) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(_python_static_text(item) for item in node.values)
+    return ""
+
+
+def _python_call_name(node: ast.AST) -> str:
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+    return ".".join(reversed(parts))
+
+
 def _command_uses_package_metadata_tool(command: object) -> bool:
     return any(_segment_uses_package_metadata_tool(segment) for segment in split_unquoted_shell_command_segments(command))
 
@@ -859,6 +1434,55 @@ def _segment_uses_direct_source_acquisition_tool(segment: object) -> bool:
         return True
     if token == "git" and any(part in {"clone", "checkout", "fetch", "ls-remote"} for part in lowered_parts[1:3]):
         return True
+    return False
+
+
+def _segment_uses_remote_source_acquisition_tool(segment: object) -> bool:
+    segment_text = str(segment or "")
+    try:
+        parts = shlex.split(segment_text)
+    except ValueError:
+        parts = segment_text.split()
+    token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+    lowered_parts = [str(part or "").casefold() for part in parts]
+    has_url_arg = any(str(part or "").startswith(("http://", "https://")) for part in parts[1:])
+    if token in {"curl", "wget"}:
+        if _curl_wget_uses_no_download_mode(parts):
+            return False
+        return has_url_arg
+    if token == "gh":
+        return ("release" in lowered_parts[1:3] and "download" in lowered_parts[2:4]) or (
+            "repo" in lowered_parts[1:3] and "clone" in lowered_parts[2:4]
+        )
+    if token == "git" and any(part in {"clone", "fetch", "ls-remote"} for part in lowered_parts[1:3]):
+        return True
+    return False
+
+
+def _curl_wget_uses_no_download_mode(parts: list[str]) -> bool:
+    arguments = [str(part or "") for part in parts[1:]]
+    lowered = [part.casefold() for part in arguments]
+    for index, part in enumerate(lowered):
+        if re.match(r"^-[A-Za-z]*XHEAD\b", arguments[index]):
+            return True
+        if part in {"--head", "--spider"}:
+            return True
+        if part.startswith("--request=head") or part.startswith("--method=head"):
+            return True
+        if part in {"-x", "--request", "--method"} and index + 1 < len(lowered) and lowered[index + 1] == "head":
+            return True
+        if part.startswith("--range"):
+            return True
+        if arguments[index] == "-r" or arguments[index].startswith("-r"):
+            return True
+        if part in {"-h", "--header"} and index + 1 < len(lowered) and lowered[index + 1].lstrip().startswith("range:"):
+            return True
+        if part.startswith("--header=") and part.split("=", 1)[1].lstrip().startswith("range:"):
+            return True
+        if arguments[index].startswith("-H") and arguments[index][2:].lstrip().casefold().startswith("range:"):
+            return True
+        if part.startswith("-") and not part.startswith("--") and "i" in part[1:]:
+            return True
     return False
 
 
@@ -894,6 +1518,7 @@ def _reduce_stages(
     stages: list[dict] = []
     source_blocked = _has_source_blocker(blockers)
     source_satisfied = _source_authority_satisfied(attempts)
+    target_proven = all((item or {}).get("status") == "proven" for item in artifacts or [])
     stages.append(
         {
             "id": "source_authority",
@@ -914,10 +1539,11 @@ def _reduce_stages(
             {
                 "id": "dependency_generation",
                 "required": bool((contract.get("build_policy") or {}).get("dependency_generation_before_final_target")),
-                "status": _stage_status(attempts, "dependency_generation"),
+                "status": "satisfied"
+                if target_proven or fresh_default_smoke
+                else _stage_status(attempts, "dependency_generation"),
             }
         )
-    target_proven = all((item or {}).get("status") == "proven" for item in artifacts or [])
     stages.append(
         {
             "id": "target_built",
@@ -1103,8 +1729,6 @@ def _current_failure(
 
 def _latest_attempt_diagnostic_failure(attempts: Iterable[Mapping[str, object]]) -> dict | None:
     for attempt in reversed([dict(item) for item in attempts or [] if isinstance(item, Mapping)]):
-        if _attempt_clears_prior_recovery_failure(attempt):
-            return None
         failure_class = ""
         excerpt = ""
         for diagnostic in attempt.get("diagnostics") or []:
@@ -1116,6 +1740,8 @@ def _latest_attempt_diagnostic_failure(attempts: Iterable[Mapping[str, object]])
                 excerpt = str(diagnostic.get("excerpt") or "")
                 break
         if not failure_class:
+            if _attempt_clears_prior_recovery_failure(attempt):
+                return None
             continue
         evidence_ref = attempt.get("command_evidence_ref") if isinstance(attempt.get("command_evidence_ref"), Mapping) else {}
         return {
@@ -1400,13 +2026,37 @@ def _command_has_default_smoke_artifact_segment(command: object, artifact: objec
     artifact_text = str(artifact or "")
     if not artifact_text:
         return False
-    segments = split_unquoted_shell_command_segments(command)
+    segment_entries = split_unquoted_shell_command_segment_spans(command)
+    segments = [str(entry.get("text") or "") for entry in segment_entries]
     for index, segment in enumerate(segments):
         if not (
             _segment_invokes_required_artifact(segment, artifact_text, cwd)
             and re.search(r"\.(?:c|cc|cpp|cxx)\b", segment)
             and re.search(r"(?:^|\s)-o\s+\S+", segment)
         ):
+            continue
+        before_operator = str(segment_entries[index].get("before_operator") or "")
+        after_operator = str(segment_entries[index].get("after_operator") or "")
+        if before_operator == "||":
+            continue
+        if before_operator == "&&" and not _previous_shell_segment_is_positive_artifact_guard(
+            segment_entries,
+            index,
+            artifact_text,
+            cwd,
+        ):
+            continue
+        if after_operator == "||":
+            continue
+        if after_operator == "|":
+            continue
+        if after_operator in {";", "\n", "\r"} and not (
+            _command_enables_errexit(command) and not _command_disables_errexit(command)
+        ):
+            continue
+        if _shell_text_has_unquoted_background_operator(segment):
+            continue
+        if _later_shell_segments_mask_artifact_failure(segment_entries, index, command):
             continue
         if _long_dependency_segment_may_mutate_artifact_scope(segment, artifact_text, cwd):
             continue
@@ -1415,7 +2065,146 @@ def _command_has_default_smoke_artifact_segment(command: object, artifact: objec
             for later_segment in segments[index + 1 :]
         ):
             continue
+        wrapper = _long_dependency_shell_wrapper_keyword(segment)
+        if wrapper in {"elif", "while", "until"}:
+            continue
+        if wrapper == "if" and not _command_has_if_failure_exit_guard(command, segment):
+            continue
         return True
+    return False
+
+
+def _later_shell_segments_mask_artifact_failure(
+    segment_entries: list[dict[str, object]],
+    index: int,
+    command: object,
+) -> bool:
+    errexit_active = _command_enables_errexit(command) and not _command_disables_errexit(command)
+    for entry in segment_entries[index + 1 :]:
+        if _shell_text_has_unquoted_background_operator(entry.get("text")):
+            return True
+        before_operator = str(entry.get("before_operator") or "")
+        after_operator = str(entry.get("after_operator") or "")
+        if before_operator == "||" or after_operator == "||":
+            return True
+        if before_operator == "|" or after_operator == "|":
+            return True
+        if after_operator in {";", "\n", "\r"} and not errexit_active:
+            return True
+    return False
+
+
+def _shell_text_has_unquoted_background_operator(text: object) -> bool:
+    value = str(text or "")
+    in_single = False
+    in_double = False
+    escaped = False
+    for index, char in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and not in_single:
+            escaped = True
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if in_single or in_double or char != "&":
+            continue
+        previous_char = value[index - 1] if index > 0 else ""
+        next_char = value[index + 1] if index + 1 < len(value) else ""
+        if previous_char in {"<", ">"} or next_char in {"<", ">"}:
+            continue
+        if previous_char != "&" and next_char != "&":
+            return True
+    return False
+
+
+def _previous_shell_segment_is_positive_artifact_guard(
+    segment_entries: list[dict[str, object]],
+    index: int,
+    artifact: object,
+    cwd: object,
+) -> bool:
+    if index <= 0:
+        return False
+    previous = str(segment_entries[index - 1].get("text") or "").strip()
+    refs = _artifact_guard_refs(artifact, cwd)
+    try:
+        parts = shlex.split(previous)
+    except ValueError:
+        parts = previous.split()
+    if len(parts) >= 3 and parts[0] == "test" and parts[1] == "-x":
+        return _shell_token_matches_artifact_guard_ref(parts[2], refs)
+    if len(parts) >= 4 and parts[0] == "[" and parts[1] == "-x" and parts[-1] == "]":
+        return _shell_token_matches_artifact_guard_ref(parts[2], refs)
+    return False
+
+
+def _artifact_guard_refs(artifact: object, cwd: object) -> list[str]:
+    artifact_text = str(artifact or "").strip()
+    refs = [artifact_text] if artifact_text else []
+    cwd_text = str(cwd or "").strip()
+    artifact_path = Path(artifact_text)
+    if artifact_path.is_absolute() and cwd_text and str(Path(cwd_text)) == str(artifact_path.parent):
+        basename = artifact_path.name.strip()
+        if basename:
+            refs.extend([basename, f"./{basename}"])
+    return refs
+
+
+def _shell_token_matches_artifact_guard_ref(token: object, refs: list[str]) -> bool:
+    token_text = str(token or "").strip().rstrip(";")
+    return any(token_text == ref for ref in refs if ref)
+
+
+def _long_dependency_shell_wrapper_keyword(segment: object) -> str:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    if not parts:
+        return ""
+    token = Path(str(parts[0] or "")).name.casefold()
+    return token if token in {"if", "elif", "while", "until"} else ""
+
+
+def _command_has_if_failure_exit_guard(command: object, segment: object) -> bool:
+    command_text = str(command or "")
+    segment_text = str(segment or "").strip()
+    if not segment_text:
+        return False
+    lines = command_text.splitlines()
+    start_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if segment_text in line.strip() and re.match(r"^\s*(?:if|elif)\b", line)
+        ),
+        -1,
+    )
+    if start_index < 0:
+        return False
+    saw_else = False
+    depth = 0
+    for line in lines[start_index + 1 :]:
+        stripped = line.strip()
+        if re.search(r"(?:^|[;&|]\s*)(?:if|case|for|while|until)\b", stripped):
+            depth += 1
+            continue
+        if re.match(r"^fi\b", stripped):
+            if depth > 0:
+                depth -= 1
+                continue
+            return False
+        if depth == 0 and re.match(r"^else\b", stripped):
+            saw_else = True
+            continue
+        if depth == 0 and saw_else and re.match(r"^exit\s+[1-9]\d*\b", stripped):
+            return True
     return False
 
 
@@ -1424,8 +2213,39 @@ def _segment_invokes_required_artifact(segment: object, artifact: object, cwd: o
         parts = shlex.split(str(segment or ""))
     except ValueError:
         parts = str(segment or "").split()
-    command_token = _long_dependency_invoked_command_token(parts)
-    return _segment_names_required_artifact(command_token, artifact, cwd)
+    if _long_dependency_shell_invocation_is_negated(parts):
+        return False
+    command_token = _long_dependency_shell_invoked_command_token(parts)
+    if _segment_names_required_artifact(command_token, artifact, cwd):
+        return True
+    return False
+
+
+def _long_dependency_shell_invocation_is_negated(parts: list[str]) -> bool:
+    index = 0
+    if parts and Path(str(parts[0] or "")).name.casefold() in {"if", "elif", "while", "until"}:
+        index = 1
+    if index < len(parts or []) and str(parts[index] or "") == "!":
+        return True
+    if index < len(parts or []) and Path(str(parts[index] or "")).name.casefold() == "time":
+        index += 1
+        while index < len(parts or []) and str(parts[index] or "").startswith("-"):
+            index += 1
+        return index < len(parts or []) and str(parts[index] or "") == "!"
+    return False
+
+
+def _long_dependency_shell_invoked_command_token(parts: list[str]) -> str:
+    index = 0
+    if parts and Path(str(parts[0] or "")).name.casefold() in {"if", "elif", "while", "until"}:
+        index = 1
+    while index < len(parts or []) and str(parts[index] or "") == "!":
+        index += 1
+    while index < len(parts or []) and Path(str(parts[index] or "")).name.casefold() == "time":
+        index += 1
+        while index < len(parts or []) and str(parts[index] or "").startswith("-"):
+            index += 1
+    return _long_dependency_invoked_command_token([str(part or "") for part in (parts or [])[index:]])
 
 
 def _segment_names_required_artifact(segment: object, artifact: object, cwd: object) -> bool:
@@ -1489,6 +2309,12 @@ def _has_fresh_default_smoke(
             isinstance(attempt, Mapping)
             and attempt.get("stage") == "default_smoke"
             and attempt.get("result") == "success"
+        ):
+            continue
+        if any(
+            isinstance(diagnostic, Mapping)
+            and str(diagnostic.get("failure_class") or "") in _RECOVERY_DECISION_FAILURE_CLASSES
+            for diagnostic in attempt.get("diagnostics") or []
         ):
             continue
         produced_paths = {
