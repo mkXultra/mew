@@ -1,4 +1,4 @@
-Output "/Users/mk/dev/personal-pj/mew_side_pj/docs/assets/demo_primary.gif"
+Output "docs/assets/demo_primary.gif"
 
 Set FontSize 16
 Set Width 1280
@@ -10,7 +10,9 @@ Set PlaybackSpeed 1.0
 
 # ---- Hidden setup: fresh local workspace with one interrupted task ----
 Hide
-Type "mkdir -p /tmp/mew-demo-work/tests /Users/mk/dev/personal-pj/mew_side_pj/docs/assets"
+Type "mkdir -p /tmp/mew-demo-work/tests docs/assets"
+Enter
+Type "ln -sfn $(pwd -P) /tmp/mew"
 Enter
 Type "cd /tmp/mew-demo-work && rm -rf .mew add_numbers.py tests/test_add_numbers.py"
 Enter
@@ -18,7 +20,7 @@ Type "export UV_PROJECT_ENVIRONMENT=/tmp/mew-demo-work/.uv-project-env"
 Enter
 Type "export PS1='~ $ '"
 Enter
-Type "alias mew='UV_CACHE_DIR=/tmp/mew-demo-work/.uv-cache uv run --quiet --project /Users/mk/dev/personal-pj/mew_side_pj --locked mew'"
+Type "alias mew='UV_CACHE_DIR=/tmp/mew-demo-work/.uv-cache uv run --quiet --project /tmp/mew --locked mew'"
 Enter
 Type "printf 'def add_numbers(a, b):\n    return abs(a) + abs(b)\n' > add_numbers.py"
 Enter
@@ -82,7 +84,7 @@ Enter
 Type "# The same discipline is used for public Terminal-Bench gap artifacts."
 Enter
 Sleep 1500ms
-Type "cd /Users/mk/dev/personal-pj/mew_side_pj"
+Type "cd /tmp/mew"
 Enter
 Type "sed -n '1,28p' docs/M6_24_GAP_BASELINE_2026-04-29.md"
 Enter
@@ -103,6 +105,6 @@ Enter
 Type "# mew: resident AI that remembers, recovers, and leaves evidence."
 Enter
 Sleep 1600ms
-Type "# github.com/mkXultra/mew"
+Type "# see README and the Application Evidence Index"
 Enter
 Sleep 2800ms

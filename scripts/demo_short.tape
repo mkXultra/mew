@@ -1,4 +1,4 @@
-Output "/Users/mk/dev/personal-pj/mew_side_pj/docs/assets/demo_short.gif"
+Output "docs/assets/demo_short.gif"
 
 Set FontSize 16
 Set Width 1280
@@ -10,7 +10,9 @@ Set PlaybackSpeed 1.0
 
 # ---- Hidden setup: small memory/reentry workspace ----
 Hide
-Type "mkdir -p /tmp/mew-demo-short /Users/mk/dev/personal-pj/mew_side_pj/docs/assets"
+Type "mkdir -p /tmp/mew-demo-short docs/assets"
+Enter
+Type "ln -sfn $(pwd -P) /tmp/mew"
 Enter
 Type "cd /tmp/mew-demo-short && rm -rf .mew"
 Enter
@@ -18,7 +20,7 @@ Type "export UV_PROJECT_ENVIRONMENT=/tmp/mew-demo-short/.uv-project-env"
 Enter
 Type "export PS1='~ $ '"
 Enter
-Type "alias mew='UV_CACHE_DIR=/tmp/mew-demo-short/.uv-cache uv run --quiet --project /Users/mk/dev/personal-pj/mew_side_pj --locked mew'"
+Type "alias mew='UV_CACHE_DIR=/tmp/mew-demo-short/.uv-cache uv run --quiet --project /tmp/mew --locked mew'"
 Enter
 Type "mew task add --kind coding --ready --priority high 'Continue resident AI work' >/dev/null"
 Enter
@@ -56,6 +58,6 @@ Enter
 Type "# mew - durable state for resident AI."
 Enter
 Sleep 1500ms
-Type "# github.com/mkXultra/mew"
+Type "# see README and the Application Evidence Index"
 Enter
 Sleep 2500ms
