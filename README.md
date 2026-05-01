@@ -1,8 +1,40 @@
 # mew
 
-`mew` is a local passive AI task agent prototype.
+`mew` is a durable-state runtime for long-running AI coding agents.
 
-It keeps task state in `.mew/state.json`, wakes on a timer, remembers context, asks questions, and can run a guarded programmer loop through `ai-cli`.
+Most coding agents are powerful inside one session, but brittle across time.
+After a context window fills, a process crashes, a verifier fails, or a day
+passes, the next model often has to reconstruct intent from git status,
+scattered notes, and human rebriefing. `mew` is built around the opposite
+operating model: a resident agent shell that preserves task memory, recovery
+state, approval history, verifier evidence, runtime effects, and audit trails
+so work can resume with less reconstruction.
+
+It keeps task state in `.mew/state.json`, wakes on explicit events or timers,
+remembers context, asks questions, runs guarded native work sessions, and
+records enough evidence for a human or another model to inspect what happened.
+
+## Current Evidence
+
+As of 2026-05-01, `mew` is still early OSS, but it is evidence-heavy:
+
+- M1-M5 are closed: native hands, interactive parity, persistent advantage,
+  true recovery, and five no-rescue self-improvement loops reached their
+  recorded gates.
+- M6 produced a daemon/resident body, mew-first implementation-lane
+  instrumentation, and Terminal-Bench compatibility.
+- M6.24 is active: mew is being measured against a frozen Codex
+  Terminal-Bench target. The public baseline is mew `92/210 = 43.8%` vs Codex
+  `156/210 = 74.3%`, with repair loops rerun on the same failed task shapes.
+- Side-project dogfood has `67` recorded attempts across
+  `mew-companion-log`, `mew-ghost`, and `mew-wisp`; `51/67` are clean or
+  practical and product-code rescue edits remain `0`.
+
+For application and review context, start here:
+
+- [Application Evidence Index](docs/APPLICATION_EVIDENCE_INDEX.md)
+- [Security and Privacy Notes](docs/SECURITY_AND_PRIVACY.md)
+- [Roadmap Status](ROADMAP_STATUS.md)
 
 ## Quick Start
 
