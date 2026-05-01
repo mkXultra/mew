@@ -1231,6 +1231,8 @@ def long_dependency_final_artifacts(text: object, *, limit: int = 6) -> list[str
         return []
     artifacts: list[str] = []
     for match in _ABSOLUTE_PATH_RE.finditer(value):
+        if match.start() > 0 and re.match(r"[A-Za-z0-9_-]", value[match.start() - 1]):
+            continue
         path = str(match.group(1) or "").rstrip("`'\".,;:)")
         if not path or path.endswith("/"):
             continue

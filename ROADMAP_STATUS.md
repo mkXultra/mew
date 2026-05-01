@@ -200,9 +200,15 @@ M6.24 resume condition:
   shared long-dependency final-artifact proof authority between finish
   acceptance and resume state, structured finish blockers, and blocked
   continuation prompts. Focused acceptance tests, full `tests/test_work_session.py`,
-  and ruff passed.
+  and ruff passed. Its first same-shape `compile-compcert` speed rerun passed
+  externally at `1/1` in `31m 10s`, but internal resume state exposed a generic
+  slash-compound artifact extraction false positive: guidance compounds such as
+  `dependency/toolchain` and `executable/invokable` were treated as missing
+  absolute artifacts `/toolchain` and `/invokable`. The bounded v1.1 repair is
+  now active: ignore slash-prefixed matches embedded in word compounds, validate
+  with focused acceptance tests, then rerun one same-shape speed_1 before proof_5.
   Current selected chain:
-  `M6.24 -> acceptance_substrate_v1 -> compile-compcert speed_1 -> proof_5 only if speed_1 is viable`.
+  `M6.24 -> acceptance_substrate_v1.1 slash-compound path repair -> compile-compcert speed_1 -> proof_5 only if speed_1 is viable`.
 - M6.24 measured baseline on 2026-04-29 is **mew 92/210 = 43.8%** vs
   **Codex 156/210 = 74.3%**, absolute gap **-30.5 percentage points**.
   Batch 2, Batch 3, Batch 4, Batch 5, and partial Batch 6 all exceed the

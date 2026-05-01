@@ -887,7 +887,8 @@ def test_model_inference_output_task_classifier_covers_checkpoint_sampling():
 def test_long_dependency_toolchain_build_classifier_extracts_final_artifact():
     text = (
         "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
-        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp. "
+        "Keep the dependency/toolchain branch coherent and prove it is executable/invokable."
     )
 
     assert is_long_dependency_toolchain_build_task(text)
