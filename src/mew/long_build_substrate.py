@@ -812,6 +812,8 @@ def _source_authority_signal(evidence: CommandEvidence) -> bool:
     output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     if _saved_authority_page_archive_signal(evidence, output_text):
         return True
+    if _validated_source_archive_acquisition_signal(evidence):
+        return True
     if _command_uses_direct_source_acquisition_tool(evidence.command):
         has_direct_source_authority = bool(_DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text))
         direct_authority_urls = _direct_source_authority_output_urls(output_text)
@@ -849,6 +851,8 @@ def _source_authority_excerpt(evidence: CommandEvidence) -> str:
     output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     if _AUTHORITY_PAGE_OUTPUT_RE.search(output_text):
         return _first_matching_line(output_text, _AUTHORITY_PAGE_OUTPUT_RE.pattern)
+    if _validated_source_archive_acquisition_signal(evidence):
+        return "validated source archive acquisition"
     if _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text):
         return _first_matching_line(output_text, _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.pattern)
     if _SOURCE_AUTHORITY_RE.search(text):
@@ -873,6 +877,343 @@ def _saved_authority_page_archive_signal(evidence: CommandEvidence, output_text:
     if _command_has_authority_page_readback(command):
         return True
     return bool(_command_has_strict_non_python_remote_source_acquisition(command))
+
+
+def _validated_source_archive_acquisition_signal(evidence: CommandEvidence) -> bool:
+    command = str(evidence.command or "")
+    if not _command_has_validated_source_archive_acquisition(command):
+        return False
+    text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    return not _BUILD_FAILURE_RE.search(text)
+
+
+def _command_has_validated_source_archive_acquisition(command: object) -> bool:
+    command_text = str(command or "")
+    if not (_command_enables_errexit(command_text) and not _command_disables_errexit(command_text)):
+        return False
+    if _command_masks_remote_source_fetch_failure(command_text):
+        return False
+    if _command_uses_python_remote_source_acquisition_tool(command_text):
+        return False
+    if _command_defines_shell_function(command_text):
+        return False
+    for archive_path in _strict_authoritative_archive_fetch_paths(command_text):
+        if _command_validates_and_extracts_archive_path(command_text, archive_path):
+            return True
+    return False
+
+
+def _command_defines_shell_function(command: object) -> bool:
+    command_text = _shell_logical_command_text(command)
+    return bool(re.search(r"(?:^|[;&|\n])\s*(?:function\s+)?[A-Za-z_][A-Za-z0-9_]*\s*(?:\(\s*\))?\s*\{", command_text))
+
+
+def _strict_authoritative_archive_fetch_paths(command: object) -> set[str]:
+    command_text = _strip_heredoc_bodies(command)
+    if not (
+        _command_enables_errexit(command_text)
+        and not _command_disables_errexit(command_text)
+        and not _command_disables_pipefail(command_text)
+        and not _command_masks_remote_source_fetch_failure(command_text)
+    ):
+        return set()
+    paths = set()
+    for segment in _top_level_direct_fetch_segments(command_text):
+        paths.update(_segment_authoritative_archive_fetch_paths(segment))
+    paths.update(_url_loop_authoritative_archive_fetch_paths(command_text))
+    return paths
+
+
+def _url_loop_authoritative_archive_fetch_paths(command: object) -> set[str]:
+    command_text = _shell_logical_command_text(_strip_heredoc_bodies(command))
+    paths: set[str] = set()
+    for variable, values, body in _top_level_for_loop_blocks(command_text):
+        if not any(_authoritative_source_archive_url(url) for url in _extract_urls(values)):
+            continue
+        body_parts = _invoked_command_parts(body)
+        for index, parts in enumerate(body_parts):
+            token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+            if token not in {"curl", "wget"} or _curl_wget_uses_no_download_mode(parts):
+                continue
+            if not _parts_reference_loop_variable(parts, variable):
+                continue
+            archive_path = _curl_wget_output_path(parts)
+            if archive_path and _loop_body_proves_selected_archive(body_parts, index, archive_path, variable):
+                paths.add(archive_path)
+    return paths
+
+
+def _top_level_for_loop_blocks(command: object) -> list[tuple[str, str, str]]:
+    lines = str(command or "").splitlines()
+    blocks: list[tuple[str, str, str]] = []
+    control_depth = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if control_depth == 0:
+            match = re.match(r"^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.*)$", stripped, re.I)
+            if match:
+                variable = match.group(1)
+                values_text = match.group(2)
+                body: list[str] = []
+                same_line_do = re.match(r"^(.*?)(?:;\s*do|\s+do)\s*(.*)$", values_text, re.I)
+                if same_line_do:
+                    values_parts = [same_line_do.group(1)]
+                    first_body = same_line_do.group(2).strip()
+                    if first_body:
+                        body.append(first_body)
+                    index += 1
+                else:
+                    values_parts = [values_text]
+                    index += 1
+                    while index < len(lines):
+                        current = lines[index]
+                        current_stripped = current.strip()
+                        if re.fullmatch(r"do\b", current_stripped, re.I):
+                            index += 1
+                            break
+                        if current_stripped.endswith(" do"):
+                            values_parts.append(current_stripped[: -len(" do")])
+                            index += 1
+                            break
+                        values_parts.append(current)
+                        index += 1
+                while index < len(lines) and not re.fullmatch(r"done\b", lines[index].strip(), re.I):
+                    body.append(lines[index])
+                    index += 1
+                blocks.append((variable, "\n".join(values_parts), "\n".join(body)))
+                index += 1
+                continue
+        control_depth = _update_shell_block_depth(stripped, control_depth)
+        index += 1
+    return blocks
+
+
+def _top_level_direct_fetch_segments(command: object) -> list[str]:
+    lines = str(command or "").splitlines()
+    segments: list[str] = []
+    control_depth = 0
+    for line in lines:
+        stripped = line.strip()
+        if control_depth == 0 and not re.match(r"^(?:if|for|while|until|case|function)\b", stripped, re.I):
+            segments.extend(split_unquoted_shell_command_segments(stripped))
+        control_depth = _update_shell_block_depth(stripped, control_depth)
+    return segments
+
+
+def _update_if_depth(stripped_line: str, current: int) -> int:
+    return _update_shell_block_depth(stripped_line, current)
+
+
+def _update_shell_block_depth(stripped_line: str, current: int) -> int:
+    line = stripped_line.strip()
+    if not line or line.startswith("#"):
+        return current
+    for segment in split_unquoted_shell_command_segments(line):
+        part = str(segment or "").strip()
+        if not part or part.startswith("#"):
+            continue
+        if re.match(r"^(?:fi|done|esac)\b", part):
+            current = max(0, current - 1)
+        if re.match(r"^if\b", part):
+            current += 1
+        elif re.match(r"^(?:while|until|for)\b", part):
+            current += 1
+        elif re.match(r"^case\b", part):
+            current += 1
+    return current
+
+
+def _segment_authoritative_archive_fetch_paths(segment: object) -> set[str]:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    parts = _drop_shell_control_prefix(parts)
+    token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+    if token not in {"curl", "wget"}:
+        return set()
+    if _curl_wget_uses_no_download_mode(parts):
+        return set()
+    if not any(_authoritative_source_archive_url(url) for url in _segment_remote_source_fetch_urls(segment)):
+        return set()
+    archive_path = _curl_wget_output_path(parts)
+    return {archive_path} if archive_path else set()
+
+
+def _curl_wget_output_path(parts: Iterable[object]) -> str:
+    values = _drop_shell_control_prefix([str(part or "") for part in parts])
+    if not values:
+        return ""
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    option_flags = {"-o", "--output"} if token == "curl" else {"-O", "--output-document"}
+    for index, part in enumerate(values[1:], start=1):
+        if part in option_flags and index + 1 < len(values):
+            return values[index + 1]
+        for flag in option_flags:
+            if part.startswith(f"{flag}="):
+                return part.split("=", 1)[1]
+    return ""
+
+
+def _loop_body_proves_selected_archive(parts_list: list[list[str]], fetch_index: int, archive_path: str, variable: str) -> bool:
+    if not any(_parts_remove_path(parts, archive_path) for parts in parts_list[: fetch_index + 1]):
+        return False
+    validation_index = None
+    for index, parts in enumerate(parts_list[fetch_index + 1 :], start=fetch_index + 1):
+        if _parts_validate_archive_path(parts, archive_path):
+            validation_index = index
+            break
+    if validation_index is None:
+        return False
+    return any(_parts_assign_selected_url(parts, variable) for parts in parts_list[validation_index + 1 :])
+
+
+def _parts_reference_loop_variable(parts: Iterable[object], variable: str) -> bool:
+    refs = {f"${variable}", f"${{{variable}}}"}
+    return any(str(part or "").strip("'\"") in refs for part in parts)
+
+
+def _parts_assign_selected_url(parts: Iterable[object], variable: str) -> bool:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if len(values) != 1:
+        return False
+    return bool(re.fullmatch(rf"(?:found|selected|chosen)=\$\{{?{re.escape(variable)}\}}?", values[0], re.I))
+
+
+def _parts_remove_path(parts: Iterable[object], path: object) -> bool:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if not values:
+        return False
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    return token == "rm" and "-f" in values[1:] and _parts_reference_path(values, path)
+
+
+def _drop_shell_control_prefix(parts: Iterable[object]) -> list[str]:
+    values = [str(part or "") for part in parts]
+    while values and values[0] in {"if", "while", "until", "then", "do"}:
+        values = values[1:]
+    return values
+
+
+def _command_validates_and_extracts_archive_path(command: object, archive_path: str) -> bool:
+    return (
+        _command_validates_archive_path(command, archive_path)
+        and _command_extracts_archive_path(command, archive_path)
+        and _command_moves_extracted_source_root(command)
+    )
+
+
+def _command_validates_archive_path(command: object, archive_path: str) -> bool:
+    for parts in _invoked_command_parts(command):
+        if _parts_validate_archive_path(parts, archive_path):
+            return True
+    return False
+
+
+def _parts_validate_archive_path(parts: Iterable[object], archive_path: str) -> bool:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token == "tar" and _tar_parts_use_mode(values, "t") and _parts_reference_path(values, archive_path):
+        return True
+    return bool(token == "unzip" and _unzip_parts_use_test_mode(values) and _parts_reference_path(values, archive_path))
+
+
+def _command_extracts_archive_path(command: object, archive_path: str) -> bool:
+    for parts in _invoked_command_parts(command):
+        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+        if token == "tar" and _tar_parts_use_mode(parts, "x") and _parts_reference_path(parts, archive_path):
+            return True
+        if token == "unzip" and not _unzip_parts_use_test_mode(parts) and _parts_reference_path(parts, archive_path):
+            return True
+    return False
+
+
+def _command_moves_extracted_source_root(command: object) -> bool:
+    for parts in _invoked_command_parts(command):
+        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+        if token != "mv":
+            continue
+        args = [str(part or "") for part in parts[1:]]
+        if any(re.search(r"(?:root|\$root|\$\{root\}|extract)", part, re.I) for part in args) and any(
+            part.startswith(("/tmp", "/src", "/work", "/app")) for part in args
+        ):
+            return True
+    return False
+
+
+def _invoked_command_parts(command: object) -> list[list[str]]:
+    parts_list: list[list[str]] = []
+    for segment in split_unquoted_shell_command_segments(_strip_heredoc_bodies(command)):
+        try:
+            parts = shlex.split(str(segment or ""))
+        except ValueError:
+            parts = str(segment or "").split()
+        parts = _drop_shell_control_prefix(parts)
+        if parts:
+            parts_list.append(parts)
+    return parts_list
+
+
+def _strip_heredoc_bodies(command: object) -> str:
+    lines = str(command or "").splitlines()
+    stripped: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped.append(line)
+        match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
+        if not match:
+            index += 1
+            continue
+        delimiter = match.group(1)
+        index += 1
+        while index < len(lines) and lines[index].strip() != delimiter:
+            index += 1
+        if index < len(lines):
+            stripped.append(lines[index])
+            index += 1
+    return "\n".join(stripped)
+
+
+def _tar_parts_use_mode(parts: Iterable[object], mode: str) -> bool:
+    long_mode = "--list" if mode == "t" else "--extract"
+    for part in [str(value or "") for value in parts][1:]:
+        if part == long_mode:
+            return True
+        if part.startswith("-") and not part.startswith("--") and mode in part[1:]:
+            return True
+    return False
+
+
+def _unzip_parts_use_test_mode(parts: Iterable[object]) -> bool:
+    return any(str(part or "") in {"-t", "--test"} for part in list(parts)[1:])
+
+
+def _parts_reference_path(parts: Iterable[object], path: object) -> bool:
+    expected = str(path or "").strip("'\"")
+    if not expected:
+        return False
+    return any(str(part or "").strip("'\"") == expected for part in parts)
+
+
+def _extract_urls(text: object) -> set[str]:
+    return {match.group(0).rstrip("'\"),;") for match in re.finditer(r"https?://[^\s'\"<>]+", str(text or ""))}
+
+
+def _authoritative_source_archive_url(url: object) -> bool:
+    value = str(url or "").rstrip("'\"),;").casefold()
+    if not value.startswith(("http://", "https://")):
+        return False
+    archiveish = bool(re.search(r"\.(?:tar\.gz|tgz|zip|tar|tar\.xz|tar\.bz2)(?:$|[?#])", value))
+    github_release_or_tag = bool(
+        re.search(r"github\.com/[^/\s]+/[^/\s]+/(?:releases/download|archive/refs/tags)/", value)
+    )
+    release_or_download_archive = archiveish and bool(
+        re.search(r"/(?:release|releases|download|downloads|dist|archive|source|src)/", value)
+    )
+    return github_release_or_tag or release_or_download_archive
 
 
 def _command_has_authority_page_readback(command: object) -> bool:
