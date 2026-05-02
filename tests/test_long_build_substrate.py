@@ -1655,6 +1655,61 @@ def test_default_smoke_allows_later_pipefail_metadata_pipeline_after_strict_smok
     assert state["status"] == "complete"
 
 
+def test_default_smoke_allows_later_errexit_disable_after_strict_smoke_segment():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10jf3:long_build:1",
+    )
+    source_command = (
+        "set -e -o pipefail\n"
+        "curl -fL https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz -o /tmp/foocc.tgz\n"
+        "printf 'authority_archive_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n'"
+    )
+    final_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/FooCC\n"
+        "make foocc\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "cat > /tmp/foocc-proof.c <<'EOF'\n"
+        "int main(void) { return 42; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc /tmp/foocc-proof.c -o /tmp/foocc-proof\n"
+        "set +e\n"
+        "/tmp/foocc-proof\n"
+        "smoke_rc=$?\n"
+        "set -e\n"
+        "printf 'smoke_exit=%s\\n' \"$smoke_rc\"\n"
+        "test \"$smoke_rc\" -eq 42\n"
+        "printf 'FINAL_ARTIFACT_PROOF_SUCCESS\\n'"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                source_command,
+                stdout="authority_archive_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n",
+            ),
+            _command_call(
+                2,
+                final_command,
+                stdout="FooCC version 1.0\nsmoke_exit=42\nFINAL_ARTIFACT_PROOF_SUCCESS\n",
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[-1]["stage"] == "default_smoke"
+    assert attempts[-1]["produced_artifacts"] == [{"path": "/tmp/FooCC/foocc", "proof_evidence_id": 2}]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+    assert state["status"] == "complete"
+
+
 def test_default_smoke_rejects_backgrounded_artifact_compile():
     contract = build_long_build_contract(
         "Under /tmp/FooCC, build the FooCC compiler from source. "

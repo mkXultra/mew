@@ -3181,6 +3181,7 @@ def _command_has_default_smoke_artifact_segment(command: object, artifact: objec
             continue
         before_operator = str(segment_entries[index].get("before_operator") or "")
         after_operator = str(segment_entries[index].get("after_operator") or "")
+        segment_errexit_active = _command_errexit_active_before_span(command, segment_entries[index])
         if before_operator == "||":
             continue
         if before_operator == "&&" and not _previous_shell_segment_is_positive_artifact_guard(
@@ -3194,9 +3195,7 @@ def _command_has_default_smoke_artifact_segment(command: object, artifact: objec
             continue
         if after_operator == "|":
             continue
-        if after_operator in {";", "\n", "\r"} and not (
-            _command_enables_errexit(command) and not _command_disables_errexit(command)
-        ):
+        if after_operator in {";", "\n", "\r"} and not segment_errexit_active:
             continue
         if _shell_text_has_unquoted_background_operator(segment):
             continue
@@ -3218,13 +3217,21 @@ def _command_has_default_smoke_artifact_segment(command: object, artifact: objec
     return False
 
 
+def _command_errexit_active_before_span(command: object, span: Mapping[str, object]) -> bool:
+    start = _coerce_int((span or {}).get("start"), default=0) or 0
+    command_prefix = str(command or "")[:start]
+    return _command_enables_errexit(command_prefix) and not _command_disables_errexit(command_prefix)
+
+
 def _later_shell_segments_mask_artifact_failure(
     segment_entries: list[dict[str, object]],
     index: int,
     command: object,
 ) -> bool:
-    errexit_active = _command_enables_errexit(command) and not _command_disables_errexit(command)
-    pipefail_active = _command_enables_pipefail(command) and not _command_disables_pipefail(command)
+    segment_start = _coerce_int((segment_entries[index] or {}).get("start"), default=0) or 0
+    command_prefix = str(command or "")[:segment_start]
+    errexit_active = _command_errexit_active_before_span(command, segment_entries[index])
+    pipefail_active = _command_enables_pipefail(command_prefix) and not _command_disables_pipefail(command_prefix)
     for entry in segment_entries[index + 1 :]:
         if _shell_text_has_unquoted_background_operator(entry.get("text")):
             return True

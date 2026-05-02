@@ -38783,6 +38783,7 @@ class WorkSessionTests(unittest.TestCase):
         self.assertIn("expected dimensions/resolution, reference similarity", prompt)
         self.assertIn("For external dependency/source acquisition tasks", prompt)
         self.assertIn("authoritative source channel", prompt)
+        self.assertIn("Place or repeat saved source readbacks after noisy build/install output", prompt)
         self.assertIn("VCS-generated tag/archive URLs", prompt)
         self.assertIn("before alternate toolchain surgery", prompt)
         self.assertIn("For long dependency/toolchain/source-build tasks", prompt)
