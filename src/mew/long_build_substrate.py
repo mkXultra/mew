@@ -948,17 +948,27 @@ def _saved_source_archive_identity_readback_paths(evidence: CommandEvidence, out
 
 def _source_authority_satisfied_by_correlated_archive_readback(evidences: Iterable[CommandEvidence]) -> bool:
     authoritative_paths: set[str] = set()
+    absent_archive_paths: set[str] = set()
     for evidence in sorted(
         [item for item in evidences or [] if isinstance(item, CommandEvidence)],
         key=lambda item: item.finish_order,
     ):
-        for path in _authoritative_source_archive_paths(evidence.command):
-            if _authoritative_archive_acquisition_completed(evidence, path):
-                authoritative_paths.add(path)
         output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+        for path in _authoritative_source_archive_paths(evidence.command):
+            if _authoritative_archive_acquisition_completed(
+                evidence,
+                path,
+            ) or _authoritative_archive_acquisition_structurally_completed(
+                evidence,
+                path,
+                output_text,
+                archive_previously_absent=path in absent_archive_paths,
+            ):
+                authoritative_paths.add(path)
         readback_paths = _saved_source_archive_identity_readback_paths(evidence, output_text)
         if authoritative_paths & readback_paths:
             return True
+        absent_archive_paths.update(_source_archive_absence_paths(evidence.command, output_text))
     return False
 
 
@@ -969,6 +979,56 @@ def _authoritative_archive_acquisition_completed(evidence: CommandEvidence, arch
     if _source_acquisition_generated_hash_output_signal(evidence.command, output_text, archive_path):
         return True
     return _output_contains_post_source_archive_extract_marker(evidence.command, output_text, archive_path)
+
+
+def _authoritative_archive_acquisition_structurally_completed(
+    evidence: CommandEvidence,
+    archive_path: object,
+    output_text: object,
+    *,
+    archive_previously_absent: bool = False,
+) -> bool:
+    if evidence.timed_out or _source_acquisition_failed_output_signal(output_text):
+        return False
+    archive_text = str(archive_path or "").strip("'\"")
+    if not archive_text:
+        return False
+    if not _command_validates_and_extracts_archive_path(evidence.command, archive_text):
+        return False
+    if not (archive_previously_absent or _command_removes_archive_path_before_fetch(evidence.command, archive_text)):
+        return False
+    return bool(_authoritative_source_archive_paths(evidence.command) & {archive_text})
+
+
+def _source_archive_absence_paths(command: object, output_text: object) -> set[str]:
+    text = str(output_text or "")
+    paths = _source_archive_paths(_shell_words(command))
+    paths.update(_source_archive_paths(_shell_words(text)))
+    return {path for path in paths if _source_archive_absence_output_for_path(text, path)}
+
+
+def _source_archive_absence_output_for_path(output_text: object, archive_path: object) -> bool:
+    path = str(archive_path or "").strip("'\"")
+    if not path:
+        return False
+    escaped = re.escape(path)
+    return bool(
+        re.search(rf"(?:cannot access|cannot stat|stat(?:x)?:).*['\"]?{escaped}['\"]?: No such file", str(output_text or ""), re.I)
+        or re.search(rf"No such file or directory[^\n]*['\"]?{escaped}['\"]?", str(output_text or ""), re.I)
+    )
+
+
+def _command_removes_archive_path_before_fetch(command: object, archive_path: object) -> bool:
+    command_text = _strip_heredoc_bodies(command)
+    assignments = _simple_shell_assignments(command_text)
+    archive_text = str(archive_path or "").strip("'\"")
+    for segment in _ordered_shell_command_segments(command_text):
+        parts = _resolve_shell_parts(_segment_invoked_command_parts(segment), assignments)
+        if _parts_fetch_archive_path(parts, archive_text) or _parts_fetch_source_archive_temp_path(parts, archive_text):
+            return False
+        if _parts_remove_path(parts, archive_text):
+            return True
+    return False
 
 
 def _output_contains_post_source_archive_extract_marker(
@@ -1030,7 +1090,7 @@ def _authoritative_source_archive_paths(command: object) -> set[str]:
     return {
         path
         for path in _strict_authoritative_archive_fetch_paths(command)
-        if _versioned_source_archive_path(path)
+        if _source_archive_pathish(path) and _versioned_source_archive_path(path)
     }
 
 
@@ -1246,11 +1306,18 @@ def _last_shell_control_start(text: object, words: Iterable[str]) -> int:
 
 
 def _source_archive_paths(values: Iterable[object]) -> set[str]:
-    return {str(value or "").strip("'\"),;") for value in values if _source_archive_pathish(value)}
+    return {str(value or "").strip("'\"),;:") for value in values if _source_archive_pathish(value)}
+
+
+def _shell_words(value: object) -> list[str]:
+    try:
+        return shlex.split(str(value or ""))
+    except ValueError:
+        return str(value or "").split()
 
 
 def _source_archive_pathish(value: object) -> bool:
-    text = str(value or "").strip("'\"),;")
+    text = str(value or "").strip("'\"),;:")
     return bool(re.search(r"\.(?:tar\.gz|tgz|zip|tar|tar\.xz|tar\.bz2)(?:$|[?#])", text, re.I))
 
 
@@ -1315,17 +1382,28 @@ def _same_archive_output_path(observed: object, expected: object) -> bool:
 
 def _command_has_ordered_source_archive_completion(command: object, archive_path: object, output_line: object) -> bool:
     fetched = False
+    pending_temp_fetch_path = ""
     hashed = False
     validated = False
     extracted = False
     archive_text = str(archive_path or "").strip("'\"")
-    for segment in _ordered_shell_command_segments(_strip_heredoc_bodies(command)):
-        parts = _segment_invoked_command_parts(segment)
+    command_text = _strip_heredoc_bodies(command)
+    assignments = _simple_shell_assignments(command_text)
+    for segment in _ordered_shell_command_segments(command_text):
+        parts = _resolve_shell_parts(_segment_invoked_command_parts(segment), assignments)
         if not parts:
             continue
         if not fetched:
             if _parts_fetch_archive_path(parts, archive_text):
                 fetched = True
+                continue
+            temp_path = _parts_fetch_source_archive_temp_path(parts, archive_text)
+            if temp_path:
+                pending_temp_fetch_path = temp_path
+                continue
+            if pending_temp_fetch_path and _parts_move_path_to_archive_path(parts, pending_temp_fetch_path, archive_text):
+                fetched = True
+                pending_temp_fetch_path = ""
                 continue
             if not _parts_are_source_archive_setup_safe(parts, archive_text, output_line):
                 return False
@@ -1339,7 +1417,9 @@ def _command_has_ordered_source_archive_completion(command: object, archive_path
             continue
         if not validated:
             if _parts_validate_archive_path(parts, archive_text) or _command_substitution_validates_archive_path(
-                segment, archive_text
+                segment,
+                archive_text,
+                assignments=assignments,
             ):
                 validated = True
                 continue
@@ -1358,6 +1438,42 @@ def _command_has_ordered_source_archive_completion(command: object, archive_path
         if not _parts_are_post_hash_source_archive_setup_safe(parts, archive_text, output_line):
             return False
     return False
+
+
+def _parts_fetch_source_archive_temp_path(parts: Iterable[object], archive_path: object) -> str:
+    values = _drop_shell_control_prefix([str(part or "") for part in parts])
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token not in {"curl", "wget"} or _curl_wget_uses_no_download_mode(values):
+        return ""
+    if not any(_authoritative_source_archive_url(url) for url in _parts_remote_source_fetch_urls(values)):
+        return ""
+    fetched_path = _curl_wget_output_path(values)
+    if not fetched_path:
+        return ""
+    if _same_archive_output_path(fetched_path, archive_path):
+        return ""
+    return fetched_path
+
+
+def _parts_move_path_to_archive_path(parts: Iterable[object], source_path: object, archive_path: object) -> bool:
+    values = _drop_shell_control_prefix([str(part or "") for part in parts])
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token != "mv" or len(values) < 3:
+        return False
+    if str(values[1] or "").strip("'\"") != str(source_path or "").strip("'\""):
+        return False
+    return _same_archive_output_path(values[2], archive_path)
+
+
+def _parts_move_path_to_source_archive_final(parts: Iterable[object], source_path: object) -> str:
+    values = _drop_shell_control_prefix([str(part or "") for part in parts])
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token != "mv" or len(values) < 3:
+        return ""
+    if str(values[1] or "").strip("'\"") != str(source_path or "").strip("'\""):
+        return ""
+    target = str(values[2] or "").strip("'\"")
+    return target if _versioned_source_archive_path(target) else ""
 
 
 def _line_is_source_archive_setup_safe(line: object, archive_path: object, output_line: object) -> bool:
@@ -1621,8 +1737,24 @@ def _strict_authoritative_archive_fetch_paths(command: object) -> set[str]:
     ):
         return set()
     paths = set()
+    pending_temp_paths: set[str] = set()
+    assignments = _simple_shell_assignments(command_text)
     for segment in _top_level_direct_fetch_segments(command_text):
-        paths.update(_segment_authoritative_archive_fetch_paths(segment))
+        for path in _segment_authoritative_archive_fetch_paths(segment, assignments):
+            if _source_archive_pathish(path) and _versioned_source_archive_path(path):
+                paths.add(path)
+            else:
+                pending_temp_paths.add(path)
+        try:
+            parts = shlex.split(str(segment or ""))
+        except ValueError:
+            parts = str(segment or "").split()
+        values = _resolve_shell_parts(_drop_shell_control_prefix(parts), assignments)
+        for temp_path in list(pending_temp_paths):
+            target = _parts_move_path_to_source_archive_final(values, temp_path)
+            if target:
+                paths.add(target)
+                pending_temp_paths.remove(temp_path)
     paths.update(_url_loop_authoritative_archive_fetch_paths(raw_command_text))
     return paths
 
@@ -1770,6 +1902,12 @@ def _resolve_shell_token(value: object, assignments: Mapping[str, str]) -> str:
     match = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", token)
     if match:
         return assignments.get(match.group(1), token)
+    match = re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}(.+)", token)
+    if match and match.group(1) in assignments and "$" not in match.group(2):
+        return assignments[match.group(1)] + match.group(2)
+    match = re.fullmatch(r"\$([A-Za-z_][A-Za-z0-9_]*)(.+)", token)
+    if match and match.group(1) in assignments and "$" not in match.group(2):
+        return assignments[match.group(1)] + match.group(2)
     return token
 
 
@@ -1859,21 +1997,49 @@ def _update_shell_block_depth(stripped_line: str, current: int) -> int:
     return current
 
 
-def _segment_authoritative_archive_fetch_paths(segment: object) -> set[str]:
+def _segment_authoritative_archive_fetch_paths(
+    segment: object,
+    assignments: Mapping[str, str] | None = None,
+) -> set[str]:
     try:
         parts = shlex.split(str(segment or ""))
     except ValueError:
         parts = str(segment or "").split()
-    parts = _drop_shell_control_prefix(parts)
+    parts = _resolve_shell_parts(_drop_shell_control_prefix(parts), assignments or {})
     token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
     if token not in {"curl", "wget"}:
         return set()
     if _curl_wget_uses_no_download_mode(parts):
         return set()
-    if not any(_authoritative_source_archive_url(url) for url in _segment_remote_source_fetch_urls(segment)):
+    if not any(_authoritative_source_archive_url(url) for url in _parts_remote_source_fetch_urls(parts)):
         return set()
     archive_path = _curl_wget_output_path(parts)
     return {archive_path} if archive_path else set()
+
+
+def _top_level_archive_move_target(
+    command: object,
+    source_path: object,
+    assignments: Mapping[str, str] | None = None,
+) -> str:
+    source_text = str(source_path or "").strip("'\"")
+    if not source_text:
+        return ""
+    for segment in _top_level_direct_fetch_segments(command):
+        try:
+            parts = shlex.split(str(segment or ""))
+        except ValueError:
+            parts = str(segment or "").split()
+        values = _resolve_shell_parts(_drop_shell_control_prefix(parts), assignments or {})
+        token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+        if token != "mv" or len(values) < 3:
+            continue
+        if not _same_archive_output_path(values[1], source_text):
+            continue
+        target = str(values[2] or "").strip("'\"")
+        if _source_archive_pathish(target):
+            return target
+    return ""
 
 
 def _curl_wget_output_path(parts: Iterable[object]) -> str:
@@ -1966,7 +2132,8 @@ def _parts_remove_path(parts: Iterable[object], path: object) -> bool:
     if not values:
         return False
     token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
-    return token == "rm" and "-f" in values[1:] and _parts_reference_path(values, path)
+    force_flag = any(value == "--force" or (value.startswith("-") and "f" in value[1:]) for value in values[1:])
+    return token == "rm" and force_flag and _parts_reference_path(values, path)
 
 
 def _drop_shell_control_prefix(parts: Iterable[object]) -> list[str]:
@@ -1977,16 +2144,18 @@ def _drop_shell_control_prefix(parts: Iterable[object]) -> list[str]:
 
 
 def _command_validates_and_extracts_archive_path(command: object, archive_path: str) -> bool:
+    assignments = _simple_shell_assignments(command)
     return (
-        _command_validates_archive_path(command, archive_path)
-        and _command_extracts_archive_path(command, archive_path)
+        _command_validates_archive_path(command, archive_path, assignments=assignments)
+        and _command_extracts_archive_path(command, archive_path, assignments=assignments)
         and _command_moves_extracted_source_root(command)
     )
 
 
 def _command_hashes_archive_path(command: object, archive_path: str) -> bool:
+    assignments = _simple_shell_assignments(command)
     for parts in _invoked_command_parts(command):
-        if _parts_hash_archive_path(parts, archive_path):
+        if _parts_hash_archive_path(_resolve_shell_parts(parts, assignments), archive_path):
             return True
     return False
 
@@ -1997,17 +2166,34 @@ def _parts_hash_archive_path(parts: Iterable[object], archive_path: str) -> bool
     return bool(token in {"sha256sum", "shasum", "sha512sum"} and _parts_reference_path(values, archive_path))
 
 
-def _command_validates_archive_path(command: object, archive_path: str) -> bool:
+def _command_validates_archive_path(
+    command: object,
+    archive_path: str,
+    *,
+    assignments: Mapping[str, str] | None = None,
+) -> bool:
+    assignments = assignments or _simple_shell_assignments(command)
     for parts in _invoked_command_parts(command):
-        if _parts_validate_archive_path(parts, archive_path):
+        if _parts_validate_archive_path(_resolve_shell_parts(parts, assignments), archive_path):
             return True
-    return _command_substitution_validates_archive_path(command, archive_path)
+    return _command_substitution_validates_archive_path(command, archive_path, assignments=assignments)
 
 
-def _command_substitution_validates_archive_path(command: object, archive_path: str) -> bool:
-    path = re.escape(str(archive_path or "").strip("'\""))
-    if not path:
+def _command_substitution_validates_archive_path(
+    command: object,
+    archive_path: str,
+    *,
+    assignments: Mapping[str, str] | None = None,
+) -> bool:
+    path_text = str(archive_path or "").strip("'\"")
+    if not path_text:
         return False
+    path_patterns = [rf"['\"]?{re.escape(path_text)}['\"]?"]
+    for name, value in (assignments or {}).items():
+        if _same_archive_output_path(value, path_text):
+            path_patterns.append(rf"['\"]?\$\{{{re.escape(name)}\}}['\"]?")
+            path_patterns.append(rf"['\"]?\${re.escape(name)}\b['\"]?")
+    path = "(?:" + "|".join(path_patterns) + ")"
     command_text = _strip_heredoc_bodies(command)
     return bool(
         re.search(rf"\$\([^)]*\btar\b[^)]*-[A-Za-z]*t[A-Za-z]*[^)]*{path}(?:\s|[|)])", command_text)
@@ -2023,9 +2209,15 @@ def _parts_validate_archive_path(parts: Iterable[object], archive_path: str) -> 
     return bool(token == "unzip" and _unzip_parts_use_test_mode(values) and _parts_reference_path(values, archive_path))
 
 
-def _command_extracts_archive_path(command: object, archive_path: str) -> bool:
+def _command_extracts_archive_path(
+    command: object,
+    archive_path: str,
+    *,
+    assignments: Mapping[str, str] | None = None,
+) -> bool:
+    assignments = assignments or _simple_shell_assignments(command)
     for parts in _invoked_command_parts(command):
-        if _parts_extract_archive_path(parts, archive_path):
+        if _parts_extract_archive_path(_resolve_shell_parts(parts, assignments), archive_path):
             return True
     return False
 
@@ -2342,9 +2534,14 @@ def _segment_remote_source_fetch_urls(segment: object) -> set[str]:
         parts = shlex.split(str(segment or ""))
     except ValueError:
         parts = str(segment or "").split()
-    token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+    return _parts_remote_source_fetch_urls(parts)
+
+
+def _parts_remote_source_fetch_urls(parts: Iterable[object]) -> set[str]:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
     if token in {"curl", "wget"}:
-        if _curl_wget_uses_no_download_mode(parts):
+        if _curl_wget_uses_no_download_mode(values):
             return set()
         option_value_flags = {
             "-o",
@@ -2364,7 +2561,7 @@ def _segment_remote_source_fetch_urls(segment: object) -> set[str]:
         }
         urls: set[str] = set()
         skip_next = False
-        for part in parts[1:]:
+        for part in values[1:]:
             part_text = str(part or "")
             if skip_next:
                 skip_next = False
@@ -2379,8 +2576,12 @@ def _segment_remote_source_fetch_urls(segment: object) -> set[str]:
             if part_text.startswith(("http://", "https://")):
                 urls.add(part_text.rstrip("'\""))
         return urls
-    if token == "git" and any(str(part or "").casefold() in {"clone", "fetch", "ls-remote"} for part in parts[1:3]):
-        return {str(part or "").rstrip("'\"") for part in parts[1:] if str(part or "").startswith(("http://", "https://"))}
+    if token == "git" and any(str(part or "").casefold() in {"clone", "fetch", "ls-remote"} for part in values[1:3]):
+        return {
+            str(part or "").rstrip("'\"")
+            for part in values[1:]
+            if str(part or "").startswith(("http://", "https://"))
+        }
     return set()
 
 

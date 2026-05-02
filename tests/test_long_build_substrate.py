@@ -2077,6 +2077,263 @@ def test_source_authority_accepts_post_loop_validated_archive_fetch_with_later_b
     assert {"id": "target_built", "required": True, "status": "unknown"} in state["stages"]
 
 
+def test_source_authority_correlates_direct_temp_fetch_move_with_later_archive_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2directtmp:long_build:1",
+    )
+    acquisition_command = (
+        "set -eu\n"
+        "ARCH=/tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "URL=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "WORK=/tmp/widgetcli-extract\n"
+        "rm -rf /tmp/WidgetCLI \"$WORK\" \"$ARCH\" \"$ARCH.tmp\"\n"
+        "curl -fL --retry 3 -o \"$ARCH.tmp\" \"$URL\"\n"
+        "mv \"$ARCH.tmp\" \"$ARCH\"\n"
+        "printf 'source_url=%s\\n' \"$URL\"\n"
+        "sha256sum \"$ARCH\"\n"
+        "ROOT=$(tar -tzf \"$ARCH\" | sed -n '1{s#/.*##;p;}')\n"
+        "printf 'archive_root=%s\\n' \"$ROOT\"\n"
+        "mkdir -p \"$WORK\"\n"
+        "tar -xzf \"$ARCH\" -C \"$WORK\"\n"
+        "mv \"$WORK/$ROOT\" /tmp/WidgetCLI\n"
+        "printf 'SOURCE_TREE_STATE\\n'\n"
+        "cd /tmp/WidgetCLI\n"
+        "make widget\n"
+    )
+    final_readback_command = (
+        "set -eu\n"
+        "test -f /tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0-src.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout=(
+                    "source_url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+                    "output clipped before archive hash/readback\n"
+                    "Error: later build failed after extraction\n"
+                ),
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                final_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0-src.tar.gz\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "Widget usage\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+
+
+def test_source_authority_rejects_failed_direct_temp_fetch_with_later_stale_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2directtmp404:long_build:1",
+    )
+    acquisition_command = (
+        "set -eu\n"
+        "ARCH=/tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "URL=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "WORK=/tmp/widgetcli-extract\n"
+        "rm -rf /tmp/WidgetCLI \"$WORK\" \"$ARCH.tmp\"\n"
+        "curl -fL --retry 3 -o \"$ARCH.tmp\" \"$URL\"\n"
+        "mv \"$ARCH.tmp\" \"$ARCH\"\n"
+        "sha256sum \"$ARCH\"\n"
+        "ROOT=$(tar -tzf \"$ARCH\" | sed -n '1{s#/.*##;p;}')\n"
+        "tar -xzf \"$ARCH\" -C \"$WORK\"\n"
+        "mv \"$WORK/$ROOT\" /tmp/WidgetCLI\n"
+    )
+    stale_readback_command = (
+        "set -eu\n"
+        "test -f /tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0-src.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=22,
+                stdout="",
+                stderr="curl: (22) The requested URL returned error: 404\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0-src.tar.gz\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "Widget usage\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for attempt in attempts for item in attempt["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_clipped_failed_temp_fetch_with_later_stale_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2directtmpclipped:long_build:1",
+    )
+    acquisition_command = (
+        "set -eu\n"
+        "ARCH=/tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "URL=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "WORK=/tmp/widgetcli-extract\n"
+        "rm -rf /tmp/WidgetCLI \"$WORK\" \"$ARCH.tmp\"\n"
+        "curl -fL --retry 3 -o \"$ARCH.tmp\" \"$URL\" >/tmp/fetch.log 2>&1\n"
+        "mv \"$ARCH.tmp\" \"$ARCH\"\n"
+        "sha256sum \"$ARCH\"\n"
+        "ROOT=$(tar -tzf \"$ARCH\" | sed -n '1{s#/.*##;p;}')\n"
+        "tar -xzf \"$ARCH\" -C \"$WORK\"\n"
+        "mv \"$WORK/$ROOT\" /tmp/WidgetCLI\n"
+    )
+    stale_readback_command = (
+        "set -eu\n"
+        "test -f /tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0-src.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, acquisition_command, exit_code=22, stdout="", stderr=""),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0-src.tar.gz\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "Widget usage\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for attempt in attempts for item in attempt["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_header_only_authoritative_url_for_temp_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2headerurl:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "ARCH=/tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "rm -f \"$ARCH\"\n"
+        "curl -fL -H 'Referer: https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz' "
+        "-o \"$ARCH.tmp\" https://mirror.invalid/files/widgetcli-1.0.0.tar.gz\n"
+        "mv \"$ARCH.tmp\" \"$ARCH\"\n"
+        "sha256sum \"$ARCH\"\n"
+        "ROOT=$(tar -tzf \"$ARCH\" | sed -n '1{s#/.*##;p;}')\n"
+        "tar -xzf \"$ARCH\" -C /tmp/widgetcli-extract\n"
+        "mv \"/tmp/widgetcli-extract/$ROOT\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0-src.tar.gz\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for attempt in attempts for item in attempt["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_prefetch_move_before_temp_download():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2premv:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "ARCH=/tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "URL=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$ARCH.tmp\" \"$ARCH\"\n"
+        "curl -fL --retry 3 -o \"$ARCH.tmp\" \"$URL\"\n"
+        "sha256sum \"$ARCH\"\n"
+        "ROOT=$(tar -tzf \"$ARCH\" | sed -n '1{s#/.*##;p;}')\n"
+        "tar -xzf \"$ARCH\" -C /tmp/widgetcli-extract\n"
+        "mv \"/tmp/widgetcli-extract/$ROOT\" /tmp/WidgetCLI\n"
+    )
+    readback_command = (
+        "set -eu\n"
+        "sha256sum /tmp/widgetcli-1.0.0-src.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0-src.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0-src.tar.gz\n"
+                ),
+            ),
+            _command_call(
+                2,
+                readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0-src.tar.gz\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "Widget usage\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for attempt in attempts for item in attempt["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
 def test_source_authority_rejects_post_loop_selected_fetch_without_clean_archive_path():
     contract = build_long_build_contract(
         "Under /tmp/WidgetCLI, build the Widget CLI from source. "

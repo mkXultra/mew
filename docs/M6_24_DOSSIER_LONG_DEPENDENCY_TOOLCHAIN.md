@@ -20,18 +20,19 @@ Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> source_toolchain_before_external_branch_attempt -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> temp_fetch_source_authority -> compile-compcert
 ```
 
-Broad measurement remains paused. The source-tail clean-closeout repair was
-reviewed and committed, but the next same-shape `compile-compcert` speed rerun
-scored `0/1` with runner errors `0`: `/tmp/CompCert/ccomp` was missing. The
-valid run exposed `-use-external-*` compatibility branches and hit a dependency
-API mismatch, then started version-pinned OPAM source-toolchain work before
-trying the external/prebuilt/system branch. The current repair is
-`source_toolchain_before_external_branch_attempt`. It is implemented and
-reviewed. The next action is one same-shape `compile-compcert` speed_1 before
-another proof_5 or broad measurement.
+Broad measurement remains paused. The external-branch attempt repair was
+reviewed and committed, and the next same-shape `compile-compcert` speed rerun
+passed externally with runner errors `0`, `mew-report.work_exit_code=0`, and a
+successful default smoke. Internal closeout still left `source_authority`
+unknown because the authoritative source archive was fetched to a temp path,
+moved to the final saved archive path, and the fetch-time archive hash/readback
+output was clipped before later final saved archive readback. The current
+repair is `temp_fetch_source_authority`. It is implemented and reviewed. The
+next action is one same-shape `compile-compcert` speed_1 before another proof_5
+or broad measurement.
 
 ## Repair Timeline
 
@@ -62,6 +63,7 @@ another proof_5 or broad measurement.
 | v1.7 runtime subdir target path | Detect parent Makefile `No rule to make target 'runtime/lib*.a'` failures and steer to the runtime subdirectory Makefile's `all/install` continuation. | runtime link proof + detector/resume | Implemented and reviewed; speed_1 pending. |
 | v1.8 source-tail clean closeout | Recognize terminal-success runtime repair plus saved archive-member readback after the verifier-passing run. | long-build reducer | Reviewed and committed; same-shape rerun exposed an earlier dependency-strategy miss. |
 | v1.9 external branch attempt before source toolchain | Detect starting version-pinned OPAM/source-toolchain work after external/prebuilt branch evidence plus dependency/API mismatch but without an actual external/prebuilt/system configure attempt. | profile/contract + detector/resume | Implemented and reviewed; speed_1 pending. |
+| v2.0 temp-fetch source authority | Recognize authoritative archive fetches to temp paths only when the actual fetch URL is authoritative, ordered `fetch -> mv final` occurs, and later saved archive readback proves the final path; reject header-only URL, pre-fetch move, and clipped failed-fetch stale-readback false positives. | long-build reducer | Implemented and reviewed; speed_1 pending. |
 
 ## Pattern Readout
 

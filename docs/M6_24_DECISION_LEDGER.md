@@ -207,28 +207,20 @@ Long-Build Substrate flag-day redesign. Phase 0, Phase 1, Phase 2, Phase 3, and
 Phase 4 are implemented and reviewed. The first Phase 4 speed rerun externally
 passed, but exposed stale strategy blockers preventing clean internal closeout.
 The stale-blocker clearing, acceptance-closeout evidence, clean closeout state,
-saved authority-page, validated archive-loop, and post-loop nonterminal source
-signal repairs moved the shape forward. The latest same-shape speed_1 passed
-externally and exited cleanly, but exposed a generic reducer defect: final
-saved-source readback evidence did not satisfy `source_authority` when the
-earlier source-acquisition hash output was clipped. The saved source readback
-repair was implemented and `codex-ultra` approved it after conservative
-hardening. The same-shape speed rerun passed externally but kept internal
-closeout open: artifact/default-smoke proof was missed because a later `set +e`
-invalidated an earlier strict proof segment, and source readback output was
-clipped because it appeared before noisy build output. The follow-up repair is
-reviewed: artifact proof is now segment-local for `errexit`, and the prompt
-requires saved source readbacks near final proof after noisy output. The latest
-same-shape speed rerun externally passed and exited cleanly, but exposed one
-more reducer closeout defect: terminal-success runtime repair plus final
-default smoke and saved archive member readback were not treated as final
-contract evidence. The source-tail repair now also requires correlated
-source-authority paths to come from evidence that proves acquisition completed,
-after `codex-ultra` rejected command-text-only correlation. The post-extract
-marker path now also requires a unique post-extract marker and no
-source-acquisition failure output. `codex-ultra` approved the hardened
-source-tail closeout repair. Broad measurement remains paused.
+saved authority-page, validated archive-loop, post-loop nonterminal source
+signal, saved source readback, source-tail closeout, and external-branch attempt
+repairs moved the shape forward. The latest same-shape speed_1 after the
+external-branch attempt repair passed externally and exited cleanly:
+`source_url` used a GitHub tag archive, `/tmp/CompCert/ccomp` was invokable, and
+the default smoke passed. Internal closeout still left `source_authority=unknown`
+because the authoritative archive was fetched to `$ARCH.tmp`, moved to `$ARCH`,
+and the fetch-time source hash output was clipped before the later saved archive
+readback. The temp-fetch source-authority repair is implemented and
+`codex-ultra` approved it after hardening authoritative URL extraction,
+fetch-before-move ordering, and clipped failed-fetch plus stale-readback false
+positives. Local replay of the live report now reaches `status=complete`.
+Broad measurement remains paused.
 
 Current selected next action:
 
-`M6.24 -> long_dependency/toolchain gap -> source-tail closeout repair reviewed -> compile-compcert speed_1 clean-closeout rerun`
+`M6.24 -> long_dependency/toolchain gap -> temp-fetch source_authority repair reviewed -> compile-compcert speed_1 clean-closeout rerun`
