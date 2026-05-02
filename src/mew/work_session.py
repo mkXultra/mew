@@ -4191,6 +4191,10 @@ _LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_MARKERS = (
     "dependency incompat",
     "api incompat",
 )
+_LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_RE = re.compile(
+    r"(?:cannot determine the location[^\n]*(?:api library|library)|\bunbound module\b)",
+    re.IGNORECASE,
+)
 _LONG_DEPENDENCY_VENDORED_DEPENDENCY_PATH_PARTS = {
     "deps",
     "dependencies",
@@ -4424,6 +4428,19 @@ def _long_dependency_has_configure_override_attempt(call):
     return bool(_LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE.search(text))
 
 
+def _long_dependency_has_external_compatibility_branch_attempt(call):
+    if not isinstance(call, dict):
+        return False
+    command = _long_dependency_call_command_text(call)
+    return bool(
+        re.search(
+            r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:use[-_]external|external|prebuilt|system[-_])",
+            command,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _long_dependency_has_external_compatibility_branch_evidence(call):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return False
@@ -4481,9 +4498,15 @@ def _long_dependency_dependency_api_mismatch_seen(call):
         return False
     text = _runtime_artifact_call_text(call)
     lowered = text.casefold()
-    if any(marker in lowered for marker in _LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_MARKERS):
-        return True
-    return any(
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    call_status = str(call.get("status") or "").casefold()
+    failed_or_error = (
+        call_status in {"failed", "interrupted"}
+        or result.get("timed_out")
+        or result.get("exit_code") not in (None, 0)
+        or bool(call.get("error") or result.get("error"))
+    )
+    if any(
         blocker.get("code")
         in {
             "toolchain_version_constraint_mismatch",
@@ -4491,7 +4514,13 @@ def _long_dependency_dependency_api_mismatch_seen(call):
             "version_pinned_source_toolchain_before_compatibility_override",
         }
         for blocker in _long_dependency_strategy_blockers(call)
-    )
+    ):
+        return True
+    if not failed_or_error:
+        return False
+    if any(marker in lowered for marker in _LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_MARKERS):
+        return True
+    return bool(_LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_RE.search(text))
 
 
 def _long_dependency_uses_prebuilt_package_manager_dependency(call):
@@ -5281,6 +5310,47 @@ def _long_dependency_external_branch_help_probe_width_blocker(calls, missing_art
     return {}
 
 
+def _long_dependency_source_toolchain_before_external_branch_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    prebuilt_dependency_call = {}
+    external_branch_evidence_call = {}
+    dependency_mismatch_seen = False
+    external_branch_attempt_seen = False
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if not external_branch_evidence_call and _long_dependency_has_external_compatibility_branch_evidence(call):
+            external_branch_evidence_call = call
+        if _long_dependency_has_external_compatibility_branch_attempt(call):
+            external_branch_attempt_seen = True
+        if _long_dependency_dependency_api_mismatch_seen(call):
+            dependency_mismatch_seen = True
+        if not (
+            external_branch_evidence_call
+            and dependency_mismatch_seen
+            and not external_branch_attempt_seen
+            and _long_dependency_uses_version_pinned_source_toolchain(call)
+        ):
+            continue
+        command = _long_dependency_call_command_text(call) or _runtime_artifact_call_text(call)
+        return {
+            "code": "source_toolchain_before_external_branch_attempt",
+            "layer": "profile_contract",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": clip_inline_text(command, 180),
+            "external_branch_tool_call_id": external_branch_evidence_call.get("id"),
+            "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id") if prebuilt_dependency_call else None,
+        }
+    return {}
+
+
 def _long_dependency_is_vendored_dependency_patch_call(call):
     if not isinstance(call, dict):
         return False
@@ -5660,6 +5730,18 @@ def build_long_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(external_branch_help_probe_width)
+    source_toolchain_before_external_branch = _long_dependency_source_toolchain_before_external_branch_blocker(
+        calls,
+        missing,
+    )
+    if source_toolchain_before_external_branch:
+        key = (
+            source_toolchain_before_external_branch.get("code"),
+            source_toolchain_before_external_branch.get("source_tool_call_id"),
+            source_toolchain_before_external_branch.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(source_toolchain_before_external_branch)
     compatibility_branch_budget = _long_dependency_compatibility_branch_budget_blocker(
         calls,
         missing,
@@ -5725,6 +5807,10 @@ def build_long_build_state(task, calls, session=None):
             "source-built dependency/toolchain installation; once source help or configure exposes an external/prebuilt "
             "compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final "
             "artifact build instead of serially probing weaker branches. "
+            "A plain ignore-version or allow-unsupported configure retry is not the same as trying an exposed "
+            "external/prebuilt/system dependency branch; if that plain override fails with a dependency API or "
+            "library-location mismatch, install the missing prebuilt/dev package when available and retry the "
+            "external/prebuilt branch before starting version-pinned source toolchain work. "
             "If the source tree came from a VCS-generated tag/archive and dependency or API compatibility fails, "
             "check the authoritative source channel next: project docs, package-manager metadata, official release/"
             "distribution archive, signed checksum, release notes, or upstream download page. Do that before "
@@ -10472,10 +10558,11 @@ def format_work_session_resume(resume):
         blocker_priority = {
             "vendored_dependency_patch_surgery_before_supported_branch": 0,
             "external_branch_help_probe_too_narrow_before_source_toolchain": 1,
-            "compatibility_branch_budget_contract_missing": 2,
-            "external_dependency_source_provenance_unverified": 3,
-            "default_runtime_link_path_failed": 4,
-            "runtime_library_subdir_target_path_invalid": 5,
+            "source_toolchain_before_external_branch_attempt": 2,
+            "compatibility_branch_budget_contract_missing": 3,
+            "external_dependency_source_provenance_unverified": 4,
+            "default_runtime_link_path_failed": 5,
+            "runtime_library_subdir_target_path_invalid": 6,
         }
         display_blockers = sorted(
             long_build_state.get("strategy_blockers") or [],

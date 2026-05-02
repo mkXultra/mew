@@ -5684,6 +5684,340 @@ class WorkSessionTests(unittest.TestCase):
 
         self.assertNotIn("version_pinned_source_toolchain_before_compatibility_override", codes)
 
+    def test_work_session_resume_flags_source_toolchain_before_external_branch_attempt(self):
+        from mew.work_session import build_work_session_resume, format_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq libcoq-flocq menhir",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq menhir",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure --help | grep -Ei 'external|prebuilt|system|library|coq'",
+                    },
+                    "result": {
+                        "command": "./configure --help | grep -Ei 'external|prebuilt|system|library|coq'",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-ignore-coq-version\n-use-external-Flocq\n-use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Menhir... Error: cannot determine the location "
+                            "of the Menhir API library.\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y ocamlfind coq.8.16.1 menhir",
+                    },
+                    "result": {
+                        "command": "opam install -y ocamlfind coq.8.16.1 menhir",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "-> retrieved coq.8.16.1\n",
+                        "stderr": "Error: Unbound module MenhirLib.General\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
+        blocker = next(
+            item for item in blockers
+            if item.get("code") == "source_toolchain_before_external_branch_attempt"
+        )
+
+        self.assertEqual(blocker["source_tool_call_id"], 6)
+        self.assertEqual(blocker["external_branch_tool_call_id"], 3)
+        self.assertEqual(blocker["prebuilt_dependency_tool_call_id"], 2)
+        self.assertEqual(
+            resume["long_build_state"]["current_failure"]["failure_class"],
+            "dependency_strategy_unresolved",
+        )
+        self.assertEqual(
+            resume["long_build_state"]["current_failure"]["clear_condition"],
+            "the exposed external/prebuilt/system dependency branch is attempted before version-pinned source toolchain work",
+        )
+        text = format_work_session_resume(resume)
+        self.assertIn(
+            "long_build_strategy_blocker: source_toolchain_before_external_branch_attempt",
+            text,
+        )
+        self.assertIn("plain ignore-version", text)
+        self.assertIn("external/prebuilt branch", text)
+
+    def test_work_session_resume_does_not_flag_source_toolchain_after_external_branch_attempt(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "apt-get install -y coq libcoq-flocq"},
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-use-external-Flocq\n-use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure -ignore-coq-version -use-external-Flocq "
+                            "-use-external-MenhirLib x86_64-linux"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "External branch attempted but still incompatible.\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "opam install -y coq.8.16.1"},
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "timed_out": True,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("source_toolchain_before_external_branch_attempt", codes)
+
+    def test_work_session_resume_flags_source_toolchain_when_mismatch_precedes_external_help(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq libcoq-flocq menhir",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq menhir",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 4,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "Testing Menhir... Error: cannot determine the location "
+                            "of the Menhir API library.\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "-use-external-Flocq\n-use-external-MenhirLib\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "opam install -y coq.8.16.1"},
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "timed_out": True,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
+        blocker = next(
+            item for item in blockers
+            if item.get("code") == "source_toolchain_before_external_branch_attempt"
+        )
+
+        self.assertEqual(blocker["source_tool_call_id"], 6)
+        self.assertEqual(blocker["external_branch_tool_call_id"], 5)
+
+    def test_work_session_resume_does_not_flag_successful_help_api_library_text_as_mismatch(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq libcoq-flocq menhir",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq libcoq-flocq menhir",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "./configure --help"},
+                    "result": {
+                        "command": "./configure --help",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": (
+                            "-use-external-MenhirLib  Use an external Menhir API library.\n"
+                            "-use-external-Flocq      Use an external Flocq library.\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/CompCert", "command": "opam install -y coq.8.16.1"},
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "timed_out": True,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("source_toolchain_before_external_branch_attempt", codes)
+
     def test_work_session_resume_does_not_flag_source_toolchain_before_mismatch(self):
         from mew.work_session import build_work_session_resume
 

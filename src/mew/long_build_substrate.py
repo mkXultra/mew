@@ -88,6 +88,7 @@ _GENERIC_FAILURE_CLASS_BY_BLOCKER_CODE = {
     "version_pinned_source_toolchain_before_compatibility_override": "dependency_strategy_unresolved",
     "compatibility_branch_budget_contract_missing": "budget_reserve_violation",
     "external_branch_help_probe_too_narrow_before_source_toolchain": "dependency_strategy_unresolved",
+    "source_toolchain_before_external_branch_attempt": "dependency_strategy_unresolved",
     "external_dependency_source_provenance_unverified": "source_authority_unverified",
     "source_archive_version_grounding_too_strict": "source_authority_overconstrained",
     "vendored_dependency_patch_surgery_before_supported_branch": "dependency_strategy_unresolved",
@@ -3818,6 +3819,8 @@ def _clear_condition(code: object, contract: Mapping[str, object], missing: Iter
         return "source authority is grounded by project docs, package metadata, official release archive, checksum, or upstream page"
     if code_text == "external_branch_help_probe_too_narrow_before_source_toolchain":
         return "project help is inspected broadly enough to find external/prebuilt/system dependency branches"
+    if code_text == "source_toolchain_before_external_branch_attempt":
+        return "the exposed external/prebuilt/system dependency branch is attempted before version-pinned source toolchain work"
     if list(missing or []):
         paths = ", ".join(str(item.get("path") or "") for item in missing if isinstance(item, Mapping))
         return f"terminal command evidence proves required artifact(s): {paths}"
