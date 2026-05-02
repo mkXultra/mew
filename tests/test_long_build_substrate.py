@@ -8,14 +8,21 @@ from mew.long_build_substrate import (
     CommandEvidence,
     LONG_BUILD_SCHEMA_VERSION,
     LongBuildContract,
+    LongCommandRun,
     LongBuildState,
     RecoveryDecision,
     build_attempts_from_command_evidence,
     build_long_build_contract,
+    build_long_command_run,
     command_evidence_from_tool_call,
+    command_evidence_terminal_acceptance_success,
     command_evidence_to_tool_call,
     fresh_long_dependency_artifact_evidence,
+    long_command_idempotence_key,
+    long_command_output_ref,
+    long_command_yield_after_seconds,
     long_dependency_artifact_proven_by_command_evidence,
+    planned_long_build_command_budget_stage,
     reduce_long_build_state,
     summarize_env,
     synthesize_command_evidence_from_tool_calls,
@@ -88,6 +95,83 @@ def test_command_evidence_synthesis_ignores_write_tools_and_verify_command_field
     assert len(evidences) == 1
     assert evidences[0].source_tool_call_id == 3
     assert evidences[0].command == "test -x /tmp/FooCC/foocc"
+
+
+def test_planned_long_build_command_budget_stage_promotes_compound_configure_build_smoke():
+    contract = build_long_build_contract(
+        TASK_TEXT,
+        [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+        contract_id="work_session:1:long_build:1",
+    )
+    command = """set -eu
+cd /tmp/FooCC
+./configure x86_64-linux
+opam install -y ocamlfind coq
+make -j"$(nproc)" foocc
+cat > /tmp/foocc_smoke.c <<'EOF'
+int main(void) { return 0; }
+EOF
+/tmp/FooCC/foocc -o /tmp/foocc_smoke /tmp/foocc_smoke.c
+/tmp/foocc_smoke
+"""
+
+    stage = planned_long_build_command_budget_stage(
+        "run_command",
+        {"command": command, "cwd": "/app", "timeout": 2400},
+        contract,
+    )
+
+    assert stage in {"build", "default_smoke", "dependency_generation"}
+
+
+def test_planned_long_build_command_budget_stage_does_not_promote_pure_curl_source_fetch():
+    contract = build_long_build_contract(
+        TASK_TEXT,
+        [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+        contract_id="work_session:1:long_build:1",
+    )
+    command = """set -eu
+cd /tmp
+curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
+tar -xzf /tmp/make.tar.gz -C /tmp
+"""
+
+    stage = planned_long_build_command_budget_stage(
+        "run_command",
+        {"command": command, "cwd": "/app", "timeout": 1200},
+        contract,
+    )
+
+    assert stage == "source_acquisition"
+
+
+@pytest.mark.parametrize(
+    "readback",
+    [
+        "test -s /tmp/make.tar.gz",
+        "sha256sum /tmp/make.tar.gz",
+        "printf 'archive=/tmp/make.tar.gz\\n'",
+    ],
+)
+def test_planned_long_build_command_budget_stage_does_not_promote_source_fetch_readback(readback):
+    contract = build_long_build_contract(
+        TASK_TEXT,
+        [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+        contract_id="work_session:1:long_build:1",
+    )
+    command = f"""set -eu
+cd /tmp
+curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
+{readback}
+"""
+
+    stage = planned_long_build_command_budget_stage(
+        "run_command",
+        {"command": command, "cwd": "/app", "timeout": 1200},
+        contract,
+    )
+
+    assert stage == "source_acquisition"
 
 
 @pytest.mark.parametrize(
@@ -308,6 +392,71 @@ def test_command_evidence_terminal_success_is_required_for_artifact_proof():
     assert not long_dependency_artifact_proven_by_command_evidence(malformed, "/tmp/FooCC/foocc")
 
 
+@pytest.mark.parametrize("status", ["running", "yielded", "failed", "timed_out", "killed", "interrupted"])
+def test_nonterminal_or_non_success_command_evidence_cannot_prove_artifact(status):
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                9,
+                "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+                stdout="FooCC version 1.0\n",
+            )
+        ]
+    )[0].to_dict()
+    evidence["status"] = status
+    evidence["finish_order"] = 0 if status in {"running", "yielded"} else evidence["finish_order"]
+    evidence["terminal_success"] = True
+
+    assert not command_evidence_terminal_acceptance_success(evidence)
+    assert not long_dependency_artifact_proven_by_command_evidence(evidence, "/tmp/FooCC/foocc")
+
+
+def test_command_evidence_acceptance_rejects_completed_without_finish_order():
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                9,
+                "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+                stdout="FooCC version 1.0\n",
+            )
+        ]
+    )[0].to_dict()
+    evidence["finish_order"] = 0
+    evidence["terminal_success"] = True
+
+    assert not command_evidence_terminal_acceptance_success(evidence)
+    assert not long_dependency_artifact_proven_by_command_evidence(evidence, "/tmp/FooCC/foocc")
+
+
+def test_malformed_yielded_command_evidence_does_not_become_successful_attempt_or_smoke():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:malformed:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                9,
+                "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe && /tmp/probe",
+                stdout="FooCC ok\n",
+            )
+        ]
+    )[0].to_dict()
+    evidence["status"] = "yielded"
+    evidence["finish_order"] = 0
+    evidence["terminal_success"] = True
+
+    attempts = build_attempts_from_command_evidence([evidence], contract)
+    state = reduce_long_build_state(contract, attempts, [evidence])
+
+    assert attempts[0]["result"] == "yielded"
+    assert attempts[0]["stage"] != "default_smoke"
+    assert attempts[0]["produced_artifacts"] == []
+    assert state["status"] != "complete"
+
+
 def test_schema_helpers_have_versioned_minimum_shapes():
     command = CommandEvidence.from_dict(
         {
@@ -385,6 +534,226 @@ def test_schema_helpers_have_versioned_minimum_shapes():
     assert attempt.to_dict()["command_evidence_ref"] == {"kind": "command_evidence", "id": 3}
     assert state.to_dict()["kind"] == "long_build_state"
     assert decision.to_dict()["budget"]["reserve_seconds"] == 60
+
+
+def test_long_command_run_schema_round_trip_output_owner_and_env_policy():
+    run = build_long_command_run(
+        session_id=7,
+        ordinal=3,
+        task_id="source-build:foocc",
+        contract_id="work_session:7:long_build:1",
+        attempt_id="work_session:7:long_build:1:attempt:5",
+        tool_call_id=10,
+        stage="build",
+        selected_target="foocc",
+        command='make -j"$(nproc)" foocc',
+        cwd="/tmp/FooCC",
+        env={"CC": "clang", "OPENAI_API_KEY": "secret", "UNRELATED": "ignored"},
+        pid=12345,
+        process_group_id=12345,
+        owner_token="managed-runner:session-7:nonce-3",
+        running_command_evidence_ref={"kind": "command_evidence", "id": 10},
+        requested_timeout_seconds=1800,
+        effective_timeout_seconds=840,
+        work_wall_remaining_seconds=900,
+        stdout="x" * 1300,
+        stderr="warning\n",
+    )
+
+    assert run["schema_version"] == LONG_BUILD_SCHEMA_VERSION
+    assert run["id"] == "work_session:7:long_command:3"
+    assert run["running_command_evidence_ref"] == {"kind": "command_evidence", "id": 10}
+    assert run["terminal_command_evidence_ref"] is None
+    assert run["process"]["owner_token"] == "managed-runner:session-7:nonce-3"
+    assert run["budget"]["yield_after_seconds"] == 30
+    assert run["budget"]["continuation_count"] == 0
+    assert run["output"]["output_ref"] == long_command_output_ref(7, 3)
+    assert run["output"]["truncated"]
+    assert run["env_summary"]["items"] == [{"name": "CC", "value": "clang"}]
+    assert "artifact_missing_or_unproven" in run["reducer_hint"]["never_suppresses"]
+
+    round_trip = LongCommandRun.from_dict({**run, "future_field": {"kept": True}}).to_dict()
+
+    assert round_trip["future_field"] == {"kept": True}
+    assert round_trip["idempotence_key"] == run["idempotence_key"]
+
+
+def test_long_command_idempotence_key_uses_command_context_and_targets():
+    base = long_command_idempotence_key(
+        cwd="/tmp/FooCC",
+        command="make foocc",
+        contract_id="work_session:7:long_build:1",
+        stage="build",
+        selected_targets=["foocc"],
+    )
+
+    assert base == long_command_idempotence_key(
+        cwd="/tmp/FooCC",
+        command="make foocc",
+        contract_id="work_session:7:long_build:1",
+        stage="build",
+        selected_targets=["foocc"],
+    )
+    assert base != long_command_idempotence_key(
+        cwd="/tmp/FooCC",
+        command="make all",
+        contract_id="work_session:7:long_build:1",
+        stage="build",
+        selected_targets=["foocc"],
+    )
+
+
+def test_long_command_yield_after_must_be_less_than_effective_timeout():
+    assert long_command_yield_after_seconds(840) == 30
+    assert long_command_yield_after_seconds(30) is None
+    assert long_command_yield_after_seconds(10) is None
+
+
+def test_reduce_state_treats_running_long_command_as_in_progress_not_blocked():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:live:long_build:1",
+    )
+    run = build_long_command_run(
+        session_id="live",
+        ordinal=1,
+        task_id="source-build:foocc",
+        contract_id=contract["id"],
+        attempt_id="work_session:live:long_build:1:attempt:1",
+        tool_call_id=10,
+        stage="build",
+        selected_target="foocc",
+        command="make foocc",
+        cwd="/tmp/FooCC",
+        running_command_evidence_ref={"kind": "command_evidence", "id": 10},
+        work_wall_remaining_seconds=900,
+        stdout="building\n",
+    )
+
+    state = reduce_long_build_state(contract, [], [], long_command_runs=[run])
+
+    assert state["status"] == "in_progress"
+    assert state["current_failure"] is None
+    assert state["missing_artifacts"][0]["status"] == "missing_or_unproven"
+    assert state["latest_long_command_run_id"] == "work_session:live:long_command:1"
+    assert state["latest_live_command_evidence_id"] == 10
+    assert state["latest_build_stage"] == "build"
+    assert state["latest_nonterminal_reason"] == "long_command_running"
+    assert state["continuation_required"] is True
+    assert state["recovery_decision"]["allowed_next_action"]["kind"] == "poll_long_command"
+    assert state["recovery_decision"]["budget"]["continuation_count"] == 0
+
+
+def test_reduce_state_maps_timed_out_long_command_to_build_timeout_resume_decision():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:timeout:long_build:1",
+    )
+    run = build_long_command_run(
+        session_id="timeout",
+        ordinal=1,
+        task_id="source-build:foocc",
+        contract_id=contract["id"],
+        attempt_id="work_session:timeout:long_build:1:attempt:1",
+        tool_call_id=10,
+        stage="build",
+        selected_target="foocc",
+        command="make foocc",
+        cwd="/tmp/FooCC",
+        status="timed_out",
+        running_command_evidence_ref={"kind": "command_evidence", "id": 10},
+        effective_timeout_seconds=120,
+        continuation_count=1,
+        stderr="command timed out\n",
+    )
+
+    state = reduce_long_build_state(contract, [], [], long_command_runs=[run])
+
+    assert state["status"] == "blocked"
+    assert state["current_failure"]["failure_class"] == "build_timeout"
+    assert state["current_failure"]["long_command_run_id"] == "work_session:timeout:long_command:1"
+    assert state["recovery_decision"]["allowed_next_action"]["kind"] == "resume_idempotent_long_command"
+    assert "repeat_same_timeout_without_budget_change" in state["recovery_decision"]["prohibited_repeated_actions"]
+    assert state["recovery_decision"]["budget"]["continuation_count"] == 1
+
+
+def test_reduce_state_maps_failed_source_acquisition_long_command_to_repair_decision():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:source-fail:long_build:1",
+    )
+    run = build_long_command_run(
+        session_id="source-fail",
+        ordinal=1,
+        task_id="source-build:foocc",
+        contract_id=contract["id"],
+        attempt_id="work_session:source-fail:long_build:1:attempt:1",
+        tool_call_id=10,
+        stage="source_acquisition",
+        selected_target="foocc",
+        command="curl -fL https://example.invalid/foo-1.0.tar.gz -o /tmp/foo.tar.gz",
+        cwd="/tmp",
+        status="failed",
+        effective_timeout_seconds=1200,
+        work_wall_remaining_seconds=900,
+        stderr="curl: (22) The requested URL returned error: 404\n",
+    )
+    run["terminal"]["exit_code"] = 22
+
+    state = reduce_long_build_state(contract, [], [], long_command_runs=[run])
+
+    assert state["status"] == "blocked"
+    assert state["current_failure"]["failure_class"] == "source_acquisition_failed"
+    assert state["recovery_decision"]["allowed_next_action"]["kind"] == "repair_failed_long_command"
+    assert state["recovery_decision"]["allowed_next_action"]["failed_exit_code"] == 22
+    assert "repeat_same_timeout_without_budget_change" not in state["recovery_decision"]["prohibited_repeated_actions"]
+    assert "repeat_same_failed_source_url_without_new_source_channel" in state["recovery_decision"]["prohibited_repeated_actions"]
+
+
+def test_reduce_state_uses_latest_long_command_run_not_stale_live_run():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:latest:long_build:1",
+    )
+    stale_live = build_long_command_run(
+        session_id="latest",
+        ordinal=1,
+        task_id="source-build:foocc",
+        contract_id=contract["id"],
+        attempt_id="work_session:latest:long_build:1:attempt:1",
+        tool_call_id=10,
+        stage="build",
+        selected_target="foocc",
+        command="make foocc",
+        cwd="/tmp/FooCC",
+        status="running",
+        running_command_evidence_ref={"kind": "command_evidence", "id": 10},
+    )
+    latest_timeout = build_long_command_run(
+        session_id="latest",
+        ordinal=2,
+        task_id="source-build:foocc",
+        contract_id=contract["id"],
+        attempt_id="work_session:latest:long_build:1:attempt:2",
+        tool_call_id=11,
+        stage="build",
+        selected_target="foocc",
+        command="make foocc",
+        cwd="/tmp/FooCC",
+        status="timed_out",
+        running_command_evidence_ref={"kind": "command_evidence", "id": 11},
+    )
+
+    state = reduce_long_build_state(contract, [], [], long_command_runs=[stale_live, latest_timeout])
+
+    assert state["status"] == "blocked"
+    assert state["latest_long_command_run_id"] == "work_session:latest:long_command:2"
+    assert state["current_failure"]["failure_class"] == "build_timeout"
+    assert state["recovery_decision"]["allowed_next_action"]["kind"] == "resume_idempotent_long_command"
 
 
 def test_env_summary_omits_secrets_and_clips_whitelisted_values():
@@ -1267,6 +1636,75 @@ def test_default_smoke_rejects_if_wrapped_without_failure_exit_guard():
     assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
 
 
+def test_default_smoke_accepts_or_failure_exit_guard():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j6a:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/probe.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/probe /tmp/probe.c >/tmp/probe.log 2>&1 || { cat /tmp/probe.log; exit 1; }\n"
+        "test -x /tmp/probe\n"
+        "/tmp/probe\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, command, stdout=""),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "default_smoke"
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+
+
+def test_default_smoke_rejects_or_guard_without_failure_exit():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can compile and link a program by default.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:10j6a2:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/probe.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/probe /tmp/probe.c >/tmp/probe.log 2>&1 || { cat /tmp/probe.log; }\n"
+        "test -x /tmp/probe\n"
+        "/tmp/probe\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "curl -L -o /tmp/foocc.tar.gz https://example.test/foocc-1.0.tar.gz",
+                stdout="official release archive\n",
+            ),
+            _command_call(2, command, stdout=""),
+            _command_call(3, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC 1.0\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[1]["stage"] == "command"
+    assert {"id": "default_smoke", "required": True, "status": "unknown"} in state["stages"]
+    assert state["current_failure"]["failure_class"] == "runtime_default_path_unproven"
+
+
 def test_default_smoke_rejects_if_wrapped_with_unrelated_printed_failure_guard():
     contract = build_long_build_contract(
         "Under /tmp/FooCC, build the FooCC compiler from source. "
@@ -2048,7 +2486,7 @@ def test_source_authority_accepts_combined_final_proof_with_headers():
     assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
 
 
-def test_source_authority_accepts_validated_archive_loop_when_output_is_truncated():
+def test_source_authority_rejects_later_authoritative_loop_candidate_without_failure_evidence():
     contract = build_long_build_contract(
         "Under /tmp/WidgetCLI, build the Widget CLI from source. "
         "Ensure /tmp/WidgetCLI/widget can be invoked.",
@@ -2109,9 +2547,9 @@ def test_source_authority_accepts_validated_archive_loop_when_output_is_truncate
     state = reduce_long_build_state(contract, attempts, evidence)
 
     assert attempts[0]["stage"] == "source_acquisition"
-    assert {"signal": "source_authority", "excerpt": "validated source archive acquisition"} in attempts[0]["diagnostics"]
-    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
-    assert state["status"] == "complete"
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert state["status"] != "complete"
 
 
 def test_source_authority_accepts_validated_archive_loop_with_same_line_do_header():
@@ -2268,6 +2706,564 @@ def test_source_authority_correlates_direct_temp_fetch_move_with_later_archive_r
     state = reduce_long_build_state(contract, attempts, evidence)
 
     assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+
+
+def test_source_authority_correlates_absolute_fetch_with_parent_cwd_relative_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadback:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch\n"
+        "url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL --retry 3 -o \"$archive.tmp\" \"$url\"\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "root=$(tar -tzf \"$archive\" | sed -n '1s#/.*##p')\n"
+        "tar -tzf \"$archive\" \"$root/configure\"\n"
+        "rm -rf /tmp/WidgetCLI\n"
+        "mkdir -p /tmp/WidgetCLI\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "cd /tmp/WidgetCLI\n"
+        "make widget\n"
+    )
+    readback_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/widget-fetch\n"
+        "test -f widgetcli-v1.0.0.tar.gz\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+                    "later build failure\n"
+                ),
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "external_dependency_source_provenance_unverified",
+                "source_tool_call_id": 1,
+                "excerpt": "generated VCS archive without authoritative readback",
+            }
+        ],
+    )
+
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert not [
+        item
+        for item in state["strategy_blockers"]
+        if item.get("code") == "external_dependency_source_provenance_unverified"
+    ]
+
+
+def test_source_authority_correlates_structural_source_root_extraction_with_clipped_acquisition_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackstructural:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL --retry 3 -o \"$archive.tmp\" \"$url\"\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "cd /tmp/WidgetCLI\n"
+        "make widget\n"
+    )
+    readback_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/widget-fetch\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="fetch and extract completed before output clipping\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "external_dependency_source_provenance_unverified",
+                "source_tool_call_id": 1,
+                "excerpt": "generated VCS archive without authoritative readback",
+            }
+        ],
+    )
+
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_without_parent_cwd():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackreject:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_after_leaving_parent_cwd():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackleave:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/widget-fetch\n"
+        "cd /tmp/other-fetch\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_with_later_cd_variable_reassignment():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackvar:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "d=/tmp/other-fetch\n"
+        "cd \"$d\"\n"
+        "d=/tmp/widget-fetch\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_after_control_flow_cd_leaves_parent():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackifleave:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/widget-fetch\n"
+        "if true; then\n"
+        "  cd /tmp/other-fetch\n"
+        "fi\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_after_pushd_leaves_parent():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackpushd:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/widget-fetch\n"
+        "pushd /tmp/other-fetch >/dev/null\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_after_builtin_cd_leaves_parent():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackbuiltincd:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/widget-fetch\n"
+        "builtin cd /tmp/other-fetch\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_from_parent_escape_path():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackescape:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "cd /tmp/widget-fetch\n"
+        "sha256sum ../other/widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf ../other/widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "../other/widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_relative_archive_readback_after_unexecuted_parent_cwd_branch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2relreadbackif:long_build:1",
+    )
+    acquisition_command = (
+        "set -euo pipefail\n"
+        "mkdir -p /tmp/widget-fetch /tmp/WidgetCLI\n"
+        "archive=/tmp/widget-fetch/widgetcli-v1.0.0.tar.gz\n"
+        "rm -f \"$archive\" \"$archive.tmp\"\n"
+        "curl -fL -o \"$archive.tmp\" https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "mv \"$archive.tmp\" \"$archive\"\n"
+        "tar -tzf \"$archive\" WidgetCLI-1.0.0/configure\n"
+        "tar -xzf \"$archive\" -C /tmp/WidgetCLI --strip-components=1\n"
+        "make -C /tmp/WidgetCLI widget\n"
+    )
+    stale_readback_command = (
+        "set -euo pipefail\n"
+        "if false; then\n"
+        "  cd /tmp/widget-fetch\n"
+        "fi\n"
+        "sha256sum widgetcli-v1.0.0.tar.gz\n"
+        "tar -tzf widgetcli-v1.0.0.tar.gz WidgetCLI-1.0.0/configure WidgetCLI-1.0.0/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                acquisition_command,
+                exit_code=2,
+                stdout="later build failure\n",
+                stderr="make: *** [widget] Error 2\n",
+            ),
+            _command_call(
+                2,
+                stale_readback_command,
+                stdout=(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+                    "widgetcli-v1.0.0.tar.gz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            ),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
 
 
 def test_source_authority_rejects_failed_direct_temp_fetch_with_later_stale_readback():
@@ -3273,6 +4269,336 @@ def test_source_authority_rejects_direct_fetch_inside_unexecuted_heredoc():
     )
     evidence = synthesize_command_evidence_from_tool_calls(
         [_command_call(1, command, stdout="extracted\n")]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "read archive_url <<'EOF'\nhttps://example.invalid/bad-1.0.0.tar.gz\nEOF",
+        "builtin read archive_url <<'EOF'\nhttps://example.invalid/bad-1.0.0.tar.gz\nEOF",
+        "command read archive_url <<'EOF'\nhttps://example.invalid/bad-1.0.0.tar.gz\nEOF",
+        "command -- read archive_url <<'EOF'\nhttps://example.invalid/bad-1.0.0.tar.gz\nEOF",
+        "builtin printf -v archive_url '%s' https://example.invalid/bad-1.0.0.tar.gz",
+        "command printf -v archive_url '%s' https://example.invalid/bad-1.0.0.tar.gz",
+        "eval archive_url=https://example.invalid/bad-1.0.0.tar.gz",
+        (
+            "cat >/tmp/seturl.sh <<'EOF'\n"
+            "archive_url=https://example.invalid/bad-1.0.0.tar.gz\n"
+            "EOF\n"
+            "source /tmp/seturl.sh"
+        ),
+        (
+            "cat >/tmp/seturl.sh <<'EOF'\n"
+            "archive_url=https://example.invalid/bad-1.0.0.tar.gz\n"
+            "EOF\n"
+            ". /tmp/seturl.sh"
+        ),
+        "mapfile archive_url <<'EOF'\nhttps://example.invalid/bad-1.0.0.tar.gz\nEOF",
+        "readarray archive_url <<'EOF'\nhttps://example.invalid/bad-1.0.0.tar.gz\nEOF",
+    ],
+)
+def test_source_authority_rejects_direct_fetch_after_url_variable_mutation(mutation: str):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k2:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "archive=/tmp/widgetcli-1.0.0.tgz\n"
+        "archive_url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        f"{mutation}\n"
+        "curl -fL \"$archive_url\" -o \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf \"$archive\" -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_direct_fetch_segment_with_mixed_remote_urls():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k3:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "curl -fL -o /tmp/widgetcli-1.0.0.tgz "
+        "https://example.invalid/bad-1.0.0.tar.gz "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_direct_fetch_segment_with_mixed_curl_url_option():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k4:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "curl -fL -o /tmp/widgetcli-1.0.0.tgz "
+        "--url=https://example.invalid/bad-1.0.0.tar.gz "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_direct_fetch_segment_with_curl_config_url():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k5:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/curl.cfg <<'EOF'\n"
+        "url = https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "curl -fL -K /tmp/curl.cfg -o /tmp/widgetcli-1.0.0.tgz "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_direct_fetch_segment_with_wget_input_file_url():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k6:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/wget-urls.txt <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "wget -O /tmp/widgetcli-1.0.0.tgz --input-file=/tmp/wget-urls.txt "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_direct_fetch_segment_with_dynamic_extra_source_operand():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k7:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "read bad_url <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$bad_url\" "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_direct_fetch_segment_with_command_substitution_source_operand():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k8:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/bad-url.txt <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$(cat /tmp/bad-url.txt)\" "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_direct_fetch_segment_with_schemeless_extra_source_operand():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2k9:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "curl -fL -o /tmp/widgetcli-1.0.0.tgz example.invalid/bad-1.0.0.tar.gz "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/widgetcli-1.0.0.tgz\n"
+                    "WidgetCLI-1.0.0/configure\n"
+                ),
+            )
+        ]
     )
     attempts = build_attempts_from_command_evidence(evidence, contract)
     state = reduce_long_build_state(contract, attempts, evidence)
@@ -6992,6 +8318,1837 @@ def test_reducer_clears_stale_strategy_blockers_after_final_contract_proof():
         "vendored_dependency_patch_surgery_before_supported_branch",
     ]
     assert state["status"] == "complete"
+
+
+def test_reducer_projects_final_artifact_and_default_smoke_closeout_after_stale_dependency_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b2:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  printf '%s\\n' \"$u\"\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "test -n \"$archive_url\"\n"
+        "printf '== selected archive ==\\n%s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "root=\"$(tar -tzf \"$archive\" | sed -n '1s#/.*##p')\"\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv \"/tmp/$root\" /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    dependency_failure_command = "set -eu\ncd /tmp/FooCC\nmake ccomp"
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "printf '== final source/config readback ==\\n'\n"
+        "test -f /tmp/foocc-1.2.3.tar.gz\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "sed -n '1,20p' Makefile.config\n"
+        "printf '== final artifact proof ==\\n'\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "ls -l /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "printf '== final default compile/link/run smoke ==\\n'\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c >/tmp/foocc-final-smoke.log 2>&1 || { cat /tmp/foocc-final-smoke.log; exit 1; }\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    final_stdout = (
+        "== final source/config readback ==\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "PREFIX=/usr/local\n"
+        "== final artifact proof ==\n"
+        "-rwxr-xr-x 1 root root 123 /tmp/FooCC/foocc\n"
+        "FooCC version 1.2.3\n"
+        "== final default compile/link/run smoke ==\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(
+                2,
+                dependency_failure_command,
+                stdout="Error: Can't find file ./Axioms.v\n",
+                exit_code=2,
+            ),
+            _command_call(3, final_command, stdout=final_stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "dependency_generation_order_issue",
+                "source_tool_call_id": 2,
+                "excerpt": "Error: Can't find file ./Axioms.v",
+            }
+        ],
+    )
+
+    assert attempts[-1]["stage"] == "default_smoke"
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+    assert state["strategy_blockers"] == []
+    assert [item["code"] for item in state["cleared_strategy_blockers"]] == [
+        "dependency_generation_order_issue",
+    ]
+    assert state["status"] == "complete"
+
+
+def test_reducer_projects_saved_source_url_archive_readback_closeout_after_compacted_acquisition():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b2compact:long_build:1",
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "printf '== source authority ==\\n'\n"
+        "test -f /tmp/foocc-source-url.txt\n"
+        "cat /tmp/foocc-source-url.txt\n"
+        "test -f /tmp/foocc-1.2.3.tar.gz\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "printf '== final artifact proof ==\\n'\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "ls -l /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "printf '== final default compile/link/run smoke ==\\n'\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    final_stdout = (
+        "== source authority ==\n"
+        "source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+        "== final artifact proof ==\n"
+        "-rwxr-xr-x 1 root root 123 /tmp/FooCC/foocc\n"
+        "FooCC version 1.2.3\n"
+        "== final default compile/link/run smoke ==\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "set -eu\ncd /tmp/FooCC\nmake depend",
+                stdout="Error: Can't find file ./Axioms.v\n",
+                exit_code=2,
+            ),
+            _command_call(2, final_command, stdout=final_stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "dependency_generation_order_issue",
+                "source_tool_call_id": 1,
+                "excerpt": "Error: Can't find file ./Axioms.v",
+            }
+        ],
+    )
+
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+    assert state["strategy_blockers"] == []
+    assert [item["code"] for item in state["cleared_strategy_blockers"]] == [
+        "dependency_generation_order_issue",
+    ]
+    assert state["status"] == "complete"
+
+
+def test_reducer_rejects_fabricated_saved_source_url_archive_readback_closeout():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b2fakecompact:long_build:1",
+    )
+    fabricate_command = (
+        "set -eu\n"
+        "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+        "> /tmp/foocc-source-url.txt\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "cat /tmp/foocc-source-url.txt\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    final_stdout = (
+        "source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+        "FooCC version 1.2.3\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, fabricate_command),
+            _command_call(2, final_command, stdout=final_stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "dependency_generation_order_issue",
+                "source_tool_call_id": 1,
+                "excerpt": "stale dependency failure",
+            }
+        ],
+    )
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert [item["code"] for item in state["strategy_blockers"]] == ["dependency_generation_order_issue"]
+    assert state["cleared_strategy_blockers"] == []
+    assert state["status"] != "complete"
+
+
+@pytest.mark.parametrize(
+    ("fabricate_command", "exit_code"),
+    [
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "> /tmp/foocc-source-url.txt\n"
+            "exit 2\n",
+            2,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "> /tmp/foocc-source-url.txt\n"
+            "curl -fL -o /tmp/foocc-1.2.3.tar.gz https://example.invalid/bad-1.2.3.tar.gz || true\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "1> /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            ">| /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "1>| /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "&> /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "&>> /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "p=/tmp/foocc-source-url.txt\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "> \"$p\"\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "dir=/tmp\n"
+            "p=\"$dir/foocc-source-url.txt\"\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "> \"$p\"\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n'>"
+            "/tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "p=/tmp/foocc-source-url.txt\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n'>\"$p\"\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "read p <<'EOF'\n"
+            "/tmp/foocc-source-url.txt\n"
+            "EOF\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "> \"$p\"\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf -v p '%s' /tmp/foocc-source-url.txt\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "> \"$p\"\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "read p <<'EOF'\n"
+            "/tmp/foocc-source-url.txt\n"
+            "EOF\n"
+            "cat > \"$p\" <<'EOF'\n"
+            "source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+            "EOF\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "read p <<'EOF'\n"
+            "/tmp/foocc-source-url.txt\n"
+            "EOF\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "| tee \"$p\" >/dev/null\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "read p <<'EOF'\n"
+            "/tmp/foocc-source-url.txt\n"
+            "EOF\n"
+            "url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+            "printf '%s=%s\\n' source_url \"$url\" > \"$p\"\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "read p <<'EOF'\n"
+            "/tmp/foocc-source-url.txt\n"
+            "EOF\n"
+            "url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+            "printf '%s=%s\\n' source_url \"$url\" | tee \"$p\" >/dev/null\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "> >(tee /tmp/foocc-source-url.txt >/dev/null)\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "cat >/tmp/tmp-source-url-content.txt <<'EOF'\n"
+            "source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+            "EOF\n"
+            "cp /tmp/tmp-source-url-content.txt /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "cat >/tmp/tmp-source-url-content.txt <<'EOF'\n"
+            "source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+            "EOF\n"
+            "install -m 0644 /tmp/tmp-source-url-content.txt /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "cat >/tmp/tmp-source-url-content.txt <<'EOF'\n"
+            "source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+            "EOF\n"
+            "mv /tmp/tmp-source-url-content.txt /tmp/foocc-source-url.txt\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "| dd of=/tmp/foocc-source-url.txt status=none\n",
+            0,
+        ),
+        (
+            "set -eu\n"
+            "read p <<'EOF'\n"
+            "/tmp/foocc-source-url.txt\n"
+            "EOF\n"
+            "printf 'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n' "
+            "| dd of=\"$p\" status=none\n",
+            0,
+        ),
+        (
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "Path('/tmp/foocc-source-url.txt').write_text("
+            "'source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n'"
+            ")\n"
+            "PY\n",
+            0,
+        ),
+        (
+            "python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "target = Path('/tmp') / ('foocc-' + 'source-' + 'url.txt')\n"
+            "target.write_text('source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\\n')\n"
+            "PY\n",
+            0,
+        ),
+    ],
+)
+def test_reducer_rejects_unvalidated_current_window_saved_source_url_writer_closeout(
+    fabricate_command,
+    exit_code,
+):
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b2fakecompact2:long_build:1",
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "cat /tmp/foocc-source-url.txt\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    final_stdout = (
+        "source_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+        "FooCC version 1.2.3\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, fabricate_command, exit_code=exit_code),
+            _command_call(2, final_command, stdout=final_stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "dependency_generation_order_issue",
+                "source_tool_call_id": 1,
+                "excerpt": "stale dependency failure",
+            }
+        ],
+    )
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert [item["code"] for item in state["strategy_blockers"]] == ["dependency_generation_order_issue"]
+    assert state["cleared_strategy_blockers"] == []
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_requires_selected_url_fetch_correlation():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b3:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "bad_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "test -n \"$archive_url\"\n"
+        "printf '== selected archive ==\\n%s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$bad_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "/tmp/FooCC/foocc --version\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c >/tmp/foocc-final-smoke.log 2>&1 || { cat /tmp/foocc-final-smoke.log; exit 1; }\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command, stdout="FooCC version 1.2.3\n"),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "dependency_generation_order_issue",
+                "source_tool_call_id": 1,
+                "excerpt": "stale dependency failure",
+            }
+        ],
+    )
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert [item["code"] for item in state["strategy_blockers"]] == ["dependency_generation_order_issue"]
+    assert state["cleared_strategy_blockers"] == []
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_ignores_failed_authoritative_candidate_output():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b4:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "bad_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "printf 'trying %s\\n' https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "archive_url=\"$bad_url\"\n"
+        "printf '== selected archive ==\\n%s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "trying https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "== selected archive ==\n"
+        "https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_requires_fetch_after_selected_marker():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b5:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "printf '== selected archive ==\\n%s\\n' \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_alias_mutation_after_marker():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b6:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "printf '== selected archive ==\\n%s\\n' \"$archive_url\"\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+@pytest.mark.parametrize(
+    "mutation_line",
+    [
+        "archive_url+=https://example.invalid/bad-1.2.3.tar.gz",
+        "export archive_url+=https://example.invalid/bad-1.2.3.tar.gz",
+        "declare archive_url+=https://example.invalid/bad-1.2.3.tar.gz",
+        "typeset archive_url+=https://example.invalid/bad-1.2.3.tar.gz",
+        "local archive_url+=https://example.invalid/bad-1.2.3.tar.gz",
+        "readonly archive_url=https://example.invalid/bad-1.2.3.tar.gz",
+        "readonly archive_url+=https://example.invalid/bad-1.2.3.tar.gz",
+        "unset archive_url",
+        "read archive_url <<'EOF'\nhttps://example.invalid/bad-1.2.3.tar.gz\nEOF",
+        "printf -v archive_url '%s' https://example.invalid/bad-1.2.3.tar.gz",
+    ],
+)
+def test_selected_archive_source_authority_rejects_alias_append_mutation_after_marker(mutation_line: str):
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id=f"work_session:12b7:{mutation_line}:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "printf '== selected archive ==\\n%s\\n' \"$archive_url\"\n"
+        f"{mutation_line}\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_literal_url_marker_with_variable_mention():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b8:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  selected_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "printf '== selected archive ==\\nhttps://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz %s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_marker_printing_different_variable():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12b9:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "selected_url=''\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  selected_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "printf '== selected archive ==\\n%s mentioned %s\\n' \"$selected_url\" \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz mentioned https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_non_print_marker_command():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12ba:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "test \"$archive_url\" = \"$archive_url\" # selected archive\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_redirected_marker_command():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12bb:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "selected_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "printf '== selected archive ==\\n%s\\n' \"$selected_url\"\n"
+        "printf 'selected archive %s\\n' \"$archive_url\" >/dev/null\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_multiple_markers_with_later_nonauthoritative_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12bc:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "selected_url=https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "printf '== selected archive ==\\n%s\\n' \"$selected_url\"\n"
+        "printf '== selected archive ==\\n%s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "== selected archive ==\n"
+        "https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_marker_command_substitution_output():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12bd:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "printf '%s\\n' https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz >/tmp/authurl\n"
+        "printf '== selected archive ==\\n%s\\n%s\\n' \"$(cat /tmp/authurl)\" \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_printf_v_marker_command():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12be:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "cat <<'EOF'\n"
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "EOF\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "printf -v marker_copy 'selected archive %s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_marker_stdout_split_from_selected_output():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12bf:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "cat <<'EOF'\n"
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "EOF\n"
+        "archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "printf 'selected archive %s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "selected archive https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_loop_body_alias_reassignment():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12bg:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "for u in https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  archive_url=https://example.invalid/bad-1.2.3.tar.gz\n"
+        "  break\n"
+        "done\n"
+        "cat <<'EOF'\n"
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "EOF\n"
+        "printf 'selected archive %s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "selected archive https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_selected_archive_source_authority_rejects_loop_alias_later_authoritative_candidate():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12bg2:long_build:1",
+    )
+    source_command = (
+        "set -eu\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "archive_url=''\n"
+        "for u in https://example.invalid/bad-1.2.3.tar.gz "
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz; do\n"
+        "  archive_url=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "cat <<'EOF'\n"
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "EOF\n"
+        "printf 'selected archive %s\\n' \"$archive_url\"\n"
+        "curl -fL -o \"$archive\" \"$archive_url\"\n"
+        "test -f \"$archive\"\n"
+        "sha256sum \"$archive\"\n"
+        "tar -tzf \"$archive\" FooCC-1.2.3/configure FooCC-1.2.3/Makefile\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+    )
+    source_stdout = (
+        "== selected archive ==\n"
+        "https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz\n"
+        "selected archive https://example.invalid/bad-1.2.3.tar.gz\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    final_command = (
+        "set -eu\n"
+        "cd /tmp/FooCC\n"
+        "test -x /tmp/FooCC/foocc\n"
+        "cat >/tmp/foocc-final-smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc -o /tmp/foocc-final-smoke /tmp/foocc-final-smoke.c\n"
+        "test -x /tmp/foocc-final-smoke\n"
+        "/tmp/foocc-final-smoke\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, stdout=source_stdout),
+            _command_call(2, final_command),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] != "complete"
+
+
+def test_source_authority_rejects_for_loop_variable_reassignment_before_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bh:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "for u in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  u=https://example.invalid/bad-1.0.0.tar.gz\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_for_loop_later_authoritative_candidate_after_bad_first():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bh2:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "for u in https://example.invalid/bad-1.0.0.tar.gz "
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_for_loop_fetch_with_mixed_remote_urls():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bh3:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "for u in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz https://example.invalid/bad-1.0.0.tar.gz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_for_loop_fetch_with_mixed_curl_url_option():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bh4:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "for u in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz --url=https://example.invalid/bad-1.0.0.tar.gz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_for_loop_fetch_with_curl_config_url():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bh5:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/curl.cfg <<'EOF'\n"
+        "url = https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "for u in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -K /tmp/curl.cfg -o /tmp/widgetcli-1.0.0.tgz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_for_loop_fetch_with_wget_input_file_url():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bh6:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/wget-urls.txt <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "for u in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  wget -O /tmp/widgetcli-1.0.0.tgz --input-file=/tmp/wget-urls.txt \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_for_loop_fetch_with_command_substitution_source_operand():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bh7:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/bad-url.txt <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "for u in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$(cat /tmp/bad-url.txt)\" \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_while_read_candidate_path_variable_mutation():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bi:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/auth-candidates.txt <<'EOF'\n"
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "EOF\n"
+        "cat >/tmp/bad-candidates.txt <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "candidates=/tmp/auth-candidates.txt\n"
+        "read candidates <<'EOF'\n"
+        "/tmp/bad-candidates.txt\n"
+        "EOF\n"
+        "while read u; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done < \"$candidates\"\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_while_read_fetch_with_mixed_remote_urls():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bi2:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/candidates.txt <<'EOF'\n"
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "EOF\n"
+        "while read u; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz https://example.invalid/bad-1.0.0.tar.gz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done < /tmp/candidates.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_while_read_candidate_file_overwrite():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bj:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/candidates.txt <<'EOF'\n"
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "EOF\n"
+        "cat >/tmp/candidates.txt <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "while read u; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done < /tmp/candidates.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_while_read_later_authoritative_candidate_after_bad_first():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:12bk:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "cat >/tmp/candidates.txt <<'EOF'\n"
+        "https://example.invalid/bad-1.0.0.tar.gz\n"
+        "EOF\n"
+        "cat >>/tmp/candidates.txt <<'EOF'\n"
+        "https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+        "EOF\n"
+        "while read u; do\n"
+        "  rm -f /tmp/widgetcli-1.0.0.tgz\n"
+        "  curl -fL -o /tmp/widgetcli-1.0.0.tgz \"$u\"\n"
+        "  tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "  found=\"$u\"\n"
+        "  break\n"
+        "done < /tmp/candidates.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                stdout=(
+                    "WidgetCLI-1.0.0/configure\n"
+                    "WidgetCLI-1.0.0/Makefile\n"
+                ),
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
 
 
 def test_reducer_clears_runtime_install_blocker_after_if_wrapped_default_smoke_and_direct_source_url():

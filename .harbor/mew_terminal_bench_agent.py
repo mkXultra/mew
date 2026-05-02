@@ -180,6 +180,8 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
                 "timed_out": timed_out,
                 "timeout_seconds": self.timeout_seconds,
                 "mew_max_wall_seconds": mew_max_wall_seconds,
+                "timeout_reserve_seconds": self._timeout_reserve_for_shape(),
+                "timeout_shape": self._timeout_shape({}),
                 "cwd": self.command_cwd,
             },
         )
@@ -283,8 +285,31 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         report = self._read_json(report_path)
         if not report:
             report = self._report_from_stdout(transcript)
-            if report:
-                self._write_json(report_path, report)
+        if not report:
+            timeout_reason = (
+                "outer_timeout_before_mew_report"
+                if transcript.get("timed_out")
+                else "mew_report_unavailable"
+            )
+            report = {
+                "summary": "unavailable",
+                "work_exit_code": transcript.get("exit_code"),
+                "work_report": {"stop_reason": timeout_reason},
+                "verification": {
+                    "passed": False,
+                    "reason": timeout_reason,
+                },
+            }
+        timeout_shape = self._timeout_shape(report)
+        report["timeout_shape"] = timeout_shape
+        report["timeout_status"] = {
+            "timed_out": transcript.get("timed_out", False),
+            "timeout_seconds": transcript.get("timeout_seconds"),
+        }
+        self._write_json(report_path, report)
+        transcript["timeout_shape"] = timeout_shape
+        transcript["timeout_reserve_seconds"] = timeout_shape.get("timeout_reserve_seconds")
+        self._write_json(task_dir / "command-transcript.json", transcript)
         summary = {
             "task_id": self._context_get(context, "task_id"),
             "artifact_dir": str(task_dir),
@@ -294,6 +319,7 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
                 "timed_out": transcript.get("timed_out", False),
                 "timeout_seconds": transcript.get("timeout_seconds"),
             },
+            "timeout_shape": timeout_shape,
             "cost_token_metadata": report.get("usage", "unavailable"),
         }
         self._write_json(task_dir / "summary.json", summary)
@@ -346,6 +372,61 @@ class MewTerminalBenchAgent(BaseInstalledAgent):
         proportional_reserve = max(1, int(timeout_seconds * 0.1))
         reserve = min(configured_reserve, proportional_reserve)
         return max(1, timeout_seconds - reserve)
+
+    def _timeout_reserve_for_shape(self) -> int | None:
+        if self.timeout_seconds is None:
+            return None
+        mew_max_wall_seconds = self._mew_max_wall_seconds()
+        if mew_max_wall_seconds is None:
+            return None
+        return max(0, int(self.timeout_seconds) - int(mew_max_wall_seconds))
+
+    def _timeout_shape(self, report: dict[str, Any]) -> dict[str, Any]:
+        mew_max_wall_seconds = self._mew_max_wall_seconds()
+        reserve = self._timeout_reserve_for_shape()
+        latest_long_command = self._latest_long_command_from_report(report)
+        return {
+            "agent_timeout_seconds": self.timeout_seconds,
+            "mew_max_wall_seconds": mew_max_wall_seconds,
+            "timeout_reserve_seconds": reserve,
+            "matched_outer_inner_timeout": bool(
+                self.timeout_seconds is not None
+                and mew_max_wall_seconds is not None
+                and reserve is not None
+                and mew_max_wall_seconds < self.timeout_seconds
+            ),
+            "diagnostic_timeout_shape": self.timeout_seconds is not None and mew_max_wall_seconds is not None,
+            "latest_long_command_run_id": latest_long_command.get("latest_long_command_run_id"),
+            "latest_long_command_status": latest_long_command.get("latest_long_command_status"),
+        }
+
+    @classmethod
+    def _latest_long_command_from_report(cls, report: dict[str, Any]) -> dict[str, Any]:
+        for candidate in cls._report_resume_candidates(report):
+            long_build_state = candidate.get("long_build_state") if isinstance(candidate, dict) else {}
+            if isinstance(long_build_state, dict) and long_build_state.get("latest_long_command_run_id"):
+                return {
+                    "latest_long_command_run_id": long_build_state.get("latest_long_command_run_id"),
+                    "latest_long_command_status": long_build_state.get("latest_long_command_status"),
+                }
+        return {}
+
+    @classmethod
+    def _report_resume_candidates(cls, report: dict[str, Any]) -> list[dict[str, Any]]:
+        if not isinstance(report, dict):
+            return []
+        candidates: list[dict[str, Any]] = []
+        for key in ("resume", "work_session_resume"):
+            value = report.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+        for key in ("work_report", "work_session"):
+            value = report.get(key)
+            if isinstance(value, dict):
+                resume = value.get("resume")
+                if isinstance(resume, dict):
+                    candidates.append(resume)
+        return candidates
 
     @staticmethod
     def _is_command_timeout_exception(exc: RuntimeError) -> bool:

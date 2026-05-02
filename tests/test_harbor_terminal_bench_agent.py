@@ -263,6 +263,10 @@ def test_run_expands_mew_wall_budget_placeholders_from_timeout_seconds(tmp_path)
     assert environment.exec_kwargs[0]["timeout_sec"] == 120
     assert transcript["timeout_seconds"] == 120
     assert transcript["mew_max_wall_seconds"] == 108
+    assert transcript["timeout_shape"]["agent_timeout_seconds"] == 120
+    assert transcript["timeout_shape"]["mew_max_wall_seconds"] == 108
+    assert transcript["timeout_shape"]["timeout_reserve_seconds"] == 12
+    assert transcript["timeout_shape"]["matched_outer_inner_timeout"] is True
 
 
 def test_run_omits_mew_wall_budget_option_when_timeout_delegates_to_harbor(tmp_path):
@@ -353,11 +357,49 @@ def test_missing_optional_metadata_is_unavailable_and_context_dict_supported(tmp
     assert transcript["stderr"] == "err"
     assert transcript["exit_code"] == 2
     assert summary["work_session_or_report_summary"] == "unavailable"
-    assert summary["verifier_result"] == "unavailable"
+    assert summary["verifier_result"] == {"passed": False, "reason": "outer_timeout_before_mew_report"}
     assert summary["timeout_status"] == {"timed_out": True, "timeout_seconds": 5}
+    assert summary["timeout_shape"]["agent_timeout_seconds"] == 5
+    assert summary["timeout_shape"]["diagnostic_timeout_shape"] is True
     assert summary["cost_token_metadata"] == "unavailable"
     assert context["mew_terminal_bench_artifact_dir"] == str(task_dir)
     assert context["mew_terminal_bench_summary"] == summary
+
+
+def test_timeout_shape_links_latest_long_command_from_mew_report(tmp_path):
+    module = load_agent_module()
+    stdout_report = {
+        "summary": "long command still running",
+        "work_report": {
+            "resume": {
+                "long_build_state": {
+                    "latest_long_command_run_id": "work_session:1:long_command:3",
+                    "latest_long_command_status": "running",
+                }
+            }
+        },
+    }
+    agent = module.MewTerminalBenchAgent(
+        command_template="mew work --oneshot --instruction {instruction_shell}",
+        artifact_root=tmp_path,
+        timeout_seconds=120,
+        timeout_reserve_seconds=30,
+    )
+    environment = FakeHarborEnvironment(SimpleNamespace(return_code=0, stdout=json.dumps(stdout_report), stderr=""))
+    context = {"task_id": "long-command-task"}
+
+    asyncio.run(agent.run("instruction", environment, context))
+
+    task_dir = tmp_path / "long-command-task"
+    transcript = json.loads((task_dir / "command-transcript.json").read_text(encoding="utf-8"))
+    report = json.loads((task_dir / "mew-report.json").read_text(encoding="utf-8"))
+    summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert transcript["timeout_shape"]["latest_long_command_run_id"] == "work_session:1:long_command:3"
+    assert transcript["timeout_shape"]["latest_long_command_status"] == "running"
+    assert report["timeout_shape"] == transcript["timeout_shape"]
+    assert report["timeout_status"] == {"timed_out": False, "timeout_seconds": 120}
+    assert summary["timeout_shape"] == transcript["timeout_shape"]
 
 
 def test_run_captures_nonzero_command_exit_without_harbor_exception(tmp_path):
@@ -401,7 +443,9 @@ def test_run_captures_nonzero_command_exit_without_harbor_exception(tmp_path):
     ]
     assert transcript["exit_code"] == 1
     assert transcript["stderr"] == "token expired"
-    assert report == stdout_report
+    assert {key: report[key] for key in stdout_report} == stdout_report
+    assert report["timeout_status"] == {"timed_out": False, "timeout_seconds": 5}
+    assert report["timeout_shape"]["agent_timeout_seconds"] == 5
     assert summary["work_session_or_report_summary"] == "work attempt ended with model error"
     assert context["mew_terminal_bench_artifact_dir"] == str(task_dir)
     assert context["mew_terminal_bench_summary"] == summary
@@ -421,6 +465,7 @@ def test_run_captures_command_timeout_without_harbor_exception(tmp_path):
 
     task_dir = tmp_path / "timeout-task"
     transcript = json.loads((task_dir / "command-transcript.json").read_text(encoding="utf-8"))
+    report = json.loads((task_dir / "mew-report.json").read_text(encoding="utf-8"))
     summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
 
     assert stdout == ""
@@ -429,7 +474,12 @@ def test_run_captures_command_timeout_without_harbor_exception(tmp_path):
     assert transcript["timed_out"] is True
     assert transcript["timeout_seconds"] == 5
     assert "Command timed out after 900 seconds" in transcript["stderr"]
+    assert report["work_report"]["stop_reason"] == "outer_timeout_before_mew_report"
+    assert report["verification"]["passed"] is False
+    assert report["timeout_status"] == {"timed_out": True, "timeout_seconds": 5}
+    assert report["timeout_shape"] == transcript["timeout_shape"]
     assert summary["timeout_status"] == {"timed_out": True, "timeout_seconds": 5}
+    assert summary["timeout_shape"] == transcript["timeout_shape"]
     assert summary["work_session_or_report_summary"] == "unavailable"
     assert context["mew_terminal_bench_artifact_dir"] == str(task_dir)
     assert context["mew_terminal_bench_summary"] == summary
@@ -475,7 +525,9 @@ def test_stdout_report_fallback_writes_report_and_context_summary(tmp_path):
     summary = json.loads((task_dir / "summary.json").read_text(encoding="utf-8"))
 
     assert stdout == json.dumps(stdout_report)
-    assert report == stdout_report
+    assert {key: report[key] for key in stdout_report} == stdout_report
+    assert report["timeout_status"] == {"timed_out": False, "timeout_seconds": 5}
+    assert report["timeout_shape"]["agent_timeout_seconds"] == 5
     assert summary["work_session_or_report_summary"] == "stdout recovered summary"
     assert summary["verifier_result"] == stdout_report["verification"]
     assert summary["timeout_status"] == {"timed_out": False, "timeout_seconds": 5}

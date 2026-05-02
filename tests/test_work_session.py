@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import mew.commands as commands
+import mew.work_session as work_session_module
 from mew.cli import main
 from mew.commands import (
     build_work_reply_schema,
@@ -37,6 +38,7 @@ from mew.commands import (
     work_session_default_verify_command,
     _recoverable_patch_shape_edit_error,
 )
+from mew.long_build_substrate import build_long_command_run
 from mew.runtime import native_work_recovery_suggestion_from_plan
 from mew.patch_draft import PATCH_BLOCKER_RECOVERY_ACTIONS
 from mew.state import load_state, save_state, state_lock
@@ -53,6 +55,7 @@ from mew.work_session import (
     build_work_session_resume,
     first_actionable_plan_item,
     create_work_session,
+    execute_work_tool,
     finish_work_tool_call,
     first_unquoted_shell_operator,
     compact_work_tool_summary,
@@ -5613,6 +5616,195 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("version-pinned source-built dependency/toolchain", text)
 
+    def test_work_session_resume_flags_filtered_help_that_skips_override_terms_before_source_toolchain(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure --help 2>&1 | "
+                            "grep -Ei 'external|use-external|library|Flocq|Menhir|x86_64|linux' || true; "
+                            "./configure -use-external-Flocq -use-external-MenhirLib x86_64-linux"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure --help 2>&1 | "
+                            "grep -Ei 'external|use-external|library|Flocq|Menhir|x86_64|linux' || true; "
+                            "./configure -use-external-Flocq -use-external-MenhirLib x86_64-linux"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "-use-external-Flocq\n"
+                            "-use-external-MenhirLib\n"
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                            "Error: cannot determine the location of the Menhir API library.\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "timed_out": True,
+                        "stdout": "-> retrieved coq.8.16.1\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
+
+        self.assertIn("compatibility_override_probe_missing", codes)
+        self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
+
+    def test_work_session_resume_counts_filtered_help_with_override_filter_term(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure --help 2>&1 | grep -i ignore",
+                    },
+                    "result": {
+                        "command": "./configure --help 2>&1 | grep -i ignore",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "  -ignore-coq-version  Continue with unsupported Coq versions.\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "timed_out": True,
+                        "stdout": "-> retrieved coq.8.16.1\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("compatibility_override_probe_missing", codes)
+        self.assertNotIn("version_pinned_source_toolchain_before_compatibility_override", codes)
+
+    def test_work_session_resume_flags_missing_compatibility_override_when_redirect_filename_mentions_compatibility(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": (
+                            "./configure --help 2>&1 | grep -i library > /tmp/compatibility-help.txt; "
+                            "./configure x86_64-linux"
+                        ),
+                    },
+                    "result": {
+                        "command": (
+                            "./configure --help 2>&1 | grep -i library > /tmp/compatibility-help.txt; "
+                            "./configure x86_64-linux"
+                        ),
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": (
+                            "  -use-external-Flocq  Use an already-installed Flocq library\n"
+                            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 124,
+                        "timed_out": True,
+                        "stdout": "-> retrieved coq.8.16.1\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item["code"] for item in resume["long_build_state"].get("strategy_blockers", [])]
+
+        self.assertIn("compatibility_override_probe_missing", codes)
+        self.assertIn("version_pinned_source_toolchain_before_compatibility_override", codes)
+
     def test_work_session_resume_does_not_flag_source_toolchain_after_override_attempt(self):
         from mew.work_session import build_work_session_resume
 
@@ -5790,6 +5982,286 @@ class WorkSessionTests(unittest.TestCase):
         )
         self.assertIn("plain ignore-version", text)
         self.assertIn("external/prebuilt branch", text)
+
+    def test_work_session_resume_flags_config_script_external_hook_before_source_toolchain(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 3,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure --help 2>&1 | sed -n '1,220p'",
+                    },
+                    "result": {
+                        "command": "./configure --help 2>&1 | sed -n '1,220p'",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "Usage: ./configure [options] target\nSupported targets:\n  x86_64-linux\n",
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "grep -nEi 'ignore.*coq|menhir|LIBRARY' configure | sed -n '1,200p'",
+                    },
+                    "result": {
+                        "command": "grep -nEi 'ignore.*coq|menhir|LIBRARY' configure | sed -n '1,200p'",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": (
+                            "31:ignore_coq_version=false\n"
+                            "34:library_MenhirLib=local\n"
+                            "783:LIBRARY_MENHIRLIB=local  # external\n"
+                            "849:Menhir API library............ $menhir_dir\n"
+                        ),
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux && make depend",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Error: The variable Z_div_mod_eq was not found in the current environment.\n",
+                    },
+                },
+                {
+                    "id": 10,
+                    "tool": "run_command",
+                    "status": "interrupted",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": "-> retrieved coq.8.16.1\ncommand timed out before final artifact proof\n",
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        blockers = resume["long_build_state"].get("strategy_blockers", [])
+        codes = [item.get("code") for item in blockers]
+
+        self.assertIn("source_toolchain_before_external_branch_attempt", codes)
+        blocker = next(
+            item
+            for item in blockers
+            if item.get("code") == "source_toolchain_before_external_branch_attempt"
+        )
+        self.assertEqual(blocker["external_branch_tool_call_id"], 5)
+        self.assertEqual(blocker["source_tool_call_id"], 10)
+        self.assertEqual(
+            resume["long_build_state"]["current_failure"]["legacy_code"],
+            "source_toolchain_before_external_branch_attempt",
+        )
+
+    def test_work_session_resume_does_not_count_query_only_external_hook_text(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "grep -n 'LIBRARY_MENHIRLIB=local # external' configure",
+                    },
+                    "result": {
+                        "command": "grep -n 'LIBRARY_MENHIRLIB=local # external' configure",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 1,
+                        "stdout": "",
+                        "stderr": "+ grep -n 'LIBRARY_MENHIRLIB=local # external' configure\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                    },
+                    "result": {
+                        "command": "./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Error: cannot determine the location of the Menhir API library.\n",
+                    },
+                },
+                {
+                    "id": 10,
+                    "tool": "run_command",
+                    "status": "interrupted",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item.get("code") for item in resume["long_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("source_toolchain_before_external_branch_attempt", codes)
+
+    def test_work_session_resume_clears_source_toolchain_blocker_after_assignment_style_external_attempt(self):
+        from mew.work_session import build_work_session_resume
+
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "title": "Compile source toolchain",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 2,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "apt-get install -y coq menhir libmenhir-ocaml-dev",
+                    },
+                    "result": {
+                        "command": "apt-get install -y coq menhir libmenhir-ocaml-dev",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                    },
+                },
+                {
+                    "id": 5,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "grep -nEi 'LIBRARY|MENHIR' configure",
+                    },
+                    "result": {
+                        "command": "grep -nEi 'LIBRARY|MENHIR' configure",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 0,
+                        "stdout": "783:LIBRARY_MENHIRLIB=local  # external\n",
+                    },
+                },
+                {
+                    "id": 6,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "LIBRARY_MENHIRLIB=external ./configure -ignore-coq-version x86_64-linux",
+                    },
+                    "result": {
+                        "command": "LIBRARY_MENHIRLIB=external ./configure -ignore-coq-version x86_64-linux",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": 2,
+                        "stdout": "Testing Coq... version 8.18.0 -- UNSUPPORTED\n",
+                    },
+                },
+                {
+                    "id": 10,
+                    "tool": "run_command",
+                    "status": "interrupted",
+                    "parameters": {
+                        "cwd": "/tmp/CompCert",
+                        "command": "opam install -y coq.8.16.1",
+                    },
+                    "result": {
+                        "command": "opam install -y coq.8.16.1",
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                    },
+                },
+            ],
+            "model_turns": [],
+        }
+
+        resume = build_work_session_resume(session)
+        codes = [item.get("code") for item in resume["long_build_state"].get("strategy_blockers", [])]
+
+        self.assertNotIn("source_toolchain_before_external_branch_attempt", codes)
 
     def test_work_session_resume_does_not_flag_source_toolchain_after_external_branch_attempt(self):
         from mew.work_session import build_work_session_resume
@@ -9900,6 +10372,1087 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertLess(observed_parameters["timeout"], 90.0)
             finally:
                 os.chdir(old_cwd)
+
+    def test_work_oneshot_converts_wait_to_active_long_command_poll(self):
+        class FakeRunner:
+            def __init__(self):
+                self.started = {}
+                self.poll_count = 0
+
+            def start(
+                self,
+                command,
+                cwd=None,
+                timeout=300,
+                extra_env=None,
+                on_output=None,
+                use_shell=False,
+                kill_process_group=False,
+            ):
+                self.started = {
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout": timeout,
+                    "use_shell": use_shell,
+                    "kill_process_group": kill_process_group,
+                }
+
+            def poll(self, wait_seconds=0):
+                self.poll_count += 1
+                if self.poll_count == 1:
+                    return {
+                        "command": self.started["command"],
+                        "cwd": self.started["cwd"],
+                        "status": "running",
+                        "pid": 123,
+                        "process_group_id": 123,
+                        "exit_code": None,
+                        "timed_out": False,
+                        "stdout": "building\n",
+                        "stderr": "",
+                    }
+                return {
+                    "command": self.started["command"],
+                    "cwd": self.started["cwd"],
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "stdout": "done\n",
+                    "stderr": "",
+                }
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_outputs = [
+                    {
+                        "summary": "start long build",
+                        "action": {
+                            "type": "run_command",
+                            "command": "make -j2 foocc",
+                            "cwd": str(workspace),
+                            "timeout": 1800,
+                        },
+                    },
+                    {
+                        "summary": "wait for the running build",
+                        "action": {
+                            "type": "wait",
+                            "reason": "build is still running",
+                        },
+                    },
+                ]
+                runner = FakeRunner()
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with patch.object(work_session_module, "_WORK_MANAGED_COMMAND_RUNNER", runner):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            (
+                                                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                                                "Ensure /tmp/FooCC/foocc can be invoked."
+                                            ),
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-shell",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "5",
+                                            "--max-wall-seconds",
+                                            "180",
+                                            "--max-steps",
+                                            "2",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                payload = json.loads(stdout.getvalue())
+                steps = payload["work_report"]["steps"]
+                self.assertEqual(steps[1]["action"]["type"], "run_command")
+                self.assertTrue(steps[1]["action"]["synthetic_long_command_poll"])
+                self.assertEqual(steps[1]["action"]["origin_action"], "wait")
+                self.assertEqual(steps[1]["tool_call"]["parameters"]["long_command_budget"]["action_kind"], "poll_long_command")
+                self.assertGreaterEqual(runner.poll_count, 2)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_returns_nonzero_when_long_command_remains_nonterminal_at_max_steps(self):
+        class AlwaysRunningRunner:
+            def __init__(self):
+                self.started = {}
+
+            def start(
+                self,
+                command,
+                cwd=None,
+                timeout=300,
+                extra_env=None,
+                on_output=None,
+                use_shell=False,
+                kill_process_group=False,
+            ):
+                self.started = {
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout": timeout,
+                    "use_shell": use_shell,
+                    "kill_process_group": kill_process_group,
+                }
+
+            def poll(self, wait_seconds=0):
+                return {
+                    "command": self.started["command"],
+                    "cwd": self.started["cwd"],
+                    "status": "running",
+                    "pid": 123,
+                    "process_group_id": 123,
+                    "exit_code": None,
+                    "timed_out": False,
+                    "stdout": "still building\n",
+                    "stderr": "",
+                }
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                model_outputs = [
+                    {
+                        "summary": "start long build",
+                        "action": {
+                            "type": "run_command",
+                            "command": "make -j2 foocc",
+                            "cwd": str(workspace),
+                            "timeout": 1800,
+                        },
+                    },
+                    {
+                        "summary": "wait for the running build",
+                        "action": {"type": "wait", "reason": "build is still running"},
+                    },
+                ]
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.work_loop.call_model_json_with_retries", side_effect=model_outputs):
+                        with patch.object(work_session_module, "_WORK_MANAGED_COMMAND_RUNNER", AlwaysRunningRunner()):
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            (
+                                                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                                                "Ensure /tmp/FooCC/foocc can be invoked."
+                                            ),
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-shell",
+                                            "--act-mode",
+                                            "deterministic",
+                                            "--no-auto-deliberation",
+                                            "--model-timeout",
+                                            "5",
+                                            "--max-wall-seconds",
+                                            "180",
+                                            "--max-steps",
+                                            "2",
+                                            "--json",
+                                        ]
+                                    ),
+                                    1,
+                                )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 1)
+                self.assertEqual(payload["work_report"]["stop_reason"], "long_command_incomplete")
+                self.assertEqual(
+                    payload["work_report"]["long_command_incomplete"]["latest_long_command_run_id"],
+                    "work_session:1:long_command:1",
+                )
+                self.assertEqual(
+                    payload["work_report"]["long_command_incomplete"]["suggested_next_action"]["type"],
+                    "run_command",
+                )
+            finally:
+                os.chdir(old_cwd)
+
+    def test_wall_timeout_ceiling_records_long_command_start_budget_and_yield_policy(self):
+        parameters = {"command": "make -j10 foocc", "timeout": 1800}
+
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=120,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=60,
+            long_command_budget_policy={
+                "applies": True,
+                "action_kind": "start_long_command",
+                "stage": "build",
+            },
+        )
+
+        self.assertFalse(ceiling["blocked"])
+        self.assertEqual(parameters["long_command_budget"]["action_kind"], "start_long_command")
+        self.assertEqual(parameters["long_command_budget"]["stage"], "build")
+        self.assertLess(parameters["timeout"], 1800)
+        self.assertEqual(parameters["long_command_budget"]["effective_timeout_seconds"], parameters["timeout"])
+        self.assertTrue(parameters["long_command_budget"]["yield_eligible"])
+        self.assertLess(
+            parameters["long_command_budget"]["yield_after_seconds"],
+            parameters["long_command_budget"]["effective_timeout_seconds"],
+        )
+
+    def test_managed_long_command_budget_dispatches_through_runner(self):
+        class FakeRunner:
+            def __init__(self):
+                self.started = {}
+
+            def start(self, command, cwd=None, timeout=300, extra_env=None, on_output=None, use_shell=False, kill_process_group=False):
+                self.started = {
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout": timeout,
+                    "use_shell": use_shell,
+                    "kill_process_group": kill_process_group,
+                }
+
+            def poll(self, wait_seconds=0):
+                return {
+                    "command": self.started["command"],
+                    "cwd": self.started["cwd"],
+                    "status": "running",
+                    "pid": 123,
+                    "process_group_id": 123,
+                    "exit_code": None,
+                    "timed_out": False,
+                    "stdout": "building\n",
+                    "stderr": "",
+                }
+
+        runner = FakeRunner()
+        parameters = {
+            "allow_shell": True,
+            "command": "make -j2 foocc",
+            "cwd": ".",
+            "timeout": 300,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "build",
+                "effective_timeout_seconds": 300,
+                "yield_after_seconds": 7,
+            },
+        }
+
+        with patch.object(work_session_module, "_WORK_MANAGED_COMMAND_RUNNER", runner):
+            result = execute_work_tool("run_command", parameters, [])
+
+        self.assertEqual(runner.started["command"], "make -j2 foocc")
+        self.assertEqual(runner.started["timeout"], 300)
+        self.assertTrue(runner.started["kill_process_group"])
+        self.assertEqual(result["managed_long_command"]["status"], "running")
+        self.assertEqual(result["managed_long_command"]["action_kind"], "start_long_command")
+        self.assertEqual(result["long_command_budget"]["stage"], "build")
+        self.assertEqual(work_session_module.work_tool_result_error("run_tests", result), "")
+
+    def test_recover_long_command_budget_dispatches_through_runner(self):
+        class FakeRunner:
+            def __init__(self):
+                self.started = {}
+
+            def start(self, command, cwd=None, timeout=300, extra_env=None, on_output=None, use_shell=False, kill_process_group=False):
+                self.started = {
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout": timeout,
+                    "use_shell": use_shell,
+                    "kill_process_group": kill_process_group,
+                }
+
+            def poll(self, wait_seconds=0):
+                return {
+                    "command": self.started["command"],
+                    "cwd": self.started["cwd"],
+                    "status": "running",
+                    "pid": 456,
+                    "process_group_id": 456,
+                    "exit_code": None,
+                    "timed_out": False,
+                    "stdout": "retrying source acquisition\n",
+                    "stderr": "",
+                }
+
+        runner = FakeRunner()
+        parameters = {
+            "allow_shell": True,
+            "command": "curl -fL https://example.org/foo.tar.gz -o /tmp/foo.tar.gz && make -j2 foocc",
+            "cwd": ".",
+            "timeout": 900,
+            "long_command_budget": {
+                "action_kind": "recover_long_command",
+                "stage": "source_acquisition",
+                "effective_timeout_seconds": 900,
+                "yield_after_seconds": 30,
+                "latest_long_command_run_id": "work_session:1:long_command:1",
+                "latest_long_command_status": "failed",
+            },
+        }
+
+        with patch.object(work_session_module, "_WORK_MANAGED_COMMAND_RUNNER", runner):
+            result = execute_work_tool("run_command", parameters, [])
+
+        self.assertEqual(runner.started["command"], parameters["command"])
+        self.assertEqual(runner.started["timeout"], 900)
+        self.assertTrue(runner.started["kill_process_group"])
+        self.assertEqual(result["managed_long_command"]["status"], "running")
+        self.assertEqual(result["managed_long_command"]["action_kind"], "recover_long_command")
+        self.assertEqual(result["managed_long_command"]["latest_long_command_run_id"], "work_session:1:long_command:1")
+        self.assertEqual(result["long_command_budget"]["stage"], "source_acquisition")
+
+    def test_managed_long_command_budget_dispatches_run_tests_through_runner(self):
+        class FakeRunner:
+            def __init__(self):
+                self.started = {}
+
+            def start(self, command, cwd=None, timeout=300, extra_env=None, on_output=None, use_shell=False, kill_process_group=False):
+                self.started = {
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout": timeout,
+                    "use_shell": use_shell,
+                    "kill_process_group": kill_process_group,
+                }
+
+            def poll(self, wait_seconds=0):
+                return {
+                    "command": self.started["command"],
+                    "cwd": self.started["cwd"],
+                    "status": "running",
+                    "pid": 123,
+                    "process_group_id": 123,
+                    "exit_code": None,
+                    "timed_out": False,
+                    "stdout": "still testing\n",
+                    "stderr": "",
+                }
+
+        runner = FakeRunner()
+        parameters = {
+            "allow_verify": True,
+            "command": "python -m pytest tests",
+            "cwd": ".",
+            "timeout": 300,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "build",
+                "effective_timeout_seconds": 300,
+                "yield_after_seconds": 7,
+            },
+        }
+
+        with patch.object(work_session_module, "_WORK_MANAGED_COMMAND_RUNNER", runner):
+            result = execute_work_tool("run_tests", parameters, [])
+
+        self.assertEqual(runner.started["command"], "python -m pytest tests")
+        self.assertFalse(runner.started["use_shell"])
+        self.assertTrue(runner.started["kill_process_group"])
+        self.assertEqual(result["managed_long_command"]["status"], "running")
+        self.assertEqual(work_session_module.work_tool_result_error("run_tests", result), "")
+
+    def test_managed_long_command_finish_persists_active_run_for_resume(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        state = {
+            "next_ids": {"work_tool_call": 1},
+            "work_sessions": [
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": task["description"],
+                    "tool_calls": [],
+                    "model_turns": [],
+                }
+            ],
+        }
+        session = state["work_sessions"][0]
+        parameters = {
+            "command": "make -j2 foocc",
+            "cwd": "/tmp/FooCC",
+            "timeout": 300,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "build",
+                "effective_timeout_seconds": 300,
+                "yield_after_seconds": 30,
+            },
+        }
+        call = start_work_tool_call(state, session, "run_command", parameters)
+        result = {
+            "command": "make -j2 foocc",
+            "cwd": "/tmp/FooCC",
+            "status": "running",
+            "pid": 4321,
+            "process_group_id": 4321,
+            "exit_code": None,
+            "timed_out": False,
+            "stdout": "building\n",
+            "stderr": "",
+            "managed_long_command": {
+                "action_kind": "start_long_command",
+                "status": "running",
+                "stage": "build",
+                "pid": 4321,
+                "process_group_id": 4321,
+            },
+            "long_command_budget": parameters["long_command_budget"],
+        }
+
+        finish_work_tool_call(state, 1, call["id"], result=result)
+
+        runs = session["long_command_runs"]
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["status"], "running")
+        self.assertEqual(runs[0]["running_command_evidence_ref"]["id"], call["command_evidence_ref"]["id"])
+        evidence = session["command_evidence"][0]
+        self.assertEqual(evidence["status"], "running")
+        self.assertEqual(evidence["finish_order"], 0)
+        self.assertFalse(evidence["terminal_success"])
+        self.assertIn("building", evidence["stdout_tail"])
+        resume = build_work_session_resume(session, task=task)
+        self.assertEqual(resume["long_build_state"]["status"], "in_progress")
+        self.assertEqual(
+            resume["long_build_state"]["recovery_decision"]["allowed_next_action"]["kind"],
+            "poll_long_command",
+        )
+        self.assertEqual(resume["long_build_state"]["latest_long_command_run_id"], "work_session:1:long_command:1")
+
+    def test_managed_long_command_finish_updates_existing_run_with_terminal_evidence(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        state = {
+            "next_ids": {"work_tool_call": 1},
+            "work_sessions": [
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": task["description"],
+                    "tool_calls": [],
+                    "model_turns": [],
+                }
+            ],
+        }
+        session = state["work_sessions"][0]
+        start_parameters = {
+            "command": "make -j2 foocc",
+            "cwd": "/tmp/FooCC",
+            "timeout": 300,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "build",
+                "effective_timeout_seconds": 300,
+                "yield_after_seconds": 30,
+            },
+        }
+        start_call = start_work_tool_call(state, session, "run_command", start_parameters)
+        finish_work_tool_call(
+            state,
+            1,
+            start_call["id"],
+            result={
+                "command": "make -j2 foocc",
+                "cwd": "/tmp/FooCC",
+                "status": "running",
+                "pid": 4321,
+                "process_group_id": 4321,
+                "exit_code": None,
+                "timed_out": False,
+                "stdout": "building\n",
+                "stderr": "",
+                "managed_long_command": {"action_kind": "start_long_command", "status": "running", "stage": "build"},
+                "long_command_budget": start_parameters["long_command_budget"],
+            },
+        )
+        poll_parameters = {
+            "command": "sleep 1",
+            "cwd": "/tmp/FooCC",
+            "timeout": 5,
+            "wall_timeout_ceiling": {"remaining_seconds": 100, "reserve_seconds": 30},
+            "long_command_budget": {
+                "action_kind": "poll_long_command",
+                "stage": "build",
+                "latest_long_command_run_id": "work_session:1:long_command:1",
+                "effective_timeout_seconds": 5,
+                "yield_after_seconds": 30,
+            },
+        }
+        poll_call = start_work_tool_call(state, session, "run_command", poll_parameters)
+        poll_call["started_at"] = "2026-01-01T00:00:00Z"
+
+        with patch("mew.work_session.now_iso", return_value="2026-01-01T00:00:02Z"):
+            finish_work_tool_call(
+                state,
+                1,
+                poll_call["id"],
+                result={
+                    "command": "make -j2 foocc",
+                    "cwd": "/tmp/FooCC",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "duration_seconds": 40,
+                    "stdout": "done\n",
+                    "stderr": "",
+                    "managed_long_command": {
+                        "action_kind": "poll_long_command",
+                        "status": "completed",
+                        "stage": "build",
+                        "latest_long_command_run_id": "work_session:1:long_command:1",
+                    },
+                    "long_command_budget": poll_parameters["long_command_budget"],
+                },
+            )
+
+        self.assertEqual(len(session["long_command_runs"]), 1)
+        run = session["long_command_runs"][0]
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["running_command_evidence_ref"]["id"], start_call["command_evidence_ref"]["id"])
+        self.assertEqual(run["terminal_command_evidence_ref"]["id"], poll_call["command_evidence_ref"]["id"])
+        self.assertEqual(run["terminal"]["exit_code"], 0)
+        self.assertEqual(run["budget"]["work_wall_remaining_seconds"], 98)
+        self.assertEqual(session["command_evidence"][1]["wall_budget_after_seconds"], 98)
+        self.assertEqual(session["command_evidence"][0]["status"], "running")
+        self.assertEqual(session["command_evidence"][0]["finish_order"], 0)
+        self.assertEqual(session["command_evidence"][1]["status"], "completed")
+        self.assertGreater(session["command_evidence"][1]["finish_order"], 0)
+
+    def test_managed_long_command_killed_status_keeps_timeout_resume_semantics(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        state = {
+            "next_ids": {"work_tool_call": 1},
+            "work_sessions": [
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": task["description"],
+                    "tool_calls": [],
+                    "model_turns": [],
+                }
+            ],
+        }
+        session = state["work_sessions"][0]
+        parameters = {
+            "command": "make -j2 foocc",
+            "cwd": "/tmp/FooCC",
+            "timeout": 600,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "build",
+                "effective_timeout_seconds": 600,
+                "yield_after_seconds": 30,
+            },
+        }
+        call = start_work_tool_call(state, session, "run_command", parameters)
+        finish_work_tool_call(
+            state,
+            1,
+            call["id"],
+            result={
+                "command": "make -j2 foocc",
+                "cwd": "/tmp/FooCC",
+                "status": "killed",
+                "pid": 4321,
+                "process_group_id": 4321,
+                "exit_code": None,
+                "timed_out": False,
+                "kill_status": "process_group_killed_after_grace",
+                "stdout": "still building\n",
+                "stderr": "terminated\n",
+                "managed_long_command": {
+                    "action_kind": "start_long_command",
+                    "status": "killed",
+                    "stage": "build",
+                    "pid": 4321,
+                    "process_group_id": 4321,
+                },
+                "long_command_budget": parameters["long_command_budget"],
+            },
+        )
+
+        run = session["long_command_runs"][0]
+        self.assertEqual(run["status"], "killed")
+        self.assertEqual(run["terminal"]["kill_reason"], "process_group_killed_after_grace")
+        resume = build_work_session_resume(session, task=task)
+        self.assertEqual(resume["long_build_state"]["current_failure"]["failure_class"], "build_timeout")
+        self.assertEqual(
+            resume["long_build_state"]["recovery_decision"]["allowed_next_action"]["kind"],
+            "resume_idempotent_long_command",
+        )
+
+    def test_long_command_budget_policy_preserves_reserve_for_dependency_generation_compound_build(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        session = {"id": 1, "task_id": 1, "status": "active", "goal": task["description"], "tool_calls": []}
+        parameters = {
+            "command": "./configure && make depend && make -j2 foocc && /tmp/FooCC/foocc -version",
+            "cwd": "/tmp/FooCC",
+            "timeout": 1200,
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+
+        self.assertTrue(policy["applies"])
+        self.assertEqual(policy["action_kind"], "start_long_command")
+        self.assertEqual(policy["stage"], "dependency_generation")
+        self.assertGreater(policy["reserve_seconds"], 0)
+
+    def test_long_command_budget_policy_attaches_to_compound_configure_build_smoke(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can compile and link a program by default."
+            ),
+        }
+        session = {"id": 1, "task_id": 1, "status": "active", "goal": task["description"], "tool_calls": []}
+        parameters = {
+            "command": """set -eu
+cd /tmp/FooCC
+./configure x86_64-linux
+opam install -y ocamlfind coq
+make -j"$(nproc)" foocc
+cat > /tmp/foocc_smoke.c <<'EOF'
+int main(void) { return 0; }
+EOF
+/tmp/FooCC/foocc -o /tmp/foocc_smoke /tmp/foocc_smoke.c
+/tmp/foocc_smoke
+""",
+            "cwd": "/app",
+            "timeout": 2400,
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertTrue(policy["applies"])
+        self.assertIn(policy["stage"], {"build", "default_smoke"})
+        self.assertGreater(policy["reserve_seconds"], 0)
+        self.assertFalse(ceiling.get("blocked", False))
+        self.assertEqual(parameters["long_command_budget"]["action_kind"], "start_long_command")
+
+    def test_long_command_budget_policy_does_not_attach_to_pure_source_fetch(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can compile and link a program by default."
+            ),
+        }
+        session = {"id": 1, "task_id": 1, "status": "active", "goal": task["description"], "tool_calls": []}
+        parameters = {
+            "command": """set -eu
+cd /tmp
+curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
+tar -xzf /tmp/make.tar.gz -C /tmp
+""",
+            "cwd": "/app",
+            "timeout": 1200,
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+
+        self.assertFalse(policy["applies"])
+
+    def test_long_command_budget_policy_does_not_attach_to_source_fetch_readback(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can compile and link a program by default."
+            ),
+        }
+        session = {"id": 1, "task_id": 1, "status": "active", "goal": task["description"], "tool_calls": []}
+        readbacks = [
+            "test -s /tmp/make.tar.gz",
+            "sha256sum /tmp/make.tar.gz",
+            "printf 'archive=/tmp/make.tar.gz\\n'",
+        ]
+        for readback in readbacks:
+            with self.subTest(readback=readback):
+                parameters = {
+                    "command": f"""set -eu
+cd /tmp
+curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
+{readback}
+""",
+                    "cwd": "/app",
+                    "timeout": 1200,
+                }
+
+                policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+
+                self.assertFalse(policy["applies"])
+
+    def test_wall_timeout_ceiling_uses_typed_stop_reason_for_long_command_budget_block(self):
+        parameters = {"command": "make -j10 foocc", "timeout": 1800}
+
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=10,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=60,
+            long_command_budget_policy={
+                "applies": True,
+                "action_kind": "resume_idempotent_long_command",
+                "stage": "build",
+                "latest_long_command_run_id": "work_session:1:long_command:1",
+                "latest_long_command_status": "timed_out",
+            },
+        )
+
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(ceiling["long_command_budget"]["action_kind"], "resume_idempotent_long_command")
+        self.assertEqual(ceiling["long_command_budget"]["latest_long_command_run_id"], "work_session:1:long_command:1")
+
+    def test_long_command_budget_policy_allows_short_poll_wait(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="build",
+            selected_target="/tmp/FooCC/foocc",
+            command="make -j10 foocc",
+            cwd="/tmp/FooCC",
+            status="running",
+            effective_timeout_seconds=1800,
+            work_wall_remaining_seconds=900,
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": "sleep 5", "timeout": 5}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=70,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "poll_long_command")
+        self.assertEqual(policy["minimum_timeout_seconds"], 5.0)
+        self.assertEqual(policy["latest_long_command_run_id"], "work_session:1:long_command:1")
+        self.assertEqual(ceiling, {})
+        self.assertEqual(parameters["long_command_budget"]["action_kind"], "poll_long_command")
+        self.assertEqual(parameters["long_command_budget"]["latest_long_command_status"], "running")
+
+    def test_long_command_budget_policy_blocks_same_timeout_resume(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="build",
+            selected_target="/tmp/FooCC/foocc",
+            command="make -j10 foocc",
+            cwd="/tmp/FooCC",
+            status="timed_out",
+            effective_timeout_seconds=600,
+            work_wall_remaining_seconds=900,
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": "make -j10 foocc", "timeout": 600}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "resume_idempotent_long_command")
+        self.assertEqual(policy["latest_effective_timeout_seconds"], 600.0)
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(ceiling["reason"], "repeat_same_timeout_without_budget_change")
+
+        larger_parameters = {"command": "make -j10 foocc", "timeout": 900}
+        larger_policy = commands.work_tool_long_command_budget_policy(
+            "run_command",
+            larger_parameters,
+            task=task,
+            session=session,
+        )
+        larger_ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            larger_parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=larger_policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=larger_policy,
+        )
+        self.assertEqual(larger_policy["action_kind"], "resume_idempotent_long_command")
+        self.assertEqual(larger_policy["budget_blocked_reason"], "")
+        self.assertEqual(larger_ceiling, {})
+        self.assertEqual(larger_parameters["long_command_budget"]["latest_effective_timeout_seconds"], 600.0)
+
+        capped_parameters = {"command": "make -j10 foocc", "timeout": 900}
+        capped_policy = commands.work_tool_long_command_budget_policy(
+            "run_command",
+            capped_parameters,
+            task=task,
+            session=session,
+        )
+        capped_ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            capped_parameters,
+            max_wall_seconds=560,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=capped_policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=capped_policy,
+        )
+        self.assertTrue(capped_ceiling["blocked"])
+        self.assertEqual(capped_ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(capped_ceiling["reason"], "resume timeout is below minimum_resume_seconds")
+
+    def test_long_command_budget_policy_allows_repaired_command_after_failed_source_acquisition(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="source_acquisition",
+            selected_target="/tmp/FooCC/foocc",
+            command="curl -fL https://example.invalid/foo-1.0.tar.gz -o /tmp/foo.tar.gz",
+            cwd="/tmp",
+            status="failed",
+            effective_timeout_seconds=1200,
+            work_wall_remaining_seconds=900,
+            stderr="curl: (22) The requested URL returned error: 404\n",
+        )
+        run["terminal"]["exit_code"] = 22
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {
+            "command": (
+                "curl -fL https://example.org/foo-1.0.tar.gz -o /tmp/foo.tar.gz && "
+                "tar -xzf /tmp/foo.tar.gz -C /tmp && cd /tmp/FooCC && make -j2 foocc"
+            ),
+            "timeout": 900,
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "recover_long_command")
+        self.assertEqual(policy["recovery_decision_kind"], "repair_failed_long_command")
+        self.assertEqual(policy["budget_blocked_reason"], "")
+        self.assertEqual(ceiling, {})
+        self.assertEqual(parameters["long_command_budget"]["action_kind"], "recover_long_command")
+
+    def test_long_command_budget_policy_blocks_identical_failed_source_acquisition_repeat(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        failed_command = "curl -fL https://example.invalid/foo-1.0.tar.gz -o /tmp/foo.tar.gz"
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="source_acquisition",
+            selected_target="/tmp/FooCC/foocc",
+            command=failed_command,
+            cwd="/tmp",
+            status="failed",
+            effective_timeout_seconds=1200,
+            work_wall_remaining_seconds=900,
+            stderr="curl: (22) The requested URL returned error: 404\n",
+        )
+        run["terminal"]["exit_code"] = 22
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": failed_command, "cwd": "/tmp", "timeout": 900}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "recover_long_command")
+        self.assertEqual(policy["budget_blocked_reason"], "repeat_identical_failed_command_without_new_evidence")
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(ceiling["reason"], "repeat_identical_failed_command_without_new_evidence")
+
+    def test_long_command_start_blocks_when_capped_timeout_cannot_yield(self):
+        parameters = {"command": "make -j10 foocc", "timeout": 1800}
+
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=90,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=60,
+            long_command_budget_policy={
+                "applies": True,
+                "action_kind": "start_long_command",
+                "stage": "build",
+            },
+        )
+
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(
+            ceiling["reason"],
+            "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
+        )
 
     def test_long_build_recovery_command_can_spend_reserved_budget_after_linker_failure(self):
         task = {
@@ -40765,6 +42318,180 @@ class WorkSessionTests(unittest.TestCase):
         self.assertNotIn("output_head", json.dumps(long_build_state))
         self.assertLessEqual(len(context["work_session"]["tool_calls"][0]["result"]["stdout"]), 1100)
         self.assertLessEqual(context["work_session"]["recent_read_file_windows"][0]["visible_chars"], 500)
+
+    def test_compact_recovery_resume_focuses_long_build_recovery_decision(self):
+        from mew.work_loop import compact_resume_for_prompt
+
+        huge = "x" * 12000
+        resume = {
+            "session_id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Recover the source build runtime link proof.",
+            "commands": {"history": [{"stdout": huge}, {"stderr": huge}]},
+            "failures": {"items": [{"trace": huge}, {"trace": huge}]},
+            "unresolved_failure": {"details": huge},
+            "verifier_failure_repair_agenda": {"items": [{"details": huge}]},
+            "suggested_safe_reobserve": {"details": huge},
+            "working_memory": {"plan_items": [huge, "runtime repair"], "target_paths": ["/tmp/WidgetCLI/widget"]},
+            "long_build_state": {
+                "schema_version": 1,
+                "kind": "long_build_state",
+                "status": "blocked",
+                "current_failure": {
+                    "failure_class": "runtime_link_failed",
+                    "legacy_code": "default_runtime_link_path_failed",
+                    "clear_condition": "default compile/link smoke succeeds",
+                },
+                "recovery_decision": {
+                    "failure_class": "runtime_link_failed",
+                    "decision": "continue",
+                    "allowed_next_action": {
+                        "kind": "command",
+                        "stage": "runtime_build_or_install",
+                        "description": "build/install runtime then rerun default smoke",
+                    },
+                    "budget": {"may_spend_reserve": True, "reserve_seconds": 60},
+                },
+                "strategy_blockers": [{"code": "default_runtime_link_path_failed", "excerpt": huge}],
+                "attempts": [{"diagnostics": [{"excerpt": huge}]} for _ in range(4)],
+                "contract": {
+                    "required_artifacts": [{"path": "/tmp/WidgetCLI/widget", "kind": "executable"}],
+                    "runtime_proof": {"required": "required"},
+                    "source_policy": {"authority_required": True},
+                },
+            },
+        }
+
+        compact = compact_resume_for_prompt(resume, mode="compact_recovery")
+
+        self.assertIn("long_build_state", compact)
+        self.assertIn("working_memory", compact)
+        self.assertNotIn("commands", compact)
+        self.assertNotIn("failures", compact)
+        self.assertNotIn("unresolved_failure", compact)
+        self.assertTrue(compact["prompt_context"]["long_build_recovery_focus"])
+        self.assertIn("commands", compact["prompt_context"]["omitted_resume_keys"])
+        self.assertEqual(compact["long_build_state"]["current_failure"]["failure_class"], "runtime_link_failed")
+        self.assertTrue(compact["long_build_state"]["runtime_recovery_focus"])
+        self.assertLess(len(json.dumps(compact)), 8000)
+
+    def test_compact_recovery_runtime_link_prompt_omits_source_rediscovery_sections(self):
+        from mew.work_loop import build_work_model_context, build_work_think_prompt_bundle
+
+        task = {
+            "id": 1,
+            "title": "Build WidgetCLI compiler",
+            "description": (
+                "Under /tmp/WidgetCLI, build the WidgetCLI compiler from source. "
+                "Ensure /tmp/WidgetCLI/widget can compile and link a program by default."
+            ),
+            "status": "todo",
+            "kind": "coding",
+        }
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 20,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"cwd": "/tmp/WidgetCLI", "command": "/tmp/WidgetCLI/widget /tmp/probe.c -o /tmp/probe"},
+                    "result": {
+                        "command": "/tmp/WidgetCLI/widget /tmp/probe.c -o /tmp/probe",
+                        "cwd": "/tmp/WidgetCLI",
+                        "exit_code": 2,
+                        "stderr": "/usr/bin/ld: cannot find -lwidgetrt: No such file or directory\nlinker command failed\n",
+                    },
+                }
+            ],
+            "model_turns": [],
+        }
+
+        context = build_work_model_context(
+            {},
+            session,
+            task,
+            "now",
+            prompt_context_mode="compact_recovery",
+            allow_shell=True,
+            allow_verify=True,
+        )
+        prompt, metrics = build_work_think_prompt_bundle(context)
+        section_ids = [item["id"] for item in metrics["sections"]]
+
+        self.assertEqual(
+            context["work_session"]["resume"]["long_build_state"]["recovery_decision"]["failure_class"],
+            "runtime_link_failed",
+        )
+        self.assertIn("runtime_link_proof", section_ids)
+        self.assertIn("recovery_budget", section_ids)
+        self.assertNotIn("source_acquisition_profile", section_ids)
+        self.assertNotIn("long_dependency_profile", section_ids)
+        self.assertLess(len(prompt), 30000)
+
+    def test_compact_recovery_context_surfaces_long_command_continuation_action(self):
+        from mew.long_build_substrate import build_long_command_run
+        from mew.work_loop import build_work_model_context
+
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": "Build FooCC from source and ensure /tmp/FooCC/foocc can be invoked.",
+            "status": "todo",
+            "kind": "coding",
+        }
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [],
+            "model_turns": [],
+            "long_command_runs": [
+                build_long_command_run(
+                    session_id=1,
+                    ordinal=1,
+                    task_id=1,
+                    contract_id="work_session:1:long_build:1",
+                    attempt_id="work_session:1:long_build:1:attempt:1",
+                    tool_call_id=10,
+                    stage="build",
+                    selected_target="/tmp/FooCC/foocc",
+                    command="make -j10 foocc",
+                    cwd="/tmp/FooCC",
+                    running_command_evidence_ref={"kind": "command_evidence", "id": 10},
+                    effective_timeout_seconds=600,
+                    work_wall_remaining_seconds=300,
+                    stdout="Compiling Parser.o\n" * 20,
+                )
+            ],
+        }
+
+        context = build_work_model_context(
+            {},
+            session,
+            task,
+            "now",
+            prompt_context_mode="compact_recovery",
+            allow_shell=True,
+            allow_verify=True,
+        )
+
+        long_build_state = context["work_session"]["resume"]["long_build_state"]
+        self.assertEqual(long_build_state["status"], "in_progress")
+        self.assertEqual(long_build_state["latest_long_command_run_id"], "work_session:1:long_command:1")
+        self.assertEqual(long_build_state["continuation_action"]["kind"], "poll_long_command")
+        self.assertEqual(long_build_state["continuation_action"]["long_command_run_id"], "work_session:1:long_command:1")
+        self.assertEqual(long_build_state["continuation_action"]["continuation_count"], 0)
+        self.assertNotIn("suggested_next", long_build_state)
 
     def test_work_tool_call_for_model_keeps_full_explicit_line_window_in_full_prompt(self):
         from mew.work_loop import work_tool_call_for_model

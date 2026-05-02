@@ -98,6 +98,7 @@ WORK_RECOVERY_RESUME_ITEM_LIMIT = 2
 WORK_RECOVERY_DECISION_ITEM_LIMIT = 2
 WORK_RECOVERY_DECISION_TEXT_LIMIT = 160
 WORK_RECOVERY_DECISION_GUIDANCE_LIMIT = 120
+WORK_RECOVERY_FOCUSED_OMITTED_KEYS_LIMIT = 30
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
@@ -1631,8 +1632,21 @@ def compact_long_build_state_for_prompt(long_build_state, *, mode="compact_memor
     if not state:
         return {}
     recovery_mode = mode == "compact_recovery"
-    text_limit = 360 if recovery_mode else 700
-    item_limit = 3 if recovery_mode else 6
+    current_failure = state.get("current_failure") if isinstance(state.get("current_failure"), dict) else {}
+    recovery_decision = state.get("recovery_decision") if isinstance(state.get("recovery_decision"), dict) else {}
+    failure_class = str(
+        (current_failure or {}).get("failure_class")
+        or (recovery_decision or {}).get("failure_class")
+        or ""
+    )
+    runtime_recovery_mode = recovery_mode and failure_class in {
+        "runtime_link_failed",
+        "runtime_default_path_unproven",
+        "runtime_install_before_build",
+        "build_system_target_surface_invalid",
+    }
+    text_limit = 220 if runtime_recovery_mode else (360 if recovery_mode else 700)
+    item_limit = 1 if runtime_recovery_mode else (3 if recovery_mode else 6)
     compact = {
         "schema_version": state.get("schema_version"),
         "kind": state.get("kind"),
@@ -1668,10 +1682,37 @@ def compact_long_build_state_for_prompt(long_build_state, *, mode="compact_memor
         "latest_build_tool_call_id": state.get("latest_build_tool_call_id"),
         "latest_build_evidence_id": state.get("latest_build_evidence_id"),
         "latest_build_command": clip_output(str(state.get("latest_build_command") or ""), text_limit),
-        "suggested_next": clip_output(str(state.get("suggested_next") or ""), text_limit),
+        "latest_long_command_run_id": state.get("latest_long_command_run_id"),
+        "latest_live_command_evidence_id": state.get("latest_live_command_evidence_id"),
+        "latest_build_stage": state.get("latest_build_stage"),
+        "latest_long_command_status": state.get("latest_long_command_status"),
+        "latest_build_output_ref": state.get("latest_build_output_ref"),
+        "latest_nonterminal_reason": state.get("latest_nonterminal_reason"),
+        "continuation_required": bool(state.get("continuation_required")),
         "compacted_for_prompt": True,
         "prompt_context_mode": mode,
     }
+    if runtime_recovery_mode:
+        compact["runtime_recovery_focus"] = True
+    if not state.get("recovery_decision"):
+        compact["suggested_next"] = clip_output(str(state.get("suggested_next") or ""), text_limit)
+    allowed_next = (
+        recovery_decision.get("allowed_next_action")
+        if isinstance(recovery_decision.get("allowed_next_action"), dict)
+        else {}
+    )
+    if allowed_next.get("kind") in {"poll_long_command", "resume_idempotent_long_command"}:
+        budget = recovery_decision.get("budget") if isinstance(recovery_decision.get("budget"), dict) else {}
+        compact["continuation_action"] = {
+            "kind": allowed_next.get("kind"),
+            "long_command_run_id": allowed_next.get("long_command_run_id") or state.get("latest_long_command_run_id"),
+            "stage": allowed_next.get("stage") or state.get("latest_build_stage"),
+            "required_evidence": allowed_next.get("required_evidence"),
+            "remaining_seconds": budget.get("remaining_seconds"),
+            "reserve_seconds": budget.get("reserve_seconds"),
+            "continuation_count": budget.get("continuation_count"),
+            "max_continuations": budget.get("max_continuations"),
+        }
     attempts = state.get("attempts") if isinstance(state.get("attempts"), list) else []
     compact["attempts"] = [
         {
@@ -1712,6 +1753,66 @@ def compact_long_build_state_for_prompt(long_build_state, *, mode="compact_memor
             ),
         }
     return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+
+_COMPACT_RECOVERY_LONG_BUILD_RESUME_KEEP_KEYS = {
+    "active_memory",
+    "active_work_todo",
+    "context",
+    "effort",
+    "goal",
+    "long_build_state",
+    "next_action",
+    "notes",
+    "pending_steer",
+    "plan_item_observations",
+    "prompt_context",
+    "recent_decisions",
+    "recovery_plan",
+    "retry_context",
+    "session_id",
+    "status",
+    "suggested_verify_command",
+    "task_id",
+    "title",
+    "updated_at",
+    "working_memory",
+}
+
+
+def _resume_has_long_build_recovery_decision(compacted):
+    if not isinstance(compacted, dict):
+        return False
+    long_build_state = compacted.get("long_build_state")
+    if not isinstance(long_build_state, dict):
+        return False
+    decision = long_build_state.get("recovery_decision")
+    return isinstance(decision, dict) and bool(decision)
+
+
+def _focus_compact_recovery_resume(compacted):
+    if not _resume_has_long_build_recovery_decision(compacted):
+        return compacted
+    focused = {
+        key: value
+        for key, value in (compacted or {}).items()
+        if key in _COMPACT_RECOVERY_LONG_BUILD_RESUME_KEEP_KEYS
+        and value not in (None, "", [], {})
+    }
+    omitted = [
+        key
+        for key, value in (compacted or {}).items()
+        if key not in focused
+        and key not in _COMPACT_RECOVERY_LONG_BUILD_RESUME_KEEP_KEYS
+        and value not in (None, "", [], {})
+    ]
+    prompt_context = focused.get("prompt_context") if isinstance(focused.get("prompt_context"), dict) else {}
+    prompt_context = dict(prompt_context)
+    prompt_context["long_build_recovery_focus"] = True
+    if omitted:
+        prompt_context["omitted_resume_keys"] = sorted(omitted)[:WORK_RECOVERY_FOCUSED_OMITTED_KEYS_LIMIT]
+    focused["prompt_context"] = prompt_context
+    return focused
 
 
 def compact_resume_for_prompt(resume, *, mode="compact_memory"):
@@ -1786,6 +1887,8 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         "resume_text_limit": resume_text_limit,
         "resume_item_limit": resume_item_limit,
     }
+    if mode == "compact_recovery":
+        compacted = _focus_compact_recovery_resume(compacted)
     return compacted
 
 
@@ -6307,7 +6410,7 @@ def _build_work_think_prompt_legacy(context):
         "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
         "For runtime frame, screenshot, or image-output tasks, artifact existence, nonzero pixels, valid headers, or self-consistent dimensions are not enough; cite a completed tool that checks expected dimensions/resolution, reference similarity, or exact stdout/boot markers before finish. "
         "For external dependency/source acquisition tasks, identify the authoritative source channel before invasive repair: prefer project docs, package-manager metadata, official release/distribution archives, signed checksums, release notes, or upstream download pages when available. Use a non-Python source fetch tool such as curl, wget, gh, or git for authority-producing archive acquisition; if the image lacks one and a package manager exists, install curl or wget before the source fetch. Python download snippets are only last-resort transport and should be paired with non-Python authority evidence before finish. When proving saved source authority from an existing archive and saved authority metadata, use top-level failing readback commands such as `test -f archive; sha256sum archive; tar -tzf archive` rather than wrapping hash/list readbacks in `if`, `while`, `|| true`, pipes, redirection, or other optional control-flow. Place or repeat saved source readbacks after noisy build/install output and close to the final artifact proof, so retained command output still includes metadata, archive hash, and archive root. Treat VCS-generated tag/archive URLs as source-tree fallbacks that may omit release packaging or compatibility shims. If a build from one source artifact hits dependency/API incompatibility, record source provenance in working_memory and evaluate a higher-authority source option before alternate toolchain surgery. "
-        "For long dependency/toolchain/source-build tasks, preserve work_session.resume.long_build_state when present. Prerequisite installation, configure, dependency generation, or partial make/build output is progress, not completion, while a required final executable/artifact is missing. Before installing a distro toolchain for a source project with version constraints, run or inspect the smallest compatibility probe; if configure or package-manager output invalidates a toolchain/package path, record it in working_memory and switch paths instead of retrying it. If configure rejects an installed dependency version but the source tree is otherwise grounded, inspect ./configure --help or equivalent project help and try cheap source-provided compatibility/override flags before building an alternate toolchain from scratch. When probing configure/project help through grep, rg, awk, sed, or another filter, include external/use-external/prebuilt/system/library terms or inspect unfiltered help before concluding no source-provided external/prebuilt branch exists. If a package manager offers prebuilt dependencies and the project exposes or likely supports a source compatibility override, try the prebuilt dependency plus override path before starting a version-pinned source-built dependency/toolchain install; once source help or configure exposes an external/prebuilt compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final artifact build instead of serially probing weaker branches. A plain ignore-version or allow-unsupported configure retry is not the same as trying an exposed external/prebuilt/system dependency branch; if that plain override fails with a dependency API or library-location mismatch, install the missing prebuilt/dev package when available and retry the external/prebuilt branch before starting version-pinned source toolchain work. If compatibility repair turns into edits under a vendored/third-party dependency or proof library while the final artifact is still missing, stop local dependency patch surgery and switch to a supported dependency version or source-provided external/prebuilt dependency branch before another long rebuild. For release archive/tag source builds, a versioned archive URL, tag/root directory, or tarball identity can ground the patch-level release even when an internal VERSION file only records the major/minor series; do not abort just because internal files omit a patch suffix already grounded by the archive/tag. If a Makefile/CMake/project build reports missing generated dependencies, missing source-path prefixes, or absent dependency files, run the project's dependency-generation/configure target before repeating the final target. When the task names one final executable/artifact, inspect available build targets and prefer the shortest explicit target that produces that artifact (for example the executable name) over full project, proof, doc, test, or all-target builds unless the task explicitly requires the full build. For compiler/toolchain tasks, a trivial return-only smoke binary is not enough if the toolchain has runtime or standard-library link requirements; install or configure the project's runtime/library target and verify a program that exercises the default link path before finish. If a default compile/link smoke fails with a missing runtime library such as 'cannot find -lfoo', do not restart source acquisition, configure, or clean rebuild; build/install the shortest runtime/library target into the default lookup path and rerun the same default smoke. If a local smoke only passes by adding custom runtime/library flags such as -stdlib, -L, LD_LIBRARY_PATH, or LIBRARY_PATH, treat that as diagnostic only; install/configure the runtime into the default lookup path and rerun the same compile/link smoke without those custom path flags before finish. If runtime install reports a missing library artifact, build the shortest explicit runtime-library target first, then retry install and the default-link smoke. If parent make reports no rule for a runtime/lib*.a or similar subdir library target, switch to the runtime subdirectory's own Makefile with make -C <runtime-dir> all/install instead of retrying the invalid parent target path. Do not restart package-manager or source-tree setup after a compatible toolchain path is found; allocate remaining wall budget to one shortest idempotent continuation command that produces the missing final artifact. For genuinely long prerequisite or source-build commands, set a bounded run_command timeout sized to the remaining wall budget instead of repeatedly slicing the same build into default-timeout commands. Then prove the final artifact exists and is executable/invokable before finish. "
+        "For long dependency/toolchain/source-build tasks, preserve work_session.resume.long_build_state when present. Prerequisite installation, configure, dependency generation, or partial make/build output is progress, not completion, while a required final executable/artifact is missing. Before installing a distro toolchain for a source project with version constraints, run or inspect the smallest compatibility probe; if configure or package-manager output invalidates a toolchain/package path, record it in working_memory and switch paths instead of retrying it. If configure rejects an installed dependency version but the source tree is otherwise grounded, inspect ./configure --help or equivalent project help and try cheap source-provided compatibility/override flags before building an alternate toolchain from scratch. When probing configure/project help through grep, rg, awk, sed, or another filter, include external/use-external/prebuilt/system/library terms or inspect unfiltered help before concluding no source-provided external/prebuilt branch exists. If configure or source-script inspection shows compatibility-hook variables such as 'LIBRARY_* = local # external', treat that as source-provided external/prebuilt branch evidence and try the branch before starting a version-pinned source toolchain. If a package manager offers prebuilt dependencies and the project exposes or likely supports a source compatibility override, try the prebuilt dependency plus override path before starting a version-pinned source-built dependency/toolchain install; once source help or configure exposes an external/prebuilt compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final artifact build instead of serially probing weaker branches. A plain ignore-version or allow-unsupported configure retry is not the same as trying an exposed external/prebuilt/system dependency branch; if that plain override fails with a dependency API or library-location mismatch, install the missing prebuilt/dev package when available and retry the external/prebuilt branch before starting version-pinned source toolchain work. If compatibility repair turns into edits under a vendored/third-party dependency or proof library while the final artifact is still missing, stop local dependency patch surgery and switch to a supported dependency version or source-provided external/prebuilt dependency branch before another long rebuild. For release archive/tag source builds, a versioned archive URL, tag/root directory, or tarball identity can ground the patch-level release even when an internal VERSION file only records the major/minor series; do not abort just because internal files omit a patch suffix already grounded by the archive/tag. If a Makefile/CMake/project build reports missing generated dependencies, missing source-path prefixes, or absent dependency files, run the project's dependency-generation/configure target before repeating the final target. When the task names one final executable/artifact, inspect available build targets and prefer the shortest explicit target that produces that artifact (for example the executable name) over full project, proof, doc, test, or all-target builds unless the task explicitly requires the full build. For compiler/toolchain tasks, a trivial return-only smoke binary is not enough if the toolchain has runtime or standard-library link requirements; install or configure the project's runtime/library target and verify a program that exercises the default link path before finish. If a default compile/link smoke fails with a missing runtime library such as 'cannot find -lfoo', do not restart source acquisition, configure, or clean rebuild; build/install the shortest runtime/library target into the default lookup path and rerun the same default smoke. If a local smoke only passes by adding custom runtime/library flags such as -stdlib, -L, LD_LIBRARY_PATH, or LIBRARY_PATH, treat that as diagnostic only; install/configure the runtime into the default lookup path and rerun the same compile/link smoke without those custom path flags before finish. If runtime install reports a missing library artifact, build the shortest explicit runtime-library target first, then retry install and the default-link smoke. If parent make reports no rule for a runtime/lib*.a or similar subdir library target, switch to the runtime subdirectory's own Makefile with make -C <runtime-dir> all/install instead of retrying the invalid parent target path. Do not restart package-manager or source-tree setup after a compatible toolchain path is found; allocate remaining wall budget to one shortest idempotent continuation command that produces the missing final artifact. For genuinely long prerequisite or source-build commands, set a bounded run_command timeout sized to the remaining wall budget instead of repeatedly slicing the same build into default-timeout commands. Then prove the final artifact exists and is executable/invokable before finish. "
         "For black-box or query-only model extraction tasks, do not read or copy visible fixture internals such as hidden weights from the provided source; local checks against exposed fixture weights are not enough to finish. Before task_done=true, cite synthetic, randomized, or holdout validation that demonstrates the method generalizes beyond the visible fixture. "
         "For model/checkpoint/tokenizer inference, sampling, or continuation tasks, compile success, byte size, the advertised CLI shape, and 'printed N tokens' are not enough. Before finish, cite completed tool output that proves model-output equivalence with a reference/golden/oracle continuation, argmax/top-1 token match, logits check, token-id match, or expected continuation. A reference/oracle built by copying, slicing, lightly modifying the current candidate implementation, or generating a new /tmp oracle source in this same work session is not independent evidence; if finish is blocked for model inference evidence/provenance, do not repeat finish with the same tool id or same oracle source. Run a new grounding/repair command or keep the exact model-output contract gap open. "
         "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, prefer analyze_table on CSV/TSV/whitespace numeric source files before choosing fit windows, scales, extrema, or output values. A schema-only, finite-number, or single-fit residual check is not enough; before finish, cite a completed grounding tool whose output contains an independent cross-check such as an alternative method, recomputation, holdout, bootstrap, or sensitivity/stability validation against the input data, plus residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric. "
@@ -6410,6 +6513,37 @@ def _work_think_dynamic_failure_evidence_section(context):
     )
 
 
+def _work_long_build_failure_class(context):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    work_session = work_session if isinstance(work_session, dict) else {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    long_build_state = resume.get("long_build_state") if isinstance(resume.get("long_build_state"), dict) else {}
+    current_failure = (
+        long_build_state.get("current_failure")
+        if isinstance(long_build_state.get("current_failure"), dict)
+        else {}
+    )
+    recovery_decision = (
+        long_build_state.get("recovery_decision")
+        if isinstance(long_build_state.get("recovery_decision"), dict)
+        else {}
+    )
+    return str(
+        current_failure.get("failure_class")
+        or recovery_decision.get("failure_class")
+        or ""
+    )
+
+
+def _work_runtime_recovery_only(context):
+    return _work_long_build_failure_class(context) in {
+        "runtime_link_failed",
+        "runtime_default_path_unproven",
+        "runtime_install_before_build",
+        "build_system_target_surface_invalid",
+    }
+
+
 def _work_think_compact_recovery_section(context):
     work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
     work_session = work_session if isinstance(work_session, dict) else {}
@@ -6444,6 +6578,7 @@ def build_work_think_prompt_sections(context):
     work_session = work_session if isinstance(work_session, dict) else {}
     compaction = work_session.get("context_compaction") if isinstance(work_session.get("context_compaction"), dict) else {}
     compact_recovery_mode = compaction.get("prompt_context_mode") == "compact_recovery"
+    runtime_recovery_only = compact_recovery_mode and _work_runtime_recovery_only(context)
     context_marker = "\n\nContext JSON:\n"
     if context_marker in legacy_prompt:
         prompt_before_context, context_json = legacy_prompt.split(context_marker, 1)
@@ -6510,7 +6645,7 @@ def build_work_think_prompt_sections(context):
                 profile="implement",
             )
         ]
-    if source_acquisition_profile:
+    if source_acquisition_profile and not runtime_recovery_only:
         sections.append(
             PromptSection(
                 id="source_acquisition_profile",
@@ -6522,7 +6657,7 @@ def build_work_think_prompt_sections(context):
                 profile="source_acquisition",
             )
         )
-    if long_dependency_profile:
+    if long_dependency_profile and not runtime_recovery_only:
         sections.append(
             PromptSection(
                 id="long_dependency_profile",

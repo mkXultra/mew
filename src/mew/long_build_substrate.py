@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import ast
 from dataclasses import asdict, dataclass, field
+import hashlib
+import json
 from pathlib import Path
+import posixpath
 import re
 import shlex
 from typing import Iterable, Mapping
@@ -22,7 +25,10 @@ from .acceptance_evidence import (
 LONG_BUILD_SCHEMA_VERSION = 1
 ENV_SUMMARY_POLICY = "env_summary_v1"
 COMMAND_OUTPUT_CLIP_CHARS = 1200
+LONG_COMMAND_OUTPUT_MAX_BYTES = 1_000_000
 ENV_VALUE_CLIP_CHARS = 120
+NONTERMINAL_COMMAND_STATUSES = {"running", "yielded"}
+TERMINAL_NON_SUCCESS_COMMAND_STATUSES = {"failed", "timed_out", "killed", "interrupted"}
 
 _SAFE_ENV_NAMES = {
     "AR",
@@ -65,8 +71,14 @@ _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE = re.compile(
     r"^matched_authority_url=https?://|^url=https?://|^CHOSEN https?://)",
     re.I | re.M,
 )
+_SAVED_SOURCE_URL_OUTPUT_RE = re.compile(r"^source_url=https?://\S+", re.I | re.M)
+_SELECTED_SOURCE_ARCHIVE_OUTPUT_RE = re.compile(
+    r"^(?:==\s*)?(?:selected|chosen|matched)\s+(?:source\s+)?archive(?:\s*==)?$",
+    re.I | re.M,
+)
 _AUTHORITY_PAGE_OUTPUT_RE = re.compile(r"^authority_page_(?:saved|fetched)=https?://\S+", re.I | re.M)
 _ARCHIVE_HASH_OUTPUT_RE = re.compile(r"^archive_sha256=[0-9a-f]{32,128}\b", re.I | re.M)
+_DYNAMIC_SOURCE_URL_WRITER_PATH = "<dynamic-source-url-writer>"
 _ARCHIVE_ROOT_OUTPUT_RE = re.compile(r"^archive_root=\S+", re.I | re.M)
 _ARCHIVE_MEMBER_OUTPUT_RE = re.compile(
     r"^[A-Za-z0-9_.+-]+(?:-[A-Za-z0-9_.+-]+)?/(?:configure|Makefile|README(?:\.[A-Za-z0-9]+)?|LICENSE|VERSION)(?:$|\s)",
@@ -288,6 +300,216 @@ class RecoveryDecision:
         return data
 
 
+@dataclass(frozen=True)
+class LongCommandRun:
+    schema_version: int
+    id: str
+    session_id: str
+    task_id: str
+    contract_id: str
+    attempt_id: str
+    running_command_evidence_ref: dict | None
+    terminal_command_evidence_ref: dict | None
+    tool_call_id: object | None
+    stage: str
+    selected_target: str
+    command: str
+    cwd: str
+    env_summary: dict
+    status: str
+    process: dict
+    budget: dict
+    output: dict
+    terminal: dict
+    continuation_eligible: bool
+    idempotence_key: str
+    reducer_hint: dict
+    unknown_fields: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        data = dict(self.unknown_fields)
+        data.update(asdict(self))
+        data.pop("unknown_fields", None)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "LongCommandRun":
+        data = dict(data or {})
+        known = {name for name in cls.__dataclass_fields__ if name != "unknown_fields"}
+        unknown = {key: value for key, value in data.items() if key not in known}
+        return cls(
+            schema_version=_coerce_int(data.get("schema_version"), default=0) or 0,
+            id=str(data.get("id") or ""),
+            session_id=str(data.get("session_id") or ""),
+            task_id=str(data.get("task_id") or ""),
+            contract_id=str(data.get("contract_id") or ""),
+            attempt_id=str(data.get("attempt_id") or ""),
+            running_command_evidence_ref=_optional_dict(data.get("running_command_evidence_ref")),
+            terminal_command_evidence_ref=_optional_dict(data.get("terminal_command_evidence_ref")),
+            tool_call_id=data.get("tool_call_id"),
+            stage=str(data.get("stage") or ""),
+            selected_target=str(data.get("selected_target") or ""),
+            command=str(data.get("command") or ""),
+            cwd=str(data.get("cwd") or ""),
+            env_summary=dict(data.get("env_summary") or {"policy": ENV_SUMMARY_POLICY, "items": []}),
+            status=str(data.get("status") or ""),
+            process=dict(data.get("process") or {}),
+            budget=dict(data.get("budget") or {}),
+            output=dict(data.get("output") or {}),
+            terminal=dict(data.get("terminal") or {}),
+            continuation_eligible=bool(data.get("continuation_eligible")),
+            idempotence_key=str(data.get("idempotence_key") or ""),
+            reducer_hint=dict(data.get("reducer_hint") or {}),
+            unknown_fields=unknown,
+        )
+
+
+def long_command_run_id(session_id: object, ordinal: object) -> str:
+    return f"work_session:{_stable_id_component(session_id)}:long_command:{_stable_id_component(ordinal)}"
+
+
+def long_command_output_ref(session_id: object, ordinal: object, *, filename: str = "output.log") -> str:
+    return (
+        f"work-session/{_safe_path_component(session_id)}/"
+        f"long-command/{_safe_path_component(ordinal)}/{_safe_path_component(filename)}"
+    )
+
+
+def long_command_idempotence_key(
+    *,
+    cwd: object,
+    command: object,
+    contract_id: object,
+    stage: object,
+    selected_targets: Iterable[object] = (),
+) -> str:
+    payload = {
+        "command": str(command or ""),
+        "contract_id": str(contract_id or ""),
+        "cwd": str(cwd or ""),
+        "selected_targets": sorted(str(item or "") for item in selected_targets or [] if str(item or "")),
+        "stage": str(stage or ""),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def long_command_output_snapshot(
+    *,
+    stdout: object = "",
+    stderr: object = "",
+    output_ref: object = "",
+    max_bytes: int = LONG_COMMAND_OUTPUT_MAX_BYTES,
+) -> dict:
+    stdout_text = str(stdout or "")
+    stderr_text = str(stderr or "")
+    combined = f"{stdout_text}\n{stderr_text}" if stdout_text and stderr_text else stdout_text or stderr_text
+    return {
+        "output_ref": str(output_ref or ""),
+        "stdout_head": _head(stdout_text),
+        "stdout_tail": _tail(stdout_text),
+        "stderr_head": _head(stderr_text),
+        "stderr_tail": _tail(stderr_text),
+        "output_bytes": len(combined.encode("utf-8")) if combined else 0,
+        "max_bytes": int(max_bytes),
+        "truncated": any(len(value) > COMMAND_OUTPUT_CLIP_CHARS for value in (stdout_text, stderr_text)),
+    }
+
+
+def long_command_yield_after_seconds(
+    effective_timeout_seconds: object,
+    *,
+    requested_yield_after_seconds: int = 30,
+) -> int | None:
+    effective = _coerce_int(effective_timeout_seconds)
+    requested = max(1, int(requested_yield_after_seconds))
+    if effective is not None and requested >= effective:
+        return None
+    return requested
+
+
+def build_long_command_run(
+    *,
+    session_id: object,
+    ordinal: object,
+    task_id: object,
+    contract_id: object,
+    attempt_id: object,
+    tool_call_id: object | None,
+    stage: object,
+    selected_target: object,
+    command: object,
+    cwd: object,
+    env: object = None,
+    status: str = "running",
+    pid: object | None = None,
+    process_group_id: object | None = None,
+    owner_token: object | None = None,
+    running_command_evidence_ref: Mapping[str, object] | None = None,
+    terminal_command_evidence_ref: Mapping[str, object] | None = None,
+    requested_timeout_seconds: object | None = None,
+    effective_timeout_seconds: object | None = None,
+    work_wall_remaining_seconds: object | None = None,
+    final_proof_reserve_seconds: object | None = 60,
+    continuation_count: object | None = 0,
+    max_continuations: object | None = 3,
+    stdout: object = "",
+    stderr: object = "",
+) -> dict:
+    run_id = long_command_run_id(session_id, ordinal)
+    output_ref = long_command_output_ref(session_id, ordinal)
+    selected_targets = [selected_target] if str(selected_target or "") else []
+    yield_after = long_command_yield_after_seconds(effective_timeout_seconds)
+    budget = {
+        "requested_timeout_seconds": _coerce_int(requested_timeout_seconds),
+        "effective_timeout_seconds": _coerce_int(effective_timeout_seconds),
+        "work_wall_remaining_seconds": _coerce_int(work_wall_remaining_seconds),
+        "yield_after_seconds": yield_after,
+        "final_proof_reserve_seconds": _coerce_int(final_proof_reserve_seconds, default=60),
+        "continuation_count": _coerce_int(continuation_count, default=0) or 0,
+        "max_continuations": _coerce_int(max_continuations, default=3) or 3,
+    }
+    run = LongCommandRun(
+        schema_version=LONG_BUILD_SCHEMA_VERSION,
+        id=run_id,
+        session_id=str(session_id or ""),
+        task_id=str(task_id or ""),
+        contract_id=str(contract_id or ""),
+        attempt_id=str(attempt_id or ""),
+        running_command_evidence_ref=dict(running_command_evidence_ref or {}),
+        terminal_command_evidence_ref=dict(terminal_command_evidence_ref) if terminal_command_evidence_ref else None,
+        tool_call_id=tool_call_id,
+        stage=str(stage or ""),
+        selected_target=str(selected_target or ""),
+        command=str(command or ""),
+        cwd=str(cwd or ""),
+        env_summary=summarize_env(env),
+        status=str(status or "running"),
+        process={
+            "pid": _coerce_int(pid),
+            "process_group_id": _coerce_int(process_group_id),
+            "owner_token": str(owner_token or f"managed-runner:{run_id}"),
+        },
+        budget=budget,
+        output=long_command_output_snapshot(stdout=stdout, stderr=stderr, output_ref=output_ref),
+        terminal={"exit_code": None, "timed_out": False, "kill_reason": "", "finished_at": None},
+        continuation_eligible=True,
+        idempotence_key=long_command_idempotence_key(
+            cwd=cwd,
+            command=command,
+            contract_id=contract_id,
+            stage=stage,
+            selected_targets=selected_targets,
+        ),
+        reducer_hint={
+            "scope": "current_failure_selection_only",
+            "suppresses_stale_classes": ["build_timeout"],
+            "never_suppresses": ["artifact_missing_or_unproven", "acceptance_proof"],
+        },
+    )
+    return run.to_dict()
+
+
 def build_long_build_contract(
     task_text: object,
     required_artifacts: Iterable[object],
@@ -384,6 +606,7 @@ def reduce_long_build_state(
     attempts: Iterable[Mapping[str, object]],
     evidences: Iterable[CommandEvidence | Mapping[str, object]],
     *,
+    long_command_runs: Iterable[LongCommandRun | Mapping[str, object]] = (),
     progress: Iterable[Mapping[str, object]] = (),
     strategy_blockers: Iterable[Mapping[str, object]] = (),
     incomplete_reason: str = "",
@@ -447,19 +670,41 @@ def reduce_long_build_state(
     status = _state_status(attempts, missing, current_failure, stages)
     latest_attempt_id = attempts[-1].get("id") if attempts else None
     latest_build_tool_call_id = latest_build_call.get("id") if isinstance(latest_build_call, Mapping) else None
+    normalized_long_command_runs = [
+        item if isinstance(item, LongCommandRun) else LongCommandRun.from_dict(item)
+        for item in long_command_runs or []
+        if isinstance(item, (LongCommandRun, Mapping))
+    ]
+    latest_long_command = _latest_long_command_run(normalized_long_command_runs)
+    latest_long_command_status = str(latest_long_command.status or "").casefold() if latest_long_command else ""
+    latest_live_long_command = (
+        latest_long_command if latest_long_command_status in NONTERMINAL_COMMAND_STATUSES else None
+    )
+    latest_terminal_long_command = (
+        latest_long_command if latest_long_command_status in TERMINAL_NON_SUCCESS_COMMAND_STATUSES else None
+    )
     effective_incomplete_reason = (
         ""
         if _incomplete_reason_cleared_by_later_success(incomplete_reason, attempts)
         else str(incomplete_reason or "")
     )
-    recovery_decision = _derive_recovery_decision(
-        contract,
-        status,
-        current_failure,
-        attempts,
-        normalized_evidence,
-        blockers,
-    )
+    if latest_live_long_command:
+        status = "in_progress"
+        current_failure = None
+        recovery_decision = _derive_long_command_poll_recovery_decision(contract, latest_live_long_command)
+    elif latest_terminal_long_command:
+        current_failure = _long_command_terminal_failure(latest_terminal_long_command)
+        status = "blocked"
+        recovery_decision = _derive_long_command_terminal_recovery_decision(contract, latest_terminal_long_command, status)
+    else:
+        recovery_decision = _derive_recovery_decision(
+            contract,
+            status,
+            current_failure,
+            attempts,
+            normalized_evidence,
+            blockers,
+        )
     state = LongBuildState(
         schema_version=LONG_BUILD_SCHEMA_VERSION,
         kind="long_build_state",
@@ -481,6 +726,14 @@ def reduce_long_build_state(
             "latest_build_evidence_id": evidence_by_tool_call_id.get(latest_build_tool_call_id),
             "latest_build_status": str(latest_build_call.get("status") or "") if isinstance(latest_build_call, Mapping) else "",
             "latest_build_command": latest_build_command,
+            "latest_long_command_run_id": latest_live_long_command.id if latest_live_long_command else (latest_terminal_long_command.id if latest_terminal_long_command else None),
+            "latest_live_command_evidence_id": _long_command_evidence_id(latest_live_long_command.running_command_evidence_ref) if latest_live_long_command else None,
+            "latest_build_stage": latest_live_long_command.stage if latest_live_long_command else (latest_terminal_long_command.stage if latest_terminal_long_command else ""),
+            "latest_long_command_status": latest_live_long_command.status if latest_live_long_command else (latest_terminal_long_command.status if latest_terminal_long_command else ""),
+            "latest_build_output_ref": (latest_live_long_command.output or {}).get("output_ref") if latest_live_long_command else ((latest_terminal_long_command.output or {}).get("output_ref") if latest_terminal_long_command else ""),
+            "latest_nonterminal_reason": "long_command_running" if latest_live_long_command else "",
+            "continuation_required": bool(latest_live_long_command),
+            "long_command_runs": [run.to_dict() for run in normalized_long_command_runs[-3:]],
             "incomplete_reason": effective_incomplete_reason,
             "strategy_blockers": active_blockers[-6:],
             "cleared_strategy_blockers": _cleared_strategy_blockers(blockers, active_blockers)[-6:],
@@ -648,6 +901,90 @@ def planned_long_build_command_stage(
     return _command_stage(evidence, contract)
 
 
+def planned_long_build_command_budget_stage(
+    action_type: object,
+    parameters: Mapping[str, object] | None,
+    contract: Mapping[str, object],
+) -> str:
+    stage = planned_long_build_command_stage(action_type, parameters, contract)
+    command = str((parameters or {}).get("command") or "")
+    if (
+        stage == "custom_runtime_smoke"
+        and _command_uses_source_acquisition_tool(command)
+        and not _command_has_non_source_acquisition_build_segment(command)
+    ):
+        return "source_acquisition"
+    if stage in {
+        "artifact_proof",
+        "build",
+        "custom_runtime_smoke",
+        "default_smoke",
+        "dependency_generation",
+        "runtime_build",
+        "runtime_install",
+    }:
+        return stage
+    if not command or str(action_type or "") not in COMMAND_EVIDENCE_TOOLS:
+        return stage
+    if not _BUILD_RE.search(command):
+        return stage
+    cwd = str((parameters or {}).get("cwd") or "")
+    artifact_paths = [
+        str((artifact or {}).get("path") or "")
+        for artifact in contract.get("required_artifacts") or []
+        if isinstance(artifact, Mapping) and (artifact or {}).get("path")
+    ]
+    if any(_command_has_default_smoke_artifact_segment(command, path, cwd) for path in artifact_paths):
+        return "default_smoke"
+    artifact_names = [Path(path).name for path in artifact_paths if path]
+    artifact_mentioned = any(
+        item and re.search(r"(?:^|[\s/])" + re.escape(item) + r"(?:$|[\s;&|])", command)
+        for item in [*artifact_paths, *artifact_names]
+    )
+    if artifact_mentioned:
+        return "build"
+    if _CONFIGURE_RE.search(command) and (_INSTALL_RE.search(command) or _DEPENDENCY_GENERATION_RE.search(command)):
+        return "dependency_generation"
+    return stage
+
+
+def _command_has_non_source_acquisition_build_segment(command: object) -> bool:
+    for segment in split_unquoted_shell_command_segments(command):
+        if _segment_uses_source_acquisition_tool(segment):
+            continue
+        if _segment_invokes_build_tool(segment):
+            return True
+    return False
+
+
+def _segment_invokes_build_tool(segment: object) -> bool:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    command_token = _long_dependency_invoked_command_token(parts)
+    if not command_token:
+        return False
+    command_name = Path(command_token).name.casefold()
+    command_index = next((index for index, part in enumerate(parts) if str(part or "") == command_token), None)
+    if command_index is None:
+        return False
+    tail = [str(part or "").casefold() for part in parts[command_index + 1 :]]
+    if command_name in {"make", "ninja"}:
+        return True
+    if command_name in {"cargo", "go"}:
+        return bool(tail and tail[0] == "build")
+    if command_name == "npm":
+        return len(tail) >= 2 and tail[0] == "run" and tail[1] == "build"
+    if command_name in {"python", "python3"} or re.fullmatch(r"python3(?:\.\d+)?", command_name):
+        return len(tail) >= 2 and tail[0] == "-m" and tail[1] == "build"
+    if command_name == "opam":
+        return bool(tail and tail[0] == "install")
+    if command_name in {"pip", "pip3"} or re.fullmatch(r"pip3(?:\.\d+)?", command_name):
+        return bool(tail and tail[0] == "install")
+    return False
+
+
 def command_evidence_to_tool_call(evidence: CommandEvidence | Mapping[str, object]) -> dict:
     if isinstance(evidence, CommandEvidence):
         evidence = evidence.to_dict()
@@ -684,9 +1021,185 @@ def long_dependency_artifact_proven_by_command_evidence(
         return False
     if evidence.tool not in COMMAND_EVIDENCE_TOOLS:
         return False
-    if not evidence.terminal_success:
+    if not command_evidence_terminal_acceptance_success(evidence):
         return False
     return long_dependency_artifact_proven_by_call(command_evidence_to_tool_call(evidence), artifact)
+
+
+def command_evidence_terminal_acceptance_success(evidence: CommandEvidence | Mapping[str, object]) -> bool:
+    if not isinstance(evidence, CommandEvidence):
+        evidence = CommandEvidence.from_dict(evidence)
+    if evidence.status != "completed":
+        return False
+    if evidence.exit_code != 0:
+        return False
+    if evidence.timed_out:
+        return False
+    if evidence.finish_order <= 0:
+        return False
+    return bool(evidence.terminal_success)
+
+
+def _latest_long_command_run_with_status(
+    runs: Iterable[LongCommandRun],
+    statuses: set[str],
+) -> LongCommandRun | None:
+    latest = None
+    for run in runs or []:
+        if str(run.status or "").casefold() in statuses:
+            latest = run
+    return latest
+
+
+def _latest_long_command_run(runs: Iterable[LongCommandRun]) -> LongCommandRun | None:
+    latest = None
+    for run in runs or []:
+        latest = run
+    return latest
+
+
+def _long_command_evidence_id(ref: object) -> int | None:
+    if not isinstance(ref, Mapping):
+        return None
+    return _coerce_int(ref.get("id"))
+
+
+def _derive_long_command_poll_recovery_decision(
+    contract: Mapping[str, object],
+    run: LongCommandRun,
+) -> RecoveryDecision:
+    contract_id = str(contract.get("id") or run.contract_id or "")
+    return RecoveryDecision(
+        schema_version=LONG_BUILD_SCHEMA_VERSION,
+        id=f"{contract_id}:recovery:long_command:{_safe_path_component(run.id)}",
+        contract_id=contract_id,
+        state_status="in_progress",
+        failure_class="long_command_running",
+        prerequisites=["active_long_command_run"],
+        clear_condition="terminal command evidence is finalized",
+        allowed_next_action={
+            "kind": "poll_long_command",
+            "long_command_run_id": run.id,
+            "stage": run.stage or "continue_long_command",
+            "required_evidence": "terminal_command_progress_or_success",
+            "targets": _contract_artifact_paths(contract),
+        },
+        prohibited_repeated_actions=[
+            "source_reacquisition",
+            "clean_rebuild",
+            "abandon_existing_source_tree_progress",
+        ],
+        budget={
+            "remaining_seconds": _coerce_int(run.budget.get("work_wall_remaining_seconds")),
+            "reserve_seconds": _coerce_int(run.budget.get("final_proof_reserve_seconds"), default=60),
+            "may_spend_reserve": False,
+            "minimum_poll_seconds": 5,
+            "continuation_count": _coerce_int(run.budget.get("continuation_count"), default=0) or 0,
+            "max_continuations": _coerce_int(run.budget.get("max_continuations"), default=3) or 3,
+        },
+        decision="continue",
+    )
+
+
+def _long_command_terminal_failure(run: LongCommandRun) -> dict:
+    status = str(run.status or "").casefold()
+    failure_class = "build_timeout" if status in {"timed_out", "killed"} else "long_command_failed"
+    if status == "interrupted":
+        failure_class = "long_command_interrupted"
+    if status == "failed" and str(run.stage or "") == "source_acquisition":
+        failure_class = "source_acquisition_failed"
+    return {
+        "failure_class": failure_class,
+        "source": "long_command_run",
+        "long_command_run_id": run.id,
+        "stage": run.stage,
+        "status": run.status,
+        "excerpt": _first_nonempty_line((run.output or {}).get("stderr_tail") or (run.output or {}).get("stdout_tail") or ""),
+    }
+
+
+def _derive_long_command_terminal_recovery_decision(
+    contract: Mapping[str, object],
+    run: LongCommandRun,
+    status: str,
+) -> RecoveryDecision:
+    contract_id = str(contract.get("id") or run.contract_id or "")
+    failure = _long_command_terminal_failure(run)
+    failure_class = str(failure.get("failure_class") or "")
+    if failure_class not in {"build_timeout", "long_command_interrupted"}:
+        return RecoveryDecision(
+            schema_version=LONG_BUILD_SCHEMA_VERSION,
+            id=f"{contract_id}:recovery:long_command:{_safe_path_component(run.id)}",
+            contract_id=contract_id,
+            state_status=status,
+            failure_class=failure_class,
+            prerequisites=["diagnose_terminal_failure", "changed_command_or_new_source_channel"],
+            clear_condition="run a repaired command and produce terminal successful evidence",
+            allowed_next_action={
+                "kind": "repair_failed_long_command",
+                "long_command_run_id": run.id,
+                "stage": run.stage or "continue_or_repair_build",
+                "failed_idempotence_key": run.idempotence_key,
+                "failed_status": run.status,
+                "failed_exit_code": (run.terminal or {}).get("exit_code"),
+                "required_evidence": "terminal_command_progress_or_success",
+                "targets": _contract_artifact_paths(contract),
+            },
+            prohibited_repeated_actions=[
+                "repeat_identical_failed_command_without_new_evidence",
+                "repeat_same_failed_source_url_without_new_source_channel",
+                "abandon_existing_diagnostic_output",
+            ],
+            budget={
+                "remaining_seconds": _coerce_int(run.budget.get("work_wall_remaining_seconds")),
+                "reserve_seconds": _coerce_int(run.budget.get("final_proof_reserve_seconds"), default=60),
+                "may_spend_reserve": False,
+                "minimum_repair_seconds": 600,
+                "continuation_count": _coerce_int(run.budget.get("continuation_count"), default=0) or 0,
+                "max_continuations": _coerce_int(run.budget.get("max_continuations"), default=3) or 3,
+            },
+            decision="continue",
+        )
+    return RecoveryDecision(
+        schema_version=LONG_BUILD_SCHEMA_VERSION,
+        id=f"{contract_id}:recovery:long_command:{_safe_path_component(run.id)}",
+        contract_id=contract_id,
+        state_status=status,
+        failure_class=failure_class,
+        prerequisites=["valid_source_tree", "same_idempotence_key", "larger_or_diagnostic_budget"],
+        clear_condition="resume same idempotent command and produce terminal successful evidence",
+        allowed_next_action={
+            "kind": "resume_idempotent_long_command",
+            "long_command_run_id": run.id,
+            "stage": run.stage or "continue_or_resume_build",
+            "idempotence_key": run.idempotence_key,
+            "required_evidence": "terminal_command_progress_or_success",
+            "targets": _contract_artifact_paths(contract),
+        },
+        prohibited_repeated_actions=[
+            "source_reacquisition",
+            "clean_rebuild",
+            "repeat_same_timeout_without_budget_change",
+            "abandon_existing_source_tree_progress",
+        ],
+        budget={
+            "remaining_seconds": _coerce_int(run.budget.get("work_wall_remaining_seconds")),
+            "reserve_seconds": _coerce_int(run.budget.get("final_proof_reserve_seconds"), default=60),
+            "may_spend_reserve": False,
+            "minimum_resume_seconds": 600,
+            "continuation_count": _coerce_int(run.budget.get("continuation_count"), default=0) or 0,
+            "max_continuations": _coerce_int(run.budget.get("max_continuations"), default=3) or 3,
+        },
+        decision="continue",
+    )
+
+
+def _contract_artifact_paths(contract: Mapping[str, object]) -> list[str]:
+    return [
+        str((artifact or {}).get("path") or "")
+        for artifact in contract.get("required_artifacts") or []
+        if isinstance(artifact, Mapping) and str((artifact or {}).get("path") or "")
+    ]
 
 
 def fresh_long_dependency_artifact_evidence(
@@ -785,11 +1298,11 @@ def _selected_target(command: object, contract: Mapping[str, object]) -> str:
 
 def _attempt_result(evidence: CommandEvidence) -> str:
     status = str(evidence.status or "").casefold()
-    if status in {"running", "interrupted"}:
+    if status in {"running", "yielded", "interrupted"}:
         return status
     if evidence.timed_out:
         return "timeout"
-    if evidence.terminal_success:
+    if command_evidence_terminal_acceptance_success(evidence):
         return "success"
     if status == "completed" or evidence.exit_code not in (None, 0):
         return "failure"
@@ -834,6 +1347,8 @@ def _source_authority_signal(evidence: CommandEvidence) -> bool:
     if _saved_authority_page_archive_signal(evidence, output_text):
         return True
     if _validated_source_archive_acquisition_signal(evidence):
+        return True
+    if _selected_authoritative_source_archive_acquisition_signal(evidence, output_text):
         return True
     if _command_uses_direct_source_acquisition_tool(evidence.command):
         has_direct_source_authority = bool(_DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(output_text))
@@ -927,8 +1442,58 @@ def _saved_source_archive_identity_readback_signal(evidence: CommandEvidence, ou
     return bool(_saved_source_archive_identity_readback_paths(evidence, output_text))
 
 
+def _saved_source_url_archive_readback_signal(
+    evidence: CommandEvidence,
+    output_text: object,
+    *,
+    fabricated_source_url_paths: Iterable[object] = (),
+) -> bool:
+    if not command_evidence_terminal_acceptance_success(evidence):
+        return False
+    command = evidence.command
+    if _command_defines_shell_function(command):
+        return False
+    if _command_has_assertion_only_source_authority_segment(command):
+        return False
+    read_paths = _command_saved_source_url_readback_paths(command)
+    if not read_paths:
+        return False
+    fabricated_paths = {str(path or "").strip("'\"") for path in fabricated_source_url_paths or []}
+    if _DYNAMIC_SOURCE_URL_WRITER_PATH in fabricated_paths:
+        return False
+    if fabricated_paths and read_paths & fabricated_paths:
+        return False
+    if not any(_authoritative_source_archive_url(url) for url in _saved_source_url_output_urls(output_text)):
+        return False
+    return _saved_source_archive_identity_readback_signal(evidence, output_text)
+
+
+def _saved_source_url_output_urls(output_text: object) -> set[str]:
+    urls: set[str] = set()
+    for match in re.finditer(r"^source_url=(https?://\S+)", str(output_text or ""), re.I | re.M):
+        urls.add(match.group(1).rstrip("'\"),;"))
+    return urls
+
+
+def _command_reads_saved_source_url_file(command: object) -> bool:
+    return bool(_command_saved_source_url_readback_paths(command))
+
+
+def _command_saved_source_url_readback_paths(command: object) -> set[str]:
+    paths: set[str] = set()
+    for parts in _invoked_command_parts(command):
+        values = [str(part or "").strip("'\"") for part in parts]
+        if not values:
+            continue
+        token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+        if token not in {"awk", "cat", "grep", "sed"}:
+            continue
+        paths.update(value for value in values[1:] if re.search(r"source[-_]url", value, re.I))
+    return paths
+
+
 def _saved_source_archive_identity_readback_paths(evidence: CommandEvidence, output_text: object) -> set[str]:
-    if not evidence.terminal_success:
+    if not command_evidence_terminal_acceptance_success(evidence):
         return set()
     command = evidence.command
     if _command_defines_shell_function(command):
@@ -947,9 +1512,258 @@ def _saved_source_archive_identity_readback_paths(evidence: CommandEvidence, out
     return {path for path in readback_paths if _source_archive_hash_output_for_path(text, path)}
 
 
+def _selected_authoritative_source_archive_acquisition_signal(
+    evidence: CommandEvidence,
+    output_text: object,
+) -> bool:
+    if not command_evidence_terminal_acceptance_success(evidence):
+        return False
+    command = str(evidence.command or "")
+    if not (
+        _command_enables_errexit(command)
+        and not _command_disables_errexit(command)
+        and not _command_disables_pipefail(command)
+        and not _command_masks_remote_source_fetch_failure(command)
+    ):
+        return False
+    if _command_uses_python_remote_source_acquisition_tool(command):
+        return False
+    if _command_defines_shell_function(command):
+        return False
+    text = str(output_text or "")
+    selected_urls = _selected_source_archive_output_urls(text)
+    if not selected_urls:
+        return False
+    authoritative_archive_paths = _selected_authoritative_source_archive_fetch_paths(command, selected_urls)
+    archive_paths = _command_hashes_source_archive_paths(command) & _command_lists_source_archive_paths(command)
+    archive_paths = {path for path in archive_paths if _versioned_source_archive_path(path)}
+    archive_paths &= authoritative_archive_paths
+    if not archive_paths:
+        return False
+    for path in archive_paths:
+        if not _command_validates_and_extracts_archive_path(command, path):
+            continue
+        if _source_archive_hash_output_for_path(text, path) and _archive_listing_output_signal(text):
+            return True
+    return False
+
+
+def _selected_source_archive_output_urls(output_text: object) -> set[str]:
+    urls: set[str] = set()
+    after_marker = False
+    for line in str(output_text or "").splitlines():
+        stripped = line.strip()
+        if _SELECTED_SOURCE_ARCHIVE_OUTPUT_RE.search(stripped):
+            after_marker = True
+            continue
+        if not after_marker:
+            continue
+        line_urls = {url for url in _extract_urls(stripped) if _authoritative_source_archive_url(url)}
+        if line_urls:
+            urls.update(line_urls)
+            continue
+        if not stripped:
+            continue
+        break
+    return urls
+
+
+def _selected_authoritative_source_archive_fetch_paths(command: object, selected_urls: Iterable[object]) -> set[str]:
+    command_text = _strip_heredoc_bodies(command)
+    selected = {str(url or "").rstrip("'\"),;") for url in selected_urls if _authoritative_source_archive_url(url)}
+    if not selected:
+        return set()
+    paths: set[str] = set()
+    assignments: dict[str, str] = {}
+    for segment in _top_level_direct_fetch_segments(command_text):
+        try:
+            raw_parts = shlex.split(str(segment or ""))
+        except ValueError:
+            raw_parts = str(segment or "").split()
+        resolved_parts = _resolve_shell_parts(_drop_shell_control_prefix(raw_parts), assignments)
+        token = Path(_long_dependency_invoked_command_token(resolved_parts)).name.casefold()
+        source_tokens = _curl_wget_effective_source_tokens(resolved_parts)
+        if (
+            token in {"curl", "wget"}
+            and not _curl_wget_uses_no_download_mode(resolved_parts)
+            and len(source_tokens) == 1
+            and source_tokens[0] in selected
+        ):
+            path = _curl_wget_output_path(resolved_parts)
+            if path and _versioned_source_archive_path(path):
+                paths.add(path)
+        _apply_top_level_shell_assignment_segment(assignments, segment)
+    paths.update(_selected_loop_alias_authoritative_source_archive_fetch_paths(command_text, selected))
+    return paths
+
+
+def _selected_loop_alias_authoritative_source_archive_fetch_paths(
+    command_text: object,
+    selected_urls: set[str],
+) -> set[str]:
+    paths: set[str] = set()
+    for variable, values, body in _top_level_for_loop_blocks(command_text):
+        urls = _extract_urls_in_order(values)
+        if not urls or not _authoritative_source_archive_url(urls[0]) or urls[0] not in selected_urls:
+            continue
+        body_parts = _invoked_command_parts(body)
+        aliases = set()
+        if not any(_parts_invalidates_selected_loop_variable(parts, variable) for parts in body_parts):
+            aliases.add(variable)
+        for index, parts in enumerate(body_parts):
+            alias = _parts_alias_variable_from_loop_variable(parts, variable)
+            if alias and not any(
+                _parts_invalidates_selected_loop_variable(later_parts, alias, empty_assignment_invalidates=True)
+                for later_parts in body_parts[index + 1 :]
+            ):
+                aliases.add(alias)
+        for alias in aliases:
+            paths.update(_top_level_fetch_paths_after_selected_variable_print(command_text, alias))
+    return paths
+
+
+def _parts_alias_variable_from_loop_variable(parts: Iterable[object], variable: str) -> str:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if len(values) != 1:
+        return ""
+    match = re.fullmatch(rf"([A-Za-z_][A-Za-z0-9_]*)=\$\{{?{re.escape(variable)}\}}?", values[0])
+    return match.group(1) if match else ""
+
+
+def _top_level_fetch_paths_after_selected_variable_print(
+    command: object,
+    variable: str,
+) -> set[str]:
+    paths: set[str] = set()
+    selected_print_seen = False
+    assignments: dict[str, str] = {}
+    top_level_segments = _top_level_direct_fetch_segments(command)
+    marker_segments = _selected_marker_segments(top_level_segments)
+    if len(marker_segments) != 1:
+        return set()
+    expected_marker = marker_segments[0]
+    for segment in top_level_segments:
+        if segment == expected_marker and not _segment_prints_selected_archive_variable(segment, variable):
+            return set()
+        if _segment_prints_selected_archive_variable(segment, variable):
+            selected_print_seen = True
+            _apply_top_level_shell_assignment_segment(assignments, segment)
+            continue
+        if not selected_print_seen:
+            if _segment_invalidates_selected_loop_variable(segment, variable):
+                return set()
+            _apply_top_level_shell_assignment_segment(assignments, segment)
+            continue
+        try:
+            raw_parts = shlex.split(str(segment or ""))
+        except ValueError:
+            raw_parts = str(segment or "").split()
+        resolved_parts = _resolve_shell_parts(_drop_shell_control_prefix(raw_parts), assignments)
+        token = Path(_long_dependency_invoked_command_token(resolved_parts)).name.casefold()
+        if (
+            token not in {"curl", "wget"}
+            or _curl_wget_uses_no_download_mode(resolved_parts)
+            or not _parts_fetches_exact_loop_variable_source(raw_parts, variable)
+        ):
+            selected_print_seen = False
+            _apply_top_level_shell_assignment_segment(assignments, segment)
+            continue
+        path = _curl_wget_output_path(resolved_parts)
+        if path and _versioned_source_archive_path(path):
+            paths.add(path)
+        selected_print_seen = False
+        _apply_top_level_shell_assignment_segment(assignments, segment)
+    return paths
+
+
+def _segment_invalidates_selected_loop_variable(segment: object, variable: str) -> bool:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    return _parts_invalidates_selected_loop_variable(parts, variable)
+
+
+def _parts_invalidates_selected_loop_variable(
+    parts: Iterable[object],
+    variable: str,
+    *,
+    empty_assignment_invalidates: bool = False,
+) -> bool:
+    values = _drop_shell_builtin_mutation_wrapper_prefix(_drop_shell_control_prefix(parts))
+    if not values:
+        return False
+    invoked = str(_long_dependency_invoked_command_token(values) or "")
+    token = Path(invoked).name.casefold() or invoked.casefold()
+    if token == "eval" or token == "source" or invoked == ".":
+        return True
+    if token in {"unset", "read", "mapfile", "readarray"}:
+        return any(str(part or "").strip("'\"") == variable for part in values[1:])
+    if token == "printf" and "-v" in values:
+        index = values.index("-v")
+        return index + 1 < len(values) and str(values[index + 1] or "").strip("'\"") == variable
+    assignment_tokens = values
+    if token in {"export", "declare", "typeset", "local", "readonly"}:
+        assignment_tokens = [part for part in values[1:] if not str(part or "").startswith("-")]
+    if len(assignment_tokens) != 1:
+        return False
+    match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)", str(assignment_tokens[0] or ""))
+    if not match or match.group(1) != variable:
+        return False
+    if match.group(2) == "+=":
+        return True
+    value = match.group(3).strip("'\"")
+    return empty_assignment_invalidates or bool(value)
+
+
+def _selected_marker_segments(segments: Iterable[object]) -> list[str]:
+    return [
+        str(segment or "")
+        for segment in segments
+        if "selected" in str(segment or "").casefold() or "chosen" in str(segment or "").casefold()
+    ]
+
+
+def _segment_prints_selected_archive_variable(segment: object, variable: str) -> bool:
+    segment_text = str(segment or "")
+    if "selected" not in segment_text.casefold() and "chosen" not in segment_text.casefold():
+        return False
+    if "$(" in segment_text or "`" in segment_text or "<(" in segment_text:
+        return False
+    if ">" in segment_text or "|" in segment_text or _shell_text_has_unquoted_background_operator(segment_text):
+        return False
+    if any(_authoritative_source_archive_url(url) for url in _extract_urls(segment_text)):
+        return False
+    try:
+        parts = shlex.split(segment_text)
+    except ValueError:
+        parts = segment_text.split()
+    token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+    if token not in {"printf", "echo"}:
+        return False
+    if token == "printf" and "-v" in parts:
+        return False
+    return _parts_referenced_variables(parts) == {variable}
+
+
+def _parts_referenced_variables(parts: Iterable[object]) -> set[str]:
+    variables: set[str] = set()
+    for part in parts:
+        token = str(part or "")
+        for match in re.finditer(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", token):
+            variables.add(match.group(1))
+    return variables
+
+
+def _parts_reference_variable(parts: Iterable[object], variable: str) -> bool:
+    refs = {f"${variable}", f"${{{variable}}}"}
+    return any(str(part or "").strip("'\"") in refs for part in parts)
+
+
 def _source_authority_satisfied_by_correlated_archive_readback(evidences: Iterable[CommandEvidence]) -> bool:
     authoritative_paths: set[str] = set()
     absent_archive_paths: set[str] = set()
+    fabricated_source_url_paths: set[str] = set()
     for evidence in sorted(
         [item for item in evidences or [] if isinstance(item, CommandEvidence)],
         key=lambda item: item.finish_order,
@@ -967,14 +1781,288 @@ def _source_authority_satisfied_by_correlated_archive_readback(evidences: Iterab
             ):
                 authoritative_paths.add(path)
         readback_paths = _saved_source_archive_identity_readback_paths(evidence, output_text)
-        if authoritative_paths & readback_paths:
+        if _source_archive_readback_matches_authoritative_path(authoritative_paths, readback_paths, evidence.command):
             return True
+        if _saved_source_url_archive_readback_signal(
+            evidence,
+            output_text,
+            fabricated_source_url_paths=fabricated_source_url_paths,
+        ):
+            return True
+        fabricated_source_url_paths.update(_fabricated_source_url_file_paths(evidence))
         absent_archive_paths.update(_source_archive_absence_paths(evidence.command, output_text))
     return False
 
 
+def _fabricated_source_url_file_paths(evidence: CommandEvidence) -> set[str]:
+    command = str(evidence.command or "")
+    if _source_authority_signal(evidence):
+        return set()
+    paths: set[str] = set()
+    redirect_re = r"(?:&>>|&>\|?|(?:\d*)?(?:>\||>>|>))"
+    if re.search(r"source_url\b", command, re.I):
+        paths.update(_mentioned_source_url_file_paths(command))
+        if re.search(r"(?:write_text|\.write\s*\(|\bopen\s*\(|\bPath\s*\()", command):
+            paths.add(_DYNAMIC_SOURCE_URL_WRITER_PATH)
+    for match in re.finditer(rf"{redirect_re}\s*>\(([^)]*)\)", command, re.I):
+        process_body = str(match.group(1) or "")
+        process_paths = {
+            item.strip("'\"")
+            for item in re.findall(r"(\S*source[-_]url\S*)", process_body, re.I)
+            if item.strip("'\"")
+        }
+        if process_paths:
+            paths.update(process_paths)
+        elif "$" in process_body:
+            paths.add(_DYNAMIC_SOURCE_URL_WRITER_PATH)
+    for match in re.finditer(rf"{redirect_re}\s*(['\"]?)(\S+)\1", command, re.I):
+        target = str(match.group(2) or "").strip("'\"")
+        if re.search(r"source[-_]url", target, re.I):
+            paths.add(target)
+    assignments: dict[str, str] = {}
+    for segment in _ordered_shell_command_segments(_strip_heredoc_bodies(command)):
+        for match in re.finditer(rf"{redirect_re}\s*(['\"]?)(\S+)\1", str(segment or ""), re.I):
+            target = _resolve_shell_token(match.group(2), assignments)
+            if re.search(r"source[-_]url", target, re.I):
+                paths.add(target.strip("'\""))
+            elif "$" in str(target or ""):
+                paths.add(_DYNAMIC_SOURCE_URL_WRITER_PATH)
+        try:
+            parts = shlex.split(str(segment or ""))
+        except ValueError:
+            parts = str(segment or "").split()
+        values = _resolve_shell_parts(_drop_shell_control_prefix(parts), assignments)
+        if not values:
+            _apply_top_level_shell_assignment_segment(assignments, segment)
+            continue
+        token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+        if token == "tee":
+            for value in values[1:]:
+                if value.startswith("-"):
+                    continue
+                if re.search(r"source[-_]url", value, re.I):
+                    paths.add(value)
+                elif "$" in str(value or ""):
+                    paths.add(_DYNAMIC_SOURCE_URL_WRITER_PATH)
+        if token in {"cp", "install", "mv"}:
+            destination = _file_materialization_destination_arg(values)
+            if re.search(r"source[-_]url", destination, re.I):
+                paths.add(destination)
+            elif "$" in str(destination or ""):
+                paths.add(_DYNAMIC_SOURCE_URL_WRITER_PATH)
+        if token == "dd":
+            destination = _dd_output_destination_arg(values, assignments)
+            if re.search(r"source[-_]url", destination, re.I):
+                paths.add(destination)
+            elif "$" in str(destination or ""):
+                paths.add(_DYNAMIC_SOURCE_URL_WRITER_PATH)
+        _apply_top_level_shell_assignment_segment(assignments, segment)
+    return paths
+
+
+def _mentioned_source_url_file_paths(command: object) -> set[str]:
+    text = str(command or "")
+    paths: set[str] = set()
+    for match in re.finditer(r"['\"]([^'\"]*source[-_]url[^'\"]*)['\"]", text, re.I):
+        candidate = match.group(1).strip("'\"")
+        if "/" in candidate or candidate.startswith("$"):
+            paths.add(candidate.rstrip("),;"))
+    for match in re.finditer(r"(?:^|\s)(\S*source[-_]url\S*)", text, re.I):
+        candidate = match.group(1).strip("'\"")
+        if "/" in candidate or candidate.startswith("$"):
+            paths.add(candidate.rstrip("),;"))
+    return paths
+
+
+def _dd_output_destination_arg(parts: Iterable[object], assignments: Mapping[str, str]) -> str:
+    values = [str(part or "").strip("'\"") for part in parts]
+    for index, value in enumerate(values[1:], start=1):
+        if value.startswith("of="):
+            return _resolve_shell_token(value[3:], assignments).strip("'\"")
+        if value == "of" and index + 1 < len(values):
+            return _resolve_shell_token(values[index + 1], assignments).strip("'\"")
+    return ""
+
+
+def _file_materialization_destination_arg(parts: Iterable[object]) -> str:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if not values:
+        return ""
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    operands: list[str] = []
+    skip_next = False
+    option_takes_value = {
+        "cp": {"-t", "--target-directory", "-T", "--no-target-directory"},
+        "install": {"-m", "--mode", "-o", "--owner", "-g", "--group", "-t", "--target-directory"},
+        "mv": {"-t", "--target-directory", "-T", "--no-target-directory"},
+    }
+    for value in values[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if value == "--":
+            operands.extend(item for item in values[values.index(value) + 1 :] if item)
+            break
+        if value.startswith("--") and "=" in value:
+            continue
+        if value.startswith("-"):
+            if value in option_takes_value.get(token, set()):
+                skip_next = True
+            continue
+        operands.append(value)
+    if not operands:
+        return ""
+    if "-t" in values or "--target-directory" in values:
+        for index, value in enumerate(values):
+            if value in {"-t", "--target-directory"} and index + 1 < len(values):
+                return str(values[index + 1] or "").strip("'\"")
+    return operands[-1]
+
+
+def _source_archive_readback_matches_authoritative_path(
+    authoritative_paths: Iterable[object],
+    readback_paths: Iterable[object],
+    readback_command: object,
+) -> bool:
+    for authoritative_path in authoritative_paths or []:
+        authoritative_text = str(authoritative_path or "").strip("'\"")
+        if not authoritative_text:
+            continue
+        for readback_path in readback_paths or []:
+            readback_text = str(readback_path or "").strip("'\"")
+            if not readback_text:
+                continue
+            if authoritative_text == readback_text:
+                return True
+            if Path(readback_text).is_absolute():
+                continue
+            if Path(readback_text).name != Path(authoritative_text).name:
+                continue
+            if _relative_source_archive_readback_runs_from_archive_parent(
+                readback_command,
+                readback_text,
+                authoritative_text,
+            ):
+                return True
+    return False
+
+
+def _relative_source_archive_readback_runs_from_archive_parent(
+    command: object,
+    readback_path: object,
+    archive_path: object,
+) -> bool:
+    readback_text = str(readback_path or "").strip("'\"")
+    if not readback_text or Path(readback_text).is_absolute():
+        return False
+    if not _safe_relative_source_archive_readback_path(readback_text):
+        return False
+    archive_text = str(archive_path or "").strip("'\"")
+    parent = _normalized_absolute_shell_path(str(Path(archive_text).parent))
+    if not parent:
+        return False
+    command_text = _strip_heredoc_bodies(command)
+    current_cwd = ""
+    hash_seen = False
+    list_seen = False
+    for span in split_unquoted_shell_command_segment_spans(command_text):
+        parts = _segment_invoked_command_parts(span.get("text"))
+        if not parts:
+            continue
+        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+        if token == "cd":
+            next_cwd = _cwd_after_cd_segment(span, command_text, parts, current_cwd)
+            current_cwd = next_cwd
+            continue
+        if _unmodeled_cwd_mutating_segment_token(parts):
+            current_cwd = ""
+            continue
+        source_paths = _source_archive_paths(parts[1:])
+        if readback_text not in source_paths:
+            continue
+        if current_cwd != parent:
+            continue
+        if not _source_archive_readback_segment_control_safe(span, command_text, {readback_text}):
+            continue
+        if token in {"sha256sum", "shasum", "sha512sum"}:
+            hash_seen = True
+        if token == "tar" and _tar_parts_use_mode(parts, "t"):
+            list_seen = True
+        if token == "unzip" and _unzip_parts_use_test_mode(parts):
+            list_seen = True
+    return hash_seen and list_seen
+
+
+def _safe_relative_source_archive_readback_path(path: object) -> bool:
+    text = str(path or "").strip("'\"")
+    if not text or Path(text).is_absolute():
+        return False
+    parts = [part for part in text.split("/") if part and part != "."]
+    return len(parts) == 1 and parts[0] not in {"..", "."}
+
+
+def _unmodeled_cwd_mutating_segment_token(parts: Iterable[object]) -> bool:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if not values:
+        return False
+    invoked = _long_dependency_invoked_command_token(values)
+    token = Path(invoked).name.casefold() or str(invoked or "").casefold()
+    if token in {"pushd", "popd", "eval", "source", "."}:
+        return True
+    if token not in {"builtin", "command"} or len(values) < 2:
+        return False
+    wrapped = Path(str(values[1] or "")).name.casefold()
+    return wrapped in {"cd", "pushd", "popd"}
+
+
+def _cwd_after_cd_segment(
+    span: Mapping[str, object],
+    command: object,
+    parts: Iterable[object],
+    current_cwd: object,
+) -> str:
+    if not _cd_segment_control_safe(span, command):
+        return ""
+    values = [str(part or "").strip("'\"") for part in parts]
+    if len(values) != 2:
+        return ""
+    target = values[1]
+    if not target or target in {"-", "~"} or "$" in target:
+        return ""
+    if Path(target).is_absolute():
+        return _normalized_absolute_shell_path(target)
+    base = str(current_cwd or "")
+    if not base:
+        return ""
+    return _normalized_absolute_shell_path(posixpath.join(base, target))
+
+
+def _cd_segment_control_safe(span: Mapping[str, object], command: object) -> bool:
+    text = str(span.get("text") or "").strip()
+    if not text or ">" in text:
+        return False
+    if _shell_text_has_unquoted_background_operator(text):
+        return False
+    before = str(span.get("before_operator") or "")
+    after = str(span.get("after_operator") or "")
+    if before in {"&&", "||", "|"} or after in {"||", "|"}:
+        return False
+    if _span_is_inside_stdout_redirected_compound_command(span, command):
+        return False
+    if _span_is_inside_if_body(span, command) or _span_is_inside_shell_loop_body(span, command):
+        return False
+    return not re.match(r"^(?:if|while|until|for)\b|^!", text, re.I)
+
+
+def _normalized_absolute_shell_path(path: object) -> str:
+    text = str(path or "").strip("'\"")
+    if not text or "$" in text or not Path(text).is_absolute():
+        return ""
+    return posixpath.normpath(text)
+
+
 def _authoritative_archive_acquisition_completed(evidence: CommandEvidence, archive_path: object) -> bool:
-    if evidence.terminal_success:
+    if command_evidence_terminal_acceptance_success(evidence):
         return True
     output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     if _source_acquisition_generated_hash_output_signal(evidence.command, output_text, archive_path):
@@ -1145,8 +2233,11 @@ def _command_readbacks_source_archive_identity(command: object) -> bool:
 
 def _command_hashes_source_archive_paths(command: object) -> set[str]:
     paths: set[str] = set()
-    for span in split_unquoted_shell_command_segment_spans(_strip_heredoc_bodies(command)):
-        values = [str(part or "").strip("'\"") for part in _segment_invoked_command_parts(span.get("text"))]
+    command_text = _strip_heredoc_bodies(command)
+    assignments = _simple_shell_assignments(command_text)
+    for span in split_unquoted_shell_command_segment_spans(command_text):
+        raw_values = [str(part or "").strip("'\"") for part in _segment_invoked_command_parts(span.get("text"))]
+        values = _resolve_shell_parts(raw_values, assignments)
         token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
         source_paths = _source_archive_paths(values[1:])
         if token in {"sha256sum", "shasum", "sha512sum"} and _source_archive_readback_segment_control_safe(
@@ -1158,8 +2249,11 @@ def _command_hashes_source_archive_paths(command: object) -> set[str]:
 
 def _command_lists_source_archive_paths(command: object) -> set[str]:
     paths: set[str] = set()
-    for span in split_unquoted_shell_command_segment_spans(_strip_heredoc_bodies(command)):
-        values = [str(part or "").strip("'\"") for part in _segment_invoked_command_parts(span.get("text"))]
+    command_text = _strip_heredoc_bodies(command)
+    assignments = _simple_shell_assignments(command_text)
+    for span in split_unquoted_shell_command_segment_spans(command_text):
+        raw_values = [str(part or "").strip("'\"") for part in _segment_invoked_command_parts(span.get("text"))]
+        values = _resolve_shell_parts(raw_values, assignments)
         token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
         source_paths = _source_archive_paths(values[1:])
         if token == "tar" and _tar_parts_use_mode(values, "t") and _source_archive_readback_segment_control_safe(
@@ -1330,7 +2424,7 @@ def _validated_source_archive_acquisition_signal(evidence: CommandEvidence) -> b
     text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     if _source_acquisition_failed_output_signal(text):
         return False
-    if not evidence.terminal_success:
+    if not command_evidence_terminal_acceptance_success(evidence):
         if not any(_source_acquisition_generated_hash_output_signal(command, text, archive_path) for archive_path in archive_paths):
             return False
     return not _BUILD_FAILURE_RE.search(text) or _source_acquisition_completed_output_signal(text)
@@ -1739,7 +2833,7 @@ def _strict_authoritative_archive_fetch_paths(command: object) -> set[str]:
         return set()
     paths = set()
     pending_temp_paths: set[str] = set()
-    assignments = _simple_shell_assignments(command_text)
+    assignments: dict[str, str] = {}
     for segment in _top_level_direct_fetch_segments(command_text):
         for path in _segment_authoritative_archive_fetch_paths(segment, assignments):
             if _source_archive_pathish(path) and _versioned_source_archive_path(path):
@@ -1756,6 +2850,7 @@ def _strict_authoritative_archive_fetch_paths(command: object) -> set[str]:
             if target:
                 paths.add(target)
                 pending_temp_paths.remove(temp_path)
+        _apply_top_level_shell_assignment_segment(assignments, segment)
     paths.update(_url_loop_authoritative_archive_fetch_paths(raw_command_text))
     return paths
 
@@ -1764,14 +2859,19 @@ def _url_loop_authoritative_archive_fetch_paths(command: object) -> set[str]:
     command_text = _shell_logical_command_text(_strip_heredoc_bodies(command))
     paths: set[str] = set()
     for variable, values, body in _top_level_for_loop_blocks(command_text):
-        if not any(_authoritative_source_archive_url(url) for url in _extract_urls(values)):
+        if not _candidate_values_allow_authoritative_source(values, body, variable):
             continue
         body_parts = _invoked_command_parts(body)
         for index, parts in enumerate(body_parts):
             token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
             if token not in {"curl", "wget"} or _curl_wget_uses_no_download_mode(parts):
                 continue
-            if not _parts_reference_loop_variable(parts, variable):
+            if not _parts_fetches_exact_loop_variable_source(parts, variable):
+                continue
+            if any(
+                _parts_invalidates_selected_loop_variable(prior_parts, variable, empty_assignment_invalidates=True)
+                for prior_parts in body_parts[:index]
+            ):
                 continue
             archive_path = _curl_wget_output_path(parts)
             if archive_path and _loop_body_proves_selected_archive(body_parts, index, archive_path, variable):
@@ -1788,12 +2888,12 @@ def _while_read_authoritative_archive_fetch_paths(command: object) -> set[str]:
     command_text = str(command or "")
     logical_text = _shell_logical_command_text(_strip_heredoc_bodies(command_text))
     candidate_text_by_path = _heredoc_text_by_output_path(command_text)
-    assignments = _simple_shell_assignments(logical_text)
     paths: set[str] = set()
-    for variable, input_path, body in _top_level_while_read_blocks(logical_text):
+    for variable, input_path, body, prefix in _top_level_while_read_blocks(logical_text):
+        assignments = _top_level_shell_assignments_in_order(prefix)
         resolved_input = _resolve_shell_token(input_path, assignments)
         candidate_text = candidate_text_by_path.get(resolved_input, "")
-        if not any(_authoritative_source_archive_url(url) for url in _extract_urls(candidate_text)):
+        if not _first_candidate_url_is_authoritative(candidate_text):
             continue
         body_parts = _invoked_command_parts(body)
         resolved_body_parts = [_resolve_shell_parts(parts, assignments) for parts in body_parts]
@@ -1801,7 +2901,12 @@ def _while_read_authoritative_archive_fetch_paths(command: object) -> set[str]:
             token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
             if token not in {"curl", "wget"} or _curl_wget_uses_no_download_mode(parts):
                 continue
-            if not _parts_reference_loop_variable(parts, variable):
+            if not _parts_fetches_exact_loop_variable_source(parts, variable):
+                continue
+            if any(
+                _parts_invalidates_selected_loop_variable(prior_parts, variable, empty_assignment_invalidates=True)
+                for prior_parts in body_parts[:index]
+            ):
                 continue
             archive_path = _curl_wget_output_path(parts)
             if archive_path and _loop_body_proves_selected_archive(resolved_body_parts, index, archive_path, variable):
@@ -1813,9 +2918,18 @@ def _while_read_authoritative_archive_fetch_paths(command: object) -> set[str]:
     return paths
 
 
-def _top_level_while_read_blocks(command: object) -> list[tuple[str, str, str]]:
+def _candidate_values_allow_authoritative_source(values: object, _body: object, _variable: str) -> bool:
+    return _first_candidate_url_is_authoritative(values)
+
+
+def _first_candidate_url_is_authoritative(candidate_text: object) -> bool:
+    urls = _extract_urls_in_order(candidate_text)
+    return bool(urls and _authoritative_source_archive_url(urls[0]))
+
+
+def _top_level_while_read_blocks(command: object) -> list[tuple[str, str, str, str]]:
     lines = str(command or "").splitlines()
-    blocks: list[tuple[str, str, str]] = []
+    blocks: list[tuple[str, str, str, str]] = []
     control_depth = 0
     index = 0
     while index < len(lines):
@@ -1828,6 +2942,7 @@ def _top_level_while_read_blocks(command: object) -> list[tuple[str, str, str]]:
                 re.I,
             )
             if match:
+                start_index = index
                 variable = match.group(1)
                 first_body = match.group(2).strip()
                 body: list[str] = [first_body] if first_body else []
@@ -1845,7 +2960,7 @@ def _top_level_while_read_blocks(command: object) -> list[tuple[str, str, str]]:
                     body.append(current)
                     index += 1
                 if input_path:
-                    blocks.append((variable, input_path, "\n".join(body)))
+                    blocks.append((variable, input_path, "\n".join(body), "\n".join(lines[:start_index])))
                 index += 1
                 continue
         control_depth = _update_shell_block_depth(stripped, control_depth)
@@ -1859,22 +2974,37 @@ def _heredoc_text_by_output_path(command: object) -> dict[str, str]:
     index = 0
     while index < len(lines):
         line = lines[index]
-        match = re.search(
-            r"\b(?:cat\s*(?:>|>>)|tee\s+(?:-[A-Za-z]+\s+)?)\s*(\S+)\s*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?",
+        cat_match = re.search(
+            r"\bcat\s*(>{1,2})\s*(\S+)\s*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?",
             line,
         )
-        if not match:
+        tee_match = re.search(
+            r"\btee\s+((?:-[A-Za-z]+\s+)*)?(\S+)\s*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?",
+            line,
+        )
+        if cat_match:
+            append = cat_match.group(1) == ">>"
+            output_path = cat_match.group(2).strip("'\"")
+            delimiter = cat_match.group(3)
+        elif tee_match:
+            options = str(tee_match.group(1) or "")
+            append = "-a" in options.split()
+            output_path = tee_match.group(2).strip("'\"")
+            delimiter = tee_match.group(3)
+        else:
             index += 1
             continue
-        output_path = match.group(1).strip("'\"")
-        delimiter = match.group(2)
         index += 1
         body: list[str] = []
         while index < len(lines) and lines[index].strip() != delimiter:
             body.append(lines[index])
             index += 1
         if body:
-            results[output_path] = "\n".join([results.get(output_path, ""), "\n".join(body)]).strip()
+            body_text = "\n".join(body).strip()
+            if append and output_path in results:
+                results[output_path] = "\n".join([results[output_path], body_text]).strip()
+            else:
+                results[output_path] = body_text
         if index < len(lines):
             index += 1
     return results
@@ -1894,8 +3024,95 @@ def _simple_shell_assignments(command: object) -> dict[str, str]:
             continue
         value = match.group(2).strip("'\"")
         if value and "$" not in value and "`" not in value and "<(" not in value:
-            assignments[match.group(1)] = value
+                assignments[match.group(1)] = value
     return assignments
+
+
+def _top_level_shell_assignments_in_order(command: object) -> dict[str, str]:
+    assignments: dict[str, str] = {}
+    for segment in _top_level_direct_fetch_segments(command):
+        _apply_top_level_shell_assignment_segment(assignments, segment)
+    return assignments
+
+
+def _apply_top_level_shell_assignment_segment(assignments: dict[str, str], segment: object) -> None:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    values = _drop_shell_control_prefix(parts)
+    values = _drop_shell_builtin_mutation_wrapper_prefix(values)
+    if not values:
+        return
+
+    invoked = str(_long_dependency_invoked_command_token(values) or "")
+    token = Path(invoked).name.casefold() or invoked.casefold()
+    if token == "eval" or token == "source" or invoked == ".":
+        assignments.clear()
+        return
+    if token == "unset":
+        for part in values[1:]:
+            name = str(part or "").strip("'\"")
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                assignments.pop(name, None)
+        return
+    if token in {"read", "mapfile", "readarray"}:
+        for part in values[1:]:
+            name = str(part or "").strip("'\"")
+            if name.startswith("-"):
+                continue
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                assignments.pop(name, None)
+        return
+    if token == "printf" and "-v" in values:
+        index = values.index("-v")
+        if index + 1 < len(values):
+            name = str(values[index + 1] or "").strip("'\"")
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                assignments.pop(name, None)
+        return
+
+    assignment_tokens = values
+    if token in {"export", "declare", "typeset", "local", "readonly"}:
+        assignment_tokens = [part for part in values[1:] if not str(part or "").startswith("-")]
+    if len(assignment_tokens) != 1:
+        return
+    assignment = str(assignment_tokens[0] or "")
+    match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)(\+?=)(.*)", assignment)
+    if not match:
+        return
+    name, operator, raw_value = match.group(1), match.group(2), match.group(3)
+    if operator == "+=":
+        assignments.pop(name, None)
+        return
+    value = _resolve_shell_token(raw_value.strip("'\""), assignments)
+    if value and "$" not in value and "`" not in value and "<(" not in value:
+        assignments[name] = value
+    else:
+        assignments.pop(name, None)
+
+
+def _drop_shell_builtin_mutation_wrapper_prefix(parts: Iterable[object]) -> list[str]:
+    values = [str(part or "") for part in parts]
+    while values:
+        name = Path(values[0]).name.casefold()
+        if name == "builtin":
+            values = values[1:]
+            continue
+        if name == "command":
+            values = values[1:]
+            while values:
+                option = str(values[0] or "")
+                if option == "--":
+                    values = values[1:]
+                    break
+                if option in {"-p", "-v", "-V"}:
+                    values = values[1:]
+                    continue
+                break
+            continue
+        break
+    return values
 
 
 def _resolve_shell_token(value: object, assignments: Mapping[str, str]) -> str:
@@ -2012,7 +3229,8 @@ def _segment_authoritative_archive_fetch_paths(
         return set()
     if _curl_wget_uses_no_download_mode(parts):
         return set()
-    if not any(_authoritative_source_archive_url(url) for url in _parts_remote_source_fetch_urls(parts)):
+    source_tokens = _curl_wget_effective_source_tokens(parts)
+    if len(source_tokens) != 1 or not _authoritative_source_archive_url(source_tokens[0]):
         return set()
     archive_path = _curl_wget_output_path(parts)
     return {archive_path} if archive_path else set()
@@ -2115,6 +3333,104 @@ def _parts_reference_loop_variable(parts: Iterable[object], variable: str) -> bo
     return any(str(part or "").strip("'\"") in refs for part in parts)
 
 
+def _parts_fetches_exact_loop_variable_source(parts: Iterable[object], variable: str) -> bool:
+    values = _drop_shell_control_prefix([str(part or "") for part in parts])
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token not in {"curl", "wget"} or _curl_wget_uses_no_download_mode(values):
+        return False
+    refs = {f"${variable}", f"${{{variable}}}"}
+    source_tokens = _curl_wget_effective_source_tokens(values)
+    return len(source_tokens) == 1 and source_tokens[0].strip("'\"") in refs
+
+
+def _curl_wget_effective_source_tokens(parts: Iterable[object]) -> list[str]:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token not in {"curl", "wget"}:
+        return []
+    if _curl_wget_uses_external_config(values):
+        return []
+    option_value_flags = {
+        "-o",
+        "--output",
+        "-O" if token == "wget" else "",
+        "--output-document",
+        "-H",
+        "--header",
+        "-e",
+        "--referer",
+        "-A",
+        "--user-agent",
+        "-d",
+        "--data",
+        "--data-binary",
+        "--connect-timeout",
+        "--max-time",
+        "--retry",
+        "--retry-delay",
+        "--retry-max-time",
+        "--speed-limit",
+        "--speed-time",
+        "--timeout",
+        "--tries",
+        "--url-query",
+    }
+    source_tokens: list[str] = []
+    skip_next = False
+    source_next = False
+    for part in values[1:]:
+        part_text = str(part or "")
+        if skip_next:
+            skip_next = False
+            continue
+        if source_next:
+            stripped = part_text.strip("'\"")
+            if stripped.startswith(("http://", "https://")) or re.fullmatch(
+                r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?", stripped
+            ):
+                source_tokens.append(stripped)
+            elif _untrusted_dynamic_source_operand(stripped):
+                source_tokens.append("__dynamic_source_operand__")
+            else:
+                source_tokens.append("__literal_source_operand__")
+            source_next = False
+            continue
+        if part_text == "--url":
+            source_next = True
+            continue
+        if part_text.startswith("--url="):
+            stripped = part_text.split("=", 1)[1].strip("'\"")
+            if stripped.startswith(("http://", "https://")) or re.fullmatch(
+                r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?", stripped
+            ):
+                source_tokens.append(stripped)
+            elif _untrusted_dynamic_source_operand(stripped):
+                source_tokens.append("__dynamic_source_operand__")
+            else:
+                source_tokens.append("__literal_source_operand__")
+            continue
+        if part_text in option_value_flags:
+            skip_next = True
+            continue
+        if any(part_text.startswith(f"{flag}=") for flag in option_value_flags if flag):
+            continue
+        if part_text.startswith("-"):
+            continue
+        stripped = part_text.strip("'\"")
+        if stripped.startswith(("http://", "https://")) or re.fullmatch(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?", stripped):
+            source_tokens.append(stripped)
+        elif _untrusted_dynamic_source_operand(stripped):
+            source_tokens.append("__dynamic_source_operand__")
+        else:
+            source_tokens.append("__literal_source_operand__")
+    return source_tokens
+
+
+def _untrusted_dynamic_source_operand(value: object) -> bool:
+    text = str(value or "")
+    return bool(text.startswith("$") or "$(" in text or "`" in text or "<(" in text or ">(" in text)
+
+
 def _parts_assign_selected_url(parts: Iterable[object], variable: str) -> bool:
     values = [str(part or "").strip("'\"") for part in parts]
     if len(values) != 1:
@@ -2149,7 +3465,10 @@ def _command_validates_and_extracts_archive_path(command: object, archive_path: 
     return (
         _command_validates_archive_path(command, archive_path, assignments=assignments)
         and _command_extracts_archive_path(command, archive_path, assignments=assignments)
-        and _command_moves_extracted_source_root(command)
+        and (
+            _command_moves_extracted_source_root(command)
+            or _command_extracts_archive_to_source_root(command, archive_path, assignments=assignments)
+        )
     )
 
 
@@ -2223,12 +3542,60 @@ def _command_extracts_archive_path(
     return False
 
 
+def _command_extracts_archive_to_source_root(
+    command: object,
+    archive_path: str,
+    *,
+    assignments: Mapping[str, str] | None = None,
+) -> bool:
+    assignments = assignments or _simple_shell_assignments(command)
+    for parts in _invoked_command_parts(command):
+        if _parts_extract_archive_to_source_root(_resolve_shell_parts(parts, assignments), archive_path):
+            return True
+    return False
+
+
 def _parts_extract_archive_path(parts: Iterable[object], archive_path: str) -> bool:
     values = [str(part or "") for part in parts]
     token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
     if token == "tar" and _tar_parts_use_mode(values, "x") and _parts_reference_path(values, archive_path):
         return True
     return bool(token == "unzip" and not _unzip_parts_use_test_mode(values) and _parts_reference_path(values, archive_path))
+
+
+def _parts_extract_archive_to_source_root(parts: Iterable[object], archive_path: str) -> bool:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token != "tar":
+        return False
+    if not (_tar_parts_use_mode(values, "x") and _parts_reference_path(values, archive_path)):
+        return False
+    if not _tar_parts_strip_single_top_component(values):
+        return False
+    target_dir = _tar_extract_target_dir(values)
+    return bool(target_dir and target_dir.startswith(("/tmp/", "/src/", "/work/", "/app/")))
+
+
+def _tar_parts_strip_single_top_component(values: Iterable[object]) -> bool:
+    parts = [str(part or "") for part in values]
+    for index, value in enumerate(parts):
+        if value in {"--strip-components", "--strip-components=1", "--strip=1"}:
+            if value.endswith("=1"):
+                return True
+            return index + 1 < len(parts) and parts[index + 1] == "1"
+        if re.fullmatch(r"--strip-components=['\"]?1['\"]?", value):
+            return True
+    return False
+
+
+def _tar_extract_target_dir(values: Iterable[object]) -> str:
+    parts = [str(part or "").strip("'\"") for part in values]
+    for index, value in enumerate(parts):
+        if value == "-C" and index + 1 < len(parts):
+            return parts[index + 1]
+        if value.startswith("--directory="):
+            return value.split("=", 1)[1]
+    return ""
 
 
 def _command_moves_extracted_source_root(command: object) -> bool:
@@ -2369,7 +3736,11 @@ def _parts_reference_path(parts: Iterable[object], path: object) -> bool:
 
 
 def _extract_urls(text: object) -> set[str]:
-    return {match.group(0).rstrip("'\"),;") for match in re.finditer(r"https?://[^\s'\"<>]+", str(text or ""))}
+    return set(_extract_urls_in_order(text))
+
+
+def _extract_urls_in_order(text: object) -> list[str]:
+    return [match.group(0).rstrip("'\"),;") for match in re.finditer(r"https?://[^\s'\"<>]+", str(text or ""))]
 
 
 def _authoritative_source_archive_url(url: object) -> bool:
@@ -2544,6 +3915,8 @@ def _parts_remote_source_fetch_urls(parts: Iterable[object]) -> set[str]:
     if token in {"curl", "wget"}:
         if _curl_wget_uses_no_download_mode(values):
             return set()
+        if _curl_wget_uses_external_config(values):
+            return set()
         option_value_flags = {
             "-o",
             "--output",
@@ -2562,10 +3935,24 @@ def _parts_remote_source_fetch_urls(parts: Iterable[object]) -> set[str]:
         }
         urls: set[str] = set()
         skip_next = False
+        source_next = False
         for part in values[1:]:
             part_text = str(part or "")
             if skip_next:
                 skip_next = False
+                continue
+            if source_next:
+                if part_text.startswith(("http://", "https://")):
+                    urls.add(part_text.rstrip("'\""))
+                source_next = False
+                continue
+            if part_text == "--url":
+                source_next = True
+                continue
+            if part_text.startswith("--url="):
+                value = part_text.split("=", 1)[1]
+                if value.startswith(("http://", "https://")):
+                    urls.add(value.rstrip("'\""))
                 continue
             if part_text in option_value_flags:
                 skip_next = True
@@ -2584,6 +3971,30 @@ def _parts_remote_source_fetch_urls(parts: Iterable[object]) -> set[str]:
             if str(part or "").startswith(("http://", "https://"))
         }
     return set()
+
+
+def _curl_wget_uses_external_config(parts: Iterable[object]) -> bool:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token == "curl":
+        for part in values[1:]:
+            part_text = str(part or "")
+            if part_text in {"-K", "--config"}:
+                return True
+            if part_text.startswith("--config="):
+                return True
+            if part_text.startswith("-K") and part_text != "-K":
+                return True
+    if token == "wget":
+        for part in values[1:]:
+            part_text = str(part or "")
+            if part_text in {"-i", "--input-file"}:
+                return True
+            if part_text.startswith("--input-file="):
+                return True
+            if part_text.startswith("-i") and part_text != "-i":
+                return True
+    return False
 
 
 def _python_remote_source_urls(code: str) -> set[str]:
@@ -3249,6 +4660,9 @@ def _active_strategy_blockers(
         if code == "external_dependency_source_provenance_unverified" and source_satisfied:
             continue
         if target_runtime_satisfied and code not in _SOURCE_AUTHORITY_BLOCKER_CODES:
+            if not final_contract_satisfied:
+                active.append(blocker)
+                continue
             if latest_diagnostic_failure_class and _generic_failure_class(code) == latest_diagnostic_failure_class:
                 active.append(blocker)
             continue
@@ -3555,7 +4969,9 @@ def _recovery_prerequisites(failure_class: str, contract: Mapping[str, object]) 
         return ["source_authority_if_required", "required_artifact_contract"]
     if failure_class == "build_timeout":
         return ["preserve_existing_source_tree", "known_current_build_stage"]
-    if failure_class in {"runtime_link_failed", "runtime_default_path_unproven"}:
+    if failure_class == "runtime_link_failed":
+        return ["artifact_invoked_by_failed_default_smoke", "runtime_proof_required"]
+    if failure_class == "runtime_default_path_unproven":
         return ["target_built", "runtime_proof_required"]
     if failure_class == "runtime_install_before_build":
         return ["runtime_library_target_known_or_discovered"]
@@ -3677,7 +5093,7 @@ def _custom_runtime_path_proof(evidence: CommandEvidence) -> bool:
 
 
 def _terminal_command_uses_required_artifact(evidence: CommandEvidence, artifact: object) -> bool:
-    if not evidence.terminal_success:
+    if not command_evidence_terminal_acceptance_success(evidence):
         return False
     command = str(evidence.command or "")
     artifact_text = str(artifact or "")
@@ -3687,7 +5103,7 @@ def _terminal_command_uses_required_artifact(evidence: CommandEvidence, artifact
 
 
 def _default_compile_link_smoke(evidence: CommandEvidence, contract: Mapping[str, object]) -> bool:
-    if not evidence.terminal_success:
+    if not command_evidence_terminal_acceptance_success(evidence):
         return False
     command = str(evidence.command or "")
     if _custom_runtime_path_proof(evidence):
@@ -3729,7 +5145,7 @@ def _command_has_default_smoke_artifact_segment(command: object, artifact: objec
             cwd,
         ):
             continue
-        if after_operator == "||":
+        if after_operator == "||" and _or_failure_guard_end_index(segment_entries, index) < 0:
             continue
         if after_operator == "|":
             continue
@@ -3770,7 +5186,10 @@ def _later_shell_segments_mask_artifact_failure(
     command_prefix = str(command or "")[:segment_start]
     errexit_active = _command_errexit_active_before_span(command, segment_entries[index])
     pipefail_active = _command_enables_pipefail(command_prefix) and not _command_disables_pipefail(command_prefix)
-    for entry in segment_entries[index + 1 :]:
+    guard_end_index = _or_failure_guard_end_index(segment_entries, index)
+    for absolute_index, entry in enumerate(segment_entries[index + 1 :], start=index + 1):
+        if absolute_index <= guard_end_index:
+            continue
         if _shell_text_has_unquoted_background_operator(entry.get("text")):
             return True
         before_operator = str(entry.get("before_operator") or "")
@@ -3782,6 +5201,29 @@ def _later_shell_segments_mask_artifact_failure(
         if after_operator in {";", "\n", "\r"} and not errexit_active:
             return True
     return False
+
+
+def _or_failure_guard_end_index(segment_entries: list[dict[str, object]], index: int) -> int:
+    if index < 0 or index >= len(segment_entries):
+        return -1
+    if str(segment_entries[index].get("after_operator") or "") != "||":
+        return -1
+    next_index = index + 1
+    if next_index >= len(segment_entries):
+        return -1
+    if str(segment_entries[next_index].get("before_operator") or "") != "||":
+        return -1
+    guard_end = -1
+    for candidate_index in range(next_index, min(len(segment_entries), next_index + 5)):
+        text = str(segment_entries[candidate_index].get("text") or "").strip()
+        if re.match(r"^(?:exit|return)\s+[1-9]\d*\b", text):
+            guard_end = candidate_index
+            continue
+        if text == "}":
+            return candidate_index if guard_end >= next_index else -1
+        if candidate_index == next_index and re.match(r"^(?:exit|return)\s+[1-9]\d*\b", text):
+            return candidate_index
+    return guard_end if guard_end >= next_index else -1
 
 
 def _shell_text_has_unquoted_background_operator(text: object) -> bool:
@@ -4118,6 +5560,21 @@ def _merge_head_tail(head: object, tail: object) -> str:
     if not tail_text or tail_text == head_text or head_text.endswith(tail_text):
         return head_text
     return f"{head_text}\n...\n{tail_text}"
+
+
+def _optional_dict(value: object) -> dict | None:
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _stable_id_component(value: object) -> str:
+    text = str(value or "unknown")
+    return text if text else "unknown"
+
+
+def _safe_path_component(value: object) -> str:
+    text = str(value or "unknown")
+    safe = re.sub(r"[^A-Za-z0-9_.+-]+", "-", text).strip("-")
+    return safe or "unknown"
 
 
 def _coerce_int(value: object, default: int | None = None) -> int | None:
