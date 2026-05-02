@@ -191,6 +191,7 @@ direction.
 | 2026-05-01 | malformed-JSON recovery proof_5 missed on low-wall full-context recovery. | `docs/M6_24_MALFORMED_JSON_PLAN_RECOVERY_COMPILE_COMPCERT_PROOF_5_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-plan-recovery-compile-compcert-5attempts-seq-20260501-0220/result.json`: sequential proof was stopped after valid completed trials reached `1/2`; the third trial was intentionally cancelled after the frozen `5/5` close target became impossible. The failed valid trial reached the known runtime-link/runtime-install recovery path, then read `runtime/Makefile` and hit repeated model planning timeouts under shrinking wall-clock ceilings while still using full prompt context. | Continue improvement phase. Next bounded repair is `work_timeout_ceiling_full_context_recovery_prompt` in model-context budgeting, then run `compile-compcert` speed_1 before proof_5 or broad measurement. | active |
 | 2026-05-01 | Implement timeout-ceiling compact recovery. | `src/mew/work_loop.py` now maps the default `full` prompt context to `compact_recovery` when `plan_work_model_turn()` runs under `timeout_ceiling=True`; `tests/test_work_session.py` pins that low-wall planning records compact recovery context. Focused validation passed: compact-recovery tests `2 passed`, `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and `codex-ultra` review session `019ddfa4-889a-7d72-a789-239af7ce2a2b` approved. | Run one-trial same-shape `compile-compcert` speed proof with refreshable `~/.codex/auth.json`; do not resume broad measurement first. | speed_rerun_pending |
 | 2026-05-01 | timeout-ceiling compact recovery same-shape speed rerun passed. | `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-1attempt-20260501-0332/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `16m 55s`. `mew work` finished after 9 steps, built `/tmp/CompCert/ccomp`, installed default runtime support, ran default-path compile/link/run smoke, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
+| 2026-05-02 | Source-tail closeout speed rerun passed externally but exposed reducer closeout drift. | `docs/M6_24_SOURCE_TAIL_CLOSEOUT_REPAIR_2026-05-02.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-tail-closeout-compile-compcert-1attempt-20260502-1347/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `23m44s`, command transcript exit `0`, and `mew-report.work_exit_code=0`. Internal long-build state still reported `source_authority=unknown`, `default_smoke=unknown`, stale `target_selection_overbroad`, and stale strategy blockers because the final command repaired runtime linking before a successful default smoke and listed concrete source archive members instead of a bare root. `codex-ultra` rejected command-text-only authority correlation and presence-only post-extract markers, so the repair now requires terminal success, ordered fetch/hash/validation output, or unique post-extract progress output with no source-acquisition failure before a later saved archive readback can satisfy `source_authority`. Final review approved in `docs/REVIEW_2026-05-02_M6_24_SOURCE_TAIL_CLOSEOUT_CODEX.md`. | Run one same-shape speed_1 rerun before proof_5 or broad measurement. | reviewed_speed_1_pending |
 
 ## Current Mode
 
@@ -216,9 +217,17 @@ closeout open: artifact/default-smoke proof was missed because a later `set +e`
 invalidated an earlier strict proof segment, and source readback output was
 clipped because it appeared before noisy build output. The follow-up repair is
 reviewed: artifact proof is now segment-local for `errexit`, and the prompt
-requires saved source readbacks near final proof after noisy output. Broad
-measurement remains paused.
+requires saved source readbacks near final proof after noisy output. The latest
+same-shape speed rerun externally passed and exited cleanly, but exposed one
+more reducer closeout defect: terminal-success runtime repair plus final
+default smoke and saved archive member readback were not treated as final
+contract evidence. The source-tail repair now also requires correlated
+source-authority paths to come from evidence that proves acquisition completed,
+after `codex-ultra` rejected command-text-only correlation. The post-extract
+marker path now also requires a unique post-extract marker and no
+source-acquisition failure output. `codex-ultra` approved the hardened
+source-tail closeout repair. Broad measurement remains paused.
 
 Current selected next action:
 
-`M6.24 -> long_dependency/toolchain gap -> saved source readback closeout follow-up reviewed -> compile-compcert speed_1 clean-closeout rerun`
+`M6.24 -> long_dependency/toolchain gap -> source-tail closeout repair reviewed -> compile-compcert speed_1 clean-closeout rerun`

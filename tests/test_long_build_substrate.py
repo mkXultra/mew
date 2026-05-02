@@ -6697,6 +6697,280 @@ def test_reducer_clears_runtime_install_blocker_after_if_wrapped_default_smoke_a
     assert state["status"] == "complete"
 
 
+def test_reducer_accepts_runtime_repair_and_saved_archive_readback_in_final_closeout():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12c2:long_build:1",
+    )
+    source_command = (
+        "set -euo pipefail\n"
+        "curl -fL https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz -o /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz >/tmp/foocc-source-list.txt\n"
+    )
+    command = (
+        "set -euo pipefail\n"
+        "cd /tmp/FooCC\n"
+        "cat > /tmp/foocc_smoke.c <<'EOF'\n"
+        "#include <stdio.h>\n"
+        "int main(void) { printf(\"ok\\n\"); return 0; }\n"
+        "EOF\n"
+        "if ! /tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke >/tmp/foocc-build.out 2>/tmp/foocc-build.err; then\n"
+        "  cat /tmp/foocc-build.out\n"
+        "  cat /tmp/foocc-build.err\n"
+        "  if grep -E 'cannot find -l|runtime' /tmp/foocc-build.out /tmp/foocc-build.err >/dev/null 2>&1; then\n"
+        "    make -C runtime all\n"
+        "    make install\n"
+        "    /tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke\n"
+        "  else\n"
+        "    exit 1\n"
+        "  fi\n"
+        "fi\n"
+        "printf 'FINAL_SOURCE_READBACK\\n'\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/Makefile\n"
+        "printf 'FINAL_DEFAULT_SMOKE\\n'\n"
+        "/tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke.again\n"
+        "/tmp/foocc_smoke.again\n"
+    )
+    stdout = (
+        "/usr/bin/ld: cannot find -lfoocc: No such file or directory\n"
+        "make: Entering directory '/tmp/FooCC/runtime'\n"
+        "AR libfoocc.a\n"
+        "make: Leaving directory '/tmp/FooCC/runtime'\n"
+        "install -m 0644 libfoocc.a /usr/local/lib/foocc\n"
+        "FINAL_SOURCE_READBACK\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+        "FINAL_DEFAULT_SMOKE\n"
+        "ok\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command),
+            _command_call(2, command, stdout=stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "untargeted_full_project_build_for_specific_artifact",
+                "source_tool_call_id": 2,
+                "excerpt": "make install",
+            },
+            {
+                "code": "default_runtime_link_path_failed",
+                "source_tool_call_id": 2,
+                "excerpt": "/usr/bin/ld: cannot find -lfoocc",
+            },
+        ],
+    )
+
+    assert attempts[-1]["stage"] == "default_smoke"
+    assert not any(item.get("failure_class") == "runtime_link_failed" for item in attempts[-1]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["current_failure"] is None
+    assert state["strategy_blockers"] == []
+    assert state["status"] == "complete"
+
+
+def test_reducer_correlates_while_read_api_archive_fetch_with_later_saved_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12c2b:long_build:1",
+    )
+    source_command = (
+        "set -euo pipefail\n"
+        "cat > /tmp/foocc-candidates.txt <<'EOF'\n"
+        "https://api.github.com/repos/example/FooCC/tarball/v1.2.3\n"
+        "https://codeload.github.com/example/FooCC/tar.gz/refs/tags/v1.2.3\n"
+        "EOF\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "rm -f \"$archive\"\n"
+        "while IFS= read -r url; do\n"
+        "  [ -n \"$url\" ] || continue\n"
+        "  rm -f \"$archive\" /tmp/foocc-list.txt\n"
+        "  if curl -fL -o \"$archive\" \"$url\"; then\n"
+        "    if test -s \"$archive\" && tar -tzf \"$archive\" >/tmp/foocc-list.txt; then\n"
+        "      got_url=\"$url\"\n"
+        "      break\n"
+        "    fi\n"
+        "  fi\n"
+        "done < /tmp/foocc-candidates.txt\n"
+        "test -n \"$got_url\"\n"
+        "test -s \"$archive\"\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "mv /tmp/FooCC-1.2.3 /tmp/FooCC\n"
+        "cd /tmp/FooCC\n"
+        "printf 'CONFIGURE_TARGET default\\n'\n"
+        "./configure\n"
+    )
+    final_command = (
+        "set -euo pipefail\n"
+        "cat > /tmp/foocc_smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke\n"
+        "printf 'FINAL_SOURCE_READBACK\\n'\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/Makefile\n"
+    )
+    stdout = (
+        "FINAL_SOURCE_READBACK\n"
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, source_command, exit_code=1, stdout="CONFIGURE_TARGET default\nconfigure failed after source acquisition\n"),
+            _command_call(2, final_command, stdout=stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] == "complete"
+
+
+def test_reducer_rejects_failed_authoritative_fetch_before_later_local_archive_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12c2c:long_build:1",
+    )
+    failed_source_command = (
+        "set -euo pipefail\n"
+        "curl -fL https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz -o /tmp/foocc-1.2.3.tar.gz\n"
+    )
+    final_command = (
+        "set -euo pipefail\n"
+        "cat > /tmp/foocc_smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/Makefile\n"
+    )
+    stdout = (
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(1, failed_source_command, exit_code=22, stdout="curl: (22) The requested URL returned error: 404\n"),
+            _command_call(2, final_command, stdout=stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[-1]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] == "ready_for_final_proof"
+
+
+def test_reducer_rejects_prefetch_duplicate_marker_after_failed_authoritative_fetch():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12c2d:long_build:1",
+    )
+    failed_source_command = (
+        "set -euo pipefail\n"
+        "archive=/tmp/foocc-1.2.3.tar.gz\n"
+        "printf 'CONFIGURE_TARGET default\\n'\n"
+        "curl -fL https://github.com/example/FooCC/archive/refs/tags/v1.2.3.tar.gz -o \"$archive\"\n"
+        "tar -xzf \"$archive\" -C /tmp\n"
+        "printf 'CONFIGURE_TARGET default\\n'\n"
+        "./configure\n"
+    )
+    final_command = (
+        "set -euo pipefail\n"
+        "cat > /tmp/foocc_smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/Makefile\n"
+    )
+    stdout = (
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                failed_source_command,
+                exit_code=22,
+                stdout="CONFIGURE_TARGET default\ncurl: (22) The requested URL returned error: 404\n",
+            ),
+            _command_call(2, final_command, stdout=stdout),
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] == "ready_for_final_proof"
+
+
+def test_reducer_rejects_saved_archive_readback_without_prior_authoritative_acquisition():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure that FooCC can be invoked through /tmp/FooCC/foocc and is fully functional.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:12c3:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "cd /tmp/FooCC\n"
+        "cat > /tmp/foocc_smoke.c <<'EOF'\n"
+        "int main(void) { return 0; }\n"
+        "EOF\n"
+        "/tmp/FooCC/foocc /tmp/foocc_smoke.c -o /tmp/foocc_smoke\n"
+        "sha256sum /tmp/foocc-1.2.3.tar.gz\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/configure\n"
+        "tar -tzf /tmp/foocc-1.2.3.tar.gz FooCC-1.2.3/Makefile\n"
+    )
+    stdout = (
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789  /tmp/foocc-1.2.3.tar.gz\n"
+        "FooCC-1.2.3/configure\n"
+        "FooCC-1.2.3/Makefile\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls([_command_call(1, command, stdout=stdout)])
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert attempts[-1]["stage"] == "default_smoke"
+    assert not any(item.get("signal") == "source_authority" for item in attempts[-1]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+    assert {"id": "default_smoke", "required": True, "status": "satisfied"} in state["stages"]
+    assert state["status"] == "ready_for_final_proof"
+
+
 def test_reducer_clears_non_source_strategy_blockers_after_target_and_runtime_proof():
     contract = build_long_build_contract(
         "Under /tmp/FooCC, build the FooCC compiler from source. "

@@ -68,6 +68,10 @@ _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE = re.compile(
 _AUTHORITY_PAGE_OUTPUT_RE = re.compile(r"^authority_page_(?:saved|fetched)=https?://\S+", re.I | re.M)
 _ARCHIVE_HASH_OUTPUT_RE = re.compile(r"^archive_sha256=[0-9a-f]{32,128}\b", re.I | re.M)
 _ARCHIVE_ROOT_OUTPUT_RE = re.compile(r"^archive_root=\S+", re.I | re.M)
+_ARCHIVE_MEMBER_OUTPUT_RE = re.compile(
+    r"^[A-Za-z0-9_.+-]+(?:-[A-Za-z0-9_.+-]+)?/(?:configure|Makefile|README(?:\.[A-Za-z0-9]+)?|LICENSE|VERSION)(?:$|\s)",
+    re.I | re.M,
+)
 _PYTHON_SOURCE_ARCHIVE_OUTPUT_RE = re.compile(
     r"^ARCHIVE\s+\S+\s+bytes=\d+\s+sha256=[0-9a-f]{32,128}\b",
     re.I | re.M,
@@ -368,7 +372,7 @@ def build_attempts_from_command_evidence(
             result=_attempt_result(evidence),
             produced_artifacts=_produced_artifacts(evidence, contract),
             mutation_refs=[],
-            diagnostics=_diagnostics(evidence),
+            diagnostics=_diagnostics(evidence, contract),
         )
         attempts.append(attempt.to_dict())
     return attempts
@@ -395,6 +399,9 @@ def reduce_long_build_state(
     artifact_status = []
     attempts = [dict(item) for item in attempts or [] if isinstance(item, Mapping)]
     fresh_default_smoke = _has_fresh_default_smoke(attempts, normalized_evidence, contract)
+    source_authority_satisfied = _source_authority_satisfied(attempts) or _source_authority_satisfied_by_correlated_archive_readback(
+        normalized_evidence
+    )
     for artifact in contract.get("required_artifacts") or []:
         path = str((artifact or {}).get("path") or "")
         proof = fresh_long_dependency_artifact_evidence(normalized_evidence, path) if path else None
@@ -415,8 +422,16 @@ def reduce_long_build_state(
         artifact_status,
         contract,
         fresh_default_smoke=fresh_default_smoke,
+        source_authority_satisfied=source_authority_satisfied,
     )
-    stages = _reduce_stages(contract, attempts, artifact_status, active_blockers, fresh_default_smoke=fresh_default_smoke)
+    stages = _reduce_stages(
+        contract,
+        attempts,
+        artifact_status,
+        active_blockers,
+        fresh_default_smoke=fresh_default_smoke,
+        source_authority_satisfied=source_authority_satisfied,
+    )
     missing = [item for item in artifact_status if item.get("status") != "proven"]
     current_failure = _current_failure(
         contract,
@@ -791,18 +806,22 @@ def _produced_artifacts(evidence: CommandEvidence, contract: Mapping[str, object
     return produced
 
 
-def _diagnostics(evidence: CommandEvidence) -> list[dict]:
+def _diagnostics(evidence: CommandEvidence, contract: Mapping[str, object] | None = None) -> list[dict]:
     text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     diagnostics = []
+    final_default_smoke_satisfied = bool(contract and _default_compile_link_smoke(evidence, contract))
     if _source_authority_signal(evidence):
         diagnostics.append({"signal": "source_authority", "excerpt": _source_authority_excerpt(evidence)})
     if evidence.timed_out:
         diagnostics.append({"failure_class": "build_timeout", "excerpt": _first_nonempty_line(text)})
-    if re.search(r"cannot find -l|ld: library not found|missing runtime|stdlib", text, re.I):
+    if (
+        re.search(r"cannot find -l|ld: library not found|missing runtime|stdlib", text, re.I)
+        and not final_default_smoke_satisfied
+    ):
         diagnostics.append({"failure_class": "runtime_link_failed", "excerpt": _first_matching_line(text, "cannot find -l|library not found|runtime|stdlib")})
     if re.search(r"no rule to make target|No rule to make target", text):
         diagnostics.append({"failure_class": "build_system_target_surface_invalid", "excerpt": _first_matching_line(text, "no rule")})
-    if _BUILD_FAILURE_RE.search(text) and not diagnostics:
+    if _BUILD_FAILURE_RE.search(text) and not diagnostics and not final_default_smoke_satisfied:
         diagnostics.append({"failure_class": "build_failed", "excerpt": _first_matching_line(text, _BUILD_FAILURE_RE.pattern)})
     return [item for item in diagnostics if item.get("failure_class") or item.get("signal")]
 
@@ -900,6 +919,141 @@ def _saved_authority_archive_readback_identity(evidence: CommandEvidence, output
         and _source_acquisition_completed_output_signal(text)
         and _archive_root_listing_output_signal(text)
     )
+
+
+def _saved_source_archive_identity_readback_signal(evidence: CommandEvidence, output_text: object) -> bool:
+    return bool(_saved_source_archive_identity_readback_paths(evidence, output_text))
+
+
+def _saved_source_archive_identity_readback_paths(evidence: CommandEvidence, output_text: object) -> set[str]:
+    if not evidence.terminal_success:
+        return set()
+    command = evidence.command
+    if _command_defines_shell_function(command):
+        return set()
+    if _command_has_assertion_only_source_authority_segment(command):
+        return set()
+    readback_paths = _command_hashes_source_archive_paths(command) & _command_lists_source_archive_paths(command)
+    if not readback_paths:
+        return set()
+    readback_paths = {path for path in readback_paths if _versioned_source_archive_path(path)}
+    if not readback_paths:
+        return set()
+    text = str(output_text or "")
+    if not _archive_listing_output_signal(text):
+        return set()
+    return {path for path in readback_paths if _source_archive_hash_output_for_path(text, path)}
+
+
+def _source_authority_satisfied_by_correlated_archive_readback(evidences: Iterable[CommandEvidence]) -> bool:
+    authoritative_paths: set[str] = set()
+    for evidence in sorted(
+        [item for item in evidences or [] if isinstance(item, CommandEvidence)],
+        key=lambda item: item.finish_order,
+    ):
+        for path in _authoritative_source_archive_paths(evidence.command):
+            if _authoritative_archive_acquisition_completed(evidence, path):
+                authoritative_paths.add(path)
+        output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+        readback_paths = _saved_source_archive_identity_readback_paths(evidence, output_text)
+        if authoritative_paths & readback_paths:
+            return True
+    return False
+
+
+def _authoritative_archive_acquisition_completed(evidence: CommandEvidence, archive_path: object) -> bool:
+    if evidence.terminal_success:
+        return True
+    output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
+    if _source_acquisition_generated_hash_output_signal(evidence.command, output_text, archive_path):
+        return True
+    return _output_contains_post_source_archive_extract_marker(evidence.command, output_text, archive_path)
+
+
+def _output_contains_post_source_archive_extract_marker(
+    command: object, output_text: object, archive_path: object
+) -> bool:
+    if _source_acquisition_failed_output_signal(output_text):
+        return False
+    markers = _post_source_archive_extract_markers(command, archive_path)
+    if not markers:
+        return False
+    text = str(output_text or "")
+    return any(marker and marker in text for marker in markers)
+
+
+def _post_source_archive_extract_markers(command: object, archive_path: object) -> set[str]:
+    command_text = _strip_heredoc_bodies(command)
+    assignments = _simple_shell_assignments(command_text)
+    pre_extract_markers: set[str] = set()
+    markers: set[str] = set()
+    after_extract = False
+    for line in command_text.splitlines():
+        if not after_extract and _line_extracts_archive_path_with_assignments(line, archive_path, assignments):
+            after_extract = True
+            continue
+        marker = _explicit_progress_marker_from_line(line)
+        if not after_extract:
+            if marker:
+                pre_extract_markers.add(marker)
+            continue
+        if marker:
+            markers.add(marker)
+    return markers - pre_extract_markers
+
+
+def _line_extracts_archive_path_with_assignments(
+    line: object, archive_path: object, assignments: Mapping[str, str]
+) -> bool:
+    archive_text = str(archive_path or "").strip("'\"")
+    if not archive_text:
+        return False
+    for parts in _line_invoked_command_parts(line):
+        if _parts_extract_archive_path(_resolve_shell_parts(parts, assignments), archive_text):
+            return True
+    return False
+
+
+def _explicit_progress_marker_from_line(line: object) -> str:
+    stripped = str(line or "").strip()
+    match = re.search(r"\b(?:printf|echo)\s+['\"]([^'\"]{3,120})", stripped)
+    if not match:
+        return ""
+    marker = match.group(1).replace("\\n", "").strip()
+    if not re.search(r"(?:CONFIGURE|BUILD|SOURCE_TREE|DEPENDENCY|TARGET|VERSION|ARTIFACT|SMOKE)", marker, re.I):
+        return ""
+    return marker
+
+
+def _authoritative_source_archive_paths(command: object) -> set[str]:
+    return {
+        path
+        for path in _strict_authoritative_archive_fetch_paths(command)
+        if _versioned_source_archive_path(path)
+    }
+
+
+def _versioned_source_archive_path(path: object) -> bool:
+    name = Path(str(path or "").strip("'\"")).name
+    return bool(re.search(r"(?:^|[-_./])v?\d+(?:\.\d+)+", name, re.I))
+
+
+def _source_archive_hash_output_for_path(output_text: object, path: object) -> bool:
+    expected = str(path or "").strip("'\"")
+    if not expected:
+        return False
+    for line in str(output_text or "").splitlines():
+        stripped = line.strip()
+        if _ARCHIVE_HASH_OUTPUT_RE.match(stripped):
+            return True
+        match = re.match(r"^[0-9a-f]{32,128}\s+(.+)$", stripped, re.I)
+        if match and _same_archive_output_path(match.group(1), expected):
+            return True
+    return False
+
+
+def _archive_listing_output_signal(output_text: object) -> bool:
+    return _archive_root_listing_output_signal(output_text) or bool(_ARCHIVE_MEMBER_OUTPUT_RE.search(str(output_text or "")))
 
 
 def _saved_authority_readback_output_signal(output_text: object) -> bool:
@@ -1456,7 +1610,8 @@ def _command_defines_shell_function(command: object) -> bool:
 
 
 def _strict_authoritative_archive_fetch_paths(command: object) -> set[str]:
-    command_text = _strip_heredoc_bodies(command)
+    raw_command_text = str(command or "")
+    command_text = _strip_heredoc_bodies(raw_command_text)
     if not (
         _command_enables_errexit(command_text)
         and not _command_disables_errexit(command_text)
@@ -1467,7 +1622,7 @@ def _strict_authoritative_archive_fetch_paths(command: object) -> set[str]:
     paths = set()
     for segment in _top_level_direct_fetch_segments(command_text):
         paths.update(_segment_authoritative_archive_fetch_paths(segment))
-    paths.update(_url_loop_authoritative_archive_fetch_paths(command_text))
+    paths.update(_url_loop_authoritative_archive_fetch_paths(raw_command_text))
     return paths
 
 
@@ -1491,7 +1646,134 @@ def _url_loop_authoritative_archive_fetch_paths(command: object) -> set[str]:
                 command_text, body_parts, index, archive_path, variable
             ):
                 paths.add(archive_path)
+    paths.update(_while_read_authoritative_archive_fetch_paths(command))
     return paths
+
+
+def _while_read_authoritative_archive_fetch_paths(command: object) -> set[str]:
+    command_text = str(command or "")
+    logical_text = _shell_logical_command_text(_strip_heredoc_bodies(command_text))
+    candidate_text_by_path = _heredoc_text_by_output_path(command_text)
+    assignments = _simple_shell_assignments(logical_text)
+    paths: set[str] = set()
+    for variable, input_path, body in _top_level_while_read_blocks(logical_text):
+        resolved_input = _resolve_shell_token(input_path, assignments)
+        candidate_text = candidate_text_by_path.get(resolved_input, "")
+        if not any(_authoritative_source_archive_url(url) for url in _extract_urls(candidate_text)):
+            continue
+        body_parts = _invoked_command_parts(body)
+        resolved_body_parts = [_resolve_shell_parts(parts, assignments) for parts in body_parts]
+        for index, parts in enumerate(resolved_body_parts):
+            token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+            if token not in {"curl", "wget"} or _curl_wget_uses_no_download_mode(parts):
+                continue
+            if not _parts_reference_loop_variable(parts, variable):
+                continue
+            archive_path = _curl_wget_output_path(parts)
+            if archive_path and _loop_body_proves_selected_archive(resolved_body_parts, index, archive_path, variable):
+                paths.add(archive_path)
+            elif archive_path and _loop_body_records_selected_archive_fetch(
+                logical_text, resolved_body_parts, index, archive_path, variable
+            ):
+                paths.add(archive_path)
+    return paths
+
+
+def _top_level_while_read_blocks(command: object) -> list[tuple[str, str, str]]:
+    lines = str(command or "").splitlines()
+    blocks: list[tuple[str, str, str]] = []
+    control_depth = 0
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if control_depth == 0:
+            match = re.match(
+                r"^while\s+(?:IFS=\s*)?read\b(?:\s+-[A-Za-z]+)*\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:;\s*do|\s+do)\s*(.*)$",
+                stripped,
+                re.I,
+            )
+            if match:
+                variable = match.group(1)
+                first_body = match.group(2).strip()
+                body: list[str] = [first_body] if first_body else []
+                index += 1
+                input_path = ""
+                while index < len(lines):
+                    current = lines[index]
+                    current_stripped = current.strip()
+                    done_match = re.match(r"^done\s*<\s*(\S+)\s*$", current_stripped, re.I)
+                    if done_match:
+                        input_path = done_match.group(1).strip("'\"")
+                        break
+                    if re.fullmatch(r"done\b", current_stripped, re.I):
+                        break
+                    body.append(current)
+                    index += 1
+                if input_path:
+                    blocks.append((variable, input_path, "\n".join(body)))
+                index += 1
+                continue
+        control_depth = _update_shell_block_depth(stripped, control_depth)
+        index += 1
+    return blocks
+
+
+def _heredoc_text_by_output_path(command: object) -> dict[str, str]:
+    lines = str(command or "").splitlines()
+    results: dict[str, str] = {}
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = re.search(
+            r"\b(?:cat\s*(?:>|>>)|tee\s+(?:-[A-Za-z]+\s+)?)\s*(\S+)\s*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?",
+            line,
+        )
+        if not match:
+            index += 1
+            continue
+        output_path = match.group(1).strip("'\"")
+        delimiter = match.group(2)
+        index += 1
+        body: list[str] = []
+        while index < len(lines) and lines[index].strip() != delimiter:
+            body.append(lines[index])
+            index += 1
+        if body:
+            results[output_path] = "\n".join([results.get(output_path, ""), "\n".join(body)]).strip()
+        if index < len(lines):
+            index += 1
+    return results
+
+
+def _simple_shell_assignments(command: object) -> dict[str, str]:
+    assignments: dict[str, str] = {}
+    for segment in _ordered_shell_command_segments(_strip_heredoc_bodies(command)):
+        try:
+            parts = shlex.split(str(segment or ""))
+        except ValueError:
+            parts = str(segment or "").split()
+        if len(parts) != 1:
+            continue
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.+)", parts[0])
+        if not match:
+            continue
+        value = match.group(2).strip("'\"")
+        if value and "$" not in value and "`" not in value and "<(" not in value:
+            assignments[match.group(1)] = value
+    return assignments
+
+
+def _resolve_shell_token(value: object, assignments: Mapping[str, str]) -> str:
+    token = str(value or "").strip("'\"")
+    match = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", token)
+    if match:
+        return assignments.get(match.group(1), token)
+    return token
+
+
+def _resolve_shell_parts(parts: Iterable[object], assignments: Mapping[str, str]) -> list[str]:
+    return [_resolve_shell_token(part, assignments) for part in parts]
 
 
 def _top_level_for_loop_blocks(command: object) -> list[tuple[str, str, str]]:
@@ -1670,7 +1952,11 @@ def _parts_assign_selected_url(parts: Iterable[object], variable: str) -> bool:
     if len(values) != 1:
         return False
     return bool(
-        re.fullmatch(rf"(?:found|selected|chosen|source_url)=\$\{{?{re.escape(variable)}\}}?", values[0], re.I)
+        re.fullmatch(
+            rf"(?:found|got(?:_url)?|selected(?:_url)?|chosen(?:_url)?|source(?:_url)?)=\$\{{?{re.escape(variable)}\}}?",
+            values[0],
+            re.I,
+        )
     )
 
 
@@ -1900,10 +2186,16 @@ def _authoritative_source_archive_url(url: object) -> bool:
     github_release_or_tag = bool(
         re.search(r"github\.com/[^/\s]+/[^/\s]+/(?:releases/download|archive/refs/tags)/", value)
     )
+    github_api_archive = bool(
+        re.search(r"api\.github\.com/repos/[^/\s]+/[^/\s]+/(?:tarball|zipball)(?:/|$)", value)
+    )
+    github_codeload_archive = bool(
+        re.search(r"codeload\.github\.com/[^/\s]+/[^/\s]+/(?:tar\.gz|zip)(?:/|$)", value)
+    )
     release_or_download_archive = archiveish and bool(
         re.search(r"/(?:release|releases|download|downloads|dist|archive|source|src)/", value)
     )
-    return github_release_or_tag or release_or_download_archive
+    return github_release_or_tag or github_api_archive or github_codeload_archive or release_or_download_archive
 
 
 def _command_has_authority_page_readback(command: object) -> bool:
@@ -2650,12 +2942,17 @@ def _reduce_stages(
     blockers: Iterable[Mapping[str, object]],
     *,
     fresh_default_smoke: bool = False,
+    source_authority_satisfied: bool | None = None,
 ) -> list[dict]:
     attempts = [dict(item) for item in attempts or []]
     blockers = [dict(item) for item in blockers or []]
     stages: list[dict] = []
     source_blocked = _has_source_blocker(blockers)
-    source_satisfied = _source_authority_satisfied(attempts)
+    source_satisfied = (
+        bool(source_authority_satisfied)
+        if source_authority_satisfied is not None
+        else _source_authority_satisfied(attempts)
+    )
     target_proven = all((item or {}).get("status") == "proven" for item in artifacts or [])
     stages.append(
         {
@@ -2711,6 +3008,7 @@ def _active_strategy_blockers(
     contract: Mapping[str, object],
     *,
     fresh_default_smoke: bool = False,
+    source_authority_satisfied: bool | None = None,
 ) -> list[dict]:
     blockers = [dict(item) for item in blockers or [] if isinstance(item, Mapping)]
     if not blockers:
@@ -2718,7 +3016,11 @@ def _active_strategy_blockers(
     attempts = [dict(item) for item in attempts or [] if isinstance(item, Mapping)]
     artifacts = [dict(item) for item in artifacts or [] if isinstance(item, Mapping)]
     source_required = bool((contract.get("source_policy") or {}).get("authority_required", True))
-    source_satisfied = _source_authority_satisfied(attempts)
+    source_satisfied = (
+        bool(source_authority_satisfied)
+        if source_authority_satisfied is not None
+        else _source_authority_satisfied(attempts)
+    )
     target_proven = bool(artifacts) and all(item.get("status") == "proven" for item in artifacts)
     runtime_policy = contract.get("runtime_proof") if isinstance(contract.get("runtime_proof"), Mapping) else {}
     runtime_required = runtime_policy.get("required") == "required"
