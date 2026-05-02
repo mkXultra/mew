@@ -82,13 +82,19 @@ WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT = 20
 WORK_COMPACT_CONTEXT_BUDGET = 25000
 WORK_COMPACT_CONTEXT_WINDOW_CANDIDATES = ((6, 4), (4, 2), (2, 2), (1, 1))
 WORK_RECOVERY_CONTEXT_WINDOW_CANDIDATES = ((4, 2), (2, 1), (1, 1))
+WORK_RECOVERY_RESULT_TEXT_LIMIT = 500
+WORK_RECOVERY_READ_FILE_CONTEXT_TEXT_LIMIT = 400
+WORK_RECOVERY_LIST_ITEM_CONTEXT_TEXT_LIMIT = 120
+WORK_RECOVERY_LIST_CONTEXT_ITEM_LIMIT = 6
+WORK_RECOVERY_RECENT_READ_FILE_WINDOW_LIMIT = 1
+WORK_RECOVERY_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 400
 WORK_COMPACT_TASK_TEXT_LIMIT = 1200
 WORK_COMPACT_RESUME_TEXT_LIMIT = 600
 WORK_COMPACT_RESUME_ITEM_LIMIT = 6
 WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT = 3
 WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT = 12
-WORK_RECOVERY_RESUME_TEXT_LIMIT = 320
-WORK_RECOVERY_RESUME_ITEM_LIMIT = 4
+WORK_RECOVERY_RESUME_TEXT_LIMIT = 120
+WORK_RECOVERY_RESUME_ITEM_LIMIT = 2
 WORK_RECOVERY_DECISION_ITEM_LIMIT = 2
 WORK_RECOVERY_DECISION_TEXT_LIMIT = 160
 WORK_RECOVERY_DECISION_GUIDANCE_LIMIT = 120
@@ -341,7 +347,7 @@ def _compact_tool_result(
             "path": result.get("path"),
             "offset": offset,
             "next_offset": next_offset,
-            "text": clip_output(text, WORK_READ_FILE_CONTEXT_TEXT_LIMIT),
+            "text": clip_output(text, read_file_text_limit),
             "visible_chars": visible_chars,
             "source_text_chars": len(text),
             "context_truncated": context_truncated,
@@ -503,12 +509,19 @@ def compact_turn_reasoning(turn):
 def work_tool_call_for_model(call, *, prompt_context_mode="full"):
     tool = call.get("tool") or ""
     compact_prompt = prompt_context_mode != "full"
-    result_text_limit = WORK_COMPACT_RESULT_TEXT_LIMIT if compact_prompt else WORK_RESULT_TEXT_LIMIT
-    read_file_text_limit = _read_file_context_text_limit_for_call(call, compact_prompt=compact_prompt)
-    list_item_text_limit = (
-        WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT
-    )
-    list_item_limit = WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT if compact_prompt else WORK_LIST_CONTEXT_ITEM_LIMIT
+    recovery_prompt = prompt_context_mode == "compact_recovery"
+    if recovery_prompt:
+        result_text_limit = WORK_RECOVERY_RESULT_TEXT_LIMIT
+        read_file_text_limit = WORK_RECOVERY_READ_FILE_CONTEXT_TEXT_LIMIT
+        list_item_text_limit = WORK_RECOVERY_LIST_ITEM_CONTEXT_TEXT_LIMIT
+        list_item_limit = WORK_RECOVERY_LIST_CONTEXT_ITEM_LIMIT
+    else:
+        result_text_limit = WORK_COMPACT_RESULT_TEXT_LIMIT if compact_prompt else WORK_RESULT_TEXT_LIMIT
+        read_file_text_limit = _read_file_context_text_limit_for_call(call, compact_prompt=compact_prompt)
+        list_item_text_limit = (
+            WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT
+        )
+        list_item_limit = WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT if compact_prompt else WORK_LIST_CONTEXT_ITEM_LIMIT
     omit_write_body = _write_call_body_should_be_omitted(call)
     result_for_prompt = call.get("result") or {}
     if omit_write_body:
@@ -547,6 +560,8 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
         item["resolved_write_body_omitted"] = True
     if compact_prompt:
         item["prompt_context_compacted"] = True
+    if recovery_prompt:
+        item["prompt_context_recovery_compacted"] = True
     if call.get("command_evidence_ref"):
         item["command_evidence_ref"] = call.get("command_evidence_ref")
     if call.get("repeat_guard"):
@@ -570,7 +585,11 @@ def work_model_turn_for_model(turn, *, prompt_context_mode="full"):
     decision_plan = turn.get("decision_plan") or {}
     working_memory = decision_plan.get("working_memory") if isinstance(decision_plan.get("working_memory"), dict) else {}
     compact_prompt = prompt_context_mode != "full"
-    text_limit = 1000 if compact_prompt else WORK_RESULT_TEXT_LIMIT
+    text_limit = (
+        WORK_RECOVERY_RESULT_TEXT_LIMIT // 2
+        if prompt_context_mode == "compact_recovery"
+        else (1000 if compact_prompt else WORK_RESULT_TEXT_LIMIT)
+    )
     item = {
         "id": turn.get("id"),
         "status": turn.get("status"),
@@ -1607,6 +1626,94 @@ def compact_recovery_plan_for_prompt(recovery_plan, *, item_limit=3, text_limit=
     return compact
 
 
+def compact_long_build_state_for_prompt(long_build_state, *, mode="compact_memory"):
+    state = long_build_state if isinstance(long_build_state, dict) else {}
+    if not state:
+        return {}
+    recovery_mode = mode == "compact_recovery"
+    text_limit = 360 if recovery_mode else 700
+    item_limit = 3 if recovery_mode else 6
+    compact = {
+        "schema_version": state.get("schema_version"),
+        "kind": state.get("kind"),
+        "contract_id": state.get("contract_id"),
+        "status": state.get("status"),
+        "latest_attempt_id": state.get("latest_attempt_id"),
+        "recovery_decision_id": state.get("recovery_decision_id"),
+        "current_failure": _compact_context_value(
+            state.get("current_failure"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "recovery_decision": _compact_context_value(
+            state.get("recovery_decision"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "stages": _compact_context_value(state.get("stages"), text_limit=text_limit, item_limit=item_limit),
+        "artifacts": _compact_context_value(state.get("artifacts"), text_limit=text_limit, item_limit=item_limit),
+        "missing_artifacts": _compact_context_value(
+            state.get("missing_artifacts"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "progress": _compact_context_value(state.get("progress"), text_limit=text_limit, item_limit=item_limit),
+        "strategy_blockers": _compact_context_value(
+            state.get("strategy_blockers"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "incomplete_reason": state.get("incomplete_reason"),
+        "latest_build_status": state.get("latest_build_status"),
+        "latest_build_tool_call_id": state.get("latest_build_tool_call_id"),
+        "latest_build_evidence_id": state.get("latest_build_evidence_id"),
+        "latest_build_command": clip_output(str(state.get("latest_build_command") or ""), text_limit),
+        "suggested_next": clip_output(str(state.get("suggested_next") or ""), text_limit),
+        "compacted_for_prompt": True,
+        "prompt_context_mode": mode,
+    }
+    attempts = state.get("attempts") if isinstance(state.get("attempts"), list) else []
+    compact["attempts"] = [
+        {
+            "id": attempt.get("id"),
+            "stage": attempt.get("stage"),
+            "selected_target": attempt.get("selected_target"),
+            "result": attempt.get("result"),
+            "command_evidence_ref": attempt.get("command_evidence_ref"),
+            "diagnostics": _compact_context_value(
+                attempt.get("diagnostics"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+            "wall_budget_before_seconds": attempt.get("wall_budget_before_seconds"),
+            "wall_budget_after_seconds": attempt.get("wall_budget_after_seconds"),
+        }
+        for attempt in attempts[-item_limit:]
+        if isinstance(attempt, dict)
+    ]
+    contract = state.get("contract") if isinstance(state.get("contract"), dict) else {}
+    if contract:
+        compact["contract"] = {
+            "id": contract.get("id"),
+            "required_artifacts": _compact_context_value(
+                contract.get("required_artifacts"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+            "runtime_proof": _compact_context_value(
+                contract.get("runtime_proof"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+            "source_policy": _compact_context_value(
+                contract.get("source_policy"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+        }
+    return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+
 def compact_resume_for_prompt(resume, *, mode="compact_memory"):
     compacted = dict(resume or {})
     if mode == "compact_recovery":
@@ -1636,6 +1743,10 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         guidance_limit=decision_guidance_limit,
     )
     compacted["recovery_plan"] = compact_recovery_plan_for_prompt(compacted.get("recovery_plan"))
+    compacted["long_build_state"] = compact_long_build_state_for_prompt(
+        compacted.get("long_build_state"),
+        mode=mode,
+    )
     for key in (
         "goal",
         "working_memory",
@@ -1643,16 +1754,21 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         "same_surface_audit",
         "continuity",
         "effort",
+        "commands",
         "low_yield_observations",
         "search_anchor_observations",
         "recent_read_images_observations",
         "failures",
         "unresolved_failure",
         "recurring_failures",
+        "verifier_failure_repair_agenda",
         "repair_anchor_observations",
+        "plan_item_observations",
         "suggested_safe_reobserve",
         "retry_context",
         "world_state",
+        "context",
+        "user_preferences",
         "files_touched",
         "queued_followups",
         "pending_steer",
@@ -1724,7 +1840,11 @@ def build_work_session_context(
         "effort": (resume or {}).get("effort") or {},
         "resume": resume,
         "world_state": world_state,
-        "session_knowledge": build_session_knowledge(tool_calls, recent_count=recent_tool_count),
+        "session_knowledge": (
+            []
+            if prompt_context_mode == "compact_recovery"
+            else build_session_knowledge(tool_calls, recent_count=recent_tool_count)
+        ),
         "tool_calls": [
             work_tool_call_for_model(call, prompt_context_mode=prompt_context_mode)
             for call in tool_calls[-recent_tool_count:]
@@ -1750,7 +1870,14 @@ def build_work_session_context(
         and str(((call or {}).get("parameters") or {}).get("reason") or "")
         == "refresh structurally incomplete write-ready cached window"
     ][-10:]
-    work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
+    if prompt_context_mode == "compact_recovery":
+        work_context["recent_read_file_windows"] = build_recent_read_file_windows(
+            tool_calls,
+            limit=WORK_RECOVERY_RECENT_READ_FILE_WINDOW_LIMIT,
+            text_limit=WORK_RECOVERY_RECENT_READ_FILE_WINDOW_TEXT_LIMIT,
+        )
+    else:
+        work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
     if compacted or prompt_compacted:
         note = "Recent work context was compacted due to session size; use remember for durable observations."
         if work_context.get("recent_read_file_windows"):
@@ -6299,8 +6426,24 @@ def _work_think_compact_recovery_section(context):
     )
 
 
+def _work_think_compact_recovery_base_section(context):
+    return (
+        "CompactRecoveryLaneBase\n"
+        "You are the THINK phase for mew work mode. Return only JSON matching the schema. "
+        "The prior turn is under recovery pressure: use the compact context as a reentry contract, "
+        "prefer one narrow action, and avoid broad rediscovery. If work_session.resume.long_build_state "
+        "contains current_failure or recovery_decision, follow that specific repair route before adding "
+        "new task-specific guidance. Preserve exact task acceptance terms and do not finish until the "
+        "required artifact or verifier proof is present."
+    )
+
+
 def build_work_think_prompt_sections(context):
     legacy_prompt = _build_work_think_prompt_legacy(context)
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    work_session = work_session if isinstance(work_session, dict) else {}
+    compaction = work_session.get("context_compaction") if isinstance(work_session.get("context_compaction"), dict) else {}
+    compact_recovery_mode = compaction.get("prompt_context_mode") == "compact_recovery"
     context_marker = "\n\nContext JSON:\n"
     if context_marker in legacy_prompt:
         prompt_before_context, context_json = legacy_prompt.split(context_marker, 1)
@@ -6343,17 +6486,30 @@ def build_work_think_prompt_sections(context):
         _RECOVERY_BUDGET_END,
     )
 
-    sections = [
-        PromptSection(
-            id="implementation_lane_base",
-            version="v1",
-            title="ImplementationLaneBase",
-            content=before_long_dependency.strip(),
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement",
-        )
-    ]
+    if compact_recovery_mode:
+        sections = [
+            PromptSection(
+                id="compact_recovery_lane_base",
+                version="v1",
+                title="CompactRecoveryLaneBase",
+                content=_work_think_compact_recovery_base_section(context),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement",
+            )
+        ]
+    else:
+        sections = [
+            PromptSection(
+                id="implementation_lane_base",
+                version="v1",
+                title="ImplementationLaneBase",
+                content=before_long_dependency.strip(),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement",
+            )
+        ]
     if source_acquisition_profile:
         sections.append(
             PromptSection(
@@ -6402,7 +6558,7 @@ def build_work_think_prompt_sections(context):
                 profile="long_dependency",
             )
         )
-    if after_long_dependency.strip():
+    if after_long_dependency.strip() and not compact_recovery_mode:
         sections.append(
             PromptSection(
                 id="implementation_lane_base_continuation",

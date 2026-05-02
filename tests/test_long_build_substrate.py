@@ -706,6 +706,135 @@ def test_recovery_decision_selects_bounded_resume_for_build_timeout():
     assert "repeat_same_timeout_without_budget_change" in state["recovery_decision"]["prohibited_repeated_actions"]
 
 
+def test_build_timeout_masks_unreached_later_install_blocker_from_same_command():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:recover-mixed-timeout:long_build:1",
+    )
+    command = "\n".join(
+        [
+            "make depend",
+            "make -j2 foocc",
+            "make install",
+            "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+        ]
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                8,
+                command,
+                stdout="make depend\nmake -j2 foocc\n",
+                stderr="make[1]: *** [Makefile:10: parser.cmx] Terminated\nmake: *** [Makefile:20: foocc] Terminated\n",
+                timed_out=True,
+                exit_code=None,
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "untargeted_full_project_build_for_specific_artifact",
+                "source_tool_call_id": 8,
+                "excerpt": "make install",
+            }
+        ],
+    )
+
+    assert attempts[-1]["selected_target"] == "foocc"
+    assert state["current_failure"]["failure_class"] == "build_timeout"
+    assert state["recovery_decision"]["failure_class"] == "build_timeout"
+    assert state["recovery_decision"]["allowed_next_action"]["stage"] == "continue_or_resume_build"
+    assert [
+        item for item in state["strategy_blockers"]
+        if item.get("code") == "untargeted_full_project_build_for_specific_artifact"
+    ] == []
+
+
+def test_build_timeout_does_not_mask_same_call_overbroad_build_blocker():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:recover-overbroad-timeout:long_build:1",
+    )
+    command = "\n".join(["make -j2 all", "make -j2 foocc"])
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                8,
+                command,
+                stdout="make -j2 all\n",
+                stderr="make[1]: *** [Makefile:10: world] Terminated\n",
+                timed_out=True,
+                exit_code=None,
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "untargeted_full_project_build_for_specific_artifact",
+                "source_tool_call_id": 8,
+                "excerpt": "make -j2 all",
+            }
+        ],
+    )
+
+    assert state["current_failure"]["failure_class"] == "target_selection_overbroad"
+    assert state["strategy_blockers"][-1]["code"] == "untargeted_full_project_build_for_specific_artifact"
+
+
+def test_build_timeout_does_not_mask_unrelated_active_blocker():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. "
+        "Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:recover-unrelated-blocker:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                8,
+                "make -j2 foocc",
+                stdout="make -j2 foocc\n",
+                stderr="make[1]: *** [Makefile:10: parser.cmx] Terminated\n",
+                timed_out=True,
+                exit_code=None,
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+
+    state = reduce_long_build_state(
+        contract,
+        attempts,
+        evidence,
+        strategy_blockers=[
+            {
+                "code": "external_dependency_source_provenance_unverified",
+                "source_tool_call_id": 2,
+                "excerpt": "no authoritative source evidence",
+            }
+        ],
+    )
+
+    assert state["current_failure"]["failure_class"] == "source_authority_unverified"
+    assert state["recovery_decision"] is None
+
+
 def test_runtime_required_contract_accepts_default_compile_link_smoke():
     contract = build_long_build_contract(
         "Under /tmp/FooCC, build the FooCC compiler from source. "

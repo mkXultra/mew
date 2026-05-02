@@ -422,6 +422,7 @@ def reduce_long_build_state(
         attempts,
         artifact_status,
         contract,
+        evidence_by_tool_call_id=evidence_by_tool_call_id,
         fresh_default_smoke=fresh_default_smoke,
         source_authority_satisfied=source_authority_satisfied,
     )
@@ -3209,6 +3210,7 @@ def _active_strategy_blockers(
     artifacts: Iterable[Mapping[str, object]],
     contract: Mapping[str, object],
     *,
+    evidence_by_tool_call_id: Mapping[object, int] | None = None,
     fresh_default_smoke: bool = False,
     source_authority_satisfied: bool | None = None,
 ) -> list[dict]:
@@ -3229,11 +3231,21 @@ def _active_strategy_blockers(
     runtime_satisfied = (not runtime_required) or fresh_default_smoke
     target_runtime_satisfied = target_proven and runtime_satisfied
     final_contract_satisfied = target_proven and runtime_satisfied and ((not source_required) or source_satisfied)
-    latest_diagnostic_failure_class = str((_latest_attempt_diagnostic_failure(attempts) or {}).get("failure_class") or "")
+    latest_diagnostic_failure = _latest_attempt_diagnostic_failure(attempts) or {}
+    latest_diagnostic_failure_class = str(latest_diagnostic_failure.get("failure_class") or "")
+    latest_diagnostic_evidence_id = latest_diagnostic_failure.get("evidence_id")
+    evidence_by_tool_call_id = dict(evidence_by_tool_call_id or {})
 
     active = []
     for blocker in blockers:
         code = str(blocker.get("code") or "")
+        if _blocker_masked_by_latest_build_timeout(
+            blocker,
+            latest_diagnostic_failure_class,
+            latest_diagnostic_evidence_id,
+            evidence_by_tool_call_id,
+        ):
+            continue
         if code == "external_dependency_source_provenance_unverified" and source_satisfied:
             continue
         if target_runtime_satisfied and code not in _SOURCE_AUTHORITY_BLOCKER_CODES:
@@ -3373,6 +3385,28 @@ def _current_failure(
             "clear_condition": "default compile/link smoke succeeds without custom runtime path flags",
         }
     return None
+
+
+def _blocker_masked_by_latest_build_timeout(
+    blocker: Mapping[str, object],
+    latest_diagnostic_failure_class: str,
+    latest_diagnostic_evidence_id: object,
+    evidence_by_tool_call_id: Mapping[object, int],
+) -> bool:
+    if latest_diagnostic_failure_class != "build_timeout":
+        return False
+    if str(blocker.get("code") or "") != "untargeted_full_project_build_for_specific_artifact":
+        return False
+    excerpt = str(blocker.get("excerpt") or "").casefold()
+    if "install" not in excerpt:
+        return False
+    source_tool_call_id = blocker.get("source_tool_call_id")
+    if source_tool_call_id is None:
+        return False
+    blocker_evidence_id = evidence_by_tool_call_id.get(source_tool_call_id)
+    if blocker_evidence_id is None:
+        return False
+    return blocker_evidence_id == latest_diagnostic_evidence_id
 
 
 def _latest_attempt_diagnostic_failure(attempts: Iterable[Mapping[str, object]]) -> dict | None:

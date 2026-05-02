@@ -158,6 +158,13 @@ or broad measurement.
   `ccomp` and failed default runtime link. The narrower blocker is an invalid
   parent Makefile target path for a runtime library that is actually declared
   inside the runtime subdirectory Makefile.
+- The 2026-05-02 temp-fetch source-authority same-shape rerun is not another
+  source-authority or target-selection repair. Source authority, configure, and
+  dependency generation were satisfied; the reached failure was a timeout inside
+  explicit `make -j"$(nproc)" ccomp`. Treat unreached later `make install` text
+  as stale for current-failure selection when the same command evidence timed
+  out first, and keep low-wall compact recovery small enough to render the
+  recovery decision instead of the full implementation prompt.
 
 ## Preflight Before Next Repair
 

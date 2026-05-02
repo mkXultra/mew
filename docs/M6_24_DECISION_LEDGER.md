@@ -193,6 +193,7 @@ direction.
 | 2026-05-01 | Implement timeout-ceiling compact recovery. | `src/mew/work_loop.py` now maps the default `full` prompt context to `compact_recovery` when `plan_work_model_turn()` runs under `timeout_ceiling=True`; `tests/test_work_session.py` pins that low-wall planning records compact recovery context. Focused validation passed: compact-recovery tests `2 passed`, `uv run ruff check src/mew/work_loop.py tests/test_work_session.py`, and `codex-ultra` review session `019ddfa4-889a-7d72-a789-239af7ce2a2b` approved. | Run one-trial same-shape `compile-compcert` speed proof with refreshable `~/.codex/auth.json`; do not resume broad measurement first. | speed_rerun_pending |
 | 2026-05-01 | timeout-ceiling compact recovery same-shape speed rerun passed. | `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-1attempt-20260501-0332/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `16m 55s`. `mew work` finished after 9 steps, built `/tmp/CompCert/ccomp`, installed default runtime support, ran default-path compile/link/run smoke, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
 | 2026-05-02 | Source-tail closeout speed rerun passed externally but exposed reducer closeout drift. | `docs/M6_24_SOURCE_TAIL_CLOSEOUT_REPAIR_2026-05-02.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-tail-closeout-compile-compcert-1attempt-20260502-1347/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `23m44s`, command transcript exit `0`, and `mew-report.work_exit_code=0`. Internal long-build state still reported `source_authority=unknown`, `default_smoke=unknown`, stale `target_selection_overbroad`, and stale strategy blockers because the final command repaired runtime linking before a successful default smoke and listed concrete source archive members instead of a bare root. `codex-ultra` rejected command-text-only authority correlation and presence-only post-extract markers, so the repair now requires terminal success, ordered fetch/hash/validation output, or unique post-extract progress output with no source-acquisition failure before a later saved archive readback can satisfy `source_authority`. Final review approved in `docs/REVIEW_2026-05-02_M6_24_SOURCE_TAIL_CLOSEOUT_CODEX.md`. | Run one same-shape speed_1 rerun before proof_5 or broad measurement. | reviewed_speed_1_pending |
+| 2026-05-02 | Build-timeout recovery decision/context repair reviewed. | `docs/M6_24_BUILD_TIMEOUT_RECOVERY_DECISION_REPAIR_2026-05-02.md` and `docs/REVIEW_2026-05-02_M6_24_BUILD_TIMEOUT_RECOVERY_CODEX.md`: after the temp-fetch same-shape rerun reached an explicit `make ccomp` timeout, the repair now suppresses only the same-evidence unreached `make install` target blocker, preserves unrelated blockers and real overbroad builds, and hard-caps compact-recovery context. Replay-style prompt size dropped from about `124k` to about `46.5k`, with work-session context about `24.9k`. | Run one same-shape `compile-compcert` speed_1. Close only on reward `1.0`, runner errors `0`, `mew work` exit `0`, invokable `/tmp/CompCert/ccomp`, default smoke passed, `source_authority=satisfied`, and no stale `current_failure` or strategy blockers. | reviewed_speed_1_pending |
 
 ## Current Mode
 
@@ -208,19 +209,20 @@ Phase 4 are implemented and reviewed. The first Phase 4 speed rerun externally
 passed, but exposed stale strategy blockers preventing clean internal closeout.
 The stale-blocker clearing, acceptance-closeout evidence, clean closeout state,
 saved authority-page, validated archive-loop, post-loop nonterminal source
-signal, saved source readback, source-tail closeout, and external-branch attempt
-repairs moved the shape forward. The latest same-shape speed_1 after the
-external-branch attempt repair passed externally and exited cleanly:
-`source_url` used a GitHub tag archive, `/tmp/CompCert/ccomp` was invokable, and
-the default smoke passed. Internal closeout still left `source_authority=unknown`
-because the authoritative archive was fetched to `$ARCH.tmp`, moved to `$ARCH`,
-and the fetch-time source hash output was clipped before the later saved archive
-readback. The temp-fetch source-authority repair is implemented and
-`codex-ultra` approved it after hardening authoritative URL extraction,
-fetch-before-move ordering, and clipped failed-fetch plus stale-readback false
-positives. Local replay of the live report now reaches `status=complete`.
+signal, saved source readback, source-tail closeout, external-branch attempt,
+and temp-fetch source-authority repairs moved the shape forward. The latest
+same-shape speed_1 after the temp-fetch source-authority repair satisfied source
+authority, configure, and dependency generation, then timed out during the
+explicit `make -j"$(nproc)" ccomp` build. The reducer incorrectly let unreached
+later `make install` text mask the real `build_timeout`, and compact recovery
+still rendered about `124k` prompt chars. The selected repair is
+`long_dependency_build_timeout_recovery_decision_context_contract`: latest
+same-evidence unreached `make install` blockers are suppressed after the latest
+`build_timeout`, unrelated blockers and real overbroad builds remain active, and
+compact recovery is hard-capped. codex-ultra approved this bounded repair in
+session `019de7d9-b0b1-7a03-9fa4-657915260995`.
 Broad measurement remains paused.
 
 Current selected next action:
 
-`M6.24 -> long_dependency/toolchain gap -> temp-fetch source_authority repair reviewed -> compile-compcert speed_1 clean-closeout rerun`
+`M6.24 -> long_dependency/toolchain gap -> build-timeout recovery decision/context repair reviewed -> compile-compcert speed_1 clean-closeout rerun`

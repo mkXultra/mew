@@ -40686,6 +40686,86 @@ class WorkSessionTests(unittest.TestCase):
             "compact_recovery",
         )
 
+    def test_compact_recovery_context_hard_caps_long_build_payloads(self):
+        from mew.work_loop import WORK_COMPACT_CONTEXT_BUDGET, _json_size, build_work_model_context, build_work_think_prompt_bundle
+
+        command = "\n".join(
+            [
+                "make depend",
+                "make -j10 ccomp",
+                "make install",
+                "test -x /tmp/CompCert/ccomp && /tmp/CompCert/ccomp -version",
+            ]
+        )
+        long_output = "Compiling extraction/Parser.cmx\n" * 2000
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": "Build the CompCert compiler from source and ensure /tmp/CompCert/ccomp can be invoked.",
+            "created_at": "then",
+            "updated_at": "now",
+            "tool_calls": [
+                {
+                    "id": 8,
+                    "tool": "run_command",
+                    "status": "completed",
+                    "parameters": {"command": command, "cwd": "/tmp/CompCert"},
+                    "result": {
+                        "command": command,
+                        "cwd": "/tmp/CompCert",
+                        "exit_code": None,
+                        "timed_out": True,
+                        "stdout": long_output,
+                        "stderr": "make[1]: *** [Makefile.extr:146: extraction/Parser.cmx] Terminated\n",
+                    },
+                    "summary": "build timed out",
+                },
+                {
+                    "id": 9,
+                    "tool": "read_file",
+                    "status": "completed",
+                    "parameters": {"path": "/tmp/CompCert/Makefile"},
+                    "result": {
+                        "path": "/tmp/CompCert/Makefile",
+                        "text": "makefile target data\n" * 1000,
+                        "truncated": False,
+                    },
+                    "summary": "read makefile",
+                },
+            ],
+            "model_turns": [],
+        }
+        task = {
+            "id": 1,
+            "title": "Build CompCert compiler",
+            "description": "Build the CompCert compiler from source and ensure /tmp/CompCert/ccomp can be invoked.",
+            "status": "todo",
+            "kind": "coding",
+        }
+
+        context = build_work_model_context(
+            {},
+            session,
+            task,
+            "now",
+            prompt_context_mode="compact_recovery",
+            allow_shell=True,
+            allow_verify=True,
+        )
+        prompt, metrics = build_work_think_prompt_bundle(context)
+
+        self.assertLessEqual(_json_size(context["work_session"]), WORK_COMPACT_CONTEXT_BUDGET)
+        self.assertLess(len(prompt), 60000)
+        self.assertIn("compact_recovery_lane_base", [item["id"] for item in metrics["sections"]])
+        long_build_state = context["work_session"]["resume"]["long_build_state"]
+        self.assertTrue(long_build_state["compacted_for_prompt"])
+        self.assertEqual(long_build_state["current_failure"]["failure_class"], "build_timeout")
+        self.assertEqual(long_build_state["recovery_decision"]["failure_class"], "build_timeout")
+        self.assertNotIn("output_head", json.dumps(long_build_state))
+        self.assertLessEqual(len(context["work_session"]["tool_calls"][0]["result"]["stdout"]), 1100)
+        self.assertLessEqual(context["work_session"]["recent_read_file_windows"][0]["visible_chars"], 500)
+
     def test_work_tool_call_for_model_keeps_full_explicit_line_window_in_full_prompt(self):
         from mew.work_loop import work_tool_call_for_model
 
