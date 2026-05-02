@@ -17,6 +17,12 @@ Authoritative inputs:
 - `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` for accepted structural repairs
 - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md` for lane,
   authority, helper-lane, and calibration-fit decisions
+- `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md` for the active
+  long-command continuation repair design
+- `docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md` for the trigger to
+  replace narrow budget routing with all-command generic managed exec
+- `docs/REVIEW_2026-05-02_CODEX_CLI_LONG_BUILD_CONTINUATION_PATTERNS.md`
+- `docs/REVIEW_2026-05-02_CLAUDE_CODE_LONG_BUILD_CONTINUATION_PATTERNS.md`
 
 Do not resume new broad Terminal-Bench measurement until this controller or the
 decision ledger records why measurement is higher value than repairing the
@@ -26,18 +32,53 @@ Current selected gap class:
 `long_dependency_toolchain_build_strategy_contract`.
 
 Current selected next action:
-`M6.24 -> long_dependency/toolchain gap -> Long-Build Substrate Phase 0 schema + safety-parity harness`.
+`M6.24 -> long_dependency/toolchain gap -> final artifact/default-smoke closeout classification -> repair or written defer`.
 
-Authoritative design:
+Active authoritative design:
+`docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`.
+
+Foundational substrate design:
 `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`.
 
-This supersedes the local `compile-compcert` detector/profile patch chain for
-now. The latest local repair may remain as evidence, but do not spend another
-`compile-compcert` proof_5 or broad measurement run after Phase 0 alone.
-Phase 0 is the next implementation slice, not the measurement gate. Same-shape
-`compile-compcert` speed_1 may run after Phase 3 if unit/fixture tests pass;
-because Phase 4 changes recovery-budget enforcement, prefer completing Phase 4
-before measurement when budget behavior changed.
+This supersedes both the stale 2026-05-01 Long-Build Substrate Phase 0 schema +
+safety-parity harness next-action text and proof escalation from the Phase 6
+continuation transfer gate. The generic long-command continuation contract
+remains implemented and valid, but the latest same-shape speed rerun built far
+enough for the compiler artifact to exist and then failed default runtime
+linking while `long_command_runs=[]` and `latest_long_command_run_id=null`.
+The production-visible managed-dispatch and nonterminal-handoff repairs are now
+reviewed and approved. The latest narrower blocker is that a compound
+configure/source-acquisition-looking command containing OPAM install, configure,
+build, and final smoke work did not receive managed long-command budget before
+the wall ceiling killed it. That repair is now reviewed and the follow-up
+same-shape speed rerun moved the blocker: a managed long command exists and
+failed terminally during source acquisition with `curl` exit `22`,
+`timed_out=false`, then recovery incorrectly used timeout-style same-command
+resume policy and blocked a corrected source-channel retry.
+Initial codex-ultra review found two integration gaps in that repair:
+`recover_long_command` was not yet routed through the managed runner, and killed
+managed commands could collapse to `failed`. Both follow-up fixes are now
+implemented locally with focused and broader validation; codex-ultra re-review
+approved them. The next action is exactly one same-shape speed_1.
+That speed_1 passed externally and `mew work` exited `0`, but internal
+`resume.long_build_state` still reports `status=blocked`, `source_authority`
+and `default_smoke` unknown, and a stale dependency-generation blocker. The
+active next action is to classify this moved internal closeout gap before
+`proof_5` or broad measurement.
+
+The one-run timeout-shape diagnostic is now recorded as classification evidence.
+The previous rerun redirected the controller from `long-build wall-time /
+continuation budget` to config/source-script external-hook repair, then to
+production continuation dispatch, nonterminal handoff, and now compound
+budget-stage promotion and non-timeout source-acquisition retry repair. Do not
+spend another `proof_5` or broad measurement run until the same-shape speed
+rerun after this repair is recorded.
+
+Do not grow the budget classifier into a broad shell classifier. The durable
+decision is in `docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md`: keep
+budget routing narrow unless repeated false negatives, repeated false positives,
+classifier accretion, lifecycle-ledger dominance, or recovery-state inversion
+triggers a deliberate all-command generic managed-exec design slice.
 
 ## Loop
 
@@ -340,3 +381,31 @@ work. The next task must be one of:
 - update the decision ledger to resume measurement with evidence
 
 Anything else is drift unless the user explicitly changes direction.
+
+## Current Controller Note - 2026-05-03
+
+The latest same-shape `compile-compcert` speed_1 after compound budget repair
+scored `0/1`, but it moved the selected gap again: `latest_long_command_run_id`
+is now present and the managed long command reached terminal `failed` state.
+The run lasted `9m58s`; `work_report.stop_reason` is
+`long_command_budget_blocked`. The new gap is
+`non_timeout_source_acquisition_retry_blocked_as_same_timeout`: terminal
+source acquisition failed with `curl` exit `22`, `timed_out=false`, but recovery
+used timeout-style same-command resume policy and blocked the corrected source
+channel retry as `repeat_same_timeout_without_budget_change`.
+
+Selected chain:
+
+`M6.24 -> long_dependency/toolchain gap -> final artifact/default-smoke closeout repair -> codex re-review -> same-shape speed_1`
+
+The current repair is generic detector/resume-state policy: only timed-out or
+killed long commands require same-idempotence resume with larger budget.
+Terminal non-timeout failures produce `repair_failed_long_command`; exact
+repeats remain blocked, but changed corrective commands are allowed. The
+same-shape rerun recorded a newer narrower gap: external pass with stale
+internal long-build closeout. codex-ultra classified it as reducer/closeout
+`REPAIR_NOW`; the generic local repair plus codex-requested hardening is
+implemented and locally validated in
+`docs/M6_24_FINAL_CLOSEOUT_PROJECTION_REPAIR_2026-05-03.md`. Do not run broad
+measurement or `proof_5` until that repair is re-reviewed and one same-shape
+rerun records clean internal closeout or a newer narrower gap.

@@ -67,6 +67,9 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-03 | Non-timeout source retry speed rerun passed externally but exposed final closeout projection drift. | `docs/M6_24_NON_TIMEOUT_SOURCE_RETRY_SPEED_RERUN_2026-05-03.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-non-timeout-source-retry-compile-compcert-1attempt-20260503-0327/result.json`: one trial, runner errors `0`, Harbor reward `1.0`, runtime `23m15s`, `mew-report.work_exit_code=0`, `work_report.stop_reason=finish`, and external verifier `3 passed`. Internal closeout still reported `status=blocked`, `source_authority=unknown`, `default_smoke=unknown`, and stale `dependency_generation_required`. codex-ultra classified this as `final_artifact_and_default_smoke_closeout_not_projected_to_long_build_state` and recommended `REPAIR_NOW` at reducer/closeout. The local repair in `docs/M6_24_FINAL_CLOSEOUT_PROJECTION_REPAIR_2026-05-03.md` accepts safe `|| exit 1` / `|| { ... exit 1; }` default-smoke guards, recognizes strict selected authoritative source archive acquisition, and resolves simple shell assignments in archive hash/list readbacks. Validation passed: focused closeout/smoke/source subset `7 passed`, broader reducer/resume slice `208 passed`, and scoped ruff passed. | Ask codex-ultra to review the reducer/closeout repair. If approved, run exactly one same-shape `compile-compcert` speed_1. Do not run `proof_5` or broad measurement first. | repair_review_pending |
+| 2026-05-03 | Source-authority path-correlation speed rerun moved the blocker to production long-command dispatch, and the generic dispatch repair is reviewed. | `docs/M6_24_SOURCE_AUTHORITY_PATH_CORRELATION_SPEED_RERUN_2026-05-03.md`, `docs/M6_24_MANAGED_LONG_COMMAND_DISPATCH_REPAIR_2026-05-03.md`, `docs/REVIEW_2026-05-03_M6_24_SOURCE_AUTHORITY_RERUN_CLASSIFICATION_CODEX.md`, and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-authority-path-correlation-compile-compcert-1attempt-20260502-2336/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, `mew-report.work_exit_code=1`, and `work_report.stop_reason=wall_timeout`. The prior source-authority blocker moved: `source_authority=satisfied` and the external verifier found `/tmp/CompCert/ccomp` executable. The remaining verifier failure is default runtime linking (`cannot find -lcompcert`). Internal continuation state was missing (`long_command_runs=[]`, `latest_long_command_run_id=null`), and the compound `configure -> make depend -> make ccomp -> smoke` command was classified as `dependency_generation`, so the managed continuation path was not engaged. The repair now dispatches budget-marked commands through `ManagedCommandRunner`, persists nonterminal and terminal `LongCommandRun` evidence, enforces managed poll timeouts, and preserves reserve for dependency-generation compound commands. Validation passed: focused managed tests `4 passed`, broader long-build/work-session/Harbor/toolbox/acceptance suite `1311 passed` with one warning and `67 subtests`, full ruff, diff check, and JSONL parse. codex-ultra session `019de952-1bf3-7513-820a-ecb5eada4139` returned `STATUS: APPROVE`. | Rerun exactly one same-shape `compile-compcert` speed_1. Do not run `proof_5` or broad measurement until the live rerun records a clean pass or a newer narrower gap. | reviewed_speed_1_pending |
+| 2026-05-02 | Build-timeout recovery speed rerun moved the blocker to wall-time/continuation budget. | `docs/M6_24_BUILD_TIMEOUT_RECOVERY_SPEED_RERUN_2026-05-02.md`, `docs/REVIEW_2026-05-02_M6_24_COMPILE_COMPCERT_TIMEOUT_CLASSIFICATION_CODEX.md`, and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-timeout-recovery-compile-compcert-1attempt-20260502-1755/result.json`: one trial, runner errors `0`, reward `0.0`, runtime `30m23s`, `mew-report.work_exit_code=1`, `work_report.stop_reason=wall_timeout`. The run reached source readback, external Flocq/MenhirLib configuration, `make depend`, and explicit `make -j"$(nproc)" ccomp`; command `10` was killed while the final compiler build was still running. Compact recovery was materially smaller than the prior failure shape, with final recovery prompts around `53k-56k` chars instead of about `124k`. codex-ultra classified this as `long-build wall-time/continuation budget`, not another toolchain-strategy or closeout-verification failure. | Record a one-run timeout-shape diagnostic and rerun one same-shape `compile-compcert` speed_1 with matched Harbor agent timeout and larger `mew --max-wall-seconds` to answer whether the current strategy passes when the final `ccomp` build can finish. If it passes only with extra wall, do not go to proof_5; record the need for generic continuation/budget repair. If it still times out inside `make ccomp`, open that tool/runtime repair immediately. | diagnostic_timeout_shape_pending |
 | 2026-05-02 | Repair source-toolchain-before-external-branch attempt after the source-tail closeout rerun. | `docs/M6_24_EXTERNAL_BRANCH_ATTEMPT_REPAIR_2026-05-02.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-tail-closeout-recheck-compile-compcert-1attempt-20260502-1458-aptpy/result.json`: one trial, runner errors `0`, Harbor mean reward `0.0`, runtime about `30m22s`, and external verifier failed because `/tmp/CompCert/ccomp` did not exist. Invalid harness attempts `20260502-1500` and `20260502-1500-py3` failed before agent execution because the expected Python binary was missing and are not score evidence. The valid run exposed source-provided external/prebuilt branch flags but then entered a version-pinned OPAM source-toolchain path after a plain ignore-version dependency/API mismatch. The repair adds `source_toolchain_before_external_branch_attempt`, scopes API-library mismatch to failed/error calls, handles mismatch-before-help ordering, maps the blocker to `dependency_strategy_unresolved`, and adds a specific clear condition. Validation passed: focused work-session subset `7 passed`, combined long-build/work-session/acceptance subset `284 passed`, full long-build/work-session `1101 passed` with one warning and `67 subtests`, scoped ruff passed, diff check passed, and `codex-ultra` session `019de766-9116-7671-b95c-dfa85da2b005` returned `STATUS: APPROVE` after one required-change round. | Commit the repair, then rerun one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement until a live run records Harbor reward `1.0`, runner errors `0`, command transcript exit `0`, `mew-report.work_exit_code=0`, `source_authority=satisfied`, no stale `current_failure`, and no active stale strategy blockers. | reviewed_speed_1_pending |
 | 2026-05-02 | Saved source readback speed rerun passed externally but selected a closeout follow-up. | `docs/M6_24_SAVED_SOURCE_READBACK_SPEED_RERUN_2026-05-02.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-saved-source-readback-compile-compcert-1attempt-20260502-1302/result.json`: one trial, exceptions `0`, Harbor mean `1.000`, reward `1.0`, runtime `30m 21s`. Internal closeout stayed open with `mew-report.work_exit_code=1`, `source_authority=unknown`, and artifact/default-smoke unknown. Local replay after the follow-up reducer repair satisfies `target_built` and `default_smoke`, clears `current_failure`, and leaves only `source_authority=unknown` because the archive hash/root readback occurred before noisy `make ccomp` output and was clipped. The repair makes default-smoke artifact proof segment-local for `errexit` and updates the prompt to place or repeat saved source readbacks after noisy build/install output near final artifact proof. Validation passed: targeted tests `23 passed, 1069 deselected`, combined long-build/work-session/acceptance `1224 passed` with one warning and `67 subtests`, scoped ruff passed, diff check passed, and `codex-ultra` session `019de6a8-c827-75f3-974b-67a08d05b5b2` returned `STATUS: APPROVE`. | Commit the follow-up repair, then rerun one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement until a live run records Harbor reward `1.0`, runner errors `0`, command transcript exit `0`, `mew-report.work_exit_code=0`, `source_authority=satisfied`, no stale `current_failure`, and no active stale strategy blockers. | reviewed_speed_1_pending |
 | 2026-05-02 | Repair saved source readback source authority after the clean closeout speed rerun. | `docs/M6_24_SAVED_SOURCE_READBACK_REPAIR_2026-05-02.md`: the post-`875fbd0` same-shape `compile-compcert` speed_1 externally passed with Harbor reward `1.0`, runner errors `0`, command transcript exit `0`, and `mew-report.work_exit_code=0`; internal closeout had `current_failure=null` and no active strategy blockers, but `source_authority=unknown`. The repair accepts saved authority-page/tag metadata plus top-level required archive hash and archive listing readback over the same archive path. Review hardening rejects marker-only output, guarded `if`/loop readbacks, fake xtrace, uncalled functions, masked `|| true`, mismatched archive paths, direct/pipeline/`exec`/compound redirection, `time` compound redirection, and backgrounded readbacks. Validation passed: focused source-authority subset `154 passed, 74 deselected`, combined long-build/work-session/acceptance `1223 passed` with one warning and `67 subtests`, scoped ruff passed, JSONL parse passed, and diff check passed. `codex-ultra` session `019de6a8-c827-75f3-974b-67a08d05b5b2` returned `STATUS: APPROVE`. | Commit the repair, then rerun one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement until a live run records Harbor reward `1.0`, runner errors `0`, command transcript exit `0`, `mew-report.work_exit_code=0`, `source_authority=satisfied`, no stale `current_failure`, and no active stale strategy blockers. | reviewed_speed_1_pending |
@@ -194,6 +197,13 @@ direction.
 | 2026-05-01 | timeout-ceiling compact recovery same-shape speed rerun passed. | `docs/M6_24_TIMEOUT_CEILING_COMPACT_RECOVERY_COMPILE_COMPCERT_SPEED_RERUN_2026-05-01.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-timeout-ceiling-compile-compcert-1attempt-20260501-0332/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `16m 55s`. `mew work` finished after 9 steps, built `/tmp/CompCert/ccomp`, installed default runtime support, ran default-path compile/link/run smoke, and the external verifier passed all three checks. | Escalate to resource-normalized five-trial proof for `compile-compcert` with sequential `-k 5 -n 1` and refreshable `~/.codex/auth.json`. Broad measurement remains paused. | proof_5_pending |
 | 2026-05-02 | Source-tail closeout speed rerun passed externally but exposed reducer closeout drift. | `docs/M6_24_SOURCE_TAIL_CLOSEOUT_REPAIR_2026-05-02.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-tail-closeout-compile-compcert-1attempt-20260502-1347/result.json`: one trial, runner errors `0`, reward `1.0`, runtime `23m44s`, command transcript exit `0`, and `mew-report.work_exit_code=0`. Internal long-build state still reported `source_authority=unknown`, `default_smoke=unknown`, stale `target_selection_overbroad`, and stale strategy blockers because the final command repaired runtime linking before a successful default smoke and listed concrete source archive members instead of a bare root. `codex-ultra` rejected command-text-only authority correlation and presence-only post-extract markers, so the repair now requires terminal success, ordered fetch/hash/validation output, or unique post-extract progress output with no source-acquisition failure before a later saved archive readback can satisfy `source_authority`. Final review approved in `docs/REVIEW_2026-05-02_M6_24_SOURCE_TAIL_CLOSEOUT_CODEX.md`. | Run one same-shape speed_1 rerun before proof_5 or broad measurement. | reviewed_speed_1_pending |
 | 2026-05-02 | Build-timeout recovery decision/context repair reviewed. | `docs/M6_24_BUILD_TIMEOUT_RECOVERY_DECISION_REPAIR_2026-05-02.md` and `docs/REVIEW_2026-05-02_M6_24_BUILD_TIMEOUT_RECOVERY_CODEX.md`: after the temp-fetch same-shape rerun reached an explicit `make ccomp` timeout, the repair now suppresses only the same-evidence unreached `make install` target blocker, preserves unrelated blockers and real overbroad builds, and hard-caps compact-recovery context. Replay-style prompt size dropped from about `124k` to about `46.5k`, with work-session context about `24.9k`. | Run one same-shape `compile-compcert` speed_1. Close only on reward `1.0`, runner errors `0`, `mew work` exit `0`, invokable `/tmp/CompCert/ccomp`, default smoke passed, `source_authority=satisfied`, and no stale `current_failure` or strategy blockers. | reviewed_speed_1_pending |
+| 2026-05-02 | Adopt long-command continuation design as durable repair for the wall-time/continuation budget class. | `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`, `docs/REVIEW_2026-05-02_CODEX_CLI_LONG_BUILD_CONTINUATION_PATTERNS.md`, `docs/REVIEW_2026-05-02_CLAUDE_CODE_LONG_BUILD_CONTINUATION_PATTERNS.md`, and `docs/REVIEW_2026-05-02_M6_24_COMPILE_COMPCERT_TIMEOUT_CLASSIFICATION_CODEX.md`: Codex CLI and Claude Code share the generic idea of command identity, durable bounded output, nonterminal progress, poll/finalize lifecycle, and terminal-only proof. The old 2026-05-01 Long-Build Substrate Phase 0/3/4 measurement gate is superseded as the current next action; that substrate remains foundational, but the active repair is the continuation contract. | Implement the continuation design Phase 1+ behind the documented feature gate, run transfer fixtures, then one same-shape speed_1 before proof_5. The one-run timeout-shape diagnostic may classify wall-time shape but gates benchmark closure/proof escalation, not implementation. | continuation_design_adopted_repair_pending |
+| 2026-05-02 | Implement and review the first long-command continuation substrate slice. | `docs/M6_24_LONG_COMMAND_CONTINUATION_PHASE_1_3_2026-05-02.md`, `src/mew/long_build_substrate.py`, `src/mew/toolbox.py`, `src/mew/work_session.py`, `tests/test_long_build_substrate.py`, and `tests/test_toolbox.py`: Phase 1 schema/output/idempotence helpers, strict terminal-only command-evidence acceptance, internal single-active managed command runner, reducer support for `long_command_runs`, and codex-ultra final review `STATUS: APPROVE` in session `019de84b-b6f5-7f83-bc9e-bace82c79d20`. Validation passed: focused `267 passed`; broader acceptance/work-session suite `1267 passed`, `67 subtests passed`; full suite `2447 passed`, `93 subtests passed`; one multiprocessing fork deprecation warning; full ruff passed; diff check passed. | Continue with production-visible work-loop dispatch behind the feature gate, compact recovery rendering, Harbor timeout-shape reporting, transfer fixtures, then one same-shape speed_1. | continuation_phase_1_3_reviewed_next_phase_pending |
+| 2026-05-02 | Implement long-command continuation Phase 4-5 budget/rendering and Harbor timeout-shape reporting. | `docs/M6_24_LONG_COMMAND_CONTINUATION_PHASE_4_5_2026-05-02.md`, `src/mew/commands.py`, `src/mew/work_loop.py`, `src/mew/work_session.py`, `.harbor/mew_terminal_bench_agent.py`, `tests/test_work_session.py`, and `tests/test_harbor_terminal_bench_agent.py`: long-command budget policy now records start/poll/resume intent, typed budget blocks use `long_command_budget_blocked`, compact recovery renders `continuation_action`, work-session resume surfaces latest long-command identity/status/output ref, and Harbor transcript/summary/report expose `timeout_shape`. Focused validation passed: Phase 4 work-session subset `7 passed`, Harbor wrapper tests `17 passed`, non-CompCert transfer subset `29 passed`, combined Phase 4/5 subset `28 passed`, scoped ruff passed, JSONL parse passed, and diff check passed. codex-ultra review session `019de86a-2a44-7c10-84e8-d384c1c3f61f` returned `STATUS: APPROVE` after two request-change rounds. | Run broader verification, then close Phase 6 transfer fixtures and one same-shape `compile-compcert` speed_1 before considering proof_5. | phase_4_5_reviewed_phase_6_pending |
+| 2026-05-02 | Close long-command continuation Phase 6 transfer gate. | `docs/M6_24_LONG_COMMAND_CONTINUATION_PHASE_6_TRANSFER_2026-05-02.md`: non-CompCert transfer subset passed with `29 passed`, broader work-session/long-build/acceptance/Harbor/toolbox suite passed with `1290 passed`, `67 subtests passed`, one multiprocessing fork deprecation warning, full ruff passed, JSONL parse passed, and diff check passed. Transfer coverage includes `WidgetCLI`, `BarVM`, invalid target surface, runtime repair, masked/spoofed artifact proof rejection, and terminal-only proof rejection for running/yielded/killed/timed-out evidence. | Run exactly one same-shape `compile-compcert` speed_1 under the normal selected timeout shape. Do not run `proof_5` until the speed rerun is recorded and the ledger selects escalation. | phase_6_closed_speed_1_pending |
+| 2026-05-02 | Same-shape speed rerun after continuation Phase 6 exposed a pre-continuation dependency-strategy regression. | `docs/M6_24_LONG_COMMAND_CONTINUATION_SPEED_RERUN_2026-05-02.md`, `docs/REVIEW_2026-05-02_M6_24_CONFIG_SOURCE_EXTERNAL_HOOK_CODEX.md`, and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-long-command-continuation-compile-compcert-1attempt-20260502-2040/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime about `30m28s`, `mew-report.work_exit_code=1`, and `work_report.stop_reason=wall_timeout`. `timeout_shape.latest_long_command_run_id=null` and `long_command_runs=[]`, so the continuation substrate was not exercised. The live path observed `LIBRARY_MENHIRLIB=local # external` in `configure`, then entered version-pinned OPAM `coq.8.16.1` source-toolchain work before trying the exposed external/system branch. The repair treats configure/source-script compatibility-hook variables such as `LIBRARY_* = local # external` as external/prebuilt/system branch evidence only from observed output, rejects query-only/xtrace false positives, recognizes assignment-style attempts such as `LIBRARY_*=external ./configure ...` as clear attempts, and preserves external-branch budget detection for timed-out branch attempts. Focused validation passed: `10 passed, 867 deselected`; broader long-build/work-session/acceptance subset passed: `309 passed, 956 deselected, 22 subtests`; ruff, diff check, and JSONL parse passed; local replay now selects `source_toolchain_before_external_branch_attempt` as the current failure. codex-ultra final review returned `STATUS: APPROVE`. | Rerun one same-shape `compile-compcert` speed_1. Do not run `proof_5` or broad measurement until the live rerun records a clean pass or a newer narrower gap. | reviewed_speed_1_pending |
+| 2026-05-02 | Config/source-script external-hook speed rerun moved the blocker to runtime-link low-wall compact recovery. | `docs/M6_24_RUNTIME_LINK_COMPACT_RECOVERY_RERUN_2026-05-02.md`, `docs/REVIEW_2026-05-02_M6_24_RUNTIME_LINK_COMPACT_RECOVERY_CODEX.md`, and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-config-external-hook-compile-compcert-1attempt-20260502-2136/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime about `30m27s`, `mew-report.work_exit_code=1`, and `work_report.stop_reason=wall_timeout`. The run moved past prior source/config/dependency blockers: it selected a valid source archive, attempted external Flocq/MenhirLib branches, applied `-ignore-coq-version`, ran `make depend`, and built enough for `/tmp/CompCert/ccomp` to exist at verifier time. External verifier failed only the default functional smoke with `/usr/bin/ld: cannot find -lcompcert`. `long_command_runs=[]`, so continuation was still not exercised. The live recovery state selected `runtime_link_failed`, but model turns 7-10 timed out with compact-recovery prompts around `55k-60k` chars under shrinking wall time. The repair focuses compact recovery resume around the long-build `recovery_decision`, omits broad source/dependency sections for runtime-link recovery, and changes the runtime-link prerequisite to artifact invocation by the failed default smoke rather than final artifact proof. Focused validation passed: `4 passed, 875 deselected`; broader long-build/work-session/acceptance subset passed: `302 passed, 965 deselected, 22 subtests`; scoped ruff, diff check, and JSONL parse passed; codex-ultra final review returned `STATUS: APPROVE`. | Rerun exactly one same-shape `compile-compcert` speed_1. Do not run `proof_5` or broad measurement before that rerun records a clean pass or a newer narrower gap. | reviewed_speed_1_pending |
+| 2026-05-02 | Runtime-link compact recovery speed rerun passed externally but exposed source-authority path-correlation closeout drift. | `docs/M6_24_RUNTIME_LINK_COMPACT_RECOVERY_SPEED_RERUN_2026-05-02.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-link-compact-recovery-compile-compcert-1attempt-20260502-2228/result.json`: one trial, runner errors `0`, Harbor mean reward `1.0`, runtime about `30m22s`, and all three external verifier checks passed. Internal closeout was not clean: `mew-report.work_exit_code=1`, `work_report.stop_reason=wall_timeout`, `source_authority=blocked`, `current_failure=source_authority_unverified`, and stale strategy blockers remained. The reviewed repair correlates an authoritative absolute archive acquisition with later relative archive identity readback only when both hash and archive-list readbacks execute from the authoritative archive parent directory, rejects basename spoofing via cwd changes, variable/wrapped/control-flow cd, `pushd`/`popd`, parent escape paths, and absolute mismatches, and recognizes validated `tar -x ... -C <absolute source dir> --strip-components=1` source-root placement. Validation passed: source-authority/readback subset `35 passed`, full long-build substrate `266 passed`, broader long-build/work-session/acceptance subset `283 passed`, scoped ruff passed, JSONL parse passed, and diff check passed. codex-ultra session `019de907-194c-7841-b84f-8f9f6e6f33d9` returned final `STATUS: APPROVE`. | Rerun exactly one same-shape `compile-compcert` speed_1. Do not run `proof_5` or broad measurement before that rerun records clean internal closeout or a newer narrower gap. | reviewed_speed_1_pending |
 
 ## Current Mode
 
@@ -203,26 +213,123 @@ The current selected gap remains
 `long_dependency_toolchain_build_strategy_contract` on `compile-compcert`.
 Broad measurement is paused.
 
-The runtime-subdir repair speed rerun was superseded by the accepted
-Long-Build Substrate flag-day redesign. Phase 0, Phase 1, Phase 2, Phase 3, and
-Phase 4 are implemented and reviewed. The first Phase 4 speed rerun externally
-passed, but exposed stale strategy blockers preventing clean internal closeout.
-The stale-blocker clearing, acceptance-closeout evidence, clean closeout state,
-saved authority-page, validated archive-loop, post-loop nonterminal source
-signal, saved source readback, source-tail closeout, external-branch attempt,
-and temp-fetch source-authority repairs moved the shape forward. The latest
-same-shape speed_1 after the temp-fetch source-authority repair satisfied source
-authority, configure, and dependency generation, then timed out during the
-explicit `make -j"$(nproc)" ccomp` build. The reducer incorrectly let unreached
-later `make install` text mask the real `build_timeout`, and compact recovery
-still rendered about `124k` prompt chars. The selected repair is
-`long_dependency_build_timeout_recovery_decision_context_contract`: latest
-same-evidence unreached `make install` blockers are suppressed after the latest
-`build_timeout`, unrelated blockers and real overbroad builds remain active, and
-compact recovery is hard-capped. codex-ultra approved this bounded repair in
-session `019de7d9-b0b1-7a03-9fa4-657915260995`.
-Broad measurement remains paused.
+The Long-Build Substrate flag-day redesign Phase 0 through Phase 4 is
+implemented and reviewed and remains the foundational substrate. The subsequent
+same-shape repair chain moved through stale blocker clearing, acceptance
+closeout, source authority, external branch attempt, temp fetch correlation,
+build-timeout recovery, long-command continuation Phase 1-6, and
+config/source-script external-hook evidence and runtime-link compact recovery.
+The latest live speed rerun moved the source-authority path-correlation blocker:
+`source_authority=satisfied`, `/tmp/CompCert/ccomp` existed, and the external
+verifier failed only default runtime linking with `cannot find -lcompcert`.
+The generic continuation path initially did not engage (`long_command_runs=[]`,
+`latest_long_command_run_id=null`), so the managed-dispatch repair was
+implemented and reviewed. The follow-up same-shape speed rerun proved managed
+dispatch now engages (`latest_long_command_run_id=work_session:1:long_command:1`,
+`latest_long_command_status=running`) but exposed a narrower one-shot handoff
+bug: `wait` was accepted as successful external verifier handoff while the
+managed command was nonterminal. The generic nonterminal-handoff repair is now
+implemented and reviewed. The next same-shape speed rerun no longer handed off
+on `wait`; it ran for `30m37s` and failed nonzero with `stop_reason=wall_timeout`.
+The new narrower gap is `compound_long_command_budget_not_attached`: a compound
+OPAM/configure/build/final-smoke continuation was capped and killed as a normal
+shell command because no managed `long_command_budget` was attached. The
+budget-stage repair was implemented and reviewed, and the same-shape rerun
+moved that gap: a managed long command is now created and terminally failed
+with source-acquisition `curl` exit `22`, `timed_out=false`. The new narrower
+gap is `non_timeout_source_acquisition_retry_blocked_as_same_timeout`: the
+terminal non-timeout source-acquisition failure reduced to timeout-style
+`resume_idempotent_long_command`, then blocked the corrected source-channel
+retry as `repeat_same_timeout_without_budget_change`. A generic detector/resume
+repair is implemented. Initial codex-ultra review found two integration gaps:
+`recover_long_command` was not routed through managed execution, and killed
+managed command status could collapse to `failed`. The follow-up integration
+fix is implemented and codex-ultra re-review approved it. The same-shape speed
+rerun passed externally (`1/1`, runner errors `0`) and `mew work` exited `0`,
+but internal long-build closeout remains stale: `resume.long_build_state`
+reports `status=blocked`, `source_authority=unknown`, `default_smoke=unknown`,
+and `dependency_generation_required` from earlier evidence. codex-ultra
+classified that moved gap as reducer/closeout `REPAIR_NOW`. The local generic
+repair is implemented and locally validated. codex-ultra requested changes for
+selected-URL spoofing, selected-alias mutation including `VAR+=...` and
+`readonly` plus non-assignment mutators such as `read` and `printf -v`, and
+literal-URL / other-variable / non-print marker spoofing, redirected marker
+output, multiple selected markers, dynamic marker output, stale direct fetch
+URL bindings after `read` / `builtin read` / `command printf -v`, and
+unmodeled shell-state mutators such as `eval` / `source` / `.`, and premature
+non-stdout `printf -v` marker commands, split selected stdout vs
+non-authoritative marker stdout, loop-body alias/loop-variable reassignment
+before fetch, stale while-read candidate-file variable bindings, plus
+candidate-file overwrite/first-candidate ordering, authoritative-first
+for-loop/selected-alias ordering, mixed direct-fetch URL rejection, and
+mixed for/while loop-fetch URL rejection, `curl --url` source operand
+accounting, `curl -K` / `--config` plus `wget --input-file` rejection, and
+dynamic/command-substitution extra source operand rejection, and
+scheme-less source operand rejection, and stale-blocker clearing; all
+follow-ups are implemented and locally validated.
+Re-review and same-shape rerun are still pending. Broad measurement remains
+paused.
+
+The re-review approved the source-authority spoof hardening, and the
+same-shape speed rerun `mew-m6-24-final-closeout-projection-compile-compcert-1attempt-20260503-0728`
+passed externally (`1/1`, runner errors `0`, verifier `3 passed`) but still
+did not close internally: `mew work` exited `1` with `wall_timeout`, while
+`resume.long_build_state` had `source_authority=unknown`, `target_built` and
+`default_smoke` satisfied, and stale blockers
+`toolchain_version_constraint_mismatch` plus `dependency_generation_order_issue`.
+The latest narrower reducer gap is compacted acquisition closeout: the original
+source acquisition evidence can be outside the current reducer window, but the
+final proof reads a saved `*source-url*` file, hashes/lists the versioned
+archive, and proves the final artifact/default smoke. The local generic repair
+is implemented and validated. codex-ultra requested one safety fix: do not
+accept saved source-url readback when the same reducer window contains a prior
+non-acquisition command that fabricated the same `*source-url*` file. That
+follow-up is implemented and validated. A second review broadened the guard:
+any current-window writer to the same source-url file is fabricated unless that
+writer itself satisfies source authority, covering failed writers and
+masked/invalid acquisition-looking commands, including fd-prefixed stdout
+redirections such as `1> /tmp/foo-source-url.txt` and clobber forms such as
+`>| /tmp/foo-source-url.txt` / `1>| /tmp/foo-source-url.txt`, plus combined
+stdout/stderr redirects such as `&>` and `&>>`, and simple shell-variable
+targets such as `p=/tmp/foo-source-url.txt; printf ... > "$p"`, including
+chained simple path assignments like `dir=/tmp; p="$dir/foo-source-url.txt"`.
+It also handles redirection operators adjacent to command words, such as
+`printf ...>/tmp/foo-source-url.txt` and `printf ...>"$p"`. Unresolved dynamic
+redirection or `tee` targets from non-authority commands now block saved
+source-url readback closeout for the current window. Process-substitution
+writers such as `> >(tee /tmp/foo-source-url.txt ...)` are tracked as
+fabricated writers too. Common file materialization commands (`cp`, `install`,
+`mv`) that create or replace a `*source-url*` path are also tracked, as are
+explicit output-path writers such as `dd of=...`. Unmodeled script writers that
+mention both `source_url` content and a concrete `*source-url*` path are treated
+as fabricated too; script write primitives with `source_url` payload and dynamic
+path construction are handled by the dynamic fabricated-writer sentinel. That
+follow-up is implemented and validated; codex-ultra re-review and one
+same-shape rerun are pending. Broad measurement remains paused.
 
 Current selected next action:
 
-`M6.24 -> long_dependency/toolchain gap -> build-timeout recovery decision/context repair reviewed -> compile-compcert speed_1 clean-closeout rerun`
+`M6.24 -> long_dependency/toolchain gap -> compatibility-override probe + terminal long-command budget repair -> broader regression -> codex re-review -> same-shape speed_1`
+
+Latest same-shape rerun:
+
+`mew-m6-24-compacted-source-url-closeout-compile-compcert-1attempt-20260503-0751`
+failed externally (`0/1`, runner errors `0`) because `/tmp/CompCert/ccomp`
+was never produced. This is not the previous compacted source-url closeout gap.
+The active gap is that mew treated a filtered `configure --help` probe as if it
+had checked compatibility override terms, then moved to a version-pinned OPAM
+source toolchain. Managed long-command state also preserved the start-of-poll
+remaining budget after terminal failure, making recovery look more viable than
+the actual outer wall clock. Local repair now requires override terms in the
+filter/output before considering compatibility override probed, records command
+`duration_seconds`, and uses terminal managed-command
+`wall_budget_after_seconds` for subsequent recovery budget.
+
+Generic managed-exec decision:
+
+Keep the current command classifier narrow as budget-routing policy. If repeated
+budget false negatives/positives, classifier accretion, lifecycle-ledger
+dominance, or recovery-state inversion appears, use
+`docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md` to open a deliberate
+all-command generic managed-exec design slice before more local classifier
+patches.

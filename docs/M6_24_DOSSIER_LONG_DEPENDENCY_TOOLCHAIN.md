@@ -15,24 +15,54 @@ Decision ledger: `docs/M6_24_DECISION_LEDGER.md`
 
 Gap ledger: `proof-artifacts/m6_24_gap_ledger.jsonl`
 
+Continuation design:
+`docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`
+
+Generic managed exec decision:
+`docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md`
+
+Reference audits:
+`docs/REVIEW_2026-05-02_CODEX_CLI_LONG_BUILD_CONTINUATION_PATTERNS.md`,
+`docs/REVIEW_2026-05-02_CLAUDE_CODE_LONG_BUILD_CONTINUATION_PATTERNS.md`
+
 ## Current Decision
 
 Current selected chain:
 
 ```text
-M6.24 -> long_dependency_toolchain_build_strategy_contract -> temp_fetch_source_authority -> compile-compcert
+M6.24 -> long_dependency_toolchain_build_strategy_contract -> final artifact/default-smoke closeout classification -> repair or written defer
 ```
 
-Broad measurement remains paused. The external-branch attempt repair was
-reviewed and committed, and the next same-shape `compile-compcert` speed rerun
-passed externally with runner errors `0`, `mew-report.work_exit_code=0`, and a
-successful default smoke. Internal closeout still left `source_authority`
-unknown because the authoritative source archive was fetched to a temp path,
-moved to the final saved archive path, and the fetch-time archive hash/readback
-output was clipped before later final saved archive readback. The current
-repair is `temp_fetch_source_authority`. It is implemented and reviewed. The
-next action is one same-shape `compile-compcert` speed_1 before another proof_5
-or broad measurement.
+Broad measurement remains paused. The build-timeout recovery and long-command
+continuation repairs are implemented and reviewed, and the config/source-script
+external-hook repair moved the same-shape `compile-compcert` run forward. The
+source-authority path-correlation speed rerun, the managed-dispatch speed
+rerun, and the nonterminal-handoff speed rerun each moved the blocker forward.
+The latest blocker is `compound_long_command_budget_not_attached`: the live
+command combined source/configure-looking setup with OPAM install, build, and
+final-smoke work, but did not get `long_command_budget`, so it was capped as a
+normal shell command. The current repair is generic budget-stage promotion for
+planned commands while preserving recorded attempt stage semantics and rejecting
+pure source fetch/readback commands. codex-ultra approved the repair after
+false-positive hardening. The same-shape speed rerun moved that gap: a managed
+long command was created, failed terminally during source acquisition with
+`curl` exit `22`, `timed_out=false`, and then recovery blocked the corrected
+source-channel retry as `repeat_same_timeout_without_budget_change`. The current
+repair separates non-timeout terminal failures from timeout-style resume
+recovery. codex-ultra initial review found two integration gaps: the new
+`recover_long_command` action was not routed through the managed runner, and
+killed managed command status could collapse to `failed`. The follow-up repair
+routes `recover_long_command` through managed execution and preserves killed /
+interrupted terminal status. codex-ultra re-review approved the repair. The
+same-shape speed rerun passed externally (`1/1`, runner errors `0`) and
+`mew work` exited cleanly, but internal `resume.long_build_state` still reports
+`status=blocked`, `source_authority=unknown`, `default_smoke=unknown`, and a
+stale `dependency_generation_required` blocker from earlier evidence. The next
+action is to classify that moved closeout gap before any `proof_5` escalation.
+
+Do not broaden this repair into a full shell classifier. Use
+`docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md` if future failures
+suggest replacing narrow budget routing with all-command generic managed exec.
 
 ## Repair Timeline
 
@@ -64,6 +94,14 @@ or broad measurement.
 | v1.8 source-tail clean closeout | Recognize terminal-success runtime repair plus saved archive-member readback after the verifier-passing run. | long-build reducer | Reviewed and committed; same-shape rerun exposed an earlier dependency-strategy miss. |
 | v1.9 external branch attempt before source toolchain | Detect starting version-pinned OPAM/source-toolchain work after external/prebuilt branch evidence plus dependency/API mismatch but without an actual external/prebuilt/system configure attempt. | profile/contract + detector/resume | Implemented and reviewed; speed_1 pending. |
 | v2.0 temp-fetch source authority | Recognize authoritative archive fetches to temp paths only when the actual fetch URL is authoritative, ordered `fetch -> mv final` occurs, and later saved archive readback proves the final path; reject header-only URL, pre-fetch move, and clipped failed-fetch stale-readback false positives. | long-build reducer | Implemented and reviewed; speed_1 pending. |
+| v2.1 build-timeout recovery context | Suppress only same-evidence unreached `make install` blocker after a latest build timeout and hard-cap compact recovery context. | reducer + model context budgeting | Speed rerun moved forward: command reached `make -j"$(nproc)" ccomp` and then wall-timed out while building. This selects the long-command continuation design, not another source/toolchain repair. |
+| v2.2 long-command continuation design | Adopt the shared Codex CLI / Claude Code continuation pattern: one active managed long command, durable output owner, running/yielded nonterminal evidence, owner-token poll/finalize lifecycle, and terminal-only acceptance. | tool/runtime design | Adopted durable repair. |
+| v2.3 long-command continuation phase 1-3 slice | Implement `LongCommandRun` schema/output/idempotence helpers, terminal-only evidence guard, internal single-active managed runner, and reducer support for live/timed-out long command runs. | tool/runtime substrate + reducer | Implemented and codex-ultra reviewed. Next: production-visible dispatch, continuation rendering, Harbor timeout-shape reporting, transfer fixtures, then same-shape speed_1. |
+| v2.4 long-command continuation phase 4-5 slice | Record start/poll/resume budget intent, typed long-command budget blocks, compact recovery continuation actions, latest long-command resume rendering, and Harbor timeout-shape reporting in transcript/summary/report. | work-loop budget + reporting | Implemented and codex-ultra approved after two request-change rounds. |
+| v2.5 long-command continuation phase 6 transfer | Verify non-CompCert long-build transfer fixtures plus terminal-only proof rejection before spending the next CompCert proof. | transfer evidence | Closed locally: transfer subset `29 passed`, broader suite `1290 passed`, ruff/diff/JSONL checks passed. Next: one same-shape `compile-compcert` speed_1. |
+| v2.6 config/source-script external hook evidence | Treat configure/source-script compatibility-hook variables such as `LIBRARY_* = local # external` as external/prebuilt/system branch evidence before version-pinned source-toolchain work. | profile/contract + detector/resume | Focused validation `10 passed`; broader subset `309 passed`; query-only/xtrace false positives are rejected; assignment-style external attempts clear the blocker. Local replay of the Phase 6 speed rerun now selects `source_toolchain_before_external_branch_attempt`. codex-ultra approved; same-shape speed_1 pending. |
+| v2.7 runtime-link compact recovery focus | When runtime-link/default-runtime recovery is already selected, focus compact recovery on the long-build recovery decision and omit broad source/dependency rediscovery sections. | model context budgeting + prompt section routing | Focused validation `4 passed`; broader subset `302 passed`; scoped ruff/diff/JSONL passed; codex-ultra approved. Same-shape speed_1 pending. |
+| v2.8 managed long-command dispatch | Wire budget-marked work commands into the managed command runner and persist `LongCommandRun` state so the continuation substrate is exercised in production work sessions. | tool/runtime dispatch + reducer state | Implemented and codex-ultra approved. Focused managed tests `4 passed`; broader long-build/work-session/Harbor/toolbox/acceptance suite `1311 passed` with one warning and `67 subtests`. Same-shape speed_1 pending. |
 
 ## Pattern Readout
 
@@ -165,6 +203,85 @@ or broad measurement.
   as stale for current-failure selection when the same command evidence timed
   out first, and keep low-wall compact recovery small enough to render the
   recovery decision instead of the full implementation prompt.
+- The 2026-05-02 build-timeout recovery rerun confirms that the prior masking
+  and oversized-recovery blocker moved: the command reached the final `ccomp`
+  build and was killed by wall time. Do not add another narrow
+  toolchain-strategy or closeout reducer rule from this evidence. The durable
+  product work is now generic long-build continuation/budget support before
+  proof_5.
+- The current blocker is above source/toolchain policy. Repair it as generic
+  command continuation and wall-budget handling, not as another prompt/profile
+  clause and not as a compile-compcert solver.
+- The config/source-script external-hook same-shape rerun moved the blocker
+  past source/config/dependency generation into default runtime linking.
+  `/tmp/CompCert/ccomp` existed at verifier time, but the functional smoke
+  failed with `cannot find -lcompcert`. The next repair is not another source
+  or dependency strategy clause. It is a low-wall compact-recovery routing
+  repair: when `runtime_link_failed` is already the selected long-build
+  recovery class, prompt context should focus on the runtime-link recovery
+  contract instead of reloading broad source/dependency sections and large
+  unrelated resume payloads.
+- The runtime-link compact-recovery speed rerun externally passed `1/1`, but
+  internal mew closeout remained blocked on `source_authority_unverified`.
+  The runtime repair direction was useful; the next blocker is reducer
+  correlation, not another runtime command recipe. The source archive was
+  acquired at an absolute path and later read back by basename after `cd` into
+  the archive parent directory. The reviewed repair accepts that shape only
+  when both hash and archive-list readbacks execute from the authoritative
+  archive parent directory, rejects basename spoofing through cwd mutation
+  (`pushd`, `popd`, wrapped/control-flow/variable `cd`, parent escape paths,
+  and absolute mismatches), and treats validated `tar -x ... -C <absolute
+  source dir> --strip-components=1` as source-root placement for
+  archive-acquisition completion.
+- The source-authority path-correlation speed rerun moved that blocker:
+  `source_authority=satisfied` and `/tmp/CompCert/ccomp` existed, but the
+  verifier failed default runtime linking. The current differentiator is that
+  the continuation substrate still was not production-visible:
+  `long_command_runs=[]`, `latest_long_command_run_id=null`, and a compound
+  `configure -> make depend -> make ccomp -> smoke` command was classified as
+  `dependency_generation` without managed-command budget dispatch. The next
+  repair was generic managed long-command dispatch and reserve preservation,
+  not proof_5, broad measurement, or a CompCert runtime recipe.
+- The managed-dispatch speed rerun moved the dispatch blocker:
+  `latest_long_command_run_id=work_session:1:long_command:1` and
+  `latest_long_command_status=running`. The remaining gap is now
+  `nonterminal_managed_command_handoff`: oneshot accepted model `wait` as a
+  successful external verifier handoff while terminal command evidence was
+  still absent. The current repair is generic one-shot handoff semantics:
+  convert `wait` to a managed poll when `poll_long_command` is the allowed next
+  action, and return a typed nonzero incomplete stop rather than verifier
+  handoff if the command remains nonterminal at max steps. Review this repair
+  before exactly one same-shape speed_1.
+- The nonterminal-handoff speed rerun moved that blocker: it no longer returned
+  `wait` as success and instead failed nonzero after `30m37s`. The next gap is
+  `compound_long_command_budget_not_attached`: a compound OPAM / configure /
+  build / final-smoke command was capped as a normal shell command with only the
+  generic 2s reserve and no `long_command_budget`. The current repair adds a
+  budget-specific planned-stage promotion so such compound long-build
+  continuations are eligible for the managed long-command runner without
+  changing recorded attempt stage semantics.
+- The non-timeout source retry speed rerun externally passed and `mew work`
+  finished, but internal closeout stayed stale:
+  `source_authority=unknown`, `default_smoke=unknown`, and a previous
+  `dependency_generation_required` blocker remained active. codex-ultra
+  classified this as reducer/closeout projection, not a solver gap. The local
+  generic repair accepts safe `|| exit 1` failure guards for default-smoke
+  commands, recognizes strict selected authoritative source archive acquisition
+  after failed candidate probes, and resolves simple shell assignments in
+  archive hash/list readbacks. codex-ultra requested hardening against
+  selected-URL spoofing, selected-alias mutation including `VAR+=...`,
+  `readonly`, `read`, and `printf -v`, literal-URL / other-variable /
+  non-print marker spoofing, redirected marker output, multiple selected
+  markers, dynamic marker output, stale direct fetch URL bindings after `read`
+  / `builtin read` / `command printf -v`, unmodeled shell-state mutators such
+  as `eval` / `source` / `.`, non-stdout `printf -v` marker commands, and
+  split selected stdout vs non-authoritative marker stdout, loop-body alias
+  / loop-variable reassignment before fetch, stale while-read candidate-file
+  variable bindings, candidate-file overwrite/first-candidate ordering, plus
+  authoritative-first for-loop/selected-alias ordering, mixed direct-fetch URL
+  rejection, and premature blocker clearing; all follow-ups are implemented and
+  locally validated. Next action is re-review, then exactly one same-shape
+  speed_1.
 
 ## Preflight Before Next Repair
 
@@ -195,6 +312,8 @@ is clearly new and low-risk.
 ## Non-Goals
 
 - No Terminal-Bench-specific solver.
+- No full Codex CLI or Claude Code clone.
+- No compile-compcert-specific solver.
 - No new authoritative lane for M6.24 coding tasks.
-- No broad prompt rewrite without the one-run trial boundary required by the
-  controller.
+- No broad prompt rewrite without typed continuation state and controller
+  approval.
