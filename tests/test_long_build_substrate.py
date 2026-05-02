@@ -3191,6 +3191,612 @@ def test_source_authority_accepts_saved_authority_page_with_archive_identity():
     assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
 
 
+def test_source_authority_accepts_saved_authority_page_archive_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3b:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "if [ -f /tmp/widgetcli-release.html ]; then\n"
+        "  grep -Ei 'Earlier releases|Git repository|Source distribution' /tmp/widgetcli-release.html | sed -n '1,20p'\n"
+        "fi\n"
+        "if [ -f /tmp/widgetcli-tag.json ]; then\n"
+        "  grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "fi\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  <a href="https://github.com/example/WidgetCLI/releases">Earlier releases</a>\n'
+        '  "ref": "refs/tags/v1.0.0",\n'
+        '    "sha": "abcdef0123456789abcdef0123456789abcdef01",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "WidgetCLI-1.0.0/README.md\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+
+
+def test_source_authority_accepts_saved_tag_json_archive_readback():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3json:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        '    "sha": "abcdef0123456789abcdef0123456789abcdef01",\n'
+        '    "url": "https://api.github.com/repos/example/WidgetCLI/git/commits/abcdef0123456789abcdef01"\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "WidgetCLI-1.0.0/README.md\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+
+
+def test_source_authority_rejects_guarded_archive_readback_even_when_xtrace_like_output_exists():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3xtrace:long_build:1",
+    )
+    command = (
+        "set -euxo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "if [ -f /tmp/widgetcli-1.0.0.tar.gz ]; then sha256sum /tmp/widgetcli-1.0.0.tar.gz; "
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz | sed -n '1,4p'; fi\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "+ sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "+ tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    stderr = (
+        "+ sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "+ tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout, stderr=stderr),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout, "stderr": stderr},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_saved_authority_page_readback_without_real_archive_commands():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3c:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "grep -Ei 'Earlier releases|Git repository|Source distribution' /tmp/widgetcli-release.html | sed -n '1,20p'\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  <a href="https://github.com/example/WidgetCLI/releases">Earlier releases</a>\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_unexecuted_guarded_archive_readback_with_printed_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3skip:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "if false; then sha256sum /tmp/widgetcli-1.0.0.tar.gz; tar -tzf /tmp/widgetcli-1.0.0.tar.gz; fi\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "+ sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "+ tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_unexecuted_loop_archive_readback_with_printed_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3loopskip:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "while false; do sha256sum /tmp/widgetcli-1.0.0.tar.gz; "
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz; done\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_uncalled_function_archive_readback_with_printed_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3funcskip:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "readback() { sha256sum /tmp/widgetcli-1.0.0.tar.gz; tar -tzf /tmp/widgetcli-1.0.0.tar.gz; }\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_redirected_archive_readback_with_printed_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3redirect:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz >/tmp/hash.out\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz >/tmp/list.out\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_pipeline_redirected_archive_readback_with_printed_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3piperedirect:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz | cat >/tmp/hash.out\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz | sed -n '1,4p' >/tmp/list.out\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_exec_redirected_archive_readback_with_printed_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3execredirect:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "exec 3>&1\n"
+        "exec >/tmp/readback.out\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+        "exec >&3\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    "redirect_sequence",
+    [
+        "exec >&3 >/tmp/readback.out\n",
+        "exec 1<>/tmp/readback.out\n",
+    ],
+)
+def test_source_authority_rejects_exec_redirect_variants_before_archive_readback(redirect_sequence):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3execvariant:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "exec 3>&1\n"
+        f"{redirect_sequence}"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+        "exec >&3\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    "open_token,close_token,redirection",
+    [
+        ("{", "}", ">"),
+        ("(", ")", ">"),
+        ("{", "}", "&>"),
+        ("{", "}", "&>>"),
+        ("time (", ")", ">"),
+        ("time -p (", ")", ">"),
+        ("time -p {", "}", ">"),
+    ],
+)
+def test_source_authority_rejects_compound_redirected_archive_readback_with_printed_output(
+    open_token, close_token, redirection
+):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3compoundredirect:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        f"{open_token}\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz\n"
+        f"{close_token} {redirection}/tmp/readback.out\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_backgrounded_archive_readback_with_printed_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3background:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -E '\"ref\"|\"sha\"|\"url\"' /tmp/widgetcli-tag.json | sed -n '1,20p'\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz &\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz &\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  "ref": "refs/tags/v1.0.0",\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_saved_authority_page_readback_with_masked_archive_commands():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3masked:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -Ei 'Earlier releases|Git repository|Source distribution' /tmp/widgetcli-release.html | sed -n '1,20p'\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz || true\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tar.gz | sed -n '1,4p' || true\n"
+        "printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\\n'\n"
+        "printf 'WidgetCLI-1.0.0/\\n'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  <a href="https://github.com/example/WidgetCLI/releases">Earlier releases</a>\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_saved_authority_page_readback_with_mismatched_archive_paths():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k3d:long_build:1",
+    )
+    command = (
+        "set -euo pipefail\n"
+        "grep -Ei 'Earlier releases|Git repository|Source distribution' /tmp/widgetcli-release.html | sed -n '1,20p'\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tar.gz\n"
+        "tar -tzf /tmp/other-widgetcli-1.0.0.tar.gz | sed -n '1,4p'\n"
+        "test -x /tmp/WidgetCLI/widget && /tmp/WidgetCLI/widget --help\n"
+    )
+    stdout = (
+        '  <a href="https://github.com/example/WidgetCLI/releases">Earlier releases</a>\n'
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tar.gz\n"
+        "WidgetCLI-1.0.0/\n"
+        "Widget usage\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(1, command, stdout=stdout),
+                "parameters": {"command": command, "cwd": "/tmp/WidgetCLI"},
+                "result": {"command": command, "cwd": "/tmp/WidgetCLI", "exit_code": 0, "stdout": stdout},
+            }
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
 def test_source_authority_rejects_saved_authority_page_without_archive_identity():
     contract = build_long_build_contract(
         "Under /tmp/WidgetCLI, build the Widget CLI from source. "

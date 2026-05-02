@@ -862,9 +862,8 @@ def _source_authority_excerpt(evidence: CommandEvidence) -> str:
 
 def _saved_authority_page_archive_signal(evidence: CommandEvidence, output_text: str) -> bool:
     if not (
-        _AUTHORITY_PAGE_OUTPUT_RE.search(output_text)
-        and _ARCHIVE_HASH_OUTPUT_RE.search(output_text)
-        and _ARCHIVE_ROOT_OUTPUT_RE.search(output_text)
+        _marked_authority_page_archive_identity(output_text)
+        or _saved_authority_archive_readback_identity(evidence, output_text)
     ):
         return False
     command = str(evidence.command or "")
@@ -877,6 +876,227 @@ def _saved_authority_page_archive_signal(evidence: CommandEvidence, output_text:
     if _command_has_authority_page_readback(command):
         return True
     return bool(_command_has_strict_non_python_remote_source_acquisition(command))
+
+
+def _marked_authority_page_archive_identity(output_text: str) -> bool:
+    return bool(
+        _AUTHORITY_PAGE_OUTPUT_RE.search(output_text)
+        and _ARCHIVE_HASH_OUTPUT_RE.search(output_text)
+        and _ARCHIVE_ROOT_OUTPUT_RE.search(output_text)
+    )
+
+
+def _saved_authority_archive_readback_identity(evidence: CommandEvidence, output_text: object) -> bool:
+    command = evidence.command
+    if not _command_has_authority_page_readback(command):
+        return False
+    if _command_defines_shell_function(command):
+        return False
+    if not _command_readbacks_source_archive_identity(command):
+        return False
+    text = str(output_text or "")
+    return bool(
+        _saved_authority_readback_output_signal(text)
+        and _source_acquisition_completed_output_signal(text)
+        and _archive_root_listing_output_signal(text)
+    )
+
+
+def _saved_authority_readback_output_signal(output_text: object) -> bool:
+    value = str(output_text or "")
+    return bool(
+        _SOURCE_AUTHORITY_RE.search(value)
+        or _DIRECT_SOURCE_AUTHORITY_OUTPUT_RE.search(value)
+        or re.search(r"^\s*\"ref\":\s*\"refs/tags/[^\"/]+\"", value, re.I | re.M)
+        or re.search(r"^\s*\"url\":\s*\"https?://[^\"]+/(?:releases|archive|git/refs/tags|git/commits)/", value, re.I | re.M)
+    )
+
+
+def _archive_root_listing_output_signal(output_text: object) -> bool:
+    value = str(output_text or "")
+    return bool(
+        _ARCHIVE_ROOT_OUTPUT_RE.search(value)
+        or re.search(r"^[A-Za-z0-9_.+-]+(?:-[A-Za-z0-9_.+-]+)?/\s*$", value, re.I | re.M)
+    )
+
+
+def _command_readbacks_source_archive_identity(command: object) -> bool:
+    return bool(
+        _command_hashes_source_archive_paths(command)
+        & _command_lists_source_archive_paths(command)
+    )
+
+
+def _command_hashes_source_archive_paths(command: object) -> set[str]:
+    paths: set[str] = set()
+    for span in split_unquoted_shell_command_segment_spans(_strip_heredoc_bodies(command)):
+        values = [str(part or "").strip("'\"") for part in _segment_invoked_command_parts(span.get("text"))]
+        token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+        source_paths = _source_archive_paths(values[1:])
+        if token in {"sha256sum", "shasum", "sha512sum"} and _source_archive_readback_segment_control_safe(
+            span, command, source_paths
+        ):
+            paths.update(source_paths)
+    return paths
+
+
+def _command_lists_source_archive_paths(command: object) -> set[str]:
+    paths: set[str] = set()
+    for span in split_unquoted_shell_command_segment_spans(_strip_heredoc_bodies(command)):
+        values = [str(part or "").strip("'\"") for part in _segment_invoked_command_parts(span.get("text"))]
+        token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+        source_paths = _source_archive_paths(values[1:])
+        if token == "tar" and _tar_parts_use_mode(values, "t") and _source_archive_readback_segment_control_safe(
+            span, command, source_paths
+        ):
+            paths.update(source_paths)
+        if (
+            token == "unzip"
+            and _unzip_parts_use_test_mode(values)
+            and _source_archive_readback_segment_control_safe(span, command, source_paths)
+        ):
+            paths.update(source_paths)
+    return paths
+
+
+def _source_archive_readback_segment_control_safe(
+    span: Mapping[str, object], command: object, source_paths: set[str]
+) -> bool:
+    text = str(span.get("text") or "").strip()
+    if not text or not source_paths:
+        return False
+    if ">" in text:
+        return False
+    if _shell_text_has_unquoted_background_operator(text):
+        return False
+    before = str(span.get("before_operator") or "")
+    after = str(span.get("after_operator") or "")
+    if before in {"&&", "||"} or after in {"&&", "||"}:
+        return False
+    if before == "|":
+        return False
+    if after == "|":
+        return False
+    if _span_has_stdout_redirected_by_prior_exec(span, command):
+        return False
+    if _span_is_inside_stdout_redirected_compound_command(span, command):
+        return False
+    if _span_is_inside_if_body(span, command) or _span_is_inside_shell_loop_body(span, command):
+        return False
+    return not re.match(r"^(?:if|while|until)\b|^!", text, re.I)
+
+
+def _span_has_stdout_redirected_by_prior_exec(span: Mapping[str, object], command: object) -> bool:
+    start = _coerce_int(span.get("start"), default=0) or 0
+    stdout_redirected = False
+    for prior_span in split_unquoted_shell_command_segment_spans(_strip_heredoc_bodies(command)):
+        end = _coerce_int(prior_span.get("end"), default=0) or 0
+        if end > start:
+            break
+        parts = _segment_invoked_command_parts(prior_span.get("text"))
+        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+        if token != "exec":
+            continue
+        if _exec_segment_restores_stdout(parts):
+            stdout_redirected = False
+        if _exec_segment_redirects_stdout(parts):
+            stdout_redirected = True
+    return stdout_redirected
+
+
+def _exec_segment_redirects_stdout(parts: Iterable[object]) -> bool:
+    values = [str(part or "") for part in parts][1:]
+    return any(
+        value in {">", ">>", "1>", "1>>", "&>"}
+        or re.match(r"^(?:1)?>{1,2}(?!&)", value)
+        or re.match(r"^1<>", value)
+        or re.match(r"^&>", value)
+        for value in values
+    )
+
+
+def _exec_segment_restores_stdout(parts: Iterable[object]) -> bool:
+    values = [str(part or "") for part in parts][1:]
+    return any(re.match(r"^(?:1)?>&[0-9-]+$", value) for value in values)
+
+
+def _span_is_inside_stdout_redirected_compound_command(span: Mapping[str, object], command: object) -> bool:
+    command_text = _strip_heredoc_bodies(command)
+    start = _coerce_int(span.get("start"), default=0) or 0
+    end = _coerce_int(span.get("end"), default=start) or start
+    return any(
+        _span_is_inside_stdout_redirected_compound(command_text, start, end, opener, closer)
+        for opener, closer in (("{", "}"), ("(", ")"))
+    )
+
+
+def _span_is_inside_stdout_redirected_compound(text: str, start: int, end: int, opener: str, closer: str) -> bool:
+    opener_start = _last_shell_compound_opener(text[:start], opener)
+    if opener_start < 0:
+        return False
+    if text[opener_start:start].rfind(closer) >= text[opener_start:start].rfind(opener):
+        return False
+    suffix = text[end:]
+    close_match = re.search(rf"{re.escape(closer)}(?P<tail>[^\n;|]*)", suffix)
+    if not close_match:
+        return False
+    return _shell_tail_redirects_stdout(close_match.group("tail"))
+
+
+def _last_shell_compound_opener(text: str, opener: str) -> int:
+    last = -1
+    escaped = re.escape(opener)
+    prefix = r"(?:time\s+(?:(?:-[A-Za-z]+|--[A-Za-z0-9_-]+)\s+)*)?"
+    for match in re.finditer(rf"(?:^|[;&|\n])\s*{prefix}{escaped}(?:\s|$)", text):
+        last = match.start()
+    return last
+
+
+def _shell_tail_redirects_stdout(tail: object) -> bool:
+    value = str(tail or "")
+    return bool(re.search(r"(?:^|\s)(?:1?>{1,2}(?!&)|&>|1<>)(?:\s|\S)", value))
+
+
+def _span_is_inside_if_body(span: Mapping[str, object], command: object) -> bool:
+    return bool(_if_body_prefix_for_span(span, command))
+
+
+def _span_is_inside_shell_loop_body(span: Mapping[str, object], command: object) -> bool:
+    command_text = _strip_heredoc_bodies(command)
+    start = _coerce_int(span.get("start"), default=0) or 0
+    prefix = command_text[:start]
+    last_loop = _last_shell_control_start(prefix, ("for", "while", "until"))
+    last_done = _last_shell_control_start(prefix, ("done",))
+    return last_loop > last_done and re.search(r"\bdo\b", prefix[last_loop:], re.I) is not None
+
+
+def _if_body_prefix_for_span(span: Mapping[str, object], command: object) -> str:
+    command_text = _strip_heredoc_bodies(command)
+    start = _coerce_int(span.get("start"), default=0) or 0
+    prefix = command_text[:start]
+    last_if = _last_shell_control_start(prefix, ("if",))
+    last_fi = _last_shell_control_start(prefix, ("fi",))
+    if last_if <= last_fi:
+        return ""
+    candidate = prefix[last_if:]
+    return candidate if re.search(r"\bthen\b", candidate, re.I) else ""
+
+
+def _last_shell_control_start(text: object, words: Iterable[str]) -> int:
+    last = -1
+    pattern = "|".join(re.escape(word) for word in words)
+    for match in re.finditer(rf"(?:^|[;&|\n])\s*(?:{pattern})\b", str(text or ""), re.I):
+        last = match.start()
+    return last
+
+
+def _source_archive_paths(values: Iterable[object]) -> set[str]:
+    return {str(value or "").strip("'\"),;") for value in values if _source_archive_pathish(value)}
+
+
+def _source_archive_pathish(value: object) -> bool:
+    text = str(value or "").strip("'\"),;")
+    return bool(re.search(r"\.(?:tar\.gz|tgz|zip|tar|tar\.xz|tar\.bz2)(?:$|[?#])", text, re.I))
 
 
 def _validated_source_archive_acquisition_signal(evidence: CommandEvidence) -> bool:
@@ -1691,6 +1911,8 @@ def _command_has_authority_page_readback(command: object) -> bool:
     return bool(
         re.search(r"\bgrep\b[^\n;]*(?:release|download|version|v?[0-9]+(?:\.[0-9]+)+)[^\n;]*\.(?:html|txt|md)\b", command_text, re.I)
         or re.search(r"\bgrep\b[^\n;]*\.(?:html|txt|md)\b[^\n;]*(?:release|download|version|v?[0-9]+(?:\.[0-9]+)+)", command_text, re.I)
+        or re.search(r"\bgrep\b[^\n;]*(?:\"ref\"|\"sha\"|\"url\"|refs/tags)[^\n;]*\.json\b", command_text, re.I)
+        or re.search(r"\bgrep\b[^\n;]*\.json\b[^\n;]*(?:\"ref\"|\"sha\"|\"url\"|refs/tags)", command_text, re.I)
     )
 
 
