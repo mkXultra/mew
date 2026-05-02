@@ -881,26 +881,353 @@ def _saved_authority_page_archive_signal(evidence: CommandEvidence, output_text:
 
 def _validated_source_archive_acquisition_signal(evidence: CommandEvidence) -> bool:
     command = str(evidence.command or "")
-    if not _command_has_validated_source_archive_acquisition(command):
+    archive_paths = _validated_source_archive_acquisition_paths(command)
+    if not archive_paths:
         return False
     text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
-    return not _BUILD_FAILURE_RE.search(text)
+    if _source_acquisition_failed_output_signal(text):
+        return False
+    if not evidence.terminal_success:
+        if not any(_source_acquisition_generated_hash_output_signal(command, text, archive_path) for archive_path in archive_paths):
+            return False
+    return not _BUILD_FAILURE_RE.search(text) or _source_acquisition_completed_output_signal(text)
+
+
+def _source_acquisition_completed_output_signal(text: object) -> bool:
+    value = str(text or "")
+    return bool(
+        _ARCHIVE_HASH_OUTPUT_RE.search(value)
+        or re.search(r"^archive_sha256=\S+", value, re.I | re.M)
+        or re.search(r"^[0-9a-f]{32,128}\s+\S+\.(?:tar\.gz|tgz|zip|tar|tar\.xz|tar\.bz2)\b", value, re.I | re.M)
+    )
+
+
+def _source_acquisition_failed_output_signal(text: object) -> bool:
+    return bool(
+        re.search(r"\b(?:curl|wget):\s*(?:\(\d+\)|error|failed)", str(text or ""), re.I)
+        or re.search(r"\btar:\s+.*(?:error|failed|cannot|not found|no such file)", str(text or ""), re.I)
+        or re.search(r"\bunzip:\s+.*(?:error|failed|cannot|not found|no such file)", str(text or ""), re.I)
+    )
+
+
+def _source_acquisition_generated_hash_output_signal(command: object, output_text: object, archive_path: object) -> bool:
+    command_text = str(command or "")
+    if not _command_hashes_archive_path(command_text, str(archive_path or "")):
+        return False
+    for line in str(output_text or "").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped in command_text:
+            continue
+        if not _command_has_ordered_source_archive_completion(command_text, archive_path, stripped):
+            continue
+        if _pre_fetch_output_may_emit_source_hash(command_text, archive_path, stripped):
+            continue
+        if _ARCHIVE_HASH_OUTPUT_RE.match(stripped):
+            return True
+        match = re.match(r"^[0-9a-f]{32,128}\s+(\S+)", stripped, re.I)
+        if match and _same_archive_output_path(match.group(1), archive_path):
+            return True
+    return False
+
+
+def _same_archive_output_path(observed: object, expected: object) -> bool:
+    observed_text = str(observed or "").strip("'\"")
+    expected_text = str(expected or "").strip("'\"")
+    if not observed_text or not expected_text:
+        return False
+    return observed_text == expected_text or Path(observed_text).name == Path(expected_text).name
+
+
+def _command_has_ordered_source_archive_completion(command: object, archive_path: object, output_line: object) -> bool:
+    fetched = False
+    hashed = False
+    validated = False
+    extracted = False
+    archive_text = str(archive_path or "").strip("'\"")
+    for segment in _ordered_shell_command_segments(_strip_heredoc_bodies(command)):
+        parts = _segment_invoked_command_parts(segment)
+        if not parts:
+            continue
+        if not fetched:
+            if _parts_fetch_archive_path(parts, archive_text):
+                fetched = True
+                continue
+            if not _parts_are_source_archive_setup_safe(parts, archive_text, output_line):
+                return False
+            continue
+        if not hashed:
+            if _parts_hash_archive_path(parts, archive_text):
+                hashed = True
+                continue
+            if not _parts_are_source_archive_setup_safe(parts, archive_text, output_line):
+                return False
+            continue
+        if not validated:
+            if _parts_validate_archive_path(parts, archive_text) or _command_substitution_validates_archive_path(
+                segment, archive_text
+            ):
+                validated = True
+                continue
+            if not _parts_are_post_hash_source_archive_setup_safe(parts, archive_text, output_line):
+                return False
+            continue
+        if not extracted:
+            if _parts_extract_archive_path(parts, archive_text):
+                extracted = True
+                continue
+            if not _parts_are_post_hash_source_archive_setup_safe(parts, archive_text, output_line):
+                return False
+            continue
+        if _parts_move_extracted_source_root(parts):
+            return True
+        if not _parts_are_post_hash_source_archive_setup_safe(parts, archive_text, output_line):
+            return False
+    return False
+
+
+def _line_is_source_archive_setup_safe(line: object, archive_path: object, output_line: object) -> bool:
+    for parts in _line_invoked_command_parts(line):
+        if not _parts_are_source_archive_setup_safe(parts, archive_path, output_line):
+            return False
+    return True
+
+
+def _parts_are_source_archive_setup_safe(parts: Iterable[object], archive_path: object, output_line: object) -> bool:
+    if _parts_may_print_source_hash_line(parts, archive_path, output_line):
+        return False
+    return _parts_are_stdout_safe_before_archive_fetch(parts) or _parts_print_non_hash_source_status(parts)
+
+
+def _parts_are_post_hash_source_archive_setup_safe(
+    parts: Iterable[object], archive_path: object, output_line: object
+) -> bool:
+    if _parts_may_print_source_hash_line(parts, archive_path, output_line):
+        return False
+    values = [str(part or "").strip("'\"") for part in parts]
+    if not values:
+        return True
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if len(values) == 1 and token in {":", "do", "done", "else", "esac", "fi", "then", "true"}:
+        return True
+    return _parts_are_plain_assignments(values)
+
+
+def _parts_are_plain_assignments(parts: Iterable[object]) -> bool:
+    for part in parts:
+        value = str(part or "")
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", value):
+            return False
+        if any(marker in value for marker in {"$", "`", "<("}):
+            return False
+    return True
+
+
+def _parts_print_non_hash_source_status(parts: Iterable[object]) -> bool:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if not values:
+        return True
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    return token in {"echo", "printf"} and "source_url" in " ".join(values[1:]).casefold()
+
+
+def _pre_fetch_stdout_risk_before_archive_fetch(command: object, archive_path: object) -> bool:
+    for line in str(command or "").splitlines():
+        if _line_fetches_archive_path(line, archive_path):
+            break
+        if re.search(r"<<-?\s*['\"]?[A-Za-z_][A-Za-z0-9_]*['\"]?", line):
+            return True
+    for parts in _invoked_command_parts(command):
+        if _parts_fetch_archive_path(parts, archive_path):
+            return False
+        if not _parts_are_stdout_safe_before_archive_fetch(parts):
+            return True
+    return False
+
+
+def _parts_are_stdout_safe_before_archive_fetch(parts: Iterable[object]) -> bool:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if not values:
+        return True
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token in {
+        ":",
+        "[",
+        "break",
+        "case",
+        "cd",
+        "continue",
+        "do",
+        "done",
+        "esac",
+        "export",
+        "fi",
+        "for",
+        "if",
+        "mkdir",
+        "rm",
+        "set",
+        "test",
+        "then",
+        "true",
+        "umask",
+        "unset",
+        "until",
+        "while",
+    }:
+        return True
+    return all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", value) for value in values)
+
+
+def _pre_fetch_output_may_emit_source_hash(command: object, archive_path: object, output_line: object) -> bool:
+    if _pre_fetch_heredoc_may_emit_source_hash(command, archive_path, output_line):
+        return True
+    for parts in _invoked_command_parts(command):
+        if _parts_fetch_archive_path(parts, archive_path):
+            return False
+        if _parts_may_print_source_hash_line(parts, archive_path, output_line):
+            return True
+    return False
+
+
+def _pre_fetch_heredoc_may_emit_source_hash(command: object, archive_path: object, output_line: object) -> bool:
+    lines = str(command or "").splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _line_fetches_archive_path(line, archive_path):
+            break
+        match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
+        if not match:
+            index += 1
+            continue
+        delimiter = match.group(1)
+        body: list[str] = []
+        index += 1
+        while index < len(lines) and lines[index].strip() != delimiter:
+            body.append(lines[index])
+            index += 1
+        if _text_may_emit_source_hash_line("\n".join(body), archive_path, output_line):
+            return True
+        index += 1
+    return False
+
+
+def _parts_may_print_source_hash_line(parts: Iterable[object], archive_path: object, output_line: object) -> bool:
+    values = [str(part or "").strip("'\"") for part in parts]
+    if not values:
+        return False
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token not in {"awk", "cat", "echo", "perl", "printf", "ruby", "sed"} and not token.startswith("python"):
+        return False
+    line = str(output_line or "").strip()
+    joined = " ".join(values[1:])
+    return _text_may_emit_source_hash_line(joined, archive_path, line)
+
+
+def _text_may_emit_source_hash_line(text: object, archive_path: object, output_line: object) -> bool:
+    body = str(text or "")
+    line = str(output_line or "").strip()
+    dynamic_or_literal_hash = bool(
+        re.search(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?", body) or re.search(r"[0-9a-f]{32,128}", body, re.I)
+    )
+    if re.match(r"^archive_sha256=\S+", line, re.I):
+        return "archive_sha256" in body.casefold() and dynamic_or_literal_hash
+    match = re.match(r"^[0-9a-f]{32,128}\s+(\S+)", line, re.I)
+    if not match:
+        return False
+    archive_text = str(archive_path or "").strip("'\"")
+    output_path = str(match.group(1) or "").strip("'\"")
+    path_referenced = any(
+        candidate and candidate in body
+        for candidate in {
+            archive_text,
+            output_path,
+            Path(archive_text).name if archive_text else "",
+            Path(output_path).name if output_path else "",
+        }
+    )
+    return path_referenced and dynamic_or_literal_hash
+
+
+def _line_fetches_archive_path(line: object, archive_path: object) -> bool:
+    for parts in _line_invoked_command_parts(line):
+        if _parts_fetch_archive_path(parts, archive_path):
+            return True
+    return False
+
+
+def _line_hashes_archive_path(line: object, archive_path: object) -> bool:
+    return _command_hashes_archive_path(line, str(archive_path or ""))
+
+
+def _line_validates_archive_path(line: object, archive_path: object) -> bool:
+    archive_text = str(archive_path or "").strip("'\"")
+    if not archive_text:
+        return False
+    for parts in _line_invoked_command_parts(line):
+        if _parts_validate_archive_path(parts, archive_text):
+            return True
+    return _command_substitution_validates_archive_path(line, archive_text)
+
+
+def _line_extracts_archive_path(line: object, archive_path: object) -> bool:
+    archive_text = str(archive_path or "").strip("'\"")
+    if not archive_text:
+        return False
+    for parts in _line_invoked_command_parts(line):
+        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
+        if token == "tar" and _tar_parts_use_mode(parts, "x") and _parts_reference_path(parts, archive_text):
+            return True
+        if token == "unzip" and not _unzip_parts_use_test_mode(parts) and _parts_reference_path(parts, archive_text):
+            return True
+    return False
+
+
+def _line_moves_extracted_source_root(line: object) -> bool:
+    return _command_moves_extracted_source_root(line)
+
+
+def _line_invoked_command_parts(line: object) -> list[list[str]]:
+    parts_list: list[list[str]] = []
+    for segment in split_unquoted_shell_command_segments(line):
+        try:
+            parts = shlex.split(str(segment or ""))
+        except ValueError:
+            parts = str(segment or "").split()
+        parts = _drop_shell_control_prefix(parts)
+        if parts:
+            parts_list.append(parts)
+    return parts_list
+
+
+def _parts_fetch_archive_path(parts: Iterable[object], archive_path: object) -> bool:
+    values = _drop_shell_control_prefix([str(part or "") for part in parts])
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token not in {"curl", "wget"} or _curl_wget_uses_no_download_mode(values):
+        return False
+    output_path = _curl_wget_output_path(values)
+    return bool(output_path and _same_archive_output_path(output_path, archive_path))
 
 
 def _command_has_validated_source_archive_acquisition(command: object) -> bool:
+    return bool(_validated_source_archive_acquisition_paths(command))
+
+
+def _validated_source_archive_acquisition_paths(command: object) -> set[str]:
     command_text = str(command or "")
     if not (_command_enables_errexit(command_text) and not _command_disables_errexit(command_text)):
-        return False
+        return set()
     if _command_masks_remote_source_fetch_failure(command_text):
-        return False
+        return set()
     if _command_uses_python_remote_source_acquisition_tool(command_text):
-        return False
+        return set()
     if _command_defines_shell_function(command_text):
-        return False
+        return set()
+    validated_paths: set[str] = set()
     for archive_path in _strict_authoritative_archive_fetch_paths(command_text):
         if _command_validates_and_extracts_archive_path(command_text, archive_path):
-            return True
-    return False
+            validated_paths.add(archive_path)
+    return validated_paths
 
 
 def _command_defines_shell_function(command: object) -> bool:
@@ -939,6 +1266,10 @@ def _url_loop_authoritative_archive_fetch_paths(command: object) -> set[str]:
                 continue
             archive_path = _curl_wget_output_path(parts)
             if archive_path and _loop_body_proves_selected_archive(body_parts, index, archive_path, variable):
+                paths.add(archive_path)
+            elif archive_path and _loop_body_records_selected_archive_fetch(
+                command_text, body_parts, index, archive_path, variable
+            ):
                 paths.add(archive_path)
     return paths
 
@@ -1070,6 +1401,45 @@ def _loop_body_proves_selected_archive(parts_list: list[list[str]], fetch_index:
     return any(_parts_assign_selected_url(parts, variable) for parts in parts_list[validation_index + 1 :])
 
 
+def _loop_body_records_selected_archive_fetch(
+    command_text: str,
+    parts_list: list[list[str]],
+    fetch_index: int,
+    archive_path: str,
+    variable: str,
+) -> bool:
+    if not (
+        any(_parts_remove_path(parts, archive_path) for parts in parts_list[: fetch_index + 1])
+        or _command_prepares_archive_output_path(command_text, archive_path)
+    ):
+        return False
+    return any(_parts_assign_selected_url(parts, variable) for parts in parts_list[fetch_index + 1 :])
+
+
+def _command_prepares_archive_output_path(command: object, archive_path: object) -> bool:
+    path = str(archive_path or "").strip("'\"")
+    if not path:
+        return False
+    cleaned_dirs: set[str] = set()
+    for parts in _invoked_command_parts(command):
+        values = [str(part or "").strip("'\"") for part in parts]
+        if not values:
+            continue
+        token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+        if token == "rm" and any(option in values[1:] for option in {"-r", "-rf", "-fr", "-R", "-Rf", "-fR"}):
+            cleaned_dirs.update(value for value in values[1:] if value.startswith("/tmp/"))
+        if token == "rm" and _parts_reference_path(values, path):
+            return True
+    if path.startswith("/"):
+        return False
+    for parts in _invoked_command_parts(command):
+        values = [str(part or "").strip("'\"") for part in parts]
+        token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+        if token == "cd" and len(values) > 1 and values[1] in cleaned_dirs:
+            return True
+    return False
+
+
 def _parts_reference_loop_variable(parts: Iterable[object], variable: str) -> bool:
     refs = {f"${variable}", f"${{{variable}}}"}
     return any(str(part or "").strip("'\"") in refs for part in parts)
@@ -1079,7 +1449,9 @@ def _parts_assign_selected_url(parts: Iterable[object], variable: str) -> bool:
     values = [str(part or "").strip("'\"") for part in parts]
     if len(values) != 1:
         return False
-    return bool(re.fullmatch(rf"(?:found|selected|chosen)=\$\{{?{re.escape(variable)}\}}?", values[0], re.I))
+    return bool(
+        re.fullmatch(rf"(?:found|selected|chosen|source_url)=\$\{{?{re.escape(variable)}\}}?", values[0], re.I)
+    )
 
 
 def _parts_remove_path(parts: Iterable[object], path: object) -> bool:
@@ -1105,11 +1477,35 @@ def _command_validates_and_extracts_archive_path(command: object, archive_path: 
     )
 
 
+def _command_hashes_archive_path(command: object, archive_path: str) -> bool:
+    for parts in _invoked_command_parts(command):
+        if _parts_hash_archive_path(parts, archive_path):
+            return True
+    return False
+
+
+def _parts_hash_archive_path(parts: Iterable[object], archive_path: str) -> bool:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    return bool(token in {"sha256sum", "shasum", "sha512sum"} and _parts_reference_path(values, archive_path))
+
+
 def _command_validates_archive_path(command: object, archive_path: str) -> bool:
     for parts in _invoked_command_parts(command):
         if _parts_validate_archive_path(parts, archive_path):
             return True
-    return False
+    return _command_substitution_validates_archive_path(command, archive_path)
+
+
+def _command_substitution_validates_archive_path(command: object, archive_path: str) -> bool:
+    path = re.escape(str(archive_path or "").strip("'\""))
+    if not path:
+        return False
+    command_text = _strip_heredoc_bodies(command)
+    return bool(
+        re.search(rf"\$\([^)]*\btar\b[^)]*-[A-Za-z]*t[A-Za-z]*[^)]*{path}(?:\s|[|)])", command_text)
+        or re.search(rf"\$\([^)]*\bunzip\b[^)]*(?:-t|--test)[^)]*{path}(?:\s|[|)])", command_text)
+    )
 
 
 def _parts_validate_archive_path(parts: Iterable[object], archive_path: str) -> bool:
@@ -1122,25 +1518,36 @@ def _parts_validate_archive_path(parts: Iterable[object], archive_path: str) -> 
 
 def _command_extracts_archive_path(command: object, archive_path: str) -> bool:
     for parts in _invoked_command_parts(command):
-        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
-        if token == "tar" and _tar_parts_use_mode(parts, "x") and _parts_reference_path(parts, archive_path):
-            return True
-        if token == "unzip" and not _unzip_parts_use_test_mode(parts) and _parts_reference_path(parts, archive_path):
+        if _parts_extract_archive_path(parts, archive_path):
             return True
     return False
+
+
+def _parts_extract_archive_path(parts: Iterable[object], archive_path: str) -> bool:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token == "tar" and _tar_parts_use_mode(values, "x") and _parts_reference_path(values, archive_path):
+        return True
+    return bool(token == "unzip" and not _unzip_parts_use_test_mode(values) and _parts_reference_path(values, archive_path))
 
 
 def _command_moves_extracted_source_root(command: object) -> bool:
     for parts in _invoked_command_parts(command):
-        token = Path(_long_dependency_invoked_command_token(parts)).name.casefold()
-        if token != "mv":
-            continue
-        args = [str(part or "") for part in parts[1:]]
-        if any(re.search(r"(?:root|\$root|\$\{root\}|extract)", part, re.I) for part in args) and any(
-            part.startswith(("/tmp", "/src", "/work", "/app")) for part in args
-        ):
+        if _parts_move_extracted_source_root(parts):
             return True
     return False
+
+
+def _parts_move_extracted_source_root(parts: Iterable[object]) -> bool:
+    values = [str(part or "") for part in parts]
+    token = Path(_long_dependency_invoked_command_token(values)).name.casefold()
+    if token != "mv":
+        return False
+    args = values[1:]
+    return bool(
+        any(re.search(r"(?:root|\$root|\$\{root\}|top|\$top|\$\{top\}|extract)", part, re.I) for part in args)
+        and any(part.startswith(("/tmp", "/src", "/work", "/app")) for part in args)
+    )
 
 
 def _invoked_command_parts(command: object) -> list[list[str]]:
@@ -1154,6 +1561,69 @@ def _invoked_command_parts(command: object) -> list[list[str]]:
         if parts:
             parts_list.append(parts)
     return parts_list
+
+
+def _segment_invoked_command_parts(segment: object) -> list[str]:
+    try:
+        parts = shlex.split(str(segment or ""))
+    except ValueError:
+        parts = str(segment or "").split()
+    return _drop_shell_control_prefix(parts)
+
+
+def _ordered_shell_command_segments(command: object) -> list[str]:
+    text = str(command or "")
+    segments: list[str] = []
+    start = 0
+    index = 0
+    in_single = False
+    in_double = False
+    command_sub_depth = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if not in_single and text[index : index + 2] == "$(":
+            command_sub_depth += 1
+            index += 2
+            continue
+        if not in_single and command_sub_depth and char == "(":
+            command_sub_depth += 1
+            index += 1
+            continue
+        if not in_single and command_sub_depth and char == ")":
+            command_sub_depth = max(0, command_sub_depth - 1)
+            index += 1
+            continue
+        if in_single or in_double or command_sub_depth:
+            index += 1
+            continue
+        operator_len = 0
+        if text[index : index + 2] in {"&&", "||"}:
+            operator_len = 2
+        elif char in {"\n", "\r", "|", ";"}:
+            operator_len = 1
+        if operator_len:
+            segment = text[start:index].strip()
+            if segment:
+                segments.append(segment)
+            index += operator_len
+            start = index
+            continue
+        index += 1
+    tail = text[start:].strip()
+    if tail:
+        segments.append(tail)
+    return segments or [text]
 
 
 def _strip_heredoc_bodies(command: object) -> str:
@@ -2074,7 +2544,7 @@ def _blocker_identity(blocker: Mapping[str, object]) -> tuple[str, str, str]:
 
 def _source_authority_satisfied(attempts: Iterable[Mapping[str, object]]) -> bool:
     return any(
-        item.get("result") == "success" and _attempt_has_signal(item, "source_authority")
+        _attempt_has_signal(item, "source_authority")
         for item in attempts or []
         if isinstance(item, Mapping)
     )

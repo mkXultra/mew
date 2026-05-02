@@ -1,3 +1,5 @@
+import shlex
+
 import pytest
 
 from mew.acceptance_evidence import long_dependency_artifact_proven_by_call, tool_call_terminal_success
@@ -1967,6 +1969,577 @@ def test_source_authority_accepts_validated_archive_loop_with_same_line_do_heade
 
     assert {"signal": "source_authority", "excerpt": "validated source archive acquisition"} in attempts[0]["diagnostics"]
     assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+
+
+def test_source_authority_accepts_post_loop_validated_archive_fetch_with_later_build_failure():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2post:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "rm -rf /tmp/widgetcli-fetch /tmp/WidgetCLI\n"
+        "mkdir -p /tmp/widgetcli-fetch\n"
+        "cd /tmp/widgetcli-fetch\n"
+        "source_url=''\n"
+        "for url in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  if curl -fL -o widgetcli-src.tar.gz \"$url\"; then\n"
+        "    source_url=\"$url\"\n"
+        "    break\n"
+        "  fi\n"
+        "done\n"
+        "test -n \"$source_url\"\n"
+        "printf 'source_url=%s\\n' \"$source_url\"\n"
+        "sha256sum widgetcli-src.tar.gz\n"
+        "top=$(tar -tzf widgetcli-src.tar.gz | head -1 | cut -d/ -f1)\n"
+        "tar -C /tmp -xzf widgetcli-src.tar.gz\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+        "cd /tmp/WidgetCLI\n"
+        "make widget\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                exit_code=2,
+                stdout=(
+                    "source_url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n"
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  widgetcli-src.tar.gz\n"
+                    "Error: later build failed\n"
+                ),
+                stderr="make: *** [widget] Error 2\n",
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "satisfied"} in state["stages"]
+    assert {"id": "target_built", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_post_loop_selected_fetch_without_clean_archive_path():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2postbad:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "source_url=''\n"
+        "for url in https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz; do\n"
+        "  if curl -fL -o widgetcli-src.tar.gz \"$url\"; then\n"
+        "    source_url=\"$url\"\n"
+        "    break\n"
+        "  fi\n"
+        "done\n"
+        "test -n \"$source_url\"\n"
+        "printf 'source_url=%s\\n' \"$source_url\"\n"
+        "sha256sum widgetcli-src.tar.gz\n"
+        "top=$(tar -tzf widgetcli-src.tar.gz | head -1 | cut -d/ -f1)\n"
+        "tar -C /tmp -xzf widgetcli-src.tar.gz\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, stdout="source_url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n")]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_failed_fetch_with_source_url_printed_before_download():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2post404:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "printf 'source_url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\\n'\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                exit_code=22,
+                stdout="source_url=https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz\n",
+                stderr="curl: (22) The requested URL returned error: 404\n",
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "archive_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  widgetcli-src.tar.gz\n",
+    ],
+)
+def test_source_authority_rejects_failed_fetch_with_hash_marker_printed_before_download(stdout):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthash404:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        f"printf '%s' {shlex.quote(stdout)}\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                command,
+                exit_code=22,
+                stdout=stdout,
+                stderr="curl: (22) The requested URL returned error: 404\n",
+            )
+        ]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_nonzero_fetch_with_clipped_failure_output():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2postclip404:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz "
+        "2>/tmp/curl.err\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=22)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "archive_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  widgetcli-src.tar.gz\n",
+    ],
+)
+def test_source_authority_rejects_nonzero_fetch_with_preprinted_hash_and_clipped_failure(stdout):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashclip:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        f"printf '%s' {shlex.quote(stdout)}\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o widgetcli-src.tar.gz "
+        "2>/tmp/curl.err\n"
+        "tar -tzf widgetcli-src.tar.gz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf widgetcli-src.tar.gz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=22, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_nonzero_fetch_with_preprinted_hash_and_later_static_hash_command():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashstatic:long_build:1",
+    )
+    stdout = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+    command = (
+        "set -eu\n"
+        f"printf '%s' {shlex.quote(stdout)}\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz "
+        "2>/tmp/curl.err\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=22, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    ("stdout", "print_command"),
+    [
+        (
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n",
+            "printf '%s  /tmp/widgetcli-1.0.0.tgz\\n' \"$h\"\n",
+        ),
+        (
+            "archive_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+            "printf 'archive_sha256=%s\\n' \"$h\"\n",
+        ),
+    ],
+)
+def test_source_authority_rejects_nonzero_fetch_with_dynamic_preprinted_hash_and_later_static_hash_command(
+    stdout,
+    print_command,
+):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashdynamic:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "h=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+        f"{print_command}"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz "
+        "2>/tmp/curl.err\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=22, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+@pytest.mark.parametrize(
+    ("stdout", "heredoc_body"),
+    [
+        (
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n",
+            "$h  /tmp/widgetcli-1.0.0.tgz\n",
+        ),
+        (
+            "archive_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+            "archive_sha256=$h\n",
+        ),
+    ],
+)
+def test_source_authority_rejects_nonzero_fetch_with_prefetch_heredoc_hash_and_later_static_hash_command(
+    stdout,
+    heredoc_body,
+):
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashheredoc:long_build:1",
+    )
+    command = (
+        "set -eu\n"
+        "h=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+        "cat <<EOF\n"
+        f"{heredoc_body}"
+        "EOF\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz "
+        "2>/tmp/curl.err\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=22, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_nonzero_fetch_with_prefetch_python_hash_and_later_static_hash_command():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashpython:long_build:1",
+    )
+    stdout = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+    command = (
+        "set -eu\n"
+        "python3 -c 'print(\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  "
+        "/tmp/widgetcli-1.0.0.tgz\")'\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz "
+        "2>/tmp/curl.err\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=22, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_nonzero_fetch_with_prefetch_python_dynamic_hash_and_later_static_hash_command():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashpythondyn:long_build:1",
+    )
+    stdout = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+    command = (
+        "set -eu\n"
+        "python3 -c 'h=\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"; "
+        "p=\"/tmp/widgetcli-1.0.0.tgz\"; print(h, p)'\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz "
+        "2>/tmp/curl.err\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "tar -tzf /tmp/widgetcli-1.0.0.tgz >/tmp/widgetcli-tar-list.txt\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp/widgetcli-extract\n"
+        "root=$(find /tmp/widgetcli-extract -mindepth 1 -maxdepth 1 -type d | head -n 1)\n"
+        "mv \"$root\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=22, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_post_fetch_python_hash_before_later_hash_and_validation_commands():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2postfetchhash:long_build:1",
+    )
+    stdout = (
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+        "make: *** [widget] Error 2\n"
+    )
+    command = (
+        "set -eu\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "python3 -c 'h=\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"; "
+        "p=\"/tmp/widgetcli-1.0.0.tgz\"; print(h, p)'\n"
+        "make widget\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "top=$(tar -tzf /tmp/widgetcli-1.0.0.tgz | head -1 | cut -d/ -f1)\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=2, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_same_line_stdout_before_fetch_with_later_ordered_source_proof():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2samecatfetch:long_build:1",
+    )
+    stdout = (
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+        "make: *** [widget] Error 2\n"
+    )
+    command = (
+        "set -eu\n"
+        "cat /tmp/precomputed-hash.txt; "
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "top=$(tar -tzf /tmp/widgetcli-1.0.0.tgz | head -1 | cut -d/ -f1)\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+        "make widget\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=2, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_failable_setup_between_hash_and_later_validation_commands():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashfailable:long_build:1",
+    )
+    stdout = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+    command = (
+        "set -eu\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "test -f /tmp/definitely-missing-source-proof-sentinel\n"
+        "top=$(tar -tzf /tmp/widgetcli-1.0.0.tgz | head -1 | cut -d/ -f1)\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=1, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_failable_assignment_between_hash_and_later_validation_commands():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashsubst:long_build:1",
+    )
+    stdout = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+    command = (
+        "set -eu\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "probe=$(false)\n"
+        "top=$(tar -tzf /tmp/widgetcli-1.0.0.tgz | head -1 | cut -d/ -f1)\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=1, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_nounset_assignment_between_hash_and_later_validation_commands():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashnounset:long_build:1",
+    )
+    stdout = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+    command = (
+        "set -eu\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "probe=$UNSET_SOURCE_PROOF_SENTINEL\n"
+        "top=$(tar -tzf /tmp/widgetcli-1.0.0.tgz | head -1 | cut -d/ -f1)\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=1, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
+
+
+def test_source_authority_rejects_failable_builtin_between_hash_and_later_validation_commands():
+    contract = build_long_build_contract(
+        "Under /tmp/WidgetCLI, build the Widget CLI from source. "
+        "Ensure /tmp/WidgetCLI/widget can be invoked.",
+        ["/tmp/WidgetCLI/widget"],
+        contract_id="work_session:10k2posthashexport:long_build:1",
+    )
+    stdout = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  /tmp/widgetcli-1.0.0.tgz\n"
+    command = (
+        "set -eu\n"
+        "curl -fL https://github.com/example/WidgetCLI/archive/refs/tags/v1.0.0.tar.gz -o /tmp/widgetcli-1.0.0.tgz\n"
+        "sha256sum /tmp/widgetcli-1.0.0.tgz\n"
+        "export -z\n"
+        "top=$(tar -tzf /tmp/widgetcli-1.0.0.tgz | head -1 | cut -d/ -f1)\n"
+        "tar -xzf /tmp/widgetcli-1.0.0.tgz -C /tmp\n"
+        "mv \"/tmp/$top\" /tmp/WidgetCLI\n"
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, command, exit_code=2, stdout=stdout)]
+    )
+    attempts = build_attempts_from_command_evidence(evidence, contract)
+    state = reduce_long_build_state(contract, attempts, evidence)
+
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert {"id": "source_authority", "required": True, "status": "unknown"} in state["stages"]
 
 
 def test_source_authority_rejects_archive_loop_without_archive_validation():
