@@ -56,7 +56,7 @@ not mean every idea in every design note has shipped.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Scope changed on 2026-05-03 to the 25 Terminal-Bench 2.0 `software-engineering,coding` tasks; scoped rebaseline pending. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Scoped rebaseline selected `build-cython-ext` as the active below-target gap; next repair is the generic verifier sibling frontier. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode: `improvement_phase` with
-`scope_rebaseline_pending`.
+`verified_sibling_repair_frontier_not_exhausted`.
 
 Scope:
 
@@ -77,6 +77,10 @@ Scope:
   `software-engineering,coding` filters.
 - The authoritative scoped task list is
   `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
+- The scoped rebaseline is
+  `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`.
+- The active repeated-gap dossier is
+  `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`.
 - Previous all-registry and `compile-compcert` records are historical repair
   evidence. They are not the active M6.24 close gate unless a later milestone
   explicitly promotes a BuildOrchestrationLane benchmark.
@@ -84,6 +88,8 @@ Scope:
 Controller docs:
 
 - `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
+- `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`
+- `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
 - `docs/M6_24_DECISION_LEDGER.md`
 - `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
@@ -92,7 +98,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> software/coding cohort scope -> build scoped cohort rebaseline -> select first below-target in-scope gap -> UT/replay/dogfood/emulator -> speed_1
+M6.24 -> verified_sibling_repair_frontier_not_exhausted -> build-cython-ext dossier -> generic verifier sibling frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1
 ```
 
 Do not spend new M6.24 live proof budget on out-of-scope tasks. If the next
@@ -134,13 +140,12 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Rebaseline the scoped 25-task software/coding cohort against the frozen Codex
-   target registry and local mew artifacts.
-2. Select the first below-target in-scope gap using the M6.24 controller.
-3. Before any live `speed_1`, run focused UT, replay, dogfood, and a same-shape
+1. Implement the selected generic `build-cython-ext` gap repair:
+   `verified_sibling_repair_frontier_not_exhausted`.
+2. Before any live `speed_1`, run focused UT, replay, dogfood, and a same-shape
    emulator. If no emulator exists, build the smallest emulator fixture first.
-4. If the selected gap is local/polish, fix it and rerun the same scoped shape.
-5. If the selected gap is structural, pause M6.24 behind M6.14, repair the
+3. If the selected gap is local/polish, fix it and rerun the same scoped shape.
+4. If the selected gap is structural, pause M6.24 behind M6.14, repair the
    generic substrate, rerun the same scoped shape, then resume M6.24.
-6. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
+5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.

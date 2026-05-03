@@ -9,15 +9,18 @@ the measured Codex gap, not a general idea backlog.
 M6.24 is in `improvement_phase`.
 
 Scope decision on 2026-05-03: M6.24 now measures only the 25 Terminal-Bench 2.0
-tasks returned by the `software-engineering,coding` filters. The active
-controller must rebaseline this scoped cohort before selecting another live
-proof target. Previous `compile-compcert` evidence is retained as historical
-build-orchestration substrate evidence, not as the active M6.24 close gate.
+tasks returned by the `software-engineering,coding` filters. The scoped
+rebaseline is now recorded, and the active proof target is the selected
+`build-cython-ext` gap class below. Previous `compile-compcert` evidence is
+retained as historical build-orchestration substrate evidence, not as the
+active M6.24 close gate.
 
 Authoritative inputs:
 
 - `docs/M6_24_DECISION_LEDGER.md`
 - `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
+- `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`
+- `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
 - latest `docs/M6_24_GAP_CLASS_PLAN_*`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
@@ -36,13 +39,19 @@ decision ledger records why measurement is higher value than repairing the
 selected gap class.
 
 Current selected gap class:
-`scope_rebaseline_pending`.
+`verified_sibling_repair_frontier_not_exhausted`.
 
 Current selected next action:
-`M6.24 -> software/coding cohort scope -> build scoped cohort rebaseline -> select first below-target in-scope gap`.
+`M6.24 -> build-cython-ext gap dossier -> generic verifier sibling frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
 
 Active authoritative design:
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
+
+Active scoped rebaseline:
+`docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`.
+
+Active repair dossier:
+`docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`.
 
 Foundational substrate design:
 `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`.
