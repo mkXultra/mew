@@ -24,6 +24,7 @@ from .acceptance_evidence import (
 
 LONG_BUILD_SCHEMA_VERSION = 1
 EXECUTION_CONTRACT_SCHEMA_VERSION = 2
+COMMAND_RUN_SCHEMA_VERSION = 3
 ENV_SUMMARY_POLICY = "env_summary_v1"
 COMMAND_OUTPUT_CLIP_CHARS = 1200
 LONG_COMMAND_OUTPUT_MAX_BYTES = 1_000_000
@@ -308,13 +309,25 @@ class CommandRun:
     tool_call_id: object | None
     tool: str
     command: str
+    argv: list[str]
+    execution_mode: str
     cwd: str
     status: str
+    started_at: str
+    finished_at: str | None
+    elapsed_seconds: float | None
+    foreground_budget_seconds: float | None
+    timeout_seconds: int | None
+    final_proof_reserve_seconds: int | None
+    diagnostic_budget_seconds: int | None
+    managed_process_id: str
     command_evidence_ref: dict | None
     terminal_command_evidence_ref: dict | None
     execution_contract: dict
     resume_identity: dict
     output_ref: object | None
+    reducer_context: dict
+    failure_fingerprint: str | None
     terminal: dict
     unknown_fields: dict = field(default_factory=dict)
 
@@ -329,6 +342,7 @@ class CommandRun:
         data = dict(data or {})
         known = {name for name in cls.__dataclass_fields__ if name != "unknown_fields"}
         unknown = {key: value for key, value in data.items() if key not in known}
+        raw_argv = data.get("argv")
         return cls(
             schema_version=_coerce_int(data.get("schema_version"), default=0) or 0,
             id=str(data.get("id") or ""),
@@ -337,13 +351,25 @@ class CommandRun:
             tool_call_id=data.get("tool_call_id"),
             tool=str(data.get("tool") or ""),
             command=str(data.get("command") or ""),
+            argv=[str(item) for item in raw_argv] if isinstance(raw_argv, list) else [],
+            execution_mode=str(data.get("execution_mode") or ""),
             cwd=str(data.get("cwd") or ""),
             status=str(data.get("status") or ""),
+            started_at=str(data.get("started_at") or ""),
+            finished_at=str(data.get("finished_at") or "") or None,
+            elapsed_seconds=_coerce_float(data.get("elapsed_seconds")),
+            foreground_budget_seconds=_coerce_float(data.get("foreground_budget_seconds")),
+            timeout_seconds=_coerce_int(data.get("timeout_seconds")),
+            final_proof_reserve_seconds=_coerce_int(data.get("final_proof_reserve_seconds")),
+            diagnostic_budget_seconds=_coerce_int(data.get("diagnostic_budget_seconds")),
+            managed_process_id=str(data.get("managed_process_id") or ""),
             command_evidence_ref=_optional_dict(data.get("command_evidence_ref")),
             terminal_command_evidence_ref=_optional_dict(data.get("terminal_command_evidence_ref")),
             execution_contract=dict(data.get("execution_contract") or {}),
             resume_identity=dict(data.get("resume_identity") or {}),
             output_ref=data.get("output_ref"),
+            reducer_context=dict(data.get("reducer_context") or {}),
+            failure_fingerprint=str(data.get("failure_fingerprint") or "") or None,
             terminal=dict(data.get("terminal") or {}),
             unknown_fields=unknown,
         )
@@ -599,6 +625,12 @@ def normalize_execution_contract(
         "proof_role": proof_role,
         "expected_artifacts": expected_artifacts,
         "declared_target_refs": declared_target_refs,
+        "affected_paths": _normalize_affected_paths(
+            data.get("affected_paths"),
+            expected_artifacts=expected_artifacts,
+            declared_target_refs=declared_target_refs,
+            cwd=cwd,
+        ),
         "acceptance_kind": acceptance_kind,
         "continuation_policy": _normalize_continuation_policy(data.get("continuation_policy")),
         "background_policy": _normalize_background_policy(data.get("background_policy"), tool=tool_name),
@@ -657,29 +689,54 @@ def build_command_run(
     command: object,
     cwd: object,
     status: object,
+    argv: Iterable[object] | None = None,
+    execution_mode: object = "",
+    started_at: object = "",
+    finished_at: object | None = None,
+    elapsed_seconds: object | None = None,
+    foreground_budget_seconds: object | None = None,
+    timeout_seconds: object | None = None,
+    final_proof_reserve_seconds: object | None = None,
+    diagnostic_budget_seconds: object | None = None,
+    managed_process_id: object = "",
     command_evidence_ref: Mapping[str, object] | None = None,
     terminal_command_evidence_ref: Mapping[str, object] | None = None,
     execution_contract: Mapping[str, object] | None = None,
     output_ref: object | None = None,
+    reducer_context: Mapping[str, object] | None = None,
+    failure_fingerprint: object | None = None,
     exit_code: object | None = None,
     timed_out: object = False,
 ) -> dict:
     contract = dict(execution_contract or {})
+    argv_items = argv if isinstance(argv, (list, tuple)) else []
     run = CommandRun(
-        schema_version=EXECUTION_CONTRACT_SCHEMA_VERSION,
+        schema_version=COMMAND_RUN_SCHEMA_VERSION,
         id=command_run_id(session_id, ordinal),
         session_id=str(session_id or ""),
         task_id=str(task_id or ""),
         tool_call_id=tool_call_id,
         tool=str(tool or ""),
         command=str(command or ""),
+        argv=[str(item) for item in argv_items],
+        execution_mode=str(execution_mode or ""),
         cwd=str(cwd or ""),
         status=str(status or ""),
+        started_at=str(started_at or ""),
+        finished_at=str(finished_at or "") or None,
+        elapsed_seconds=_coerce_float(elapsed_seconds),
+        foreground_budget_seconds=_coerce_float(foreground_budget_seconds),
+        timeout_seconds=_coerce_int(timeout_seconds),
+        final_proof_reserve_seconds=_coerce_int(final_proof_reserve_seconds),
+        diagnostic_budget_seconds=_coerce_int(diagnostic_budget_seconds),
+        managed_process_id=str(managed_process_id or ""),
         command_evidence_ref=dict(command_evidence_ref or {}),
         terminal_command_evidence_ref=dict(terminal_command_evidence_ref) if terminal_command_evidence_ref else None,
         execution_contract=contract,
         resume_identity=dict(contract.get("resume_identity") or {}),
         output_ref=output_ref,
+        reducer_context=dict(reducer_context or {}),
+        failure_fingerprint=str(failure_fingerprint or "") or None,
         terminal={
             "exit_code": _coerce_int(exit_code),
             "timed_out": bool(timed_out),
@@ -735,14 +792,40 @@ def _normalize_continuation_policy(value: object) -> dict:
 
 def _normalize_background_policy(value: object, *, tool: str) -> dict:
     policy = dict(value or {}) if isinstance(value, Mapping) else {}
-    mode = str(policy.get("mode") or ("foreground_blocking" if tool == "run_tests" else "foreground_yieldable"))
+    mode = str(policy.get("mode") or "foreground_yieldable")
     if mode not in {"foreground_blocking", "foreground_yieldable", "background_allowed"}:
-        mode = "foreground_blocking" if tool == "run_tests" else "foreground_yieldable"
+        mode = "foreground_yieldable"
     return {
         "mode": mode,
         "allow_background": bool(policy.get("allow_background")),
         "handoff": str(policy.get("handoff") or ""),
     }
+
+
+def _normalize_affected_paths(
+    value: object,
+    *,
+    expected_artifacts: Iterable[Mapping[str, object]],
+    declared_target_refs: Iterable[Mapping[str, object]],
+    cwd: object,
+) -> list[str]:
+    raw_items = value if isinstance(value, list) else []
+    paths: list[str] = []
+    for item in raw_items:
+        text = str(item or "").strip().replace("\\", "/")
+        if text and text not in paths:
+            paths.append(text)
+    if paths:
+        return paths
+    for item in list(expected_artifacts or []) + list(declared_target_refs or []):
+        if not isinstance(item, Mapping):
+            continue
+        text = str(item.get("path") or item.get("ref") or "").strip().replace("\\", "/")
+        if text and text not in paths:
+            paths.append(text)
+    if not paths and cwd:
+        paths.append(str(cwd).replace("\\", "/"))
+    return paths
 
 
 def _normalize_source_authority_requirement(value: object, *, task_contract: Mapping[str, object] | None) -> dict:

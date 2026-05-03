@@ -15729,6 +15729,61 @@ def compact_command_result(result, limit=4):
     return summary
 
 
+def _compact_observed_work_session(value):
+    tool_calls = value.get("tool_calls") if isinstance(value.get("tool_calls"), list) else []
+    command_evidence = value.get("command_evidence") if isinstance(value.get("command_evidence"), list) else []
+    command_runs = value.get("command_runs") if isinstance(value.get("command_runs"), list) else []
+    managed_events = value.get("managed_exec_events") if isinstance(value.get("managed_exec_events"), list) else []
+    return {
+        "id": value.get("id"),
+        "task_id": value.get("task_id"),
+        "status": value.get("status"),
+        "stop_reason": value.get("stop_reason"),
+        "last_tool_call_id": value.get("last_tool_call_id"),
+        "last_model_turn_id": value.get("last_model_turn_id"),
+        "tool_call_count": len(tool_calls),
+        "command_evidence_count": len(command_evidence),
+        "command_run_count": len(command_runs),
+        "managed_exec_event_count": len(managed_events),
+        "latest_tool_calls": [
+            {
+                "id": item.get("id"),
+                "tool": item.get("tool"),
+                "status": item.get("status"),
+                "error": item.get("error") or "",
+                "command_run_id": item.get("command_run_id") or "",
+            }
+            for item in tool_calls[-3:]
+            if isinstance(item, dict)
+        ],
+        "latest_command_runs": [
+            {
+                "id": item.get("id"),
+                "tool": item.get("tool"),
+                "status": item.get("status"),
+                "exit_code": (item.get("terminal") or {}).get("exit_code") if isinstance(item.get("terminal"), dict) else None,
+                "timed_out": (item.get("terminal") or {}).get("timed_out") if isinstance(item.get("terminal"), dict) else None,
+                "output_ref": item.get("output_ref") or "",
+            }
+            for item in command_runs[-3:]
+            if isinstance(item, dict)
+        ],
+        "latest_managed_exec_events": [
+            {
+                "id": item.get("id"),
+                "type": item.get("type"),
+                "command_run_id": item.get("command_run_id") or "",
+                "status": item.get("status") or "",
+                "exit_code": item.get("exit_code"),
+            }
+            for item in managed_events[-3:]
+            if isinstance(item, dict)
+        ],
+        "default_options": compact_dogfood_value(value.get("default_options") or {}, depth=1),
+        "active_work_todo": compact_dogfood_value(value.get("active_work_todo") or {}, depth=1),
+    }
+
+
 def compact_dogfood_value(value, *, depth=0):
     if value is None or isinstance(value, (bool, int, float)):
         return value
@@ -15745,6 +15800,8 @@ def compact_dogfood_value(value, *, depth=0):
             items.append({"omitted_items": len(value) - DOGFOOD_OBSERVED_LIST_LIMIT})
         return items
     if isinstance(value, dict):
+        if {"id", "task_id", "tool_calls"}.issubset(value.keys()):
+            return _compact_observed_work_session(value)
         if {"status", "score", "axes"}.issubset(value.keys()):
             return {
                 "status": value.get("status"),

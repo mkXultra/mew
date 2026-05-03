@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import re
 import shlex
+import time
 
 from .acceptance import (
     coerce_acceptance_checks,
@@ -72,7 +73,10 @@ WORK_EXECUTOR_LIFECYCLE_STATES = {"queued", "executing", "completed", "cancelled
 WORK_SESSION_TODO_STATUSES = {"todo", "in_progress", "blocked", "done", "dropped"}
 WORK_SESSION_TODO_OPEN_STATUSES = {"todo", "in_progress", "blocked"}
 WORK_SESSION_TODO_MAX_ITEMS = 10
-_WORK_MANAGED_COMMAND_RUNNER = ManagedCommandRunner()
+WORK_COMMAND_FOREGROUND_BUDGET_SECONDS = 15.0
+WORK_COMMAND_MAX_FOREGROUND_BUDGET_SECONDS = 30.0
+WORK_COMMAND_OUTPUT_ROOT = (Path.cwd() / ".mew").resolve(strict=False)
+_WORK_MANAGED_COMMAND_RUNNER = ManagedCommandRunner(max_active=4)
 WORK_TODO_STATUSES = {
     "queued",
     "drafting",
@@ -267,6 +271,9 @@ WORK_TOOLS = {
     "glob",
     "run_command",
     "run_tests",
+    "poll_command",
+    "cancel_command",
+    "read_command_output",
     "git_status",
     "git_diff",
     "git_log",
@@ -281,7 +288,8 @@ APPROVAL_WAIT_RE = re.compile(
 )
 READ_ONLY_WORK_TOOLS = {"analyze_table", "inspect_dir", "read_file", "read_image", "read_images", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
-COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
+MANAGED_COMMAND_WORK_TOOLS = {"run_command", "run_tests", "poll_command", "cancel_command"}
+COMMAND_WORK_TOOLS = MANAGED_COMMAND_WORK_TOOLS | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 SHELL_CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
 RESIDENT_MEW_LOOP_TEXT_RE = re.compile(
@@ -2256,30 +2264,118 @@ def _with_managed_long_command_metadata(result, *, budget, action_kind):
         "stage": budget.get("stage") or "",
         "latest_long_command_run_id": budget.get("latest_long_command_run_id"),
         "latest_long_command_status": budget.get("latest_long_command_status"),
+        "command_run_id": result.get("command_run_id"),
+        "output_ref": result.get("output_ref"),
+        "output_path": result.get("output_path"),
         "pid": result.get("pid"),
         "process_group_id": result.get("process_group_id"),
     }
     result["managed_long_command"] = {key: value for key, value in meta.items() if value not in (None, "")}
-    result["long_command_budget"] = dict(budget)
+    if budget:
+        result["long_command_budget"] = dict(budget)
     return result
 
 
-def _run_managed_command_for_work(command, cwd=".", timeout=300, on_output=None, use_shell=False, parameters=None):
-    budget = _managed_long_command_budget(parameters or {})
-    if not budget:
-        return run_command_for_work(
+def _command_run_output_ref_from_id(command_run_id_value):
+    text = str(command_run_id_value or "")
+    match = re.match(r"^work_session:([^:]+):command_run:([^:]+)$", text)
+    if match:
+        session_id, ordinal = match.groups()
+        return f"work-session/{session_id}/command/{ordinal}/output.log"
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or "unknown"
+    return f"work-session/unknown/command/{safe}/output.log"
+
+
+def _command_run_output_path_from_ref(output_ref):
+    ref = str(output_ref or "").strip()
+    if not ref:
+        return ""
+    return str((WORK_COMMAND_OUTPUT_ROOT / ref).resolve(strict=False))
+
+
+def _managed_command_foreground_budget(parameters, effective_timeout):
+    parameters = parameters or {}
+    explicit = parameters.get("foreground_budget_seconds")
+    if explicit is None:
+        continuation = parameters.get("execution_contract") if isinstance(parameters.get("execution_contract"), dict) else {}
+        continuation_policy = (
+            continuation.get("continuation_policy") if isinstance(continuation.get("continuation_policy"), dict) else {}
+        )
+        background_policy = (
+            continuation.get("background_policy") if isinstance(continuation.get("background_policy"), dict) else {}
+        )
+        explicit = (
+            continuation_policy.get("yield_after_seconds")
+            or background_policy.get("foreground_budget_seconds")
+            or WORK_COMMAND_FOREGROUND_BUDGET_SECONDS
+        )
+    timeout_value = _float_or_default(effective_timeout, 300.0)
+    budget = _float_or_default(explicit, WORK_COMMAND_FOREGROUND_BUDGET_SECONDS)
+    budget = min(WORK_COMMAND_MAX_FOREGROUND_BUDGET_SECONDS, max(1.0, budget))
+    if budget >= timeout_value:
+        budget = max(0.0, timeout_value - 1.0)
+    return budget
+
+
+def _managed_runner_start(command, *, cwd, timeout, on_output, use_shell, command_run_id_value, output_ref, output_path):
+    try:
+        return _WORK_MANAGED_COMMAND_RUNNER.start(
             command,
             cwd=cwd,
             timeout=timeout,
             on_output=on_output,
             use_shell=use_shell,
+            kill_process_group=True,
+            command_run_id=command_run_id_value,
+            output_ref=output_ref,
+            output_path=output_path,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _WORK_MANAGED_COMMAND_RUNNER.start(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            on_output=on_output,
+            use_shell=use_shell,
+            kill_process_group=True,
         )
 
-    action_kind = str(budget.get("action_kind") or "start_long_command")
-    if action_kind == "poll_long_command":
-        wait_seconds = _float_or_default(timeout, 5.0)
+
+def _managed_runner_poll(*, wait_seconds, command_run_id_value):
+    try:
+        return _WORK_MANAGED_COMMAND_RUNNER.poll(wait_seconds=wait_seconds, command_run_id=command_run_id_value)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _WORK_MANAGED_COMMAND_RUNNER.poll(wait_seconds=wait_seconds)
+
+
+def _managed_runner_cancel(*, reason, command_run_id_value):
+    try:
+        return _WORK_MANAGED_COMMAND_RUNNER.cancel(reason=reason, command_run_id=command_run_id_value)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _WORK_MANAGED_COMMAND_RUNNER.cancel(reason)
+
+
+def _run_managed_command_for_work(command, cwd=".", timeout=300, on_output=None, use_shell=False, parameters=None):
+    parameters = dict(parameters or {})
+    budget = _managed_long_command_budget(parameters or {})
+    action_kind = str(budget.get("action_kind") or parameters.get("action_kind") or "start_command")
+    command_run_id_value = str(parameters.get("command_run_id") or "")
+    if not command_run_id_value and action_kind not in {"poll_long_command", "poll_command", "cancel_command", "cancel_long_command"}:
+        digest = hashlib.sha256(f"{now_iso()}:{time.monotonic_ns()}:{cwd}:{command}".encode("utf-8")).hexdigest()[:12]
+        command_run_id_value = f"adhoc:{digest}"
+        parameters["command_run_id"] = command_run_id_value
+    output_ref = str(parameters.get("output_ref") or _command_run_output_ref_from_id(command_run_id_value))
+    output_path = str(parameters.get("output_path") or _command_run_output_path_from_ref(output_ref))
+    if action_kind in {"poll_long_command", "poll_command"}:
+        wait_seconds = _float_or_default(parameters.get("wait_seconds"), _float_or_default(timeout, 5.0))
         try:
-            result = _WORK_MANAGED_COMMAND_RUNNER.poll(wait_seconds=wait_seconds)
+            result = _managed_runner_poll(wait_seconds=wait_seconds, command_run_id_value=command_run_id_value)
         except RuntimeError as exc:
             result = {
                 "command": command,
@@ -2291,22 +2387,50 @@ def _run_managed_command_for_work(command, cwd=".", timeout=300, on_output=None,
                 "stderr": str(exc),
             }
         return _with_managed_long_command_metadata(result, budget=budget, action_kind=action_kind)
+    if action_kind in {"cancel_command", "cancel_long_command"}:
+        result = _managed_runner_cancel(
+            reason=parameters.get("reason") or "cancelled",
+            command_run_id_value=command_run_id_value,
+        )
+        return _with_managed_long_command_metadata(result, budget=budget, action_kind=action_kind)
 
     effective_timeout = _float_or_default(budget.get("effective_timeout_seconds"), _float_or_default(timeout, 300.0))
-    yield_after = _float_or_default(budget.get("yield_after_seconds"), 30.0)
-    if yield_after >= effective_timeout:
-        yield_after = max(0.0, effective_timeout - 1.0)
+    yield_after = _float_or_default(
+        budget.get("yield_after_seconds"),
+        _managed_command_foreground_budget(parameters, effective_timeout),
+    )
+    command_started = False
     try:
-        _WORK_MANAGED_COMMAND_RUNNER.start(
+        _managed_runner_start(
             command,
             cwd=cwd,
             timeout=effective_timeout,
             on_output=on_output,
             use_shell=use_shell,
-            kill_process_group=True,
+            command_run_id_value=command_run_id_value,
+            output_ref=output_ref,
+            output_path=output_path,
         )
-        result = _WORK_MANAGED_COMMAND_RUNNER.poll(wait_seconds=yield_after)
-    except (RuntimeError, ValueError) as exc:
+        command_started = True
+        result = _managed_runner_poll(wait_seconds=yield_after, command_run_id_value=command_run_id_value)
+        if result.get("status") == "running" and not budget:
+            result["status"] = "yielded"
+    except (RuntimeError, ValueError, OSError) as exc:
+        if command_started:
+            try:
+                _managed_runner_cancel(
+                    reason="managed command failed during foreground poll",
+                    command_run_id_value=command_run_id_value,
+                )
+            except (RuntimeError, ValueError, OSError):
+                pass
+        missing_executable = isinstance(exc, FileNotFoundError)
+        executable = ""
+        try:
+            executable = shlex.split(command or "")[0]
+        except (ValueError, IndexError):
+            executable = str(command or "").split(" ", 1)[0]
+        stderr = f"executable not found: {executable}" if missing_executable and executable else str(exc)
         result = {
             "command": command,
             "cwd": cwd,
@@ -2314,8 +2438,15 @@ def _run_managed_command_for_work(command, cwd=".", timeout=300, on_output=None,
             "exit_code": None,
             "timed_out": False,
             "stdout": "",
-            "stderr": str(exc),
+            "stderr": stderr,
         }
+        if missing_executable:
+            result["error_type"] = "executable_not_found"
+    result.setdefault("command_run_id", command_run_id_value)
+    result.setdefault("output_ref", output_ref)
+    result.setdefault("output_path", output_path)
+    result.setdefault("foreground_budget_seconds", yield_after)
+    result.setdefault("command_timeout_seconds", effective_timeout)
     return _with_managed_long_command_metadata(result, budget=budget, action_kind=action_kind)
 
 
@@ -2560,6 +2691,50 @@ def reject_resident_mew_loop_command(command, *, tool_name="run_command"):
     )
 
 
+def read_work_command_output(parameters):
+    parameters = dict(parameters or {})
+    output_path = str(parameters.get("output_path") or "").strip()
+    if not output_path:
+        output_ref = str(parameters.get("output_ref") or "").strip()
+        if not output_ref and parameters.get("command_run_id"):
+            output_ref = _command_run_output_ref_from_id(parameters.get("command_run_id"))
+        output_path = _command_run_output_path_from_ref(output_ref)
+    if not output_path:
+        raise ValueError("read_command_output requires command_run_id, output_ref, or output_path")
+    path = Path(output_path).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve(strict=False)
+    else:
+        path = path.resolve(strict=False)
+    spool_root = (WORK_COMMAND_OUTPUT_ROOT / "work-session").resolve(strict=False)
+    try:
+        path.relative_to(spool_root)
+    except ValueError as exc:
+        raise ValueError("read_command_output can only read managed command output under .mew/work-session") from exc
+    max_chars = int(parameters.get("max_chars") or DEFAULT_READ_MAX_CHARS)
+    offset = int(parameters.get("offset") or 0)
+    tail = bool(parameters.get("tail"))
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ValueError(f"command output is unavailable: {exc}") from exc
+    if tail and max_chars > 0:
+        sliced = text[-max_chars:]
+        offset = max(0, len(text) - len(sliced))
+    else:
+        sliced = text[max(0, offset) : max(0, offset) + max_chars] if max_chars > 0 else text[max(0, offset) :]
+    return {
+        "path": str(path),
+        "output_path": str(path),
+        "command_run_id": str(parameters.get("command_run_id") or ""),
+        "offset": offset,
+        "content": sliced,
+        "bytes": len(text.encode("utf-8")),
+        "chars": len(text),
+        "truncated": len(sliced) < len(text),
+    }
+
+
 def split_unquoted_shell_command_segments(command):
     text = str(command or "")
     segments = []
@@ -2587,6 +2762,23 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
+    if tool in {"poll_command", "cancel_command"}:
+        disallowed = sorted(
+            key
+            for key in (
+                "command",
+                "cwd",
+                "timeout",
+                "foreground_budget_seconds",
+                "execution_contract",
+                "allow_shell",
+                "allow_verify",
+                "long_command_budget",
+            )
+            if key in parameters and parameters.get(key) not in (None, "")
+        )
+        if disallowed:
+            raise ValueError(f"{tool} accepts command_run_id only for command identity; disallowed: {', '.join(disallowed)}")
     requested_cwd = str(parameters.get("cwd") or "").strip()
     default_cwd_requested = requested_cwd in ("", ".")
     parameters, allowed_read_roots = _workspace_relative_work_parameters(
@@ -2598,6 +2790,31 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
         raise ValueError("work tool read access is disabled; pass --allow-read PATH")
     if tool in GIT_WORK_TOOLS and not allowed_read_roots:
         raise ValueError("git inspection is disabled; pass --allow-read PATH")
+
+    if tool == "read_command_output":
+        return read_work_command_output(parameters)
+    if tool == "poll_command":
+        command_run_id_value = str(parameters.get("command_run_id") or "")
+        if not command_run_id_value:
+            raise ValueError("poll_command requires command_run_id")
+        return _run_managed_command_for_work(
+            parameters.get("command") or "",
+            cwd=parameters.get("cwd") or ".",
+            timeout=parameters.get("timeout", 5),
+            on_output=on_output,
+            parameters={**parameters, "action_kind": "poll_command"},
+        )
+    if tool == "cancel_command":
+        command_run_id_value = str(parameters.get("command_run_id") or "")
+        if not command_run_id_value:
+            raise ValueError("cancel_command requires command_run_id")
+        return _run_managed_command_for_work(
+            parameters.get("command") or "",
+            cwd=parameters.get("cwd") or ".",
+            timeout=parameters.get("timeout", 5),
+            on_output=on_output,
+            parameters={**parameters, "action_kind": "cancel_command"},
+        )
 
     if tool == "inspect_dir":
         return inspect_dir(parameters.get("path") or ".", allowed_read_roots, limit=parameters.get("limit", 50))
@@ -2929,6 +3146,18 @@ def format_exit_code(value):
 
 
 def summarize_work_tool_result(tool, result):
+    if tool == "read_command_output":
+        result = result or {}
+        lines = [
+            f"path: {result.get('path') or result.get('output_path') or ''}",
+            f"chars: {result.get('chars')}",
+        ]
+        content = result.get("content") or ""
+        if content:
+            lines.extend(["content:", clip_tail(content, 2000)])
+        return "\n".join(lines)
+    if tool in {"poll_command", "cancel_command"}:
+        return format_command_record(result or {})
     if tool in READ_ONLY_WORK_TOOLS:
         return summarize_read_result(tool, result or {})
     if tool in WRITE_WORK_TOOLS:
@@ -10487,6 +10716,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "files_touched": paths[-limit:],
         "declared_write_roots": declared_write_roots,
         "commands": commands[-limit:],
+        "running_commands": build_running_command_context(session, limit=limit),
         "suggested_verify_command": suggested_verify_command,
         "verification_coverage_warning": verification_coverage_warning,
         "verification_confidence": verification_confidence,
@@ -10851,6 +11081,20 @@ def format_work_session_resume(resume):
             lines.append(f"long_build_latest_build: {long_build_state.get('latest_build_command')}")
         if long_build_state.get("suggested_next") and not long_build_state.get("recovery_decision"):
             lines.append(f"long_build_next: {long_build_state.get('suggested_next')}")
+    running_commands = resume.get("running_commands") or []
+    if running_commands:
+        lines.extend(["", "Running commands"])
+        for item in running_commands:
+            lines.append(
+                f"- {item.get('command_run_id')} status={item.get('status')} "
+                f"elapsed={item.get('elapsed_seconds')}s timeout={item.get('timeout_seconds')}s "
+                f"tool=#{item.get('tool_call_id')} {item.get('tool') or ''}"
+            )
+            if item.get("command"):
+                lines.append(f"  command: {item.get('command')}")
+            if item.get("output_ref"):
+                lines.append(f"  output_ref: {item.get('output_ref')}")
+            lines.append("  next: poll_command or read_command_output before relying on terminal result")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)
@@ -11646,6 +11890,36 @@ def _find_command_run_for_tool_call(session, tool_call):
     return None
 
 
+def _find_command_run_by_id(session, run_id):
+    if not isinstance(session, dict) or not run_id:
+        return None
+    for run in session.get("command_runs") or []:
+        if isinstance(run, dict) and str(run.get("id") or "") == str(run_id):
+            return run
+    return None
+
+
+def _record_managed_exec_event(session, event_type, *, command_run_id="", tool_call_id=None, result=None):
+    if not isinstance(session, dict):
+        return None
+    result = result if isinstance(result, dict) else {}
+    events = session.setdefault("managed_exec_events", [])
+    event = {
+        "id": len(events) + 1,
+        "type": str(event_type or ""),
+        "created_at": now_iso(),
+        "command_run_id": str(command_run_id or result.get("command_run_id") or ""),
+        "tool_call_id": tool_call_id,
+        "status": result.get("status") or "",
+        "exit_code": result.get("exit_code"),
+        "timed_out": bool(result.get("timed_out")),
+        "elapsed_seconds": result.get("duration_seconds"),
+        "output_ref": result.get("output_ref") or "",
+    }
+    events.append({key: value for key, value in event.items() if value not in (None, "")})
+    return event
+
+
 def _find_command_evidence_for_tool_call(session, tool_call):
     if not isinstance(session, dict) or not isinstance(tool_call, dict):
         return None
@@ -11659,6 +11933,91 @@ def _find_command_evidence_for_tool_call(session, tool_call):
         if str(evidence.get("source_tool_call_id")) == str(tool_call.get("id")):
             return evidence
     return None
+
+
+def _find_command_evidence_by_ref(session, ref):
+    ref = ref if isinstance(ref, dict) else {}
+    ref_id = ref.get("id")
+    if ref_id is None:
+        return None
+    for evidence in (session or {}).get("command_evidence") or []:
+        if isinstance(evidence, dict) and str(evidence.get("id")) == str(ref_id):
+            return evidence
+    return None
+
+
+def _command_run_output_ref(run):
+    ref = (run or {}).get("output_ref")
+    if isinstance(ref, dict):
+        return str(ref.get("path") or "")
+    return str(ref or "")
+
+
+def build_running_command_context(session, limit=4):
+    running = []
+    for run in (session or {}).get("command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        status = str(run.get("status") or "").casefold()
+        if status not in {"running", "yielded"}:
+            continue
+        command_run_id_value = str(run.get("id") or "")
+        item = {
+            "command_run_id": command_run_id_value,
+            "tool_call_id": run.get("tool_call_id"),
+            "tool": run.get("tool") or "",
+            "status": status,
+            "command": run.get("command") or "",
+            "cwd": run.get("cwd") or "",
+            "started_at": run.get("started_at") or "",
+            "elapsed_seconds": run.get("elapsed_seconds"),
+            "foreground_budget_seconds": run.get("foreground_budget_seconds"),
+            "timeout_seconds": run.get("timeout_seconds"),
+            "output_ref": _command_run_output_ref(run) or _command_run_output_ref_from_id(command_run_id_value),
+            "suggested_next": "poll_command or continue read-only investigation",
+            "poll_action": {"type": "poll_command", "command_run_id": command_run_id_value, "wait_seconds": 5},
+            "read_output_action": {"type": "read_command_output", "command_run_id": command_run_id_value, "tail": True},
+        }
+        running.append(item)
+    return running[-max(1, int(limit or 1)) :]
+
+
+def _command_run_is_terminal(run):
+    status = str((run or {}).get("status") or "").casefold()
+    terminal = (run or {}).get("terminal") if isinstance((run or {}).get("terminal"), dict) else {}
+    return status in {"completed", "failed", "timed_out", "killed", "interrupted", "orphaned"} or bool(
+        terminal.get("terminal")
+    )
+
+
+def _cached_terminal_command_result(session, parameters, *, action_kind):
+    parameters = parameters if isinstance(parameters, dict) else {}
+    run_id = str(parameters.get("command_run_id") or "")
+    run = _find_command_run_by_id(session, run_id)
+    if not run or not _command_run_is_terminal(run):
+        return None
+    terminal = run.get("terminal") if isinstance(run.get("terminal"), dict) else {}
+    evidence = _find_command_evidence_by_ref(session, run.get("terminal_command_evidence_ref") or run.get("command_evidence_ref"))
+    status = str(run.get("status") or "completed")
+    result = {
+        "command": run.get("command") or "",
+        "argv": run.get("argv") or [],
+        "execution_mode": run.get("execution_mode") or "",
+        "cwd": run.get("cwd") or "",
+        "command_run_id": run_id,
+        "output_ref": _command_run_output_ref(run),
+        "output_path": _command_run_output_path_from_ref(_command_run_output_ref(run)),
+        "started_at": run.get("started_at") or "",
+        "finished_at": run.get("finished_at") or terminal.get("finished_at") or "",
+        "duration_seconds": run.get("elapsed_seconds"),
+        "status": status,
+        "exit_code": terminal.get("exit_code"),
+        "timed_out": bool(terminal.get("timed_out")),
+        "stdout": (evidence or {}).get("stdout_tail") or "",
+        "stderr": (evidence or {}).get("stderr_tail") or "",
+        "cached_terminal_command": True,
+    }
+    return _with_managed_long_command_metadata(result, budget={}, action_kind=action_kind)
 
 
 def _command_run_status_from_evidence(evidence, tool_call):
@@ -11715,10 +12074,26 @@ def _record_command_run_from_evidence(session, tool_call, evidence):
         command=result.get("command") or parameters.get("command") or "",
         cwd=result.get("cwd") or parameters.get("cwd") or "",
         status=status,
+        argv=result.get("argv") or [],
+        execution_mode=result.get("execution_mode") or "",
+        started_at=result.get("started_at") or tool_call.get("started_at") or "",
+        finished_at=result.get("finished_at") or tool_call.get("finished_at"),
+        elapsed_seconds=result.get("duration_seconds"),
+        foreground_budget_seconds=result.get("foreground_budget_seconds") or parameters.get("foreground_budget_seconds"),
+        timeout_seconds=result.get("timeout_seconds") or result.get("command_timeout_seconds") or parameters.get("timeout"),
+        final_proof_reserve_seconds=(
+            (evidence.get("execution_contract") or {}).get("continuation_policy", {}).get("final_proof_reserve_seconds")
+            if isinstance(evidence.get("execution_contract"), dict)
+            and isinstance((evidence.get("execution_contract") or {}).get("continuation_policy"), dict)
+            else None
+        ),
+        managed_process_id=result.get("pid") or "",
         command_evidence_ref=evidence.get("ref") if isinstance(evidence.get("ref"), dict) else None,
         terminal_command_evidence_ref=terminal_ref,
         execution_contract=evidence.get("execution_contract") if isinstance(evidence.get("execution_contract"), dict) else {},
         output_ref=evidence.get("output_ref"),
+        reducer_context=parameters.get("reducer_context") if isinstance(parameters.get("reducer_context"), dict) else {},
+        failure_fingerprint=result.get("failure_fingerprint"),
         exit_code=evidence.get("exit_code"),
         timed_out=evidence.get("timed_out"),
     )
@@ -11760,7 +12135,13 @@ def _record_command_evidence_start(session, tool_call):
     evidence_dict = evidence.to_dict()
     session.setdefault("command_evidence", []).append(evidence_dict)
     tool_call["command_evidence_ref"] = dict(evidence.ref)
-    _record_command_run_from_evidence(session, tool_call, evidence_dict)
+    run = _record_command_run_from_evidence(session, tool_call, evidence_dict)
+    _record_managed_exec_event(
+        session,
+        "command_queued",
+        command_run_id=(run or {}).get("id") or evidence_dict.get("command_run_id") or "",
+        tool_call_id=tool_call.get("id"),
+    )
     return evidence_dict
 
 
@@ -11808,7 +12189,101 @@ def _record_command_evidence_finish(session, tool_call):
     else:
         session.setdefault("command_evidence", []).append(evidence_dict)
     tool_call["command_evidence_ref"] = dict(evidence.ref)
-    _record_command_run_from_evidence(session, tool_call, evidence_dict)
+    run = _record_command_run_from_evidence(session, tool_call, evidence_dict)
+    if managed_status in {"running", "yielded"}:
+        event_type = "foreground_yielded"
+    elif managed_status == "timed_out":
+        event_type = "timeout_killed"
+    else:
+        event_type = "evidence_finalized"
+    _record_managed_exec_event(
+        session,
+        event_type,
+        command_run_id=(run or {}).get("id") or evidence_dict.get("command_run_id") or "",
+        tool_call_id=tool_call.get("id"),
+        result=result,
+    )
+    return evidence_dict
+
+
+def _record_command_lifecycle_tool_finish(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    if tool_call.get("tool") not in {"poll_command", "cancel_command"}:
+        return None
+    result = tool_call.get("result") if isinstance(tool_call.get("result"), dict) else {}
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    run_id = str(result.get("command_run_id") or parameters.get("command_run_id") or "")
+    run = _find_command_run_by_id(session, run_id)
+    if run is None:
+        return None
+    if result.get("cached_terminal_command"):
+        evidence = _find_command_evidence_by_ref(
+            session,
+            run.get("terminal_command_evidence_ref") or run.get("command_evidence_ref"),
+        )
+        if evidence:
+            ref = evidence.get("ref") if isinstance(evidence.get("ref"), dict) else {"kind": "command_evidence", "id": evidence.get("id")}
+            tool_call["command_evidence_ref"] = dict(ref)
+            tool_call["command_run_id"] = run_id
+        return evidence
+    managed = result.get("managed_long_command") if isinstance(result.get("managed_long_command"), dict) else {}
+    managed_status = str(managed.get("status") or result.get("status") or "").casefold()
+    if managed_status in {"running", "yielded"}:
+        run["status"] = managed_status
+        run["terminal"] = {
+            **(run.get("terminal") if isinstance(run.get("terminal"), dict) else {}),
+            "exit_code": None,
+            "timed_out": False,
+            "terminal": False,
+        }
+        return None
+
+    original_tool = str(run.get("tool") or "run_command")
+    if original_tool not in COMMAND_EVIDENCE_TOOLS:
+        original_tool = "run_command"
+    start_evidence = _find_command_evidence_by_ref(session, run.get("command_evidence_ref"))
+    evidence_id = _next_command_evidence_id(session)
+    start_order = int((start_evidence or {}).get("start_order") or _next_command_evidence_order(session))
+    finish_order = _next_command_evidence_order(session)
+    fake_parameters = {
+        "command": result.get("command") or run.get("command") or parameters.get("command") or "",
+        "cwd": result.get("cwd") or run.get("cwd") or parameters.get("cwd") or "",
+        "command_run_id": run_id,
+        "execution_contract": run.get("execution_contract") if isinstance(run.get("execution_contract"), dict) else {},
+        "timeout": result.get("timeout_seconds") or parameters.get("timeout"),
+    }
+    fake_call = {
+        "id": run.get("tool_call_id") or tool_call.get("id"),
+        "tool": original_tool,
+        "status": "completed" if managed_status not in {"failed", "timed_out", "killed", "interrupted", "orphaned"} else managed_status,
+        "parameters": fake_parameters,
+        "result": result,
+        "started_at": result.get("started_at") or run.get("started_at") or tool_call.get("started_at"),
+        "finished_at": result.get("finished_at") or tool_call.get("finished_at"),
+    }
+    evidence = command_evidence_from_tool_call(
+        fake_call,
+        evidence_id=evidence_id,
+        start_order=start_order,
+        finish_order=finish_order,
+        source="native_command",
+    )
+    if not evidence:
+        return None
+    evidence_dict = evidence.to_dict()
+    session.setdefault("command_evidence", []).append(evidence_dict)
+    tool_call["command_evidence_ref"] = dict(evidence.ref)
+    tool_call["command_run_id"] = run_id
+    _record_command_run_from_evidence(session, fake_call, evidence_dict)
+    event_type = "timeout_killed" if managed_status == "timed_out" else "evidence_finalized"
+    _record_managed_exec_event(
+        session,
+        event_type,
+        command_run_id=run_id,
+        tool_call_id=tool_call.get("id"),
+        result=result,
+    )
     return evidence_dict
 
 
@@ -12025,6 +12500,8 @@ def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""
     tool_call.pop("running_output", None)
     tool_call["finished_at"] = finished_at
     evidence = _record_command_evidence_finish(session, tool_call)
+    if evidence is None:
+        evidence = _record_command_lifecycle_tool_finish(session, tool_call)
     _record_long_command_run_from_tool_call(session, tool_call, evidence)
     if session:
         session["updated_at"] = finished_at
@@ -12035,7 +12512,15 @@ def run_work_tool(state, session, tool, parameters, allowed_read_roots):
     tool_call = start_work_tool_call(state, session, tool, parameters)
 
     try:
-        result = execute_work_tool(tool, parameters, allowed_read_roots)
+        if tool in {"poll_command", "cancel_command"}:
+            cached_result = _cached_terminal_command_result(
+                session,
+                tool_call.get("parameters") or {},
+                action_kind=f"{tool}_cached_terminal",
+            )
+            if cached_result is not None:
+                return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), result=cached_result)
+        result = execute_work_tool(tool, tool_call.get("parameters") or {}, allowed_read_roots)
         return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), result=result)
     except (OSError, ValueError) as exc:
         return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), error=str(exc))

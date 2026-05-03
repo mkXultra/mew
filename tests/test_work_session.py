@@ -2049,6 +2049,246 @@ class WorkSessionTests(unittest.TestCase):
                 allowed_read_roots=[Path(".")],
             )
 
+    def test_run_tests_allows_foreground_yieldable_without_background(self):
+        result = execute_work_tool(
+            "run_tests",
+            {
+                "allow_verify": True,
+                "command": f"{shlex.quote(sys.executable)} -c \"print('ok')\"",
+                "cwd": ".",
+                "execution_contract": {
+                    "purpose": "verification",
+                    "stage": "verification",
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                    "background_policy": {"mode": "foreground_yieldable", "allow_background": False},
+                },
+            },
+            allowed_read_roots=[Path(".")],
+        )
+
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["managed_long_command"]["status"], "completed")
+
+    def test_run_command_yields_then_poll_finalizes_command_run_and_output(self):
+        work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+        with tempfile.TemporaryDirectory() as tmp:
+            state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+            session = {"id": 1, "task_id": 1, "tool_calls": []}
+            state["work_sessions"].append(session)
+            command = shlex.join(
+                [
+                    sys.executable,
+                    "-c",
+                    "import time; print('managed-start', flush=True); time.sleep(1.2); print('managed-done', flush=True)",
+                ]
+            )
+
+            call = work_session_module.run_work_tool(
+                state,
+                session,
+                "run_command",
+                {
+                    "allow_shell": True,
+                    "command": command,
+                    "cwd": tmp,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+                allowed_read_roots=[Path(tmp)],
+            )
+
+            try:
+                self.assertEqual(call["result"]["managed_long_command"]["status"], "yielded")
+                run_id = call["command_run_id"]
+                self.assertEqual(session["command_runs"][0]["id"], run_id)
+                self.assertEqual(session["command_runs"][0]["status"], "yielded")
+                self.assertFalse(session["command_runs"][0]["terminal"]["terminal"])
+                self.assertEqual(session["command_evidence"][0]["finish_order"], 0)
+                self.assertEqual(
+                    [event["type"] for event in session["managed_exec_events"]],
+                    ["command_queued", "foreground_yielded"],
+                )
+                resume = work_session_module.build_work_session_resume(session)
+                self.assertEqual(resume["running_commands"][0]["command_run_id"], run_id)
+                self.assertEqual(resume["running_commands"][0]["status"], "yielded")
+                self.assertEqual(resume["running_commands"][0]["poll_action"]["type"], "poll_command")
+                self.assertIn("Running commands", work_session_module.format_work_session_resume(resume))
+                output_path = Path(call["result"]["output_path"])
+                self.assertTrue(output_path.exists())
+                self.assertIn("managed-start", output_path.read_text(encoding="utf-8"))
+
+                output_call = work_session_module.run_work_tool(
+                    state,
+                    session,
+                    "read_command_output",
+                    {"command_run_id": run_id, "tail": True, "max_chars": 200},
+                    allowed_read_roots=[],
+                )
+                self.assertIn("managed-start", output_call["result"]["content"])
+
+                time.sleep(0.4)
+                poll_call = work_session_module.run_work_tool(
+                    state,
+                    session,
+                    "poll_command",
+                    {"command_run_id": run_id, "wait_seconds": 1},
+                    allowed_read_roots=[],
+                )
+
+                self.assertEqual(poll_call["result"]["managed_long_command"]["status"], "completed")
+                self.assertEqual(session["command_runs"][0]["status"], "completed")
+                self.assertEqual(session["command_runs"][0]["terminal_command_evidence_ref"], {"kind": "command_evidence", "id": 2})
+                self.assertEqual(session["command_evidence"][0]["finish_order"], 0)
+                self.assertGreater(session["command_evidence"][1]["finish_order"], session["command_evidence"][1]["start_order"])
+                self.assertIn("managed-done", session["command_evidence"][1]["stdout_tail"])
+                self.assertEqual(session["managed_exec_events"][-1]["type"], "evidence_finalized")
+            finally:
+                work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+
+    def test_poll_command_after_terminal_returns_cached_result_without_mutating_evidence(self):
+        work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+        with tempfile.TemporaryDirectory() as tmp:
+            state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+            session = {"id": 1, "task_id": 1, "tool_calls": []}
+            state["work_sessions"].append(session)
+            command = shlex.join([sys.executable, "-c", "print('done')"])
+
+            start = work_session_module.run_work_tool(
+                state,
+                session,
+                "run_command",
+                {"allow_shell": True, "command": command, "cwd": tmp, "timeout": 5},
+                allowed_read_roots=[Path(tmp)],
+            )
+            run_id = start["command_run_id"]
+            self.assertEqual(session["command_runs"][0]["status"], "completed")
+            self.assertEqual(session["command_runs"][0]["foreground_budget_seconds"], 4.0)
+            self.assertEqual(session["command_runs"][0]["timeout_seconds"], 5)
+            terminal_ref = dict(session["command_runs"][0]["terminal_command_evidence_ref"])
+            evidence_before = deepcopy(session["command_evidence"])
+
+            poll = work_session_module.run_work_tool(
+                state,
+                session,
+                "poll_command",
+                {"command_run_id": run_id, "wait_seconds": 1},
+                allowed_read_roots=[],
+            )
+
+            self.assertTrue(poll["result"]["cached_terminal_command"])
+            self.assertEqual(poll["command_evidence_ref"], terminal_ref)
+            self.assertEqual(session["command_runs"][0]["status"], "completed")
+            self.assertEqual(session["command_evidence"], evidence_before)
+
+    def test_cancel_command_finalizes_yielded_command_run(self):
+        work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+        with tempfile.TemporaryDirectory() as tmp:
+            state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+            session = {"id": 1, "task_id": 1, "tool_calls": []}
+            state["work_sessions"].append(session)
+            command = shlex.join([sys.executable, "-c", "import time; print('started', flush=True); time.sleep(10)"])
+
+            start = work_session_module.run_work_tool(
+                state,
+                session,
+                "run_command",
+                {
+                    "allow_shell": True,
+                    "command": command,
+                    "cwd": tmp,
+                    "timeout": 30,
+                    "foreground_budget_seconds": 1,
+                },
+                allowed_read_roots=[Path(tmp)],
+            )
+            try:
+                run_id = start["command_run_id"]
+                self.assertEqual(session["command_runs"][0]["status"], "yielded")
+
+                cancel = work_session_module.run_work_tool(
+                    state,
+                    session,
+                    "cancel_command",
+                    {"command_run_id": run_id, "reason": "test stop"},
+                    allowed_read_roots=[],
+                )
+
+                self.assertEqual(cancel["result"]["managed_long_command"]["status"], "killed")
+                self.assertEqual(session["command_runs"][0]["status"], "killed")
+                self.assertEqual(session["command_runs"][0]["terminal_command_evidence_ref"], {"kind": "command_evidence", "id": 2})
+                self.assertEqual(session["command_evidence"][0]["finish_order"], 0)
+                self.assertEqual(session["command_evidence"][1]["status"], "killed")
+                self.assertEqual(session["managed_exec_events"][-1]["type"], "evidence_finalized")
+            finally:
+                work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+
+    def test_poll_command_rejects_command_shape_fields(self):
+        with self.assertRaisesRegex(ValueError, "disallowed: command"):
+            execute_work_tool(
+                "poll_command",
+                {"command_run_id": "work_session:1:command_run:1", "command": "sleep 1"},
+                allowed_read_roots=[],
+            )
+        with self.assertRaisesRegex(ValueError, "disallowed: foreground_budget_seconds"):
+            execute_work_tool(
+                "cancel_command",
+                {"command_run_id": "work_session:1:command_run:1", "foreground_budget_seconds": 1},
+                allowed_read_roots=[],
+            )
+
+    def test_managed_poll_exception_cancels_started_command(self):
+        work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+        with tempfile.TemporaryDirectory() as tmp:
+            command = shlex.join([sys.executable, "-c", "import time; print('started', flush=True); time.sleep(10)"])
+            try:
+                with patch.object(work_session_module, "_managed_runner_poll", side_effect=RuntimeError("poll boom")):
+                    result = execute_work_tool(
+                        "run_command",
+                        {
+                            "allow_shell": True,
+                            "command": command,
+                            "cwd": tmp,
+                            "timeout": 30,
+                            "foreground_budget_seconds": 1,
+                        },
+                        allowed_read_roots=[Path(tmp)],
+                    )
+                self.assertEqual(result["managed_long_command"]["status"], "failed")
+                self.assertIn("poll boom", result["stderr"])
+                self.assertEqual(work_session_module._WORK_MANAGED_COMMAND_RUNNER.handles, {})
+            finally:
+                work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+
+    def test_read_command_output_rejects_non_spool_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outside = Path(tmp) / "outside.log"
+            outside.write_text("secret", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "only read managed command output"):
+                execute_work_tool(
+                    "read_command_output",
+                    {"output_path": str(outside)},
+                    allowed_read_roots=[],
+                )
+
+    def test_read_command_output_uses_stable_spool_root_across_cwd_changes(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as other:
+            root = (Path(tmp) / ".mew").resolve()
+            output_ref = "work-session/1/command/1/output.log"
+            output_path = root / output_ref
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text("stable spool\n", encoding="utf-8")
+            old_cwd = Path.cwd()
+            try:
+                with patch.object(work_session_module, "WORK_COMMAND_OUTPUT_ROOT", root):
+                    os.chdir(other)
+                    result = work_session_module.read_work_command_output({"output_ref": output_ref})
+            finally:
+                os.chdir(old_cwd)
+
+            self.assertEqual(result["content"], "stable spool\n")
+            self.assertEqual(Path(result["output_path"]), output_path)
+
     def test_command_evidence_ref_is_visible_when_tool_and_evidence_ids_diverge(self):
         from mew.work_session import build_work_session_command_entries, format_work_session_commands
         from mew.work_loop import work_tool_call_for_model

@@ -161,6 +161,23 @@ def test_execution_contract_normalizer_rejects_invalid_enum_and_missing_required
     assert execution_contract_stage(contract) == ""
 
 
+def test_execution_contract_normalizer_deduplicates_normalized_affected_paths():
+    contract = normalize_execution_contract(
+        {
+            "purpose": "build",
+            "stage": "build",
+            "proof_role": "target_build",
+            "acceptance_kind": "progress_only",
+            "affected_paths": ["src\\module", "src/module"],
+        },
+        tool="run_command",
+        command="make",
+        cwd="/tmp/project",
+    )
+
+    assert contract["affected_paths"] == ["src/module"]
+
+
 def test_invalid_typed_contract_cannot_fallback_into_artifact_acceptance():
     evidence = synthesize_command_evidence_from_tool_calls(
         [

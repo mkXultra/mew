@@ -135,6 +135,7 @@ class ToolboxTests(unittest.TestCase):
 
     def test_managed_command_runner_yields_then_finalizes_success(self):
         with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "managed-output.log"
             command = shlex.join(
                 [
                     sys.executable,
@@ -144,11 +145,22 @@ class ToolboxTests(unittest.TestCase):
             )
             runner = ManagedCommandRunner()
 
-            handle = runner.start(command, cwd=tmp, timeout=1, kill_process_group=True)
+            handle = runner.start(
+                command,
+                cwd=tmp,
+                timeout=1,
+                kill_process_group=True,
+                command_run_id="work_session:1:command_run:1",
+                output_ref="work-session/1/command/1/output.log",
+                output_path=str(output_path),
+            )
             running = runner.poll(wait_seconds=0.2)
             final = runner.finalize(timeout=1)
 
             self.assertEqual(handle.pid, handle.process_group_id)
+            self.assertEqual(running["command_run_id"], "work_session:1:command_run:1")
+            self.assertEqual(running["output_ref"], "work-session/1/command/1/output.log")
+            self.assertEqual(running["output_path"], str(output_path))
             self.assertEqual(running["status"], "running")
             self.assertIsNone(running["exit_code"])
             self.assertGreater(running["duration_seconds"], 0)
@@ -157,6 +169,8 @@ class ToolboxTests(unittest.TestCase):
             self.assertFalse(final["timed_out"])
             self.assertGreaterEqual(final["duration_seconds"], running["duration_seconds"])
             self.assertIn("done", final["stdout"])
+            self.assertIn("started", output_path.read_text(encoding="utf-8"))
+            self.assertIn("done", output_path.read_text(encoding="utf-8"))
 
     def test_managed_command_runner_finalizes_nonzero_after_yield(self):
         with tempfile.TemporaryDirectory() as tmp:
