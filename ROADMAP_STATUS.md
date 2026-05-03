@@ -2488,7 +2488,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.24 improvement_phase -> clean long-build closeout state repair -> clean compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
+`M6.24 improvement_phase -> clean long-build closeout state repair -> pre-speed operation -> clean compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
 
 Acceptable near-term work:
 
@@ -2496,7 +2496,12 @@ Acceptable near-term work:
   no-Terminal-Bench-specific-solver constraint
 - preserve the no-task-specific-acceptance-parser decision recorded in
   `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_REPAIR_2026-05-01.md`
-- after the clean closeout state repair, rerun one same-shape
+- after the clean closeout state repair, run the pre-speed operation on current
+  head: focused local validation, `mew replay terminal-bench` against the latest
+  relevant saved Harbor artifact or synthetic same-shape fixture, and
+  `mew dogfood --scenario m6_24-terminal-bench-replay` with
+  `--terminal-bench-job-dir` when validating an existing artifact
+- only after the pre-speed operation passes, rerun one same-shape
   `compile-compcert` speed_1 with refreshable `~/.codex/auth.json`; escalate
   to sequential proof_5 only after speed_1 shows external reward `1.0`, runner
   errors `0`, command transcript exit `0`, clean `mew-report` closeout, no

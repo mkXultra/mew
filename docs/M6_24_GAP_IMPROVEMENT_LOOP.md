@@ -59,7 +59,8 @@ Initial codex-ultra review found two integration gaps in that repair:
 `recover_long_command` was not yet routed through the managed runner, and killed
 managed commands could collapse to `failed`. Both follow-up fixes are now
 implemented locally with focused and broader validation; codex-ultra re-review
-approved them. The next action is exactly one same-shape speed_1.
+approved them. At that point the next action was exactly one same-shape
+speed_1.
 That speed_1 passed externally and `mew work` exited `0`, but internal
 `resume.long_build_state` still reports `status=blocked`, `source_authority`
 and `default_smoke` unknown, and a stale dependency-generation blocker. The
@@ -71,8 +72,8 @@ The previous rerun redirected the controller from `long-build wall-time /
 continuation budget` to config/source-script external-hook repair, then to
 production continuation dispatch, nonterminal handoff, and now compound
 budget-stage promotion and non-timeout source-acquisition retry repair. Do not
-spend another `proof_5` or broad measurement run until the same-shape speed
-rerun after this repair is recorded.
+spend another `proof_5` or broad measurement run until the pre-speed operation
+and same-shape speed rerun after this repair are recorded.
 
 Do not grow the budget classifier into a broad shell classifier. The durable
 decision is in `docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md`: keep
@@ -100,7 +101,18 @@ For every candidate gap, run this decision chain:
    no  -> stop and write the lane/profile/helper decision first
    yes -> continue
 
-4. Did the speed same-shape rerun improve the selected gap class?
+4. Before spending a live speed same-shape rerun, did the pre-speed operation
+   pass on current head?
+   required:
+     1. focused local validation for the changed gap surface
+     2. `mew replay terminal-bench` against the latest relevant saved Harbor
+        artifact, or a synthetic same-shape replay fixture if no artifact exists
+     3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
+        `--terminal-bench-job-dir` when validating an existing Harbor artifact
+   no  -> fix the local/replay/dogfood failure before live speed proof
+   yes -> spend exactly the selected same-shape speed rerun
+
+5. Did the speed same-shape rerun improve the selected gap class?
    yes -> record delta, then choose the next highest-leverage gap or resume
           broad measurement if the decision ledger says the threshold is met
    no  -> record unchanged/regressed, then either revise the repair route or
@@ -111,7 +123,7 @@ The selected gap class must be written before implementation starts. If the
 current resident cannot write this chain in one line, do not implement:
 
 ```text
-M6.24 -> selected gap class -> architecture fit -> required next action -> same-shape rerun condition
+M6.24 -> selected gap class -> architecture fit -> required next action -> pre-speed operation -> same-shape rerun condition
 ```
 
 ## Gap-Class Repair History Rule
@@ -396,7 +408,7 @@ channel retry as `repeat_same_timeout_without_budget_change`.
 
 Selected chain:
 
-`M6.24 -> long_dependency/toolchain gap -> final artifact/default-smoke closeout repair -> codex re-review -> same-shape speed_1`
+`M6.24 -> long_dependency/toolchain gap -> final artifact/default-smoke closeout repair -> codex re-review -> pre-speed operation -> same-shape speed_1`
 
 The current repair is generic detector/resume-state policy: only timed-out or
 killed long commands require same-idempotence resume with larger budget.
@@ -406,6 +418,11 @@ same-shape rerun recorded a newer narrower gap: external pass with stale
 internal long-build closeout. codex-ultra classified it as reducer/closeout
 `REPAIR_NOW`; the generic local repair plus codex-requested hardening is
 implemented and locally validated in
-`docs/M6_24_FINAL_CLOSEOUT_PROJECTION_REPAIR_2026-05-03.md`. Do not run broad
-measurement or `proof_5` until that repair is re-reviewed and one same-shape
-rerun records clean internal closeout or a newer narrower gap.
+`docs/M6_24_FINAL_CLOSEOUT_PROJECTION_REPAIR_2026-05-03.md`. Before spending
+the live same-shape `speed_1`, run the pre-speed operation: focused local
+validation for the closeout repair, `mew replay terminal-bench` against the
+latest relevant saved Harbor artifact, and
+`mew dogfood --scenario m6_24-terminal-bench-replay` using that artifact when
+available. Do not run broad measurement or `proof_5` until that repair is
+re-reviewed, the pre-speed operation passes, and one same-shape rerun records
+clean internal closeout or a newer narrower gap.
