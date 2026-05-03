@@ -458,3 +458,16 @@ Review update: codex-ultra session `019debd8-a8c8-7d91-8fcf-27f147c89eb4`
 approved after a request-change round that added post-wall-ceiling enforcement
 for recover actions. The next action is the pre-speed operation on current head,
 then exactly one same-shape `compile-compcert` speed_1.
+
+Update 2026-05-03 12:56 JST: that same-shape speed_1 was run and classified.
+The prior failed-long-command repair-budget gate moved; the current selected
+gap is `dependency_generation_diagnostic_budget_floor_overconstrained` in
+`tool_runtime_budget`. The exact Harbor artifact was reproduced through both
+`mew replay terminal-bench` and `mew dogfood --scenario
+m6_24-terminal-bench-replay` with explicit assertions. The local repair keeps
+the `600s` floor for side-effecting dependency/build repairs, but routes
+read-only diagnostics such as `find`, `sed`, and `make -n` to the diagnostic
+floor only after segment/token validation. codex-ultra review session
+`019debfe-47ae-71c0-b778-744d4aa70d99` approved after two request-change
+rounds. The next action is the pre-speed operation on current head, then
+exactly one same-shape `compile-compcert` speed_1.

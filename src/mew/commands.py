@@ -26,6 +26,7 @@ from .acceptance import (
     is_long_dependency_toolchain_build_task,
     long_dependency_final_artifacts,
 )
+from .acceptance_evidence import split_unquoted_shell_command_segments
 from .agent_runs import (
     build_ai_cli_run_command,
     create_agent_run,
@@ -6154,6 +6155,11 @@ _FAILED_LONG_COMMAND_REPAIR_MINIMUM_TIMEOUT_BY_STAGE = {
     "configure": 120.0,
 }
 
+_READ_ONLY_DIAGNOSTIC_COMMANDS = {"cat", "grep", "ls", "pwd", "sha256sum", "test", "wc"}
+_WRITE_REDIRECT_RE = re.compile(r"(?:^|[\s])(?:\d*)?(?:>>?|>\||&>>|&>)(?!&\d)")
+_HEREDOC_RE = re.compile(r"(?:^|[\s])(?:<<|<<<)")
+_FD_DUP_REDIRECT_RE = re.compile(r"^\d*>&\d+$")
+
 _LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES = {
     "build_system_target_surface_probe": {"artifact_proof", "build", "default_smoke", "runtime_build", "runtime_install"},
     "budget_preserving_recovery": set(),
@@ -6177,6 +6183,109 @@ def _failed_long_command_repair_minimum_timeout_seconds(stage, budget):
     if stage_minimum is None:
         return base
     return min(base, stage_minimum)
+
+
+def _shell_segment_tokens_for_read_only_diagnostic(segment):
+    try:
+        return shlex.split(str(segment or ""), comments=True, posix=True)
+    except ValueError:
+        return []
+
+
+def _diagnostic_executable_name(token):
+    name = os.path.basename(str(token or "").strip())
+    return name.lower()
+
+
+def _diagnostic_segment_has_write_redirect(segment):
+    text = str(segment or "")
+    if _HEREDOC_RE.search(text) or _WRITE_REDIRECT_RE.search(text):
+        return True
+    for token in _shell_segment_tokens_for_read_only_diagnostic(segment):
+        if ">" in token and not _FD_DUP_REDIRECT_RE.match(token):
+            return True
+        if token in {">", ">>", ">|", "&>", "&>>", "<>", "<<<"}:
+            return True
+        if re.match(r"^\d*(?:>>?|>\|).+", token) and not re.match(r"^\d*>&\d+$", token):
+            return True
+    return False
+
+
+def _make_tokens_are_dry_run(tokens):
+    for token in tokens[1:]:
+        if token in {"-n", "--dry-run", "--just-print", "--print-only"}:
+            return True
+        if token.startswith("--"):
+            continue
+        if token.startswith("-") and "n" in token[1:]:
+            return True
+    return False
+
+
+def _tar_tokens_are_read_only_list(tokens):
+    for token in tokens[1:]:
+        if token in {"--extract", "-x"}:
+            return False
+        if token.startswith("--"):
+            if token == "--list":
+                return True
+            continue
+        if token.startswith("-") and "x" in token:
+            return False
+    return any(token == "--list" or (token.startswith("-") and "t" in token) for token in tokens[1:])
+
+
+def _find_tokens_are_read_only(tokens):
+    if any(token in {"-delete", "-exec", "-execdir", "-ok", "-okdir"} for token in tokens[1:]):
+        return False
+    return True
+
+
+def _sed_tokens_are_read_only(tokens):
+    return not any(token == "--in-place" or token.startswith("--in-place=") or token.startswith("-i") for token in tokens[1:])
+
+
+def _shell_segment_is_read_only_diagnostic(segment):
+    if _diagnostic_segment_has_write_redirect(segment):
+        return False
+    tokens = _shell_segment_tokens_for_read_only_diagnostic(segment)
+    if not tokens:
+        return False
+    command = _diagnostic_executable_name(tokens[0])
+    if command in {"cd", "set", "true", ":"}:
+        return True
+    if command in _READ_ONLY_DIAGNOSTIC_COMMANDS:
+        return True
+    if command == "find":
+        return _find_tokens_are_read_only(tokens)
+    if command == "sed":
+        return _sed_tokens_are_read_only(tokens)
+    if command == "tar":
+        return _tar_tokens_are_read_only_list(tokens)
+    if command == "make":
+        return _make_tokens_are_dry_run(tokens)
+    return False
+
+
+def _failed_long_command_repair_is_read_only_diagnostic(command, typed_contract=None):
+    command = str(command or "")
+    saw_diagnostic = False
+    for segment in split_unquoted_shell_command_segments(command):
+        if not _shell_segment_is_read_only_diagnostic(segment):
+            return False
+        tokens = _shell_segment_tokens_for_read_only_diagnostic(segment)
+        command_name = _diagnostic_executable_name(tokens[0]) if tokens else ""
+        if command_name not in {"cd", "set", "true", ":"}:
+            saw_diagnostic = True
+    return saw_diagnostic
+
+
+def _failed_long_command_repair_effective_stage_for_minimum(stage, command, typed_contract=None):
+    if _failed_long_command_repair_is_read_only_diagnostic(command, typed_contract=typed_contract):
+        return "diagnostic"
+    if str(stage or "") == "diagnostic":
+        return ""
+    return str(stage or "")
 
 
 def _work_session_long_build_state_for_timeout_policy(task=None, session=None):
@@ -6376,7 +6485,10 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
                 budget_blocked_reason = "repeat_same_timeout_without_budget_change"
             reserve = _long_build_reserve_seconds(contract, recovery_decision)
         elif recovery_decision_kind == "repair_failed_long_command":
-            minimum_timeout_seconds = _failed_long_command_repair_minimum_timeout_seconds(stage, budget)
+            minimum_timeout_seconds = _failed_long_command_repair_minimum_timeout_seconds(
+                _failed_long_command_repair_effective_stage_for_minimum(stage, command, typed_contract=typed_contract),
+                budget,
+            )
             failed_idempotence_key = str(allowed_next.get("failed_idempotence_key") or "")
             resume_identity = typed_contract.get("resume_identity") if isinstance(typed_contract.get("resume_identity"), dict) else {}
             planned_key = str(resume_identity.get("idempotence_key") or "") or long_command_idempotence_key(

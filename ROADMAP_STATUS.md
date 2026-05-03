@@ -2499,12 +2499,12 @@ Acceptable near-term work:
 - execution-contract Phase 0-6 is committed at `4dbd099`; current-head local
   validation, replay, dogfood, ruff, diff check, and codex-ultra phase review
   passed with `PHASE_GATE: safe_to_commit_pre_speed`
-- next, rerun one same-shape `compile-compcert` speed_1 with refreshable
-  `~/.codex/auth.json`; escalate to sequential proof_5 only after speed_1 shows
-  external reward `1.0`, runner errors `0`, command transcript exit `0`, clean
-  `mew-report` closeout, no stale `resume.long_build_state.current_failure`,
-  and no active stale strategy blockers for resolved runtime/toolchain/source
-  blockers
+- next, run the pre-speed operation and one same-shape `compile-compcert`
+  speed_1 with refreshable `~/.codex/auth.json`; escalate to sequential
+  proof_5 only after speed_1 shows external reward `1.0`, runner errors `0`,
+  command transcript exit `0`, clean `mew-report` closeout, no stale
+  `resume.long_build_state.current_failure`, and no active stale strategy
+  blockers for resolved runtime/toolchain/source blockers
 - if that live speed/proof misses, reproduce the saved Harbor artifact with
   both `mew replay terminal-bench` and `mew dogfood --scenario
   m6_24-terminal-bench-replay --terminal-bench-job-dir ...` using explicit
@@ -2517,6 +2517,16 @@ Acceptable near-term work:
   while preserving the 600s floor for build repairs and blocking identical
   failed retries. codex-ultra session `019debd8-a8c8-7d91-8fcf-27f147c89eb4`
   approved after adding post-wall-ceiling enforcement for recover actions.
+- the failed-long-command repair-budget same-shape speed_1 then missed and was
+  reproduced through exact artifact replay/dogfood. The current repair is
+  `dependency_generation_diagnostic_budget_floor_overconstrained`: allow short
+  read-only diagnostics such as `find`, `sed`, and `make -n` after a terminal
+  failed long command, while preserving the 600s floor for side-effecting
+  dependency/build repairs such as `make depend` or `make ccomp`. codex-ultra
+  session `019debfe-47ae-71c0-b778-744d4aa70d99` approved after two
+  request-change rounds that tightened segment/token parsing, comment
+  stripping, typed-contract guardrails, and no-whitespace write-redirection
+  rejection.
 - if proof_5 misses the frozen `5/5` close target, read
   `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before selecting any next
   repair, and update `proof-artifacts/m6_24_gap_ledger.jsonl`
