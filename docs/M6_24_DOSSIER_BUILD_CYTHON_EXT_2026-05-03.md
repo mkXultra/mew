@@ -159,8 +159,10 @@ Current pre-speed status:
 - `mew dogfood --scenario m6_24-terminal-bench-replay` now passes on the same
   artifact after removing the scenario's hard-coded `compile-compcert` task
   filter and adding `--terminal-bench-task`.
-- A same-shape emulator for this repository-test-tail frontier is still needed
-  before live `speed_1`.
+- `mew dogfood --scenario m6_24-repository-test-tail-emulator` passes on the
+  same artifact. It detects that main smoke/example usage passed, the external
+  verifier failed on the repository-test wrapper, and mew stopped by
+  `wall_timeout` before closing that frontier.
 
 Only after all four pass, spend exactly one `build-cython-ext` `speed_1`.
 

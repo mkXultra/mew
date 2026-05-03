@@ -101,7 +101,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> verified_sibling_repair_frontier_not_exhausted -> current-head build-cython-ext artifact -> replay/dogfood pass -> repository-test-tail emulator pending -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1
+M6.24 -> verified_sibling_repair_frontier_not_exhausted -> current-head build-cython-ext artifact -> replay/dogfood/emulator pass -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1
 ```
 
 Do not spend new M6.24 live proof budget on out-of-scope tasks. If the next
@@ -143,15 +143,13 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Build the smallest repository-test-tail emulator for the current-head
-   `build-cython-ext` artifact. Replay and dogfood already pass.
-2. Implement the selected generic `build-cython-ext` gap repair:
+1. Implement the selected generic `build-cython-ext` gap repair:
    `verified_sibling_repair_frontier_not_exhausted` /
    `repository_test_tail_frontier_not_exhausted_before_wall_timeout`.
-3. Before any live `speed_1`, run focused UT, replay, dogfood, and a same-shape
+2. Before any live `speed_1`, run focused UT, replay, dogfood, and a same-shape
    emulator. If no emulator exists, build the smallest emulator fixture first.
-4. If the selected gap is local/polish, fix it and rerun the same scoped shape.
-5. If the selected gap is structural, pause M6.24 behind M6.14, repair the
+3. If the selected gap is local/polish, fix it and rerun the same scoped shape.
+4. If the selected gap is structural, pause M6.24 behind M6.14, repair the
    generic substrate, rerun the same scoped shape, then resume M6.24.
-6. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
+5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.

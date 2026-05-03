@@ -1336,6 +1336,33 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["ceiling"], {})
             self.assertIn("m6_24-compile-compcert-emulator: pass", text)
 
+    def test_run_dogfood_m6_24_repository_test_tail_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-repository-test-tail-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+                terminal_bench_task=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-repository-test-tail-emulator")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(scenario["artifacts"]["task"], "build-cython-ext")
+            self.assertTrue(scenario["artifacts"]["summary"]["repository_tail_failed"])
+            self.assertTrue(scenario["artifacts"]["summary"]["upstream_tail_failed"])
+            self.assertTrue(scenario["artifacts"]["summary"]["main_smoke_passed"])
+            self.assertEqual(scenario["artifacts"]["summary"]["stop_reason"], "wall_timeout")
+            self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
+            self.assertIn("m6_24-repository-test-tail-emulator: pass", text)
+
     def test_run_dogfood_m6_11_draft_timeout_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

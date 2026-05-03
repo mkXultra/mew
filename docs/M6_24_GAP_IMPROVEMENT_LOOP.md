@@ -52,7 +52,7 @@ Current selected gap class:
 `verified_sibling_repair_frontier_not_exhausted`.
 
 Current selected next action:
-`M6.24 -> current-head build-cython-ext artifact -> replay/dogfood pass -> create repository-test-tail emulator -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
+`M6.24 -> current-head build-cython-ext artifact -> replay/dogfood/emulator pass -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
 
 Current pre-speed status:
 
@@ -62,8 +62,9 @@ Current pre-speed status:
 - dogfood: pass on the same artifact after adding dogfood
   `--terminal-bench-task`; the previous failure was a measurement-infra defect
   caused by a hard-coded `compile-compcert` filter.
-- emulator: pending. Build the smallest same-shape repository-test-tail
-  emulator before code repair or the next live `speed_1`.
+- emulator: pass on the same artifact via
+  `m6_24-repository-test-tail-emulator`. It detects main smoke pass,
+  repository-test wrapper failure, and wall-timeout frontier exhaustion.
 
 Active authoritative design:
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.

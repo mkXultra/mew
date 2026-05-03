@@ -109,6 +109,7 @@ DOGFOOD_SCENARIOS = (
     "m6_13-deliberation-internalization",
     "m6_24-terminal-bench-replay",
     "m6_24-compile-compcert-emulator",
+    "m6_24-repository-test-tail-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -14666,6 +14667,156 @@ def _write_terminal_bench_replay_fixture(workspace, *, task="compile-compcert"):
     return job_dir
 
 
+def _write_repository_test_tail_emulator_fixture(workspace, *, task="build-cython-ext"):
+    job_dir = Path(workspace) / "repository-test-tail-emulator-fixture"
+    trial_name = f"{task}__repository-tail"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    verifier_dir = trial_dir / "verifier"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "repository-test-tail-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    verifier_stdout = """\
+PASSED ../tests/test_outputs.py::test_numpy_version
+PASSED ../tests/test_outputs.py::test_repo_cloned
+PASSED ../tests/test_outputs.py::test_pyknotid_core_import
+PASSED ../tests/test_outputs.py::test_chelpers_cython_extension
+PASSED ../tests/test_outputs.py::test_ccomplexity_cython_extension
+PASSED ../tests/test_outputs.py::test_cinvariants_cython_extension
+PASSED ../tests/test_outputs.py::test_chelpers
+PASSED ../tests/test_outputs.py::test_ccomplexity
+PASSED ../tests/test_outputs.py::test_cinvariants_python_vs_cython
+PASSED ../tests/test_outputs.py::test_example_usage
+FAILED tests/test_spacecurve.py::test_reconstructed_space_curve - AttributeError: module 'numpy' has no attribute 'int'
+FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError: Repository tests failed with return code 1
+========================= 1 failed, 10 passed in 3.70s =========================
+"""
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(verifier_stdout, encoding="utf-8")
+    test_command = (
+        "set -euo pipefail\n"
+        "cd /app/pyknotid\n"
+        "python -m pytest -q tests --ignore=tests/test_random_curves.py --ignore=tests/test_catalogue.py"
+    )
+    next_action = "patch the remaining repository test failure, reinstall, and rerun the repository test tail"
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": 1,
+        "session_id": 1,
+        "work_exit_code": 1,
+        "resume": {
+            "session_id": 1,
+            "task_id": 1,
+            "title": "Build Cython extensions and pass repository tests",
+            "goal": (
+                "Build a Python package from source, repair compatibility issues, "
+                "and pass the package repository tests after the main smoke passes."
+            ),
+            "phase": "failed",
+            "next_action": next_action,
+            "long_build_state": {},
+        },
+        "work_report": {
+            "session_id": 1,
+            "task_id": 1,
+            "stop_reason": "wall_timeout",
+            "wall_timeout": True,
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {"type": "run_tests", "command": test_command},
+                    "model_turn": {
+                        "id": 1,
+                        "status": "completed",
+                        "action_plan": {
+                            "summary": "Run the remaining repository tests after main smoke passes.",
+                            "action": {"type": "run_tests", "cwd": "/app/pyknotid", "command": test_command},
+                        },
+                        "action": {"type": "run_tests", "command": test_command},
+                    },
+                    "tool_call": {
+                        "id": 1,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"cwd": "/app/pyknotid", "command": test_command},
+                        "result": {
+                            "cwd": "/app/pyknotid",
+                            "command": test_command,
+                            "exit_code": 1,
+                            "stdout": verifier_stdout,
+                            "stderr": "",
+                        },
+                    },
+                },
+                {
+                    "index": 2,
+                    "status": "failed",
+                    "action": {"type": "wait", "reason": "request timed out"},
+                    "model_turn": {
+                        "id": 2,
+                        "status": "failed",
+                        "error": "request timed out",
+                        "action": {"type": "wait", "reason": "request timed out"},
+                    },
+                    "error": "request timed out",
+                },
+            ],
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps(
+            {
+                "command": "mew work --oneshot --instruction repository-test-tail-emulator",
+                "exit_code": 1,
+                "timed_out": False,
+                "timeout_seconds": 1800,
+                "mew_max_wall_seconds": 1740,
+                "stdout": "",
+                "stderr": "",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
 def _compile_compcert_task_description():
     return (
         "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
@@ -14974,6 +15125,55 @@ def _write_llm_action_fixtures_jsonl(path, contexts):
             fh.write(json.dumps(_public_llm_action_fixture(context), ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _repository_test_tail_summary(verifier_stdout, trial_entry):
+    text = verifier_stdout or ""
+    failed_tests = sorted(set(re.findall(r"FAILED\s+([^\s]+)", text)))
+    passed_tests = sorted(set(re.findall(r"PASSED\s+([^\s]+)", text)))
+    failed_count = None
+    passed_count = None
+    summary_match = re.search(r"(?P<failed>\d+)\s+failed,\s+(?P<passed>\d+)\s+passed", text)
+    if summary_match:
+        failed_count = int(summary_match.group("failed"))
+        passed_count = int(summary_match.group("passed"))
+    repository_tail_failed = any("test_pyknotid_repository_tests" in item for item in failed_tests) or (
+        "test_pyknotid_repository_tests" in text
+    )
+    upstream_tail_failed = any("test_reconstructed_space_curve" in item for item in failed_tests) or (
+        "test_reconstructed_space_curve" in text
+    )
+    main_smoke_passed = any("test_example_usage" in item for item in passed_tests) or "test_example_usage" in text
+    return {
+        "trial_name": (trial_entry or {}).get("trial_name") or "",
+        "external_reward": (trial_entry or {}).get("external_reward"),
+        "mew_exit_code": (trial_entry or {}).get("mew_exit_code"),
+        "stop_reason": (trial_entry or {}).get("stop_reason") or "",
+        "wall_timeout": bool((trial_entry or {}).get("wall_timeout")),
+        "repository_tail_failed": repository_tail_failed,
+        "upstream_tail_failed": upstream_tail_failed,
+        "main_smoke_passed": main_smoke_passed,
+        "failed_count": failed_count,
+        "passed_count": passed_count,
+        "failed_tests": failed_tests[:8],
+        "passed_tests": passed_tests[:12],
+    }
+
+
+def _write_repository_test_tail_fixture_json(path, *, replay, summary, contexts):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "kind": "repository_test_tail_frontier_emulator",
+        "generated_at": now_iso(),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "summary": summary,
+        "latest_llm_action_fixture": _public_llm_action_fixture(contexts[-1]) if contexts else {},
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
 def _select_compile_compcert_emulator_context(contexts):
     for context in reversed(contexts or []):
         raw_action = (((context or {}).get("fixture") or {}).get("raw_action") or {})
@@ -15205,6 +15405,91 @@ def run_m6_24_compile_compcert_emulator_scenario(
     return report
 
 
+def run_m6_24_repository_test_tail_emulator_scenario(
+    workspace,
+    *,
+    job_dir=None,
+    task=None,
+):
+    checks = []
+    commands = []
+    task_filter = task or "build-cython-ext"
+    source = (
+        Path(job_dir).expanduser()
+        if job_dir
+        else _write_repository_test_tail_emulator_fixture(workspace, task=task_filter)
+    )
+    replay = replay_terminal_bench_job(
+        source,
+        task=task_filter,
+        assertions={"mew_exit_code": 1, "external_reward": 0.0},
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    verifier_path = Path(first_trial.get("verifier_stdout_path") or "")
+    try:
+        verifier_stdout = verifier_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        verifier_stdout = first_trial.get("verifier_stdout_excerpt") or ""
+    summary = _repository_test_tail_summary(verifier_stdout, first_trial)
+    contexts = terminal_bench_llm_action_fixture_contexts(source, task=task_filter)
+    fixture_path = Path(workspace) / "repository-test-tail-frontier-fixture.json"
+    fixture = _write_repository_test_tail_fixture_json(
+        fixture_path,
+        replay=replay,
+        summary=summary,
+        contexts=contexts,
+    )
+
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_detects_main_smoke_passed",
+        bool(summary.get("main_smoke_passed")),
+        summary,
+        "main smoke/example usage passed before repository tail failed",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_detects_repository_tail",
+        bool(summary.get("repository_tail_failed")),
+        summary,
+        "repository test wrapper failure detected; upstream failing test is optional if verifier output clipped it",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_detects_wall_timeout",
+        bool(summary.get("wall_timeout")) and summary.get("stop_reason") == "wall_timeout",
+        summary,
+        "mew stopped by wall_timeout before closing the repository-test frontier",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_writes_fixture",
+        fixture_path.is_file() and (fixture.get("summary") or {}).get("repository_tail_failed") is True,
+        {"fixture_path": str(fixture_path), "summary": fixture.get("summary")},
+        "repository-test-tail fixture file",
+    )
+
+    report = _scenario_report("m6_24-repository-test-tail-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "task": task_filter,
+        "fixture_path": str(fixture_path),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "first_trial": first_trial.get("trial_name") or "",
+        "summary": summary,
+        "llm_action_fixture_count": len(contexts),
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -15318,6 +15603,14 @@ def run_dogfood_scenario(args):
                 run_m6_24_compile_compcert_emulator_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-repository-test-tail-emulator":
+            reports.append(
+                run_m6_24_repository_test_tail_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                    task=getattr(args, "terminal_bench_task", None),
                 )
             )
         elif name == "m6_9-active-memory-recall":
