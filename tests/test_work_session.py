@@ -12278,15 +12278,16 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
             "command": (
                 "set -euo pipefail\n"
                 "cd /tmp/CompCert\n"
-                "printf '== configure help ==\\n'\n"
-                "(./configure --help 2>&1 || ./configure -help 2>&1 || true) | sed -n '1,240p'\n"
-                "printf '== configure/source dependency knobs ==\\n'\n"
-                "grep -RInE 'coq|COQ|menhir|MENHIR|ignore|unsupported|external|system|prebuilt|library|API' configure Makefile* 2>/dev/null | sed -n '1,260p' || true\n"
-                "printf '== ocamlfind menhir/coq visibility ==\\n'\n"
-                "ocamlfind query menhirLib 2>&1 || true\n"
-                "ocamlfind list 2>/dev/null | grep -Ei 'menhir|coq' || true\n"
-                "printf '== apt dependency candidates ==\\n'\n"
-                "apt-cache policy opam libmenhir-ocaml-dev libcoq-core-ocaml-dev coq 2>/dev/null | sed -n '1,220p' || true\n"
+                "./configure -help 2>&1 | sed -n '1,260p'\n"
+                "printf '\\n== configure compatibility hooks ==\\n'\n"
+                "grep -nEi 'coq|menhir|ignore|unsupported|version|external|use-external|prebuilt|system|library|opam|COQ|MENHIR' configure Makefile Makefile.config 2>/dev/null | sed -n '1,220p' || true\n"
+                "printf '\\n== build docs dependency mentions ==\\n'\n"
+                "grep -nEi 'coq|menhir|opam|ocaml|configure|build|8[.]16|8[.]12' README.md Changelog.md 2>/dev/null | sed -n '1,160p' || true\n"
+                "printf '\\n== package/opam availability ==\\n'\n"
+                "for t in menhir opam; do printf '%s: ' \"$t\"; command -v \"$t\" || true; done\n"
+                "apt-cache policy menhir opam coq 2>/dev/null | sed -n '1,220p'\n"
+                "printf '\\n== coq-related apt packages ==\\n'\n"
+                "apt-cache search '^coq|coq-8|libcoq' 2>/dev/null | sed -n '1,120p'\n"
             ),
             "cwd": "/app",
             "timeout": 60,

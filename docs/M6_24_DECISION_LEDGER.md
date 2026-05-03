@@ -506,3 +506,13 @@ floor. Focused policy tests, scoped ruff, and live-artifact
 rerun the full pre-speed sequence: focused UT/local validation, exact replay,
 exact terminal-bench dogfood, and exact compile-compcert emulator. If all pass,
 run exactly one same-shape `compile-compcert` speed_1.
+
+Follow-up update: the grouped-diagnostic speed rerun
+`mew-m6-24-grouped-diagnostic-budget-compile-compcert-1attempt-20260503-1714`
+scored `0/1` with runner errors `0`. Replay and terminal-bench dogfood passed.
+The emulator caught another read-only diagnostic parser false negative:
+`for ...; do printf ...; command -v ...; done` shell-control syntax kept the
+diagnostic action on the long repair floor. The repair now accepts this bounded
+read-only shell-control shape. Stop rule: if the next speed proof exposes
+another read-only diagnostic parser false negative, stop adding parser cases and
+open a diagnostic-contract redesign slice before any further proof spending.

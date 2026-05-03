@@ -55,7 +55,10 @@ diagnostic budget handling. The current saved proof artifact
 is reproduced by exact replay/dogfood and, importantly, by the
 `m6_24-compile-compcert-emulator` without spending another Harbor run. The
 latest local repair is the grouped diagnostic predicate for shell grouping,
-`./configure -help`, pipelines, and `/dev/null` redirects.
+`./configure -help`, pipelines, `/dev/null` redirects, and bounded read-only
+shell loop control. Stop rule: if another read-only diagnostic parser false
+negative appears, stop adding parser cases and open a diagnostic-contract
+redesign slice.
 
 The one-run timeout-shape diagnostic is now recorded as classification evidence.
 The previous reruns redirected the controller from `long-build wall-time /

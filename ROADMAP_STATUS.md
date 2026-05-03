@@ -336,8 +336,11 @@ M6.24 resume condition:
   `docs/M6_24_GROUPED_DIAGNOSTIC_BUDGET_REPAIR_2026-05-03.md`: a saved
   `compile-compcert` speed_1 artifact exposed that typed read-only diagnostics
   with shell grouping, `./configure -help`, pipelines, and `/dev/null`
-  redirects were still blocked by a long repair floor. The live-artifact
-  emulator now catches this defect before another Harbor proof. Next action is
+  redirects were still blocked by a long repair floor. Its follow-up speed
+  artifact exposed the same class for bounded read-only `for/do/done`
+  diagnostic shell control, and the emulator caught it before another proof.
+  Stop rule: if another read-only diagnostic parser false negative appears,
+  stop adding parser cases and open a diagnostic-contract redesign slice. Next action is
   focused UT/local validation, exact replay, exact terminal-bench dogfood,
   exact compile-compcert emulator, then exactly one same-shape speed_1 if all
   four pass.

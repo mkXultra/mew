@@ -61,6 +61,9 @@ The read-only diagnostic predicate now accepts this shell-diagnostic surface:
   `(./configure ... )`;
 - `./configure -help` as a help-only diagnostic when the typed execution
   contract says `purpose=diagnostic` and `risk_class=read_only`;
+- simple read-only shell loop control (`for ... in ...`, `do <diagnostic>`,
+  `done`) when the typed execution contract says the action is a read-only
+  diagnostic;
 - existing conservative guards still reject write-shaped redirects except
   `/dev/null` and do not trust arbitrary shell text as diagnostic.
 
@@ -78,6 +81,24 @@ Passed after repair:
 The live-artifact emulator now observes `diagnostic_budget=true`,
 `minimum_timeout_seconds=30.0`, and no wall/budget block for the raw diagnostic
 action.
+
+## Follow-up Speed Rerun
+
+The first speed rerun after the initial grouped diagnostic fix was:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-grouped-diagnostic-budget-compile-compcert-1attempt-20260503-1714/result.json`
+
+It scored `0/1` with runner errors `0`. Replay and terminal-bench dogfood
+passed. The emulator caught the remaining defect before another Harbor run:
+the next raw model action was still a typed read-only diagnostic, but it used
+`for t in ...; do printf ...; command -v ...; done`, which the previous
+allowlist treated as non-diagnostic shell text. The repair now accepts this
+bounded shell-control shape.
+
+Stop rule: if the next same-shape speed proof exposes another read-only
+diagnostic parser false negative, stop adding shell-syntax cases and open a
+separate diagnostic-contract redesign slice. At that point the signal is no
+longer a small grouped-diagnostic gap.
 
 ## Next
 
