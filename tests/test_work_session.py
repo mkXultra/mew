@@ -12276,16 +12276,20 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         }
         parameters = {
             "command": (
-                "set -euxo pipefail\n"
+                "set -euo pipefail\n"
                 "cd /tmp/CompCert\n"
-                "./configure --help\n"
-                "grep -nE 'Coq|Menhir|external|system|prebuilt|library' configure Makefile Makefile.menhir 2>/dev/null | head -250\n"
-                "apt-cache policy coq libcoq-stdlib libcoq-core-ocaml libcoq-flocq menhir libmenhir-ocaml-dev opam || true\n"
-                "dpkg -L menhir 2>/dev/null | grep -Ei 'menhirLib|MenhirLib|META|\\.cmxa$|\\.cma$|\\.cmi$' | head -100 || true\n"
-                "ocamlfind list 2>/dev/null | grep -i menhir || true"
+                "printf '== configure help ==\\n'\n"
+                "(./configure --help 2>&1 || ./configure -help 2>&1 || true) | sed -n '1,240p'\n"
+                "printf '== configure/source dependency knobs ==\\n'\n"
+                "grep -RInE 'coq|COQ|menhir|MENHIR|ignore|unsupported|external|system|prebuilt|library|API' configure Makefile* 2>/dev/null | sed -n '1,260p' || true\n"
+                "printf '== ocamlfind menhir/coq visibility ==\\n'\n"
+                "ocamlfind query menhirLib 2>&1 || true\n"
+                "ocamlfind list 2>/dev/null | grep -Ei 'menhir|coq' || true\n"
+                "printf '== apt dependency candidates ==\\n'\n"
+                "apt-cache policy opam libmenhir-ocaml-dev libcoq-core-ocaml-dev coq 2>/dev/null | sed -n '1,220p' || true\n"
             ),
             "cwd": "/app",
-            "timeout": 90,
+            "timeout": 60,
             "execution_contract": {
                 "schema_version": 2,
                 "purpose": "diagnostic",

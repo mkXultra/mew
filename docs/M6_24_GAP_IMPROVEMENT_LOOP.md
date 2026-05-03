@@ -32,7 +32,7 @@ Current selected gap class:
 `structural_tool_runtime_budget`.
 
 Current selected next action:
-`M6.24 -> compile-compcert typed read-only diagnostic repair floor -> UT -> replay -> dogfood -> compile-compcert emulator -> exactly one same-shape speed_1`.
+`M6.24 -> grouped read-only diagnostic repair floor -> UT -> replay -> dogfood -> compile-compcert emulator -> exactly one same-shape speed_1`.
 
 Active authoritative design:
 `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`.
@@ -47,33 +47,24 @@ remains implemented and valid, but the latest same-shape speed rerun built far
 enough for the compiler artifact to exist and then failed default runtime
 linking while `long_command_runs=[]` and `latest_long_command_run_id=null`.
 The production-visible managed-dispatch and nonterminal-handoff repairs are now
-reviewed and approved. The latest narrower blocker is that a compound
-configure/source-acquisition-looking command containing OPAM install, configure,
-build, and final smoke work did not receive managed long-command budget before
-the wall ceiling killed it. That repair is now reviewed and the follow-up
-same-shape speed rerun moved the blocker: a managed long command exists and
-failed terminally during source acquisition with `curl` exit `22`,
-`timed_out=false`, then recovery incorrectly used timeout-style same-command
-resume policy and blocked a corrected source-channel retry.
-Initial codex-ultra review found two integration gaps in that repair:
-`recover_long_command` was not yet routed through the managed runner, and killed
-managed commands could collapse to `failed`. Both follow-up fixes are now
-implemented locally with focused and broader validation; codex-ultra re-review
-approved them. At that point the next action was exactly one same-shape
-speed_1.
-That speed_1 passed externally and `mew work` exited `0`, but internal
-`resume.long_build_state` still reports `status=blocked`, `source_authority`
-and `default_smoke` unknown, and a stale dependency-generation blocker. The
-active next action is to classify this moved internal closeout gap before
-`proof_5` or broad measurement.
+reviewed and approved. Later same-shape speed reruns moved the blocker through
+non-timeout source-acquisition retry repair, managed timeout resume-budget
+repair, typed read-only diagnostic budget handling, and now grouped read-only
+diagnostic budget handling. The current saved proof artifact
+`mew-m6-24-typed-diagnostic-budget-compile-compcert-1attempt-20260503-1653`
+is reproduced by exact replay/dogfood and, importantly, by the
+`m6_24-compile-compcert-emulator` without spending another Harbor run. The
+latest local repair is the grouped diagnostic predicate for shell grouping,
+`./configure -help`, pipelines, and `/dev/null` redirects.
 
 The one-run timeout-shape diagnostic is now recorded as classification evidence.
 The previous reruns redirected the controller from `long-build wall-time /
 continuation budget` to config/source-script external-hook repair, production
 continuation dispatch, nonterminal handoff, compound budget-stage promotion,
 non-timeout source-acquisition retry repair, managed timeout resume-budget
-repair, and now typed read-only diagnostic repair-floor handling. Do not spend
-another `proof_5` or broad measurement run until the full
+repair, typed read-only diagnostic repair-floor handling, and now grouped
+diagnostic repair-floor handling. Do not spend another `proof_5` or broad
+measurement run until the full
 UT/replay/dogfood/emulator pre-speed operation and same-shape speed rerun after
 this repair are recorded.
 

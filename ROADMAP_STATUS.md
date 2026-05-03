@@ -269,7 +269,7 @@ M6.24 resume condition:
   and `tool_call` ref compatibility may be dropped by flag-day cutover. Preserve
   safety invariants instead.
   Current selected chain:
-  `M6.24 -> long_dependency/toolchain gap -> acceptance closeout evidence repair -> clean compile-compcert speed_1`.
+  `M6.24 -> grouped read-only diagnostic budget repair -> UT -> replay -> dogfood -> compile-compcert emulator -> exactly one same-shape compile-compcert speed_1`.
 - M6.24 Long-Build Substrate Phase 4 is now implemented and reviewed:
   wall/recovery budget enforcement uses `LongBuildContract`, planned command
   stage classification, and `RecoveryDecision` budget policy instead of command
@@ -327,6 +327,22 @@ M6.24 resume condition:
   the decision ledger to resume measurement with evidence. New broad benchmark
   measurement is drift until the controller says otherwise.
 - Current selected gap class:
+  `structural_tool_runtime_budget`, governed by
+  `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`,
+  `docs/M6_24_DECISION_LEDGER.md`,
+  `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`, and
+  `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`. The current
+  latest repair is recorded in
+  `docs/M6_24_GROUPED_DIAGNOSTIC_BUDGET_REPAIR_2026-05-03.md`: a saved
+  `compile-compcert` speed_1 artifact exposed that typed read-only diagnostics
+  with shell grouping, `./configure -help`, pipelines, and `/dev/null`
+  redirects were still blocked by a long repair floor. The live-artifact
+  emulator now catches this defect before another Harbor proof. Next action is
+  focused UT/local validation, exact replay, exact terminal-bench dogfood,
+  exact compile-compcert emulator, then exactly one same-shape speed_1 if all
+  four pass.
+
+Historical selected gap class:
   `long_dependency_toolchain_build_strategy_contract`, governed by
   `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md`,
   `docs/REVIEW_2026-05-01_M6_24_LONG_DEPENDENCY_REFERENCE_DIVERGENCE.md`, and

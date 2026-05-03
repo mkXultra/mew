@@ -485,3 +485,24 @@ and `mew dogfood --scenario m6_24-compile-compcert-emulator
 --terminal-bench-job-dir <same-job>` all pass. The next action is exactly one
 same-shape `compile-compcert` speed_1; do not run `proof_5` or broad
 measurement first.
+
+Grouped diagnostic budget checkpoint:
+
+The typed-diagnostic-budget speed rerun
+`mew-m6-24-typed-diagnostic-budget-compile-compcert-1attempt-20260503-1653`
+scored `0/1` with runner errors `0`. This was not a regression to broad
+measurement. The new emulator reproduced the exact next-action defect from the
+saved artifact: the raw model action was typed `purpose=diagnostic` and
+`risk_class=read_only`, but shell grouping around `./configure --help`, the
+`./configure -help` spelling, pipelines, and `/dev/null` redirects made the
+read-only diagnostic predicate return false. The budget layer therefore
+inherited the failed long-command stage and blocked the 60s diagnostic behind a
+larger repair floor. The repair is recorded in
+`docs/M6_24_GROUPED_DIAGNOSTIC_BUDGET_REPAIR_2026-05-03.md`.
+
+Repair update: the grouped diagnostic surface now keeps the diagnostic repair
+floor. Focused policy tests, scoped ruff, and live-artifact
+`m6_24-compile-compcert-emulator` pass. Before spending another speed proof,
+rerun the full pre-speed sequence: focused UT/local validation, exact replay,
+exact terminal-bench dogfood, and exact compile-compcert emulator. If all pass,
+run exactly one same-shape `compile-compcert` speed_1.

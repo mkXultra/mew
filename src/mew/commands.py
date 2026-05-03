@@ -6210,7 +6210,11 @@ def _shell_segment_tokens_for_read_only_diagnostic(segment):
 
 
 def _diagnostic_executable_name(token):
-    name = os.path.basename(str(token or "").strip())
+    raw = str(token or "").strip()
+    if raw.startswith("$("):
+        return raw.lower()
+    raw = raw.lstrip("({").rstrip(")}")
+    name = os.path.basename(raw)
     return name.lower()
 
 
@@ -6267,7 +6271,7 @@ def _sed_tokens_are_read_only(tokens):
 def _tokens_are_help_only(tokens):
     if not tokens:
         return False
-    return any(token in {"--help", "-h", "help"} for token in tokens[1:])
+    return any(token in {"--help", "-help", "-h", "help"} for token in tokens[1:])
 
 
 def _typed_contract_claims_read_only_diagnostic(typed_contract):
