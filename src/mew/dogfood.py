@@ -31,6 +31,7 @@ from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
 from .state import add_question, default_state, migrate_state, next_id, reconcile_next_ids
+from .terminal_bench_replay import replay_terminal_bench_job
 from .tasks import find_task
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
@@ -105,6 +106,7 @@ DOGFOOD_SCENARIOS = (
     "m6_9-drift-canary",
     "m6_9-alignment-decay-rehearsal",
     "m6_13-deliberation-internalization",
+    "m6_24-terminal-bench-replay",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -14524,6 +14526,191 @@ def run_m6_9_alignment_decay_rehearsal_scenario(workspace, env=None):
     return report
 
 
+def _write_terminal_bench_replay_fixture(workspace):
+    job_dir = Path(workspace) / "terminal-bench-replay-fixture"
+    trial_dir = job_dir / "compile-compcert__fixture"
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    verifier_dir = trial_dir / "verifier"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "fixture-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": "compile-compcert__fixture",
+                "task_name": "terminal-bench/compile-compcert",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text("missing /tmp/CompCert/ccomp\n", encoding="utf-8")
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": 1,
+        "session_id": 1,
+        "work_exit_code": 1,
+        "resume": {
+            "session_id": 1,
+            "task_id": 1,
+            "title": "Compile CompCert from source",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "phase": "failed",
+            "next_action": "verify the world and review side-effecting work before retry",
+            "long_build_state": {},
+        },
+        "work_report": {
+            "session_id": 1,
+            "task_id": 1,
+            "stop_reason": "wall_timeout",
+            "wall_timeout": True,
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {"type": "run_command"},
+                    "model_turn": {"id": 1, "status": "completed", "action": {"type": "run_command"}},
+                    "tool_call": {
+                        "id": 1,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "./configure x86_64-linux && apt-cache policy coq",
+                        },
+                        "result": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "./configure x86_64-linux && apt-cache policy coq",
+                            "exit_code": 2,
+                            "stdout": (
+                                "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                                "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                            ),
+                            "stderr": "",
+                        },
+                    },
+                },
+                {
+                    "index": 2,
+                    "status": "completed",
+                    "action": {"type": "run_command"},
+                    "model_turn": {"id": 2, "status": "completed", "action": {"type": "run_command"}},
+                    "tool_call": {
+                        "id": 2,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "opam install -y coq.8.16.1",
+                        },
+                        "result": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "opam install -y coq.8.16.1",
+                            "exit_code": 124,
+                            "timed_out": True,
+                            "stdout": "-> retrieved coq.8.16.1\n",
+                            "stderr": "",
+                        },
+                    },
+                },
+            ],
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps(
+            {
+                "command": "mew work --oneshot --instruction fixture",
+                "exit_code": 1,
+                "timed_out": False,
+                "timeout_seconds": 1800,
+                "mew_max_wall_seconds": 1740,
+                "stdout": "",
+                "stderr": "",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def run_m6_24_terminal_bench_replay_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_terminal_bench_replay_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="compile-compcert",
+        assertions={
+            "long_build_status": "blocked",
+            "blockers": ["compatibility_override_probe_missing"],
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+        },
+    )
+    _scenario_check(
+        checks,
+        "m6_24_terminal_bench_replay_finds_artifact",
+        replay.get("trial_count", 0) >= 1,
+        replay.get("trial_count"),
+        ">=1",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_terminal_bench_replay_recomputes_resume",
+        replay.get("status") == "pass",
+        replay,
+        "pass",
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_long = ((first_trial.get("current") or {}).get("long_build_state") or {})
+    _scenario_check(
+        checks,
+        "m6_24_terminal_bench_replay_surfaces_long_build_blocker",
+        "compatibility_override_probe_missing" in (current_long.get("strategy_blockers") or []),
+        current_long.get("strategy_blockers") or [],
+        "compatibility_override_probe_missing",
+    )
+    report = _scenario_report("m6_24-terminal-bench-replay", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "trial_count": replay.get("trial_count"),
+        "replay_status": replay.get("status"),
+        "first_trial": first_trial.get("trial_name") or "",
+        "current_long_build": current_long,
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -14616,6 +14803,13 @@ def run_dogfood_scenario(args):
                     base_url=base_url,
                     model_backend=model_backend,
                     timeout=getattr(args, "model_timeout", 60),
+                )
+            )
+        elif name == "m6_24-terminal-bench-replay":
+            reports.append(
+                run_m6_24_terminal_bench_replay_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
                 )
             )
         elif name == "m6_9-active-memory-recall":

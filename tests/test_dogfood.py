@@ -1201,6 +1201,29 @@ class DogfoodTests(unittest.TestCase):
                 {item["name"] for item in scenario["checks"]},
             )
 
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-terminal-bench-replay")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertEqual(scenario["command_count"], 0)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(scenario["artifacts"]["trial_count"], 1)
+            self.assertIn("compatibility_override_probe_missing", scenario["artifacts"]["current_long_build"]["strategy_blockers"])
+            self.assertIn("m6_24-terminal-bench-replay: pass", text)
+
     def test_run_dogfood_m6_11_draft_timeout_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

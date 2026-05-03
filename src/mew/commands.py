@@ -219,6 +219,7 @@ from .state import (
 from .snapshot import load_snapshot, save_snapshot, snapshot_path, take_snapshot
 from .sweep import format_sweep_report, sweep_agent_runs, sweep_report_json
 from .step_loop import format_step_loop_report, run_step_loop
+from .terminal_bench_replay import format_terminal_bench_replay, replay_terminal_bench_job
 from .read_tools import (
     glob_paths,
     inspect_dir,
@@ -14526,6 +14527,36 @@ def cmd_dogfood(args):
     if report_path:
         print(f"report_path: {report_path}")
     return 0
+
+
+def cmd_replay(args):
+    replay_action = getattr(args, "replay_action", None)
+    if replay_action != "terminal-bench":
+        print(f"mew: unknown replay action: {replay_action}", file=sys.stderr)
+        return 1
+    assertions = {
+        "long_build_status": getattr(args, "assert_long_build_status", None) or "",
+        "current_failure": getattr(args, "assert_current_failure", None) or "",
+        "recovery_action": getattr(args, "assert_recovery_action", None) or "",
+        "blockers": list(getattr(args, "assert_blocker", None) or []),
+        "next_action_contains": getattr(args, "assert_next_action_contains", None) or "",
+    }
+    if getattr(args, "assert_mew_exit_code", None) is not None:
+        assertions["mew_exit_code"] = args.assert_mew_exit_code
+    if getattr(args, "assert_external_reward", None) is not None:
+        assertions["external_reward"] = args.assert_external_reward
+    report = replay_terminal_bench_job(
+        args.job_dir,
+        task=getattr(args, "task", None),
+        trial=getattr(args, "trial", None),
+        assertions=assertions,
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_terminal_bench_replay(report))
+    return 0 if report.get("status") == "pass" else 1
+
 
 def cmd_proof_summary(args):
     if getattr(args, "m6_12_report", False) and getattr(args, "m6_11_phase2_calibration", False):

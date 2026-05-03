@@ -59,6 +59,7 @@ from .commands import (
     cmd_questions,
     cmd_repair,
     cmd_reply,
+    cmd_replay,
     cmd_runtime_effects,
     cmd_self_init,
     cmd_self_improve,
@@ -896,6 +897,10 @@ def build_parser():
         help="for m3-reentry-gate, merge a JSON report from the paired fresh CLI run",
     )
     dogfood_parser.add_argument(
+        "--terminal-bench-job-dir",
+        help="for terminal-bench replay dogfood, replay an existing Harbor job, trial, or artifact directory",
+    )
+    dogfood_parser.add_argument(
         "--m2-task-shape",
         choices=M2_COMPARATIVE_TASK_SHAPES,
         help="for m2-comparative, set task_shape.selected for this paired run",
@@ -1012,6 +1017,50 @@ def build_parser():
         help="print structured JSON report; scenario mode prints a compact summary, use --report for full details",
     )
     dogfood_parser.set_defaults(func=cmd_dogfood)
+
+    replay_parser = subparsers.add_parser("replay", help="replay saved external task artifacts without rerunning them")
+    replay_subparsers = replay_parser.add_subparsers(dest="replay_action")
+    terminal_bench_replay = replay_subparsers.add_parser(
+        "terminal-bench",
+        help="recompute mew terminal-bench work-session state from Harbor artifacts",
+    )
+    terminal_bench_replay.add_argument("--job-dir", required=True, help="Harbor job, trial, or artifact directory")
+    terminal_bench_replay.add_argument("--task", help="filter replayed trials by task name")
+    terminal_bench_replay.add_argument("--trial", help="filter replayed trials by trial name or directory")
+    terminal_bench_replay.add_argument(
+        "--assert-long-build-status",
+        help="require current recomputed long_build_state.status to equal this value",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-current-failure",
+        help="require current recomputed long_build_state.current_failure.failure_class",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-recovery-action",
+        help="require current recomputed recovery allowed_next_action.kind",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-blocker",
+        action="append",
+        default=[],
+        help="require a current recomputed long_build strategy blocker code; repeatable",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-next-action-contains",
+        help="require the recomputed work-session next_action to contain this text",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-mew-exit-code",
+        type=int,
+        help="require saved mew work exit code to equal this value",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-external-reward",
+        type=float,
+        help="require saved external verifier reward to equal this value",
+    )
+    terminal_bench_replay.add_argument("--json", action="store_true", help="print structured JSON")
+    terminal_bench_replay.set_defaults(func=cmd_replay)
 
     proof_summary_parser = subparsers.add_parser("proof-summary", help="summarize collected proof artifacts")
     proof_summary_parser.add_argument("artifact_dir", help="artifact directory created by scripts/collect_proof_docker.sh")
