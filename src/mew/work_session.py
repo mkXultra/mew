@@ -11840,6 +11840,33 @@ def _find_long_command_run(session, run_id):
     return None
 
 
+def _cap_timed_out_long_command_remaining_seconds(session, existing, remaining, effective_timeout):
+    if remaining is None:
+        return None
+    try:
+        capped = float(remaining)
+    except (TypeError, ValueError):
+        return remaining
+    timeout = _positive_float_or_none(effective_timeout)
+    if timeout is None:
+        return int(max(0, capped))
+    for run in (session or {}).get("long_command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        if existing is not None and run is existing:
+            continue
+        budget = run.get("budget") if isinstance(run.get("budget"), dict) else {}
+        prior_remaining = _positive_float_or_none(budget.get("work_wall_remaining_seconds"))
+        if prior_remaining is None:
+            continue
+        # Outer work-session wall budget is monotonic. A nested or replayed
+        # managed command can report a fresh local ceiling; it must not make a
+        # terminal timeout look more recoverable than the previously recorded
+        # session-level budget minus the timeout slice that was just spent.
+        capped = min(capped, max(0.0, prior_remaining - timeout))
+    return int(max(0.0, capped))
+
+
 def _long_command_terminal_status(result):
     status = _managed_long_command_status(result)
     if status in {"running", "yielded"}:
@@ -11907,6 +11934,19 @@ def _record_long_command_run_from_tool_call(session, tool_call, evidence):
         final_proof_reserve_seconds = existing_budget.get("final_proof_reserve_seconds") or wall_ceiling.get("reserve_seconds")
     else:
         final_proof_reserve_seconds = wall_ceiling.get("reserve_seconds") or existing_budget.get("final_proof_reserve_seconds")
+    if status == "timed_out":
+        effective_for_timeout = (
+            budget.get("effective_timeout_seconds")
+            or existing_budget.get("effective_timeout_seconds")
+            or result.get("timeout_seconds")
+            or (tool_call.get("parameters") or {}).get("timeout")
+        )
+        work_wall_remaining_seconds = _cap_timed_out_long_command_remaining_seconds(
+            session,
+            existing,
+            work_wall_remaining_seconds,
+            effective_for_timeout,
+        )
 
     run = build_long_command_run(
         session_id=session.get("id") or "unknown",

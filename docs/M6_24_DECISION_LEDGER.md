@@ -85,6 +85,7 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-03 | Managed-poll reserve rerun moved the blocker to managed timeout resume-budget handling, and the repair is reviewed. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-managed-poll-reserve-compile-compcert-1attempt-20260503-1416/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime `32m13s`, and external verifier failed because `/tmp/CompCert/ccomp` was missing. The prior poll-reserve gate moved: mew reached real managed `make -j10 ccomp` progress, then stopped with `wall_timeout`; reducer reported `blocked`, `build_timeout`, and stale `resume_idempotent_long_command` despite the prior wall slice and 600s timeout implying exhausted resume budget. Exact artifact replay and dogfood reproduced `blocked`, `build_timeout`, `resume_idempotent_long_command`, and external reward `0`. codex-ultra session `019dec63-b7ff-7a31-9d54-661b13a6062c` classified this as structural `timed_out_managed_long_command_resume_budget_not_preserved` in `tool_runtime_budget`. The local repair caps terminal timed-out managed long-command remaining budget by prior session-level wall slice, emits `resume_budget_exhausted` when remaining budget is below `minimum_resume_seconds + reserve_seconds`, and blocks action planning for that exhausted resume action. Validation passed: focused timeout/resume-budget tests `2 passed`, focused work-session policy tests `4 passed`, exact artifact replay/dogfood with `resume_budget_exhausted` passed, full long-build substrate `366 passed`, broader work-session long-command subset `38 passed` plus `12 subtests`, terminal-bench replay/dogfood `5 passed`, scoped ruff, JSONL parse, and diff check. codex-ultra review session `019dec74-191f-75b1-97f0-da6e0ed306fe` approved with only a minor direct-policy-test note, which was added. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
 | 2026-05-03 | Dependency-generation diagnostic budget rerun moved the blocker to managed-poll reserve handling. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-dependency-diagnostic-budget-compile-compcert-1attempt-20260503-1320/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime about `30m58s`, `mew-report.work_exit_code=1`, `work_report.stop_reason=long_command_budget_blocked`, and the external verifier failed because `/tmp/CompCert/ccomp` was missing. The prior diagnostic-budget gate moved: mew reached source acquisition recovery, MenhirLib install, configure/dependency generation, and a real managed `make -j"$(nproc)" ccomp` that remained running. Exact artifact replay and dogfood reproduced `long_build_status=in_progress`, `recovery_action=poll_long_command`, `mew_exit_code=1`, and external reward `0`. codex-ultra session `019dec30-429e-77d2-a75d-a233bdeb3af7` classified this as structural `managed_long_command_poll_blocked_by_final_proof_reserve` in `tool_runtime_budget`. The local repair allows only `poll_long_command` for an already running/yielded managed command to spend the final-proof reserve, preserves the logical `final_proof_reserve_seconds` on the `LongCommandRun`, preserves reserve for start/resume/recover/new commands, and preserves terminal-only artifact proof. codex-ultra review session `019dec39-7f1d-7901-af16-e2d1950b0a3e` approved after one request-change round. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
 | 2026-05-03 | Failed-long-command repair-budget rerun moved to dependency-generation diagnostic budget routing. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-failed-long-command-repair-budget-compile-compcert-1attempt-20260503-1229/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime `16m36s`, `mew-report.work_exit_code=1`, and external verifier failed because `/tmp/CompCert/ccomp` was missing. The prior gate moved: source acquisition/configure/dependency install ran, then `make ccomp` failed with missing generated/dependency files such as `Heaps.v`. mew proposed a read-only diagnostic (`find`, `sed`, `make -n depend`), but `long_command_budget_blocked` rejected the 120s diagnostic because the true-build `minimum_repair_seconds=600` floor still applied. Exact artifact replay and dogfood reproduced `blocked`, `long_command_failed`, `repair_failed_long_command`, blocker `dependency_generation_order_issue`, `mew_exit_code=1`, and external reward `0`. codex-ultra session `019debf2-726f-7552-8ced-5130e69683bc` classified this as `dependency_generation_diagnostic_budget_floor_overconstrained` in `tool_runtime_budget`. The local repair lowers the floor only for segment/token-proven read-only diagnostics, while preserving the 600s floor for side-effecting dependency/build repairs, spoofed diagnostics, typed diagnostic side effects, no-whitespace write redirects, and identical failed retries. codex-ultra review session `019debfe-47ae-71c0-b778-744d4aa70d99` approved after two request-change rounds. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
 | 2026-05-03 | Execution-contract speed rerun moved the gap to failed-long-command repair budgeting, and replay/dogfood reproduction is now mandatory before repair. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-execution-contract-compile-compcert-1attempt-20260503-1155/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime `8m10s`, `mew-report.work_exit_code=1`, and external verifier failed because `/tmp/CompCert/ccomp` was missing. The managed source-acquisition command failed terminally with `curl: (22) The requested URL returned error: 404`; mew then proposed a changed bounded source-authority probe, but `long_command_budget_blocked` rejected the 120s probe because `minimum_repair_seconds=600`. Local replay passed with `long_build_status=blocked`, `current_failure=long_command_failed`, `recovery_action=repair_failed_long_command`, `mew_exit_code=1`, and external reward `0`. Dogfood initially exposed stale fixed blocker expectations, so the dogfood scenario was widened to accept explicit `--terminal-bench-assert-*` failure-shape flags, then passed on the exact saved artifact. codex-ultra session `019debcc-a33c-7153-b948-3c923c491290` approved the classification as `failed_long_command_repair_timeout_floor_overconstrained` in `tool_runtime_budget`. The repair keeps the 600s floor for true build repairs, allows bounded changed source/diagnostic repair probes below that floor, blocks identical failed retries, and now rechecks the floor after wall-clock timeout capping. codex-ultra review session `019debd8-a8c8-7d91-8fcf-27f147c89eb4` approved after one request-change round. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
@@ -401,3 +402,46 @@ approved after tightening the predicate to segment/token parsing, comment
 stripping, typed-contract guardrails, and no-whitespace write-redirection
 rejection. The next action is the pre-speed operation, then exactly one
 same-shape `compile-compcert` speed_1.
+
+Managed poll reserve checkpoint:
+
+The dependency-generation diagnostic budget speed rerun
+`mew-m6-24-dependency-diagnostic-budget-compile-compcert-1attempt-20260503-1320`
+scored `0/1` with runner errors `0`. The prior diagnostic-budget gap moved:
+mew reached a real running managed `make ccomp`, but then blocked a
+`poll_long_command` because the remaining wall budget was below the final-proof
+reserve. The repair in
+`docs/M6_24_MANAGED_POLL_RESERVE_REPAIR_2026-05-03.md` allows only
+`poll_long_command` for an already running/yielded managed command to spend
+the final-proof reserve, while preserving the logical reserve for later
+recover/resume decisions. codex-ultra review session
+`019dec39-7f1d-7901-af16-e2d1950b0a3e` approved after one request-change
+round. The next same-shape speed rerun produced the timeout/resume-budget
+checkpoint below.
+
+Managed timeout resume-budget checkpoint:
+
+The managed poll reserve speed rerun
+`mew-m6-24-managed-poll-reserve-compile-compcert-1attempt-20260503-1416`
+scored `0/1` with runner errors `0`. The prior poll-reserve gap moved: mew
+advanced to a real managed `make -j10 ccomp` build, with multiple `coqc`
+processes running, then timed out in `runtime_build` before
+`/tmp/CompCert/ccomp` existed. Exact replay and dogfood reproduced `blocked`,
+`build_timeout`, `resume_idempotent_long_command`, and external reward `0`.
+codex-ultra session `019dec63-b7ff-7a31-9d54-661b13a6062c` classified the new
+gap as `timed_out_managed_long_command_resume_budget_not_preserved` in
+`structural_tool_runtime_budget`. The selected repair is the generic
+managed-long-command timeout/resume-budget route in
+`docs/M6_24_MANAGED_TIMEOUT_RESUME_BUDGET_REPAIR_2026-05-03.md`. This remains
+inside the narrow long-build substrate; do not open all-command generic
+managed exec from this signal alone.
+
+Repair update: local code now prevents stale nested managed-command wall
+budgets from making a timed-out long command look more recoverable than the
+work-session wall budget allows. The same saved artifact recomputes to
+`resume_budget_exhausted`, while preserving `blocked` + `build_timeout` and
+external reward `0`. Focused and broader tests, exact replay/dogfood, scoped
+ruff, JSONL parse, and diff check pass. codex-ultra review session
+`019dec74-191f-75b1-97f0-da6e0ed306fe` approved; its minor direct-policy-test
+note was addressed. The next action is the pre-speed operation, then exactly
+one same-shape `compile-compcert` speed_1.

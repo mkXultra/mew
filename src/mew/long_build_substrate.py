@@ -28,6 +28,8 @@ ENV_SUMMARY_POLICY = "env_summary_v1"
 COMMAND_OUTPUT_CLIP_CHARS = 1200
 LONG_COMMAND_OUTPUT_MAX_BYTES = 1_000_000
 ENV_VALUE_CLIP_CHARS = 120
+LONG_COMMAND_MINIMUM_RESUME_SECONDS = 600
+LONG_COMMAND_DEFAULT_FINAL_PROOF_RESERVE_SECONDS = 60
 NONTERMINAL_COMMAND_STATUSES = {"running", "yielded"}
 TERMINAL_NON_SUCCESS_COMMAND_STATUSES = {"failed", "timed_out", "killed", "interrupted"}
 COMMAND_RUN_TERMINAL_STATUSES = {"completed", "failed", "timed_out", "killed", "interrupted"}
@@ -1139,6 +1141,7 @@ def reduce_long_build_state(
         for item in long_command_runs or []
         if isinstance(item, (LongCommandRun, Mapping))
     ]
+    normalized_long_command_runs = _cap_timed_out_long_command_budgets_by_prior_wall(normalized_long_command_runs)
     latest_long_command = _latest_long_command_run(normalized_long_command_runs)
     latest_long_command_status = str(latest_long_command.status or "").casefold() if latest_long_command else ""
     latest_live_long_command = (
@@ -1686,6 +1689,35 @@ def _latest_long_command_run(runs: Iterable[LongCommandRun]) -> LongCommandRun |
     return latest
 
 
+def _cap_timed_out_long_command_budgets_by_prior_wall(
+    runs: Iterable[LongCommandRun],
+) -> list[LongCommandRun]:
+    capped_runs = []
+    prior_remaining: int | None = None
+    for run in runs or []:
+        current = run
+        budget = dict(run.budget or {})
+        remaining = _coerce_int(budget.get("work_wall_remaining_seconds"))
+        effective_timeout = _coerce_int(budget.get("effective_timeout_seconds"))
+        if (
+            str(run.status or "").casefold() == "timed_out"
+            and prior_remaining is not None
+            and effective_timeout is not None
+        ):
+            capped_remaining = max(0, prior_remaining - effective_timeout)
+            if remaining is None or capped_remaining < remaining:
+                data = run.to_dict()
+                budget = dict(data.get("budget") or {})
+                budget["work_wall_remaining_seconds"] = capped_remaining
+                data["budget"] = budget
+                current = LongCommandRun.from_dict(data)
+                remaining = capped_remaining
+        if remaining is not None:
+            prior_remaining = remaining if prior_remaining is None else min(prior_remaining, remaining)
+        capped_runs.append(current)
+    return capped_runs
+
+
 def _long_command_evidence_id(ref: object) -> int | None:
     if not isinstance(ref, Mapping):
         return None
@@ -1794,6 +1826,44 @@ def _derive_long_command_terminal_recovery_decision(
             },
             decision="continue",
         )
+    minimum_resume_seconds = LONG_COMMAND_MINIMUM_RESUME_SECONDS
+    reserve_seconds = _coerce_int(
+        run.budget.get("final_proof_reserve_seconds"),
+        default=LONG_COMMAND_DEFAULT_FINAL_PROOF_RESERVE_SECONDS,
+    )
+    remaining_seconds = _coerce_int(run.budget.get("work_wall_remaining_seconds"))
+    if remaining_seconds is not None and remaining_seconds < minimum_resume_seconds + reserve_seconds:
+        return RecoveryDecision(
+            schema_version=LONG_BUILD_SCHEMA_VERSION,
+            id=f"{contract_id}:recovery:long_command:{_safe_path_component(run.id)}",
+            contract_id=contract_id,
+            state_status=status,
+            failure_class=failure_class,
+            prerequisites=["valid_source_tree", "same_idempotence_key", "fresh_wall_budget"],
+            clear_condition="resume budget exhausted before required artifact proof",
+            allowed_next_action={
+                "kind": "resume_budget_exhausted",
+                "long_command_run_id": run.id,
+                "stage": run.stage or "continue_or_resume_build",
+                "idempotence_key": run.idempotence_key,
+                "required_evidence": "new_work_session_or_larger_wall_budget",
+                "targets": _contract_artifact_paths(contract),
+            },
+            prohibited_repeated_actions=[
+                "low_wall_model_retry",
+                "resume_without_larger_wall_budget",
+                "abandon_existing_source_tree_progress",
+            ],
+            budget={
+                "remaining_seconds": remaining_seconds,
+                "reserve_seconds": reserve_seconds,
+                "may_spend_reserve": False,
+                "minimum_resume_seconds": minimum_resume_seconds,
+                "continuation_count": _coerce_int(run.budget.get("continuation_count"), default=0) or 0,
+                "max_continuations": _coerce_int(run.budget.get("max_continuations"), default=3) or 3,
+            },
+            decision="stop",
+        )
     return RecoveryDecision(
         schema_version=LONG_BUILD_SCHEMA_VERSION,
         id=f"{contract_id}:recovery:long_command:{_safe_path_component(run.id)}",
@@ -1817,10 +1887,10 @@ def _derive_long_command_terminal_recovery_decision(
             "abandon_existing_source_tree_progress",
         ],
         budget={
-            "remaining_seconds": _coerce_int(run.budget.get("work_wall_remaining_seconds")),
-            "reserve_seconds": _coerce_int(run.budget.get("final_proof_reserve_seconds"), default=60),
+            "remaining_seconds": remaining_seconds,
+            "reserve_seconds": reserve_seconds,
             "may_spend_reserve": False,
-            "minimum_resume_seconds": 600,
+            "minimum_resume_seconds": minimum_resume_seconds,
             "continuation_count": _coerce_int(run.budget.get("continuation_count"), default=0) or 0,
             "max_continuations": _coerce_int(run.budget.get("max_continuations"), default=3) or 3,
         },

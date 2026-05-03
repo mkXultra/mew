@@ -11260,6 +11260,145 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(ceiling["blocked"])
         self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
 
+    def test_timed_out_managed_long_command_caps_resume_budget_to_prior_wall_slice(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        state = {
+            "next_ids": {"work_tool_call": 1},
+            "work_sessions": [
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": task["description"],
+                    "tool_calls": [],
+                    "model_turns": [],
+                    "long_command_runs": [
+                        build_long_command_run(
+                            session_id=1,
+                            ordinal=1,
+                            task_id=1,
+                            contract_id="work_session:1:long_build:1",
+                            attempt_id="attempt-1",
+                            tool_call_id=5,
+                            stage="configure",
+                            selected_target="/tmp/FooCC/foocc",
+                            command="./configure && make depend",
+                            cwd="/tmp/FooCC",
+                            status="completed",
+                            effective_timeout_seconds=120,
+                            work_wall_remaining_seconds=1177,
+                            final_proof_reserve_seconds=60,
+                        )
+                    ],
+                }
+            ],
+        }
+        session = state["work_sessions"][0]
+        parameters = {
+            "command": "make -j10 foocc",
+            "cwd": "/tmp/FooCC",
+            "timeout": 600,
+            "wall_timeout_ceiling": {"remaining_seconds": 1491, "reserve_seconds": 60},
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "runtime_build",
+                "effective_timeout_seconds": 600,
+                "yield_after_seconds": 30,
+                "final_proof_reserve_seconds": 60,
+            },
+        }
+        call = start_work_tool_call(state, session, "run_command", parameters)
+        call["started_at"] = "2026-01-01T00:00:00Z"
+
+        with patch("mew.work_session.now_iso", return_value="2026-01-01T00:10:00Z"):
+            finish_work_tool_call(
+                state,
+                1,
+                call["id"],
+                result={
+                    "command": "make -j10 foocc",
+                    "cwd": "/tmp/FooCC",
+                    "exit_code": None,
+                    "timed_out": True,
+                    "duration_seconds": 600,
+                    "stdout": "COQC backend/ValueDomain.v\n",
+                    "stderr": "command timed out after 600 second(s)\n",
+                    "managed_long_command": {
+                        "action_kind": "start_long_command",
+                        "status": "timed_out",
+                        "stage": "runtime_build",
+                    },
+                    "long_command_budget": parameters["long_command_budget"],
+                },
+            )
+
+        latest_run = session["long_command_runs"][-1]
+        self.assertEqual(latest_run["status"], "timed_out")
+        self.assertEqual(latest_run["budget"]["work_wall_remaining_seconds"], 577)
+        resume = build_work_session_resume(session, task=task)
+        recovery = resume["long_build_state"]["recovery_decision"]
+        self.assertEqual(recovery["allowed_next_action"]["kind"], "resume_budget_exhausted")
+        self.assertEqual(recovery["budget"]["remaining_seconds"], 577)
+
+    def test_long_command_budget_policy_blocks_resume_budget_exhausted_action(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="runtime_build",
+            selected_target="/tmp/FooCC/foocc",
+            command="make -j10 foocc",
+            cwd="/tmp/FooCC",
+            status="timed_out",
+            effective_timeout_seconds=600,
+            work_wall_remaining_seconds=577,
+            final_proof_reserve_seconds=60,
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": "make -j10 foocc", "cwd": "/tmp/FooCC", "timeout": 900}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "resume_budget_exhausted")
+        self.assertEqual(policy["recovery_decision_kind"], "resume_budget_exhausted")
+        self.assertEqual(policy["budget_blocked_reason"], "resume budget exhausted for long-command continuation")
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(ceiling["reason"], "resume budget exhausted for long-command continuation")
+
     def test_typed_managed_long_command_preserves_idempotence_across_poll_without_contract(self):
         task = {
             "id": 1,

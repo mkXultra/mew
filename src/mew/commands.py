@@ -6463,6 +6463,9 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
         budget = budget if isinstance(budget, dict) else {}
         if recovery_decision_kind in {"poll_long_command", "resume_idempotent_long_command"}:
             action_kind = recovery_decision_kind
+        elif recovery_decision_kind == "resume_budget_exhausted":
+            action_kind = recovery_decision_kind
+            budget_blocked_reason = "resume budget exhausted for long-command continuation"
         else:
             action_kind = "recover_long_command"
         if recovery_decision_kind == "poll_long_command":

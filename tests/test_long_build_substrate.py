@@ -965,6 +965,43 @@ def test_reduce_state_maps_timed_out_long_command_to_build_timeout_resume_decisi
     assert state["recovery_decision"]["budget"]["continuation_count"] == 1
 
 
+def test_reduce_state_does_not_advertise_resume_when_resume_budget_exhausted():
+    contract = build_long_build_contract(
+        "Under /tmp/FooCC, build the FooCC compiler from source. Ensure /tmp/FooCC/foocc can be invoked.",
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:timeout-low-wall:long_build:1",
+    )
+    run = build_long_command_run(
+        session_id="timeout-low-wall",
+        ordinal=1,
+        task_id="source-build:foocc",
+        contract_id=contract["id"],
+        attempt_id="work_session:timeout-low-wall:long_build:1:attempt:1",
+        tool_call_id=10,
+        stage="runtime_build",
+        selected_target="foocc",
+        command="make foocc",
+        cwd="/tmp/FooCC",
+        status="timed_out",
+        running_command_evidence_ref={"kind": "command_evidence", "id": 10},
+        effective_timeout_seconds=600,
+        work_wall_remaining_seconds=577,
+        final_proof_reserve_seconds=60,
+        stderr="command timed out\n",
+    )
+
+    state = reduce_long_build_state(contract, [], [], long_command_runs=[run])
+
+    assert state["status"] == "blocked"
+    assert state["current_failure"]["failure_class"] == "build_timeout"
+    assert state["recovery_decision"]["decision"] == "stop"
+    assert state["recovery_decision"]["allowed_next_action"]["kind"] == "resume_budget_exhausted"
+    assert state["recovery_decision"]["budget"]["remaining_seconds"] == 577
+    assert state["recovery_decision"]["budget"]["minimum_resume_seconds"] == 600
+    assert state["recovery_decision"]["budget"]["reserve_seconds"] == 60
+    assert "low_wall_model_retry" in state["recovery_decision"]["prohibited_repeated_actions"]
+
+
 def test_reduce_state_maps_failed_source_acquisition_long_command_to_repair_decision():
     contract = build_long_build_contract(
         "Under /tmp/FooCC, build the FooCC compiler from source. Ensure /tmp/FooCC/foocc can be invoked.",

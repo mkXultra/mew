@@ -487,3 +487,31 @@ implemented and codex-ultra review session
 `019dec39-7f1d-7901-af16-e2d1950b0a3e` approved after one request-change
 round. The next action is the pre-speed operation on current head, then exactly
 one same-shape `compile-compcert` speed_1.
+
+Update 2026-05-03 14:55 JST: that same-shape speed_1 was run and classified.
+The prior managed-poll reserve gate moved; the current selected gap is
+`timed_out_managed_long_command_resume_budget_not_preserved` in
+`structural_tool_runtime_budget`. The run reached real managed
+`make -j10 ccomp` progress, then timed out in `runtime_build` before
+`/tmp/CompCert/ccomp` existed. The exact Harbor artifact was reproduced through
+both `mew replay terminal-bench` and `mew dogfood --scenario
+m6_24-terminal-bench-replay` with explicit assertions for `blocked`,
+`build_timeout`, `resume_idempotent_long_command`, and external reward `0`.
+codex-ultra session `019dec63-b7ff-7a31-9d54-661b13a6062c` classified this as
+structural and recommended repair now. This is still narrow long-build
+substrate evidence, not an all-command generic managed-exec trigger. The next
+action is the generic timeout/resume-budget repair in
+`docs/M6_24_MANAGED_TIMEOUT_RESUME_BUDGET_REPAIR_2026-05-03.md`.
+
+Repair update 2026-05-03 15:06 JST: the local repair now caps terminal timed-out
+managed long-command remaining budget by the prior work-session wall slice, and
+the reducer emits `resume_budget_exhausted` instead of advertising
+`resume_idempotent_long_command` when remaining budget is below
+`minimum_resume_seconds + reserve_seconds`. Exact artifact replay and dogfood
+now pass with the repaired assertion. Focused and broader long-build/work-session
+tests, terminal-bench replay/dogfood tests, scoped ruff, JSONL parse, and diff
+check pass. codex-ultra review session
+`019dec74-191f-75b1-97f0-da6e0ed306fe` approved; the requested direct
+`resume_budget_exhausted` policy test was added and passed. The next action is
+the pre-speed operation on current head, then exactly one same-shape
+`compile-compcert` speed_1.
