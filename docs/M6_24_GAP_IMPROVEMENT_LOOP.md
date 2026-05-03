@@ -1,6 +1,6 @@
 # M6.24 Gap Improvement Loop
 
-Purpose: keep M6.24 from drifting between broad measurement, local fixes, and
+Purpose: keep M6.24 from drifting between scoped measurement, local fixes, and
 reference-derived architecture work. This file is the controller for closing
 the measured Codex gap, not a general idea backlog.
 
@@ -8,37 +8,48 @@ the measured Codex gap, not a general idea backlog.
 
 M6.24 is in `improvement_phase`.
 
+Scope decision on 2026-05-03: M6.24 now measures only the 25 Terminal-Bench 2.0
+tasks returned by the `software-engineering,coding` filters. The active
+controller must rebaseline this scoped cohort before selecting another live
+proof target. Previous `compile-compcert` evidence is retained as historical
+build-orchestration substrate evidence, not as the active M6.24 close gate.
+
 Authoritative inputs:
 
 - `docs/M6_24_DECISION_LEDGER.md`
+- `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
 - latest `docs/M6_24_GAP_CLASS_PLAN_*`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 - `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md` for accepted structural repairs
 - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md` for lane,
   authority, helper-lane, and calibration-fit decisions
-- `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md` for the active
-  long-command continuation repair design
+- `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md` as historical
+  long-command/build-orchestration repair evidence
 - `docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md` for the trigger to
   replace narrow budget routing with all-command generic managed exec
 - `docs/REVIEW_2026-05-02_CODEX_CLI_LONG_BUILD_CONTINUATION_PATTERNS.md`
 - `docs/REVIEW_2026-05-02_CLAUDE_CODE_LONG_BUILD_CONTINUATION_PATTERNS.md`
 
-Do not resume new broad Terminal-Bench measurement until this controller or the
+Do not resume new scoped Terminal-Bench measurement until this controller or the
 decision ledger records why measurement is higher value than repairing the
 selected gap class.
 
 Current selected gap class:
-`structural_tool_runtime_budget`.
+`scope_rebaseline_pending`.
 
 Current selected next action:
-`M6.24 -> grouped read-only diagnostic repair floor -> UT -> replay -> dogfood -> compile-compcert emulator -> exactly one same-shape speed_1`.
+`M6.24 -> software/coding cohort scope -> build scoped cohort rebaseline -> select first below-target in-scope gap`.
 
 Active authoritative design:
-`docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`.
+`docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
 
 Foundational substrate design:
 `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`.
+
+Historical long-build note: the following `compile-compcert` history remains
+useful repair evidence, but it no longer selects the active M6.24 next action
+after the 2026-05-03 scope change.
 
 This supersedes both the stale 2026-05-01 Long-Build Substrate Phase 0 schema +
 safety-parity harness next-action text and proof escalation from the Phase 6
@@ -121,7 +132,7 @@ For every candidate gap, run this decision chain:
 
 5. Did the speed same-shape rerun improve the selected gap class?
    yes -> record delta, then choose the next highest-leverage gap or resume
-          broad measurement if the decision ledger says the threshold is met
+          scoped measurement if the decision ledger says the threshold is met
    no  -> first reproduce the saved Harbor artifact through replay and dogfood
           with assertions for the classified failure; only then record
           unchanged/regressed and revise the repair route or reclassify the gap
@@ -203,7 +214,7 @@ one-off guidance line.
 ## Repair Close Rule
 
 A same-shape proof reaching the frozen Codex target closes only that selected
-repair. It does **not** automatically reopen broad measurement.
+repair. It does **not** automatically reopen scoped measurement.
 
 For CPU-heavy long dependency/toolchain builds, proof escalation must be
 resource-normalized. A high-parallelism `-k N -n N` proof can create host-level
@@ -216,7 +227,7 @@ For Harbor proof commands used in this project, `-k` is the trial count and
 `-n` is the worker concurrency. A sequential five-trial proof is therefore
 `-k 5 -n 1`, not `-k 1 -n 5`.
 
-Before broad measurement resumes, re-evaluate the controller thresholds against
+Before scoped measurement resumes, re-evaluate the controller thresholds against
 the latest aggregate and batch evidence:
 
 ```text
@@ -369,7 +380,7 @@ Escalate from a speed-rerun to `-k 5 -n 5` only when one of these is true:
   candidate
 - the result is contradictory or variance-sensitive enough that one trial is
   misleading
-- the decision ledger is about to resume broad measurement
+- the decision ledger is about to resume scoped measurement
 - the user explicitly asks for a five-trial proof
 
 Record both the rerun tier and the reason in the decision ledger or gap ledger.
@@ -430,7 +441,11 @@ work. The next task must be one of:
 
 Anything else is drift unless the user explicitly changes direction.
 
-## Current Controller Note - 2026-05-03
+## Historical Long-Build Controller Notes - 2026-05-03
+
+This section is superseded for active next-action selection by the 2026-05-03
+software/coding scope decision. Keep it as repair evidence, but do not use its
+`compile-compcert` selected chains as M6.24's active next action.
 
 The latest same-shape `compile-compcert` speed_1 after compound budget repair
 scored `0/1`, but it moved the selected gap again: `latest_long_command_run_id`
@@ -462,7 +477,8 @@ from task-semantic shell labels toward typed `ExecutionContract` and
 `CommandRun` evidence, while keeping safety/display parsers and negative
 fallback fixtures as guardrails. The pre-speed operation has passed on current
 head, and codex-ultra approved the phase gate as
-`safe_to_commit_pre_speed`. Do not run broad measurement or `proof_5` next.
+`safe_to_commit_pre_speed`. This was the historical long-build controller state
+before the 25-task scope reset.
 Spend exactly one same-shape `compile-compcert` speed_1, then classify the
 result as clean closeout, moved narrower gap, or regression.
 

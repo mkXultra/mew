@@ -9,20 +9,27 @@ Companion controller and data files:
 - `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
+- `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
 - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
 
 ## Controller Rule
 
-After each batch or partial batch checkpoint, compare mew against the frozen
-Codex target for the same measured trials.
+M6.24 scope decision on 2026-05-03: the controller applies only to the 25
+Terminal-Bench 2.0 tasks returned by the `software-engineering,coding` filters
+and listed in `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`. Previous
+all-registry and `compile-compcert` records are historical repair evidence, not
+the active M6.24 close gate.
+
+After each scoped batch or partial batch checkpoint, compare mew against the
+frozen Codex target for the same measured trials.
 
 Decision thresholds:
 
-- `gap <= 10 percentage points`: classify any misses and continue broad
+- `gap <= 10 percentage points`: classify any misses and continue scoped
   measurement.
-- `10 < gap <= 20 percentage points`: record gap classes and continue broad
+- `10 < gap <= 20 percentage points`: record gap classes and continue scoped
   measurement unless the same class repeats across batches.
-- `gap > 20 percentage points`: pause broad measurement and enter improvement
+- `gap > 20 percentage points`: pause scoped measurement and enter improvement
   phase.
 - accepted structural blocker at any gap: pause M6.24, append/update
   `docs/M6_14_STRUCTURAL_REPAIR_LEDGER.md`, repair through M6.14, rerun the
@@ -36,7 +43,7 @@ Improvement phase requirements:
 2. Name the failed task shape that will be rerun after repair.
 3. Do not add Terminal-Bench-specific solvers.
 4. Record before/after evidence.
-5. Resume broad measurement only after the rerun is recorded or a written
+5. Resume scoped measurement only after the rerun is recorded or a written
    decision explains why the repair cannot be validated with the same shape.
 6. Record classification and repair state in
    `proof-artifacts/m6_24_gap_ledger.jsonl`.
@@ -83,7 +90,7 @@ Allowed next actions during improvement phase:
 - run the pre-speed operation before a live same-shape speed rerun
 - reproduce a failed live proof through replay and dogfood before code repair
 - rerun the same failed shape after repair
-- update this decision ledger to resume broad measurement with evidence
+- update this decision ledger to resume scoped measurement with evidence
 
 Anything else is drift unless the user's newest explicit instruction changes
 direction.
@@ -92,6 +99,7 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-03 | Scope M6.24 to the Terminal-Bench 2.0 `software-engineering,coding` cohort. | User explicitly narrowed the milestone to "その25 task"; the filtered Terminal-Bench page shows 25 tasks for `software-engineering,coding`; mew's near-term goal is developer/task/coding execution quality. Out-of-scope work such as `compile-compcert` remains useful build-orchestration evidence but no longer owns the active M6.24 close gate. | Rebaseline the scoped 25-task cohort against frozen Codex targets and measured mew artifacts, then select the first below-target in-scope gap. Do not spend new M6.24 proof budget on out-of-scope tasks unless the newest user decision reopens that scope. | scope_updated_rebaseline_pending |
 | 2026-05-03 | Managed-poll reserve rerun moved the blocker to managed timeout resume-budget handling, and the repair is reviewed. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-managed-poll-reserve-compile-compcert-1attempt-20260503-1416/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime `32m13s`, and external verifier failed because `/tmp/CompCert/ccomp` was missing. The prior poll-reserve gate moved: mew reached real managed `make -j10 ccomp` progress, then stopped with `wall_timeout`; reducer reported `blocked`, `build_timeout`, and stale `resume_idempotent_long_command` despite the prior wall slice and 600s timeout implying exhausted resume budget. Exact artifact replay and dogfood reproduced `blocked`, `build_timeout`, `resume_idempotent_long_command`, and external reward `0`. codex-ultra session `019dec63-b7ff-7a31-9d54-661b13a6062c` classified this as structural `timed_out_managed_long_command_resume_budget_not_preserved` in `tool_runtime_budget`. The local repair caps terminal timed-out managed long-command remaining budget by prior session-level wall slice, emits `resume_budget_exhausted` when remaining budget is below `minimum_resume_seconds + reserve_seconds`, and blocks action planning for that exhausted resume action. Validation passed: focused timeout/resume-budget tests `2 passed`, focused work-session policy tests `4 passed`, exact artifact replay/dogfood with `resume_budget_exhausted` passed, full long-build substrate `366 passed`, broader work-session long-command subset `38 passed` plus `12 subtests`, terminal-bench replay/dogfood `5 passed`, scoped ruff, JSONL parse, and diff check. codex-ultra review session `019dec74-191f-75b1-97f0-da6e0ed306fe` approved with only a minor direct-policy-test note, which was added. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
 | 2026-05-03 | Dependency-generation diagnostic budget rerun moved the blocker to managed-poll reserve handling. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-dependency-diagnostic-budget-compile-compcert-1attempt-20260503-1320/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime about `30m58s`, `mew-report.work_exit_code=1`, `work_report.stop_reason=long_command_budget_blocked`, and the external verifier failed because `/tmp/CompCert/ccomp` was missing. The prior diagnostic-budget gate moved: mew reached source acquisition recovery, MenhirLib install, configure/dependency generation, and a real managed `make -j"$(nproc)" ccomp` that remained running. Exact artifact replay and dogfood reproduced `long_build_status=in_progress`, `recovery_action=poll_long_command`, `mew_exit_code=1`, and external reward `0`. codex-ultra session `019dec30-429e-77d2-a75d-a233bdeb3af7` classified this as structural `managed_long_command_poll_blocked_by_final_proof_reserve` in `tool_runtime_budget`. The local repair allows only `poll_long_command` for an already running/yielded managed command to spend the final-proof reserve, preserves the logical `final_proof_reserve_seconds` on the `LongCommandRun`, preserves reserve for start/resume/recover/new commands, and preserves terminal-only artifact proof. codex-ultra review session `019dec39-7f1d-7901-af16-e2d1950b0a3e` approved after one request-change round. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
 | 2026-05-03 | Failed-long-command repair-budget rerun moved to dependency-generation diagnostic budget routing. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-failed-long-command-repair-budget-compile-compcert-1attempt-20260503-1229/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime `16m36s`, `mew-report.work_exit_code=1`, and external verifier failed because `/tmp/CompCert/ccomp` was missing. The prior gate moved: source acquisition/configure/dependency install ran, then `make ccomp` failed with missing generated/dependency files such as `Heaps.v`. mew proposed a read-only diagnostic (`find`, `sed`, `make -n depend`), but `long_command_budget_blocked` rejected the 120s diagnostic because the true-build `minimum_repair_seconds=600` floor still applied. Exact artifact replay and dogfood reproduced `blocked`, `long_command_failed`, `repair_failed_long_command`, blocker `dependency_generation_order_issue`, `mew_exit_code=1`, and external reward `0`. codex-ultra session `019debf2-726f-7552-8ced-5130e69683bc` classified this as `dependency_generation_diagnostic_budget_floor_overconstrained` in `tool_runtime_budget`. The local repair lowers the floor only for segment/token-proven read-only diagnostics, while preserving the 600s floor for side-effecting dependency/build repairs, spoofed diagnostics, typed diagnostic side effects, no-whitespace write redirects, and identical failed retries. codex-ultra review session `019debfe-47ae-71c0-b778-744d4aa70d99` approved after two request-change rounds. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
