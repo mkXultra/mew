@@ -120,11 +120,12 @@ For every candidate gap, run this decision chain:
      3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
         `--terminal-bench-job-dir` and explicit `--terminal-bench-assert-*`
         flags when validating an existing Harbor artifact
-     4. for `compile-compcert` long-build repairs, run
-        `mew dogfood --scenario m6_24-compile-compcert-emulator`; pass
-        `--terminal-bench-job-dir <latest-saved-job>` after every speed proof
-        so the raw model action fixture is refreshed from the latest
-        `mew-report.json`
+     4. run the selected gap's emulator. If no emulator exists for the selected
+        task/gap shape, create the smallest replayable emulator fixture before
+        live benchmark budget is spent. `compile-compcert` keeps using
+        `mew dogfood --scenario m6_24-compile-compcert-emulator`; scoped
+        software/coding gaps should use a generic Terminal-Bench emulator or a
+        task-family emulator such as build/FFI/runtime/numeric/data.
      5. only after 1-4 pass, spend exactly one selected same-shape live
         `speed_1`
    no  -> fix the UT/replay/dogfood/emulator failure before live speed proof
@@ -172,6 +173,11 @@ parsed from the speed proof, writes a local JSONL fixture, recomputes the
 long-build state, and re-runs the raw action through budget/continuation
 policy. If this emulator fails, repair the emulator-detected substrate gap
 before spending another live speed proof.
+
+For scoped software/coding tasks, use the same principle without hard-coding the
+task: replay the saved action/evidence shape through a local emulator that can
+fail before Harbor is invoked. If no emulator can express the failure, building
+that emulator is the next repair step.
 
 ## Gap-Class Repair History Rule
 

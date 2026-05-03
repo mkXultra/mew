@@ -92,7 +92,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> software/coding cohort scope -> build scoped cohort rebaseline -> select first below-target in-scope gap
+M6.24 -> software/coding cohort scope -> build scoped cohort rebaseline -> select first below-target in-scope gap -> UT/replay/dogfood/emulator -> speed_1
 ```
 
 Do not spend new M6.24 live proof budget on out-of-scope tasks. If the next
@@ -137,8 +137,10 @@ Useful historical files:
 1. Rebaseline the scoped 25-task software/coding cohort against the frozen Codex
    target registry and local mew artifacts.
 2. Select the first below-target in-scope gap using the M6.24 controller.
-3. If the selected gap is local/polish, fix it and rerun the same scoped shape.
-4. If the selected gap is structural, pause M6.24 behind M6.14, repair the
+3. Before any live `speed_1`, run focused UT, replay, dogfood, and a same-shape
+   emulator. If no emulator exists, build the smallest emulator fixture first.
+4. If the selected gap is local/polish, fix it and rerun the same scoped shape.
+5. If the selected gap is structural, pause M6.24 behind M6.14, repair the
    generic substrate, rerun the same scoped shape, then resume M6.24.
-5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
+6. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
