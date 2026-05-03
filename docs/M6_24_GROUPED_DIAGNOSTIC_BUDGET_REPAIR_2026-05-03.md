@@ -95,10 +95,22 @@ the next raw model action was still a typed read-only diagnostic, but it used
 allowlist treated as non-diagnostic shell text. The repair now accepts this
 bounded shell-control shape.
 
-Stop rule: if the next same-shape speed proof exposes another read-only
-diagnostic parser false negative, stop adding shell-syntax cases and open a
-separate diagnostic-contract redesign slice. At that point the signal is no
-longer a small grouped-diagnostic gap.
+The next same-shape speed proof did expose another read-only diagnostic parser
+false negative:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-shell-loop-diagnostic-compile-compcert-1attempt-20260503-1731/result.json`
+
+That triggered the stop rule. The follow-up repair is no longer a one-off
+parser case. It normalizes shell-control prefixes for typed read-only
+diagnostics (`if`, `then`, `else`, `elif`, `while`, `until`, `do`, plus
+control-only terminators such as `fi`, `done`, `esac`) and recursively validates
+the executable command inside the control branch. Side-effecting payloads such
+as `if ...; then make ccomp; fi` still keep the long repair floor.
+
+New stop rule: if the next same-shape speed proof exposes another read-only
+diagnostic parser false negative after shell-control normalization, stop local
+budget-gate work and open a separate diagnostic-contract redesign milestone.
+At that point the narrow predicate is no longer the right abstraction.
 
 ## Next
 

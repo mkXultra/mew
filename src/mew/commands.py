@@ -6160,6 +6160,7 @@ _READ_ONLY_DIAGNOSTIC_COMMANDS = {
     "cat",
     "command",
     "dpkg",
+    "echo",
     "grep",
     "head",
     "ls",
@@ -6287,12 +6288,15 @@ def _shell_segment_is_read_only_diagnostic(segment, *, typed_contract=None):
     if not tokens:
         return False
     command = _diagnostic_executable_name(tokens[0])
+    if command in {"fi", "done", "esac"}:
+        return _typed_contract_claims_read_only_diagnostic(typed_contract)
+    if command in {"do", "then", "else", "elif", "if", "while", "until"} and len(tokens) > 1:
+        return _shell_segment_is_read_only_diagnostic(
+            " ".join(shlex.quote(token) for token in tokens[1:]),
+            typed_contract=typed_contract,
+        )
     if command == "for":
         return _typed_contract_claims_read_only_diagnostic(typed_contract) and "in" in tokens[1:]
-    if command == "done":
-        return _typed_contract_claims_read_only_diagnostic(typed_contract)
-    if command == "do" and len(tokens) > 1:
-        return _shell_segment_is_read_only_diagnostic(" ".join(shlex.quote(token) for token in tokens[1:]), typed_contract=typed_contract)
     if command in {"cd", "set", "true", ":"}:
         return True
     if command in _READ_ONLY_DIAGNOSTIC_COMMANDS:

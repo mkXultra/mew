@@ -339,8 +339,11 @@ M6.24 resume condition:
   redirects were still blocked by a long repair floor. Its follow-up speed
   artifact exposed the same class for bounded read-only `for/do/done`
   diagnostic shell control, and the emulator caught it before another proof.
-  Stop rule: if another read-only diagnostic parser false negative appears,
-  stop adding parser cases and open a diagnostic-contract redesign slice. Next action is
+  The next artifact triggered that stop rule with `if/then/else/fi`; the
+  current local repair is diagnostic-contract shell-control normalization, not
+  another one-off parser case. If another read-only diagnostic parser false
+  negative appears after this, stop local budget-gate work and open a separate
+  diagnostic-contract redesign milestone. Next action is
   focused UT/local validation, exact replay, exact terminal-bench dogfood,
   exact compile-compcert emulator, then exactly one same-shape speed_1 if all
   four pass.

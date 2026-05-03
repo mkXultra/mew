@@ -12278,16 +12278,16 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
             "command": (
                 "set -euo pipefail\n"
                 "cd /tmp/CompCert\n"
-                "./configure -help 2>&1 | sed -n '1,260p'\n"
-                "printf '\\n== configure compatibility hooks ==\\n'\n"
-                "grep -nEi 'coq|menhir|ignore|unsupported|version|external|use-external|prebuilt|system|library|opam|COQ|MENHIR' configure Makefile Makefile.config 2>/dev/null | sed -n '1,220p' || true\n"
-                "printf '\\n== build docs dependency mentions ==\\n'\n"
-                "grep -nEi 'coq|menhir|opam|ocaml|configure|build|8[.]16|8[.]12' README.md Changelog.md 2>/dev/null | sed -n '1,160p' || true\n"
-                "printf '\\n== package/opam availability ==\\n'\n"
-                "for t in menhir opam; do printf '%s: ' \"$t\"; command -v \"$t\" || true; done\n"
-                "apt-cache policy menhir opam coq 2>/dev/null | sed -n '1,220p'\n"
-                "printf '\\n== coq-related apt packages ==\\n'\n"
-                "apt-cache search '^coq|coq-8|libcoq' 2>/dev/null | sed -n '1,120p'\n"
+                "printf '== configure help ==\\n'\n"
+                "./configure --help 2>&1 | sed -n '1,240p' || true\n"
+                "printf '== configure/project compatibility terms ==\\n'\n"
+                "grep -nE 'ignore|unsupported|Coq|coq|MENHIR|Menhir|menhir|external|use-external|prebuilt|system|library|LIBRARY' configure Makefile Makefile.config.in Makefile.extr 2>/dev/null || true\n"
+                "printf '== installed ocaml findlib packages ==\\n'\n"
+                "if command -v ocamlfind >/dev/null 2>&1; then ocamlfind list 2>/dev/null | grep -E 'menhir|coq|flocq' || true; else echo 'ocamlfind: missing'; fi\n"
+                "printf '== apt candidate packages ==\\n'\n"
+                "apt-cache policy libmenhir-ocaml-dev menhir coq opam ocaml-findlib 2>/dev/null | sed -n '1,260p'\n"
+                "printf '== current final artifact state ==\\n'\n"
+                "ls -l /tmp/CompCert/ccomp 2>/dev/null || true"
             ),
             "cwd": "/app",
             "timeout": 60,
@@ -12559,36 +12559,43 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
             "tool_calls": [],
             "long_command_runs": [run],
         }
-        parameters = {
-            "command": "make ccomp",
-            "cwd": "/tmp/FooCC",
-            "timeout": 120,
-            "execution_contract": {
-                "schema_version": 2,
-                "purpose": "diagnostic",
-                "stage": "diagnostic",
-                "proof_role": "negative_diagnostic",
-                "acceptance_kind": "not_acceptance",
-                "continuation_policy": {"mode": "managed", "yield_after_seconds": 10},
-                "risk_class": "read_only",
-            },
-        }
+        for command in ("make ccomp", "if command -v make >/dev/null 2>&1; then make ccomp; fi"):
+            with self.subTest(command=command):
+                parameters = {
+                    "command": command,
+                    "cwd": "/tmp/FooCC",
+                    "timeout": 120,
+                    "execution_contract": {
+                        "schema_version": 2,
+                        "purpose": "diagnostic",
+                        "stage": "diagnostic",
+                        "proof_role": "negative_diagnostic",
+                        "acceptance_kind": "not_acceptance",
+                        "continuation_policy": {"mode": "managed", "yield_after_seconds": 10},
+                        "risk_class": "read_only",
+                    },
+                }
 
-        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
-        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
-            "run_command",
-            parameters,
-            max_wall_seconds=1000,
-            run_started_at=time.monotonic(),
-            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
-            long_command_budget_policy=policy,
-        )
+                policy = commands.work_tool_long_command_budget_policy(
+                    "run_command",
+                    parameters,
+                    task=task,
+                    session=session,
+                )
+                ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+                    "run_command",
+                    parameters,
+                    max_wall_seconds=1000,
+                    run_started_at=time.monotonic(),
+                    recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+                    long_command_budget_policy=policy,
+                )
 
-        self.assertEqual(policy["action_kind"], "recover_long_command")
-        self.assertEqual(policy["recovery_decision_kind"], "repair_failed_long_command")
-        self.assertEqual(policy["minimum_timeout_seconds"], 600.0)
-        self.assertEqual(policy["budget_blocked_reason"], "repair timeout is below minimum_repair_seconds")
-        self.assertTrue(ceiling["blocked"])
+                self.assertEqual(policy["action_kind"], "recover_long_command")
+                self.assertEqual(policy["recovery_decision_kind"], "repair_failed_long_command")
+                self.assertEqual(policy["minimum_timeout_seconds"], 600.0)
+                self.assertEqual(policy["budget_blocked_reason"], "repair timeout is below minimum_repair_seconds")
+                self.assertTrue(ceiling["blocked"])
 
     def test_long_command_budget_policy_keeps_long_floor_for_failed_build_repair(self):
         task = {

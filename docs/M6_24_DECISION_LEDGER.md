@@ -516,3 +516,14 @@ diagnostic action on the long repair floor. The repair now accepts this bounded
 read-only shell-control shape. Stop rule: if the next speed proof exposes
 another read-only diagnostic parser false negative, stop adding parser cases and
 open a diagnostic-contract redesign slice before any further proof spending.
+
+Stop-rule update: the next speed rerun
+`mew-m6-24-shell-loop-diagnostic-compile-compcert-1attempt-20260503-1731`
+again scored `0/1` with runner errors `0`, and the emulator reproduced another
+typed read-only diagnostic false negative around `if/then/else/fi` shell
+control. The stop rule fired. The repair is now a small diagnostic-contract
+normalization: typed read-only diagnostics may use shell-control prefixes only
+when the recursively validated branch command is itself read-only. Side-effecting
+branch payloads still keep the long repair floor. If another parser false
+negative appears after this normalization, stop local budget-gate work and open
+a separate diagnostic-contract redesign milestone.
