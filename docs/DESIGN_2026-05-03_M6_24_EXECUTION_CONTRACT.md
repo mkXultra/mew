@@ -749,10 +749,15 @@ Pre-speed operation required before any same-shape Terminal-Bench speed proof:
 2. `mew replay terminal-bench` against the latest relevant saved Harbor
    artifact, or a synthetic same-shape replay fixture if no artifact exists.
 3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
-   `--terminal-bench-job-dir` when validating an existing Harbor artifact.
+   `--terminal-bench-job-dir` and explicit `--terminal-bench-assert-*` flags
+   when validating an existing Harbor artifact.
 
 Only after all three pass should the controller spend exactly one same-shape
 speed_1. Do not run proof_5 or broad measurement first.
+
+After a live speed/proof miss, run the same replay and dogfood checks against
+the exact saved Harbor job before any code repair. If dogfood is too narrow to
+represent the classified failure shape, expand dogfood instrumentation first.
 
 ### Phase 6 - Cleanup
 

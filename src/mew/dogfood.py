@@ -14663,19 +14663,67 @@ def _write_terminal_bench_replay_fixture(workspace):
     return job_dir
 
 
-def run_m6_24_terminal_bench_replay_scenario(workspace, *, job_dir=None):
-    checks = []
-    commands = []
-    source = Path(job_dir).expanduser() if job_dir else _write_terminal_bench_replay_fixture(workspace)
-    replay = replay_terminal_bench_job(
-        source,
-        task="compile-compcert",
-        assertions={
+def _m6_24_terminal_bench_replay_assertions(
+    *,
+    job_dir=None,
+    long_build_status=None,
+    current_failure=None,
+    recovery_action=None,
+    blockers=None,
+    mew_exit_code=None,
+    external_reward=None,
+):
+    if job_dir:
+        assertions = {}
+    else:
+        assertions = {
             "long_build_status": "blocked",
             "blockers": ["compatibility_override_probe_missing"],
             "mew_exit_code": 1,
             "external_reward": 0.0,
-        },
+        }
+    if long_build_status:
+        assertions["long_build_status"] = long_build_status
+    if current_failure:
+        assertions["current_failure"] = current_failure
+    if recovery_action:
+        assertions["recovery_action"] = recovery_action
+    if blockers:
+        assertions["blockers"] = list(blockers)
+    if mew_exit_code is not None:
+        assertions["mew_exit_code"] = mew_exit_code
+    if external_reward is not None:
+        assertions["external_reward"] = external_reward
+    return assertions
+
+
+def run_m6_24_terminal_bench_replay_scenario(
+    workspace,
+    *,
+    job_dir=None,
+    long_build_status=None,
+    current_failure=None,
+    recovery_action=None,
+    blockers=None,
+    mew_exit_code=None,
+    external_reward=None,
+):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_terminal_bench_replay_fixture(workspace)
+    assertions = _m6_24_terminal_bench_replay_assertions(
+        job_dir=job_dir,
+        long_build_status=long_build_status,
+        current_failure=current_failure,
+        recovery_action=recovery_action,
+        blockers=blockers,
+        mew_exit_code=mew_exit_code,
+        external_reward=external_reward,
+    )
+    replay = replay_terminal_bench_job(
+        source,
+        task="compile-compcert",
+        assertions=assertions,
     )
     _scenario_check(
         checks,
@@ -14695,10 +14743,10 @@ def run_m6_24_terminal_bench_replay_scenario(workspace, *, job_dir=None):
     current_long = ((first_trial.get("current") or {}).get("long_build_state") or {})
     _scenario_check(
         checks,
-        "m6_24_terminal_bench_replay_surfaces_long_build_blocker",
-        "compatibility_override_probe_missing" in (current_long.get("strategy_blockers") or []),
-        current_long.get("strategy_blockers") or [],
-        "compatibility_override_probe_missing",
+        "m6_24_terminal_bench_replay_satisfies_requested_assertions",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "pass",
     )
     report = _scenario_report("m6_24-terminal-bench-replay", workspace, commands, checks)
     report["artifacts"] = {
@@ -14810,6 +14858,12 @@ def run_dogfood_scenario(args):
                 run_m6_24_terminal_bench_replay_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
+                    long_build_status=getattr(args, "terminal_bench_assert_long_build_status", None),
+                    current_failure=getattr(args, "terminal_bench_assert_current_failure", None),
+                    recovery_action=getattr(args, "terminal_bench_assert_recovery_action", None),
+                    blockers=getattr(args, "terminal_bench_assert_blocker", None),
+                    mew_exit_code=getattr(args, "terminal_bench_assert_mew_exit_code", None),
+                    external_reward=getattr(args, "terminal_bench_assert_external_reward", None),
                 )
             )
         elif name == "m6_9-active-memory-recall":

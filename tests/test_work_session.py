@@ -11706,6 +11706,139 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertEqual(ceiling, {})
         self.assertEqual(parameters["long_command_budget"]["action_kind"], "recover_long_command")
 
+    def test_long_command_budget_policy_allows_short_source_acquisition_probe_after_terminal_failure(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="source_acquisition",
+            selected_target="/tmp/FooCC/foocc",
+            command="curl -fL https://example.invalid/foo-1.0.tar.gz -o /tmp/foo.tar.gz",
+            cwd="/tmp",
+            status="failed",
+            effective_timeout_seconds=1200,
+            work_wall_remaining_seconds=900,
+            stderr="curl: (22) The requested URL returned error: 404\n",
+        )
+        run["terminal"]["exit_code"] = 22
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {
+            "command": "curl -fsSIL https://example.org/foo-1.0.tar.gz",
+            "cwd": "/tmp",
+            "timeout": 120,
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "recover_long_command")
+        self.assertEqual(policy["recovery_decision_kind"], "repair_failed_long_command")
+        self.assertEqual(policy["stage"], "source_acquisition")
+        self.assertEqual(policy["minimum_timeout_seconds"], 60.0)
+        self.assertEqual(policy["budget_blocked_reason"], "")
+        self.assertEqual(ceiling, {})
+
+    def test_long_command_budget_policy_keeps_long_floor_for_failed_build_repair(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="build",
+            selected_target="/tmp/FooCC/foocc",
+            command="make -j10 foocc",
+            cwd="/tmp/FooCC",
+            status="failed",
+            effective_timeout_seconds=1200,
+            work_wall_remaining_seconds=900,
+            stderr="compiler build failed\n",
+        )
+        run["terminal"]["exit_code"] = 2
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": "make clean && make -j10 foocc", "cwd": "/tmp/FooCC", "timeout": 120}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1000,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "recover_long_command")
+        self.assertEqual(policy["stage"], "build")
+        self.assertEqual(policy["minimum_timeout_seconds"], 600.0)
+        self.assertEqual(policy["budget_blocked_reason"], "repair timeout is below minimum_repair_seconds")
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(ceiling["reason"], "repair timeout is below minimum_repair_seconds")
+
+        capped_parameters = {"command": "make clean && make -j10 foocc", "cwd": "/tmp/FooCC", "timeout": 600}
+        capped_policy = commands.work_tool_long_command_budget_policy(
+            "run_command",
+            capped_parameters,
+            task=task,
+            session=session,
+        )
+        capped_ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            capped_parameters,
+            max_wall_seconds=560,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=capped_policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=capped_policy,
+        )
+
+        self.assertEqual(capped_policy["budget_blocked_reason"], "")
+        self.assertTrue(capped_ceiling["blocked"])
+        self.assertEqual(capped_ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(capped_ceiling["reason"], "repair timeout is below minimum_repair_seconds")
+        self.assertLess(capped_parameters["timeout"], capped_policy["minimum_timeout_seconds"])
+
     def test_long_command_budget_policy_blocks_identical_failed_source_acquisition_repeat(self):
         task = {
             "id": 1,

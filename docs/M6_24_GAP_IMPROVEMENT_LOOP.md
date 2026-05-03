@@ -108,15 +108,17 @@ For every candidate gap, run this decision chain:
      2. `mew replay terminal-bench` against the latest relevant saved Harbor
         artifact, or a synthetic same-shape replay fixture if no artifact exists
      3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
-        `--terminal-bench-job-dir` when validating an existing Harbor artifact
+        `--terminal-bench-job-dir` and explicit `--terminal-bench-assert-*`
+        flags when validating an existing Harbor artifact
    no  -> fix the local/replay/dogfood failure before live speed proof
    yes -> spend exactly the selected same-shape speed rerun
 
 5. Did the speed same-shape rerun improve the selected gap class?
    yes -> record delta, then choose the next highest-leverage gap or resume
           broad measurement if the decision ledger says the threshold is met
-   no  -> record unchanged/regressed, then either revise the repair route or
-          reclassify the gap
+   no  -> first reproduce the saved Harbor artifact through replay and dogfood
+          with assertions for the classified failure; only then record
+          unchanged/regressed and revise the repair route or reclassify the gap
 ```
 
 The selected gap class must be written before implementation starts. If the
@@ -125,6 +127,20 @@ current resident cannot write this chain in one line, do not implement:
 ```text
 M6.24 -> selected gap class -> architecture fit -> required next action -> pre-speed operation -> same-shape rerun condition
 ```
+
+## Failed-Proof Reproduction Rule
+
+When a live `speed_1` or `proof_5` misses, do not repair directly from the live
+Harbor output. Reproduce the exact saved artifact first:
+
+1. `mew replay terminal-bench --job-dir <saved-job> --task <task> ...` with
+   assertions matching the classified current failure.
+2. `mew dogfood --scenario m6_24-terminal-bench-replay
+   --terminal-bench-job-dir <saved-job> ...` with the same assertion shape.
+3. Only after both pass may code repair start.
+
+If dogfood cannot express the current failure shape, fix dogfood
+instrumentation before repairing the product gap.
 
 ## Gap-Class Repair History Rule
 
@@ -429,3 +445,16 @@ head, and codex-ultra approved the phase gate as
 `safe_to_commit_pre_speed`. Do not run broad measurement or `proof_5` next.
 Spend exactly one same-shape `compile-compcert` speed_1, then classify the
 result as clean closeout, moved narrower gap, or regression.
+
+Update 2026-05-03 12:17 JST: that execution-contract speed_1 was run and
+classified. The prior execution-contract gate moved; the current selected gap
+is `failed_long_command_repair_timeout_floor_overconstrained` in
+`tool_runtime_budget`. The exact Harbor artifact was reproduced through both
+`mew replay terminal-bench` and `mew dogfood --scenario
+m6_24-terminal-bench-replay` with explicit assertions. The local repair keeps
+the 600s floor for true build repairs while allowing bounded changed
+source/diagnostic probes.
+Review update: codex-ultra session `019debd8-a8c8-7d91-8fcf-27f147c89eb4`
+approved after a request-change round that added post-wall-ceiling enforcement
+for recover actions. The next action is the pre-speed operation on current head,
+then exactly one same-shape `compile-compcert` speed_1.

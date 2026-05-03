@@ -901,6 +901,34 @@ def build_parser():
         help="for terminal-bench replay dogfood, replay an existing Harbor job, trial, or artifact directory",
     )
     dogfood_parser.add_argument(
+        "--terminal-bench-assert-long-build-status",
+        help="for terminal-bench replay dogfood, require recomputed long_build_state.status",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-current-failure",
+        help="for terminal-bench replay dogfood, require recomputed current failure class",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-recovery-action",
+        help="for terminal-bench replay dogfood, require recomputed recovery action kind",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-blocker",
+        action="append",
+        default=[],
+        help="for terminal-bench replay dogfood, require a recomputed strategy blocker code; repeatable",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-mew-exit-code",
+        type=int,
+        help="for terminal-bench replay dogfood, require saved mew work exit code",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-external-reward",
+        type=float,
+        help="for terminal-bench replay dogfood, require saved external verifier reward",
+    )
+    dogfood_parser.add_argument(
         "--m2-task-shape",
         choices=M2_COMPARATIVE_TASK_SHAPES,
         help="for m2-comparative, set task_shape.selected for this paired run",

@@ -55,8 +55,16 @@ Improvement phase requirements:
    2. `mew replay terminal-bench` against the latest relevant saved Harbor
       artifact, or a synthetic same-shape replay fixture if no artifact exists,
    3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
-      `--terminal-bench-job-dir` when validating an existing Harbor artifact.
+      `--terminal-bench-job-dir` and explicit `--terminal-bench-assert-*`
+      flags when validating an existing Harbor artifact.
    Fix any local/replay/dogfood failure before spending live benchmark budget.
+10. After any live `speed_1` or `proof_5` miss, do not edit code directly from
+    the live Harbor output. First reproduce the exact saved artifact through
+    `mew replay terminal-bench` and `mew dogfood --scenario
+    m6_24-terminal-bench-replay` with assertions matching the classified
+    failure. If dogfood cannot express the current failure shape, fix dogfood
+    instrumentation first; then record the reproduced failure before selecting
+    the repair.
 
 Allowed next actions during improvement phase:
 
@@ -66,6 +74,7 @@ Allowed next actions during improvement phase:
 - make a bounded local/polish repair for a selected gap
 - open/complete a reference-backed structural repair for a selected gap
 - run the pre-speed operation before a live same-shape speed rerun
+- reproduce a failed live proof through replay and dogfood before code repair
 - rerun the same failed shape after repair
 - update this decision ledger to resume broad measurement with evidence
 
@@ -76,6 +85,7 @@ direction.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-03 | Execution-contract speed rerun moved the gap to failed-long-command repair budgeting, and replay/dogfood reproduction is now mandatory before repair. | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-execution-contract-compile-compcert-1attempt-20260503-1155/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, runtime `8m10s`, `mew-report.work_exit_code=1`, and external verifier failed because `/tmp/CompCert/ccomp` was missing. The managed source-acquisition command failed terminally with `curl: (22) The requested URL returned error: 404`; mew then proposed a changed bounded source-authority probe, but `long_command_budget_blocked` rejected the 120s probe because `minimum_repair_seconds=600`. Local replay passed with `long_build_status=blocked`, `current_failure=long_command_failed`, `recovery_action=repair_failed_long_command`, `mew_exit_code=1`, and external reward `0`. Dogfood initially exposed stale fixed blocker expectations, so the dogfood scenario was widened to accept explicit `--terminal-bench-assert-*` failure-shape flags, then passed on the exact saved artifact. codex-ultra session `019debcc-a33c-7153-b948-3c923c491290` approved the classification as `failed_long_command_repair_timeout_floor_overconstrained` in `tool_runtime_budget`. The repair keeps the 600s floor for true build repairs, allows bounded changed source/diagnostic repair probes below that floor, blocks identical failed retries, and now rechecks the floor after wall-clock timeout capping. codex-ultra review session `019debd8-a8c8-7d91-8fcf-27f147c89eb4` approved after one request-change round. | Run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run proof_5 or broad measurement first. | reviewed_speed_1_pending |
 | 2026-05-03 | Non-timeout source retry speed rerun passed externally but exposed final closeout projection drift. | `docs/M6_24_NON_TIMEOUT_SOURCE_RETRY_SPEED_RERUN_2026-05-03.md` and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-non-timeout-source-retry-compile-compcert-1attempt-20260503-0327/result.json`: one trial, runner errors `0`, Harbor reward `1.0`, runtime `23m15s`, `mew-report.work_exit_code=0`, `work_report.stop_reason=finish`, and external verifier `3 passed`. Internal closeout still reported `status=blocked`, `source_authority=unknown`, `default_smoke=unknown`, and stale `dependency_generation_required`. codex-ultra classified this as `final_artifact_and_default_smoke_closeout_not_projected_to_long_build_state` and recommended `REPAIR_NOW` at reducer/closeout. The local repair in `docs/M6_24_FINAL_CLOSEOUT_PROJECTION_REPAIR_2026-05-03.md` accepts safe `|| exit 1` / `|| { ... exit 1; }` default-smoke guards, recognizes strict selected authoritative source archive acquisition, and resolves simple shell assignments in archive hash/list readbacks. Validation passed: focused closeout/smoke/source subset `7 passed`, broader reducer/resume slice `208 passed`, and scoped ruff passed. | Ask codex-ultra to review the reducer/closeout repair. If approved, run the pre-speed operation on current head, then exactly one same-shape `compile-compcert` speed_1. Do not run `proof_5` or broad measurement first. | repair_review_pending |
 | 2026-05-03 | Source-authority path-correlation speed rerun moved the blocker to production long-command dispatch, and the generic dispatch repair is reviewed. | `docs/M6_24_SOURCE_AUTHORITY_PATH_CORRELATION_SPEED_RERUN_2026-05-03.md`, `docs/M6_24_MANAGED_LONG_COMMAND_DISPATCH_REPAIR_2026-05-03.md`, `docs/REVIEW_2026-05-03_M6_24_SOURCE_AUTHORITY_RERUN_CLASSIFICATION_CODEX.md`, and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-authority-path-correlation-compile-compcert-1attempt-20260502-2336/result.json`: one trial, runner errors `0`, Harbor reward `0.0`, `mew-report.work_exit_code=1`, and `work_report.stop_reason=wall_timeout`. The prior source-authority blocker moved: `source_authority=satisfied` and the external verifier found `/tmp/CompCert/ccomp` executable. The remaining verifier failure is default runtime linking (`cannot find -lcompcert`). Internal continuation state was missing (`long_command_runs=[]`, `latest_long_command_run_id=null`), and the compound `configure -> make depend -> make ccomp -> smoke` command was classified as `dependency_generation`, so the managed continuation path was not engaged. The repair now dispatches budget-marked commands through `ManagedCommandRunner`, persists nonterminal and terminal `LongCommandRun` evidence, enforces managed poll timeouts, and preserves reserve for dependency-generation compound commands. Validation passed: focused managed tests `4 passed`, broader long-build/work-session/Harbor/toolbox/acceptance suite `1311 passed` with one warning and `67 subtests`, full ruff, diff check, and JSONL parse. codex-ultra session `019de952-1bf3-7513-820a-ecb5eada4139` returned `STATUS: APPROVE`. | Rerun exactly one same-shape `compile-compcert` speed_1. Do not run `proof_5` or broad measurement until the live rerun records a clean pass or a newer narrower gap. | reviewed_speed_1_pending |
 | 2026-05-02 | Build-timeout recovery speed rerun moved the blocker to wall-time/continuation budget. | `docs/M6_24_BUILD_TIMEOUT_RECOVERY_SPEED_RERUN_2026-05-02.md`, `docs/REVIEW_2026-05-02_M6_24_COMPILE_COMPCERT_TIMEOUT_CLASSIFICATION_CODEX.md`, and `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-timeout-recovery-compile-compcert-1attempt-20260502-1755/result.json`: one trial, runner errors `0`, reward `0.0`, runtime `30m23s`, `mew-report.work_exit_code=1`, `work_report.stop_reason=wall_timeout`. The run reached source readback, external Flocq/MenhirLib configuration, `make depend`, and explicit `make -j"$(nproc)" ccomp`; command `10` was killed while the final compiler build was still running. Compact recovery was materially smaller than the prior failure shape, with final recovery prompts around `53k-56k` chars instead of about `124k`. codex-ultra classified this as `long-build wall-time/continuation budget`, not another toolchain-strategy or closeout-verification failure. | Record a one-run timeout-shape diagnostic and rerun one same-shape `compile-compcert` speed_1 with matched Harbor agent timeout and larger `mew --max-wall-seconds` to answer whether the current strategy passes when the final `ccomp` build can finish. If it passes only with extra wall, do not go to proof_5; record the need for generic continuation/budget repair. If it still times out inside `make ccomp`, open that tool/runtime repair immediately. | diagnostic_timeout_shape_pending |
@@ -355,3 +365,18 @@ review session `019debb3-afc8-7ff2-9f4e-039eeaaa7dd3` approved with
 `PHASE_GATE: safe_to_commit_pre_speed`. Do not run `proof_5` or broad
 measurement next. Spend exactly one same-shape `compile-compcert` speed_1, then
 classify the result before any escalation.
+
+Failed long-command repair-budget checkpoint:
+
+The execution-contract speed rerun
+`mew-m6-24-execution-contract-compile-compcert-1attempt-20260503-1155`
+exposed a moved `tool_runtime_budget` gap. Replay and dogfood reproduction now
+pass on the exact saved artifact with assertions for `blocked`,
+`long_command_failed`, `repair_failed_long_command`, `mew_exit_code=1`, and
+external reward `0`. The repair in
+`docs/M6_24_FAILED_LONG_COMMAND_REPAIR_BUDGET_REPAIR_2026-05-03.md` keeps the
+600s floor for true build repairs, allows bounded changed source/diagnostic
+repair probes below that floor, and keeps identical failed retries blocked.
+Focused work-session and dogfood tests, exact-artifact replay/dogfood, broader
+long-command focused tests, and scoped ruff passed. codex-ultra repair review
+is pending before the next same-shape `compile-compcert` speed_1.

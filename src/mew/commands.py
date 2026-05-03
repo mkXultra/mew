@@ -6147,6 +6147,13 @@ _LONG_BUILD_RESERVE_PRESERVING_STAGES = {
     "runtime_install",
 }
 
+_FAILED_LONG_COMMAND_REPAIR_MINIMUM_TIMEOUT_BY_STAGE = {
+    "diagnostic": 30.0,
+    "source_acquisition": 60.0,
+    "source_authority": 60.0,
+    "configure": 120.0,
+}
+
 _LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES = {
     "build_system_target_surface_probe": {"artifact_proof", "build", "default_smoke", "runtime_build", "runtime_install"},
     "budget_preserving_recovery": set(),
@@ -6156,6 +6163,20 @@ _LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES = {
     "runtime_build_then_install": {"build", "default_smoke", "runtime_build", "runtime_install"},
     "target_build_or_artifact_proof": {"artifact_proof", "build", "default_smoke"},
 }
+
+
+def _failed_long_command_repair_minimum_timeout_seconds(stage, budget):
+    budget = budget if isinstance(budget, dict) else {}
+    base = _positive_float_or_none(budget.get("minimum_repair_seconds")) or WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
+    stage = str(stage or "")
+    by_stage = budget.get("minimum_repair_seconds_by_stage")
+    by_stage = by_stage if isinstance(by_stage, dict) else {}
+    stage_minimum = _positive_float_or_none(by_stage.get(stage))
+    if stage_minimum is None:
+        stage_minimum = _FAILED_LONG_COMMAND_REPAIR_MINIMUM_TIMEOUT_BY_STAGE.get(stage)
+    if stage_minimum is None:
+        return base
+    return min(base, stage_minimum)
 
 
 def _work_session_long_build_state_for_timeout_policy(task=None, session=None):
@@ -6355,10 +6376,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
                 budget_blocked_reason = "repeat_same_timeout_without_budget_change"
             reserve = _long_build_reserve_seconds(contract, recovery_decision)
         elif recovery_decision_kind == "repair_failed_long_command":
-            minimum_timeout_seconds = (
-                _positive_float_or_none(budget.get("minimum_repair_seconds"))
-                or WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
-            )
+            minimum_timeout_seconds = _failed_long_command_repair_minimum_timeout_seconds(stage, budget)
             failed_idempotence_key = str(allowed_next.get("failed_idempotence_key") or "")
             resume_identity = typed_contract.get("resume_identity") if isinstance(typed_contract.get("resume_identity"), dict) else {}
             planned_key = str(resume_identity.get("idempotence_key") or "") or long_command_idempotence_key(
@@ -6597,6 +6615,16 @@ def apply_work_tool_wall_timeout_ceiling(
             parameters["long_command_budget"].get("latest_effective_timeout_seconds")
         )
         diagnostic_budget = bool(parameters["long_command_budget"].get("diagnostic_budget"))
+        if action_kind == "recover_long_command" and minimum_timeout is not None and parameters["timeout"] < minimum_timeout:
+            ceiling.update(
+                {
+                    "blocked": True,
+                    "reason": "repair timeout is below minimum_repair_seconds",
+                    "stop_reason": "long_command_budget_blocked",
+                }
+            )
+            parameters["wall_timeout_ceiling"] = ceiling
+            return ceiling
         if action_kind == "resume_idempotent_long_command" and (
             (minimum_timeout is not None and parameters["timeout"] < minimum_timeout)
             or (

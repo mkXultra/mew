@@ -1783,6 +1783,12 @@ def _derive_long_command_terminal_recovery_decision(
                 "reserve_seconds": _coerce_int(run.budget.get("final_proof_reserve_seconds"), default=60),
                 "may_spend_reserve": False,
                 "minimum_repair_seconds": 600,
+                "minimum_repair_seconds_by_stage": {
+                    "diagnostic": 30,
+                    "source_acquisition": 60,
+                    "source_authority": 60,
+                    "configure": 120,
+                },
                 "continuation_count": _coerce_int(run.budget.get("continuation_count"), default=0) or 0,
                 "max_continuations": _coerce_int(run.budget.get("max_continuations"), default=3) or 3,
             },

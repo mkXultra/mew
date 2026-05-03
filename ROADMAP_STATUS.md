@@ -2505,6 +2505,18 @@ Acceptable near-term work:
   `mew-report` closeout, no stale `resume.long_build_state.current_failure`,
   and no active stale strategy blockers for resolved runtime/toolchain/source
   blockers
+- if that live speed/proof misses, reproduce the saved Harbor artifact with
+  both `mew replay terminal-bench` and `mew dogfood --scenario
+  m6_24-terminal-bench-replay --terminal-bench-job-dir ...` using explicit
+  assertion flags before any code repair; if dogfood cannot express the
+  failure shape, fix dogfood instrumentation first
+- the execution-contract speed_1 did miss and was reproduced through exact
+  artifact replay/dogfood. The current repair is
+  `failed_long_command_repair_timeout_floor_overconstrained`: allow bounded
+  changed source/diagnostic repair probes below the true long-build 600s floor,
+  while preserving the 600s floor for build repairs and blocking identical
+  failed retries. codex-ultra session `019debd8-a8c8-7d91-8fcf-27f147c89eb4`
+  approved after adding post-wall-ceiling enforcement for recover actions.
 - if proof_5 misses the frozen `5/5` close target, read
   `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before selecting any next
   repair, and update `proof-artifacts/m6_24_gap_ledger.jsonl`

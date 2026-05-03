@@ -12,6 +12,7 @@ from mew.cli import build_parser
 from mew.config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     DOGFOOD_SCENARIOS,
+    _write_terminal_bench_replay_fixture,
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
     build_dogfood_report,
@@ -98,6 +99,40 @@ class DogfoodTests(unittest.TestCase):
         args = parser.parse_args(["dogfood", "--scenario", "resident-loop", "--time-dilation", "168", "--json"])
 
         self.assertEqual(args.time_dilation, 168.0)
+
+    def test_cli_dogfood_terminal_bench_replay_assertions_parse(self):
+        parser = build_parser()
+
+        args = parser.parse_args(
+            [
+                "dogfood",
+                "--scenario",
+                "m6_24-terminal-bench-replay",
+                "--terminal-bench-job-dir",
+                "/tmp/job",
+                "--terminal-bench-assert-long-build-status",
+                "blocked",
+                "--terminal-bench-assert-current-failure",
+                "long_command_failed",
+                "--terminal-bench-assert-recovery-action",
+                "repair_failed_long_command",
+                "--terminal-bench-assert-blocker",
+                "runtime_link_failed",
+                "--terminal-bench-assert-mew-exit-code",
+                "1",
+                "--terminal-bench-assert-external-reward",
+                "0",
+                "--json",
+            ]
+        )
+
+        self.assertEqual(args.terminal_bench_job_dir, "/tmp/job")
+        self.assertEqual(args.terminal_bench_assert_long_build_status, "blocked")
+        self.assertEqual(args.terminal_bench_assert_current_failure, "long_command_failed")
+        self.assertEqual(args.terminal_bench_assert_recovery_action, "repair_failed_long_command")
+        self.assertEqual(args.terminal_bench_assert_blocker, ["runtime_link_failed"])
+        self.assertEqual(args.terminal_bench_assert_mew_exit_code, 1)
+        self.assertEqual(args.terminal_bench_assert_external_reward, 0.0)
 
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()
@@ -1223,6 +1258,33 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["trial_count"], 1)
             self.assertIn("compatibility_override_probe_missing", scenario["artifacts"]["current_long_build"]["strategy_blockers"])
             self.assertIn("m6_24-terminal-bench-replay: pass", text)
+
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_external_assertions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _write_terminal_bench_replay_fixture(Path(tmp) / "fixture")
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=str(fixture),
+                terminal_bench_assert_long_build_status="blocked",
+                terminal_bench_assert_current_failure="dependency_strategy_unresolved",
+                terminal_bench_assert_blocker=["compatibility_override_probe_missing"],
+                terminal_bench_assert_mew_exit_code=1,
+                terminal_bench_assert_external_reward=0.0,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(
+                scenario["artifacts"]["current_long_build"]["current_failure_class"],
+                "dependency_strategy_unresolved",
+            )
 
     def test_run_dogfood_m6_11_draft_timeout_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
