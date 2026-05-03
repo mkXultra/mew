@@ -88,6 +88,9 @@ from .implementation_lane_baseline import (
 )
 from .long_build_substrate import (
     build_long_build_contract,
+    execution_contract_continuation_policy,
+    execution_contract_is_valid,
+    normalize_execution_contract,
     long_command_idempotence_key,
     long_command_yield_after_seconds,
     planned_long_build_command_budget_stage,
@@ -6285,8 +6288,30 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
         session=session,
         long_build_state=long_build_state,
     )
-    if not contract:
+    typed_contract = {}
+    if isinstance(parameters.get("execution_contract"), dict):
+        candidate_contract = normalize_execution_contract(
+            parameters.get("execution_contract"),
+            tool=action_type,
+            command=command,
+            cwd=parameters.get("cwd") or "",
+            task_contract=contract,
+        )
+        if execution_contract_is_valid(candidate_contract):
+            typed_contract = candidate_contract
+            parameters["execution_contract"] = typed_contract
+    typed_continuation = execution_contract_continuation_policy(typed_contract)
+    typed_managed = str(typed_continuation.get("mode") or "") == "managed"
+    if not contract and not typed_managed:
         return policy
+    if not contract:
+        contract = {
+            "id": (typed_contract.get("contract_id") or "work_session:unknown:execution_contract:1"),
+            "required_artifacts": typed_contract.get("expected_artifacts") or [],
+            "budget": {
+                "final_proof_reserve_seconds": typed_continuation.get("final_proof_reserve_seconds") or 60,
+            },
+        }
     recovery_decision = _long_build_recovery_decision_for_timeout_policy(long_build_state)
     latest_run = _latest_long_command_run_for_timeout_policy(long_build_state)
     latest_run_budget = latest_run.get("budget") if isinstance(latest_run, dict) else {}
@@ -6335,7 +6360,8 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
                 or WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
             )
             failed_idempotence_key = str(allowed_next.get("failed_idempotence_key") or "")
-            planned_key = long_command_idempotence_key(
+            resume_identity = typed_contract.get("resume_identity") if isinstance(typed_contract.get("resume_identity"), dict) else {}
+            planned_key = str(resume_identity.get("idempotence_key") or "") or long_command_idempotence_key(
                 cwd=parameters.get("cwd") or "",
                 command=command,
                 contract_id=contract.get("id") or "",
@@ -6360,6 +6386,14 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
             reserve = 0.0
         elif not reserve:
             reserve = _long_build_reserve_seconds(contract, recovery_decision)
+    elif typed_managed:
+        reserve = _positive_float_or_none(typed_continuation.get("final_proof_reserve_seconds")) or _long_build_reserve_seconds(
+            contract, recovery_decision
+        )
+        requested_yield = _positive_float_or_none(typed_continuation.get("yield_after_seconds"))
+        minimum_timeout_seconds = requested_yield + 1.0 if requested_yield is not None else minimum_timeout_seconds
+        if effective_timeout < minimum_timeout_seconds:
+            budget_blocked_reason = "managed execution_contract timeout is below minimum continuation duration"
     elif stage in _LONG_BUILD_RESERVE_PRESERVING_STAGES:
         if effective_timeout < WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS:
             return policy
@@ -6377,8 +6411,10 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
             "latest_long_command_status": long_build_state.get("latest_long_command_status"),
             "latest_effective_timeout_seconds": latest_effective_timeout,
             "minimum_timeout_seconds": float(minimum_timeout_seconds or 0.0),
+            "yield_after_seconds": _positive_float_or_none(typed_continuation.get("yield_after_seconds")),
             "budget_blocked_reason": budget_blocked_reason,
             "diagnostic_budget": diagnostic_budget,
+            "execution_contract_managed": typed_managed,
         }
     )
     return policy
@@ -6483,7 +6519,12 @@ def apply_work_tool_wall_timeout_ceiling(
     requested_timeout = _positive_float_or_none(parameters.get("timeout"))
     effective_timeout = requested_timeout or WORK_DEFAULT_TOOL_TIMEOUT_SECONDS
     if long_command_budget_policy:
-        yield_after = long_command_yield_after_seconds(effective_timeout)
+        requested_yield_after = long_command_budget_policy.get("yield_after_seconds")
+        yield_after = (
+            long_command_yield_after_seconds(effective_timeout, requested_yield_after_seconds=int(requested_yield_after))
+            if requested_yield_after is not None
+            else long_command_yield_after_seconds(effective_timeout)
+        )
         long_command_budget = {
             "action_kind": long_command_budget_policy.get("action_kind") or "start_long_command",
             "stage": long_command_budget_policy.get("stage") or "",
@@ -6540,7 +6581,12 @@ def apply_work_tool_wall_timeout_ceiling(
         }
     )
     if long_command_budget_policy:
-        adjusted_yield_after = long_command_yield_after_seconds(parameters["timeout"])
+        requested_yield_after = long_command_budget_policy.get("yield_after_seconds")
+        adjusted_yield_after = (
+            long_command_yield_after_seconds(parameters["timeout"], requested_yield_after_seconds=int(requested_yield_after))
+            if requested_yield_after is not None
+            else long_command_yield_after_seconds(parameters["timeout"])
+        )
         parameters["long_command_budget"]["effective_timeout_seconds"] = parameters["timeout"]
         parameters["long_command_budget"]["yield_after_seconds"] = adjusted_yield_after
         parameters["long_command_budget"]["yield_eligible"] = adjusted_yield_after is not None

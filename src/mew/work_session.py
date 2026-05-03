@@ -26,11 +26,16 @@ from .read_tools import (
 )
 from .image_tools import read_image_with_model, read_images_with_model
 from .long_build_substrate import (
+    build_command_run,
     build_attempts_from_command_evidence,
     build_long_build_contract,
     build_long_command_run,
+    command_run_id,
     command_evidence_to_tool_call,
     command_evidence_from_tool_call,
+    execution_contract_is_valid,
+    migrate_command_evidence_fixture_contracts,
+    normalize_execution_contract,
     reduce_long_build_state,
     synthesize_command_evidence_from_tool_calls,
 )
@@ -2498,6 +2503,37 @@ def command_has_shell_execution_surface(command):
     return bool(operator) or shell_interpreter_invocation(command)
 
 
+def normalize_and_validate_work_execution_contract(tool, parameters):
+    raw_contract = (parameters or {}).get("execution_contract")
+    if not isinstance(raw_contract, dict):
+        if isinstance(parameters, dict) and "execution_contract" in parameters:
+            raise ValueError("invalid execution_contract: expected object")
+        return {}
+    raw_background_policy = raw_contract.get("background_policy") if isinstance(raw_contract.get("background_policy"), dict) else {}
+    if tool == "run_tests" and (
+        bool(raw_background_policy.get("allow_background"))
+        or str(raw_background_policy.get("mode") or "") == "background_allowed"
+    ):
+        raise ValueError("run_tests execution_contract cannot allow background execution")
+    contract = normalize_execution_contract(
+        raw_contract,
+        tool=tool,
+        command=(parameters or {}).get("command") or "",
+        cwd=(parameters or {}).get("cwd") or "",
+    )
+    reason = str(contract.get("contract_invalid_reason") or "")
+    if reason:
+        raise ValueError(f"invalid execution_contract: {reason}")
+    background_policy = contract.get("background_policy") if isinstance(contract.get("background_policy"), dict) else {}
+    if tool == "run_tests" and (
+        bool(background_policy.get("allow_background"))
+        or str(background_policy.get("mode") or "") == "background_allowed"
+    ):
+        raise ValueError("run_tests execution_contract cannot allow background execution")
+    parameters["execution_contract"] = contract
+    return contract
+
+
 def _shell_resident_loop_scan_text(command):
     text = str(command or "").replace("\\", "").replace("'", "").replace('"', "")
     return re.sub(r"[^A-Za-z0-9_./-]+", " ", text)
@@ -2664,6 +2700,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
             parameters["normalized_pytest_file_invocation"] = True
             parameters["normalized_pytest_file_invocation_reason"] = normalize_reason
         reject_shell_control_tokens(command, tool_name="run_tests")
+        normalize_and_validate_work_execution_contract(tool, parameters)
         result = _run_managed_command_for_work(
             command,
             cwd=cwd,
@@ -2682,6 +2719,7 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
     if not command:
         raise ValueError("run_command command is empty")
     reject_resident_mew_loop_command(command, tool_name="run_command")
+    normalize_and_validate_work_execution_contract(tool, parameters)
     shell_operator, _shell_operator_kind = first_unquoted_shell_operator(command)
     return _run_managed_command_for_work(
         command,
@@ -5742,7 +5780,10 @@ def build_long_build_state(task, calls, session=None):
     if native_command_evidence:
         command_evidence = native_command_evidence
     elif _allow_synthesized_command_evidence_for_fixture(session):
-        command_evidence = [evidence.to_dict() for evidence in synthesize_command_evidence_from_tool_calls(calls or [])]
+        command_evidence = migrate_command_evidence_fixture_contracts(
+            synthesize_command_evidence_from_tool_calls(calls or []),
+            contract,
+        )
     else:
         command_evidence = []
     attempts = build_attempts_from_command_evidence(command_evidence, contract)
@@ -9816,6 +9857,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             running_output = call.get("running_output") or {}
             command_record = {
                 "tool_call_id": call.get("id"),
+                "command_run_id": parameters.get("command_run_id") or call.get("command_run_id") or "",
                 "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "tool": call.get("tool"),
                 "command": result.get("command") or parameters.get("command"),
@@ -9830,6 +9872,13 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS,
                 ),
             }
+            execution_contract = parameters.get("execution_contract")
+            if isinstance(execution_contract, dict):
+                command_record["execution_contract"] = {
+                    key: execution_contract.get(key)
+                    for key in ("schema_version", "purpose", "stage", "proof_role", "acceptance_kind", "risk_class")
+                    if execution_contract.get(key) is not None
+                }
             if running_output:
                 command_record.update(
                     {
@@ -11563,6 +11612,40 @@ def _next_command_evidence_order(session):
     return latest + 1
 
 
+def _next_command_run_ordinal(session):
+    latest = 0
+    for run in (session or {}).get("command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        match = re.search(r":command_run:(\d+)$", str(run.get("id") or ""))
+        if match:
+            try:
+                latest = max(latest, int(match.group(1)))
+            except ValueError:
+                pass
+            continue
+        try:
+            latest = max(latest, int(run.get("ordinal") or 0))
+        except (TypeError, ValueError):
+            pass
+    return latest + 1
+
+
+def _find_command_run_for_tool_call(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    command_run = parameters.get("command_run_id") or tool_call.get("command_run_id")
+    for run in session.get("command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        if command_run and str(run.get("id") or "") == str(command_run):
+            return run
+        if str(run.get("tool_call_id")) == str(tool_call.get("id")):
+            return run
+    return None
+
+
 def _find_command_evidence_for_tool_call(session, tool_call):
     if not isinstance(session, dict) or not isinstance(tool_call, dict):
         return None
@@ -11578,14 +11661,96 @@ def _find_command_evidence_for_tool_call(session, tool_call):
     return None
 
 
+def _command_run_status_from_evidence(evidence, tool_call):
+    status = str((evidence or {}).get("status") or (tool_call or {}).get("status") or "").casefold()
+    if status in {"running", "yielded"}:
+        return status
+    if bool((evidence or {}).get("timed_out")):
+        return "timed_out"
+    exit_code = (evidence or {}).get("exit_code")
+    if exit_code not in (None, 0):
+        return "failed"
+    if status in {"failed", "timed_out", "killed", "interrupted"}:
+        return status
+    if (evidence or {}).get("finish_order"):
+        return "completed" if bool((evidence or {}).get("terminal_success")) else "failed"
+    return status or "unknown"
+
+
+def _record_command_run_from_evidence(session, tool_call, evidence):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict) or not isinstance(evidence, dict):
+        return None
+    if tool_call.get("tool") not in COMMAND_EVIDENCE_TOOLS:
+        return None
+    result = tool_call.get("result") if isinstance(tool_call.get("result"), dict) else {}
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    existing = _find_command_run_for_tool_call(session, tool_call)
+    run_id = str(evidence.get("command_run_id") or parameters.get("command_run_id") or "")
+    ordinal = _next_command_run_ordinal(session)
+    if run_id:
+        match = re.search(r":command_run:(\d+)$", run_id)
+        if match:
+            try:
+                ordinal = int(match.group(1))
+            except ValueError:
+                pass
+    elif existing:
+        run_id = str(existing.get("id") or "")
+        match = re.search(r":command_run:(\d+)$", run_id)
+        if match:
+            try:
+                ordinal = int(match.group(1))
+            except ValueError:
+                pass
+    status = _command_run_status_from_evidence(evidence, tool_call)
+    terminal_ref = None
+    if status.casefold() not in {"running", "yielded"} and evidence.get("finish_order"):
+        terminal_ref = evidence.get("ref") if isinstance(evidence.get("ref"), dict) else None
+    run = build_command_run(
+        session_id=session.get("id") or "unknown",
+        task_id=session.get("task_id") or "",
+        ordinal=ordinal,
+        tool_call_id=tool_call.get("id"),
+        tool=tool_call.get("tool") or "",
+        command=result.get("command") or parameters.get("command") or "",
+        cwd=result.get("cwd") or parameters.get("cwd") or "",
+        status=status,
+        command_evidence_ref=evidence.get("ref") if isinstance(evidence.get("ref"), dict) else None,
+        terminal_command_evidence_ref=terminal_ref,
+        execution_contract=evidence.get("execution_contract") if isinstance(evidence.get("execution_contract"), dict) else {},
+        output_ref=evidence.get("output_ref"),
+        exit_code=evidence.get("exit_code"),
+        timed_out=evidence.get("timed_out"),
+    )
+    if run_id and run["id"] != run_id:
+        run["id"] = run_id
+    parameters["command_run_id"] = run["id"]
+    tool_call["parameters"] = parameters
+    tool_call["command_run_id"] = run["id"]
+    evidence["command_run_id"] = run["id"]
+    runs = session.setdefault("command_runs", [])
+    if existing:
+        existing.clear()
+        existing.update(run)
+    else:
+        runs.append(run)
+    return run
+
+
 def _record_command_evidence_start(session, tool_call):
     if not isinstance(session, dict) or not isinstance(tool_call, dict):
         return None
     if tool_call.get("tool") not in COMMAND_EVIDENCE_TOOLS:
         return None
+    evidence_id = _next_command_evidence_id(session)
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    if not parameters.get("command_run_id"):
+        parameters = dict(parameters)
+        parameters["command_run_id"] = command_run_id(session.get("id") or "unknown", _next_command_run_ordinal(session))
+        tool_call["parameters"] = parameters
     evidence = command_evidence_from_tool_call(
         tool_call,
-        evidence_id=_next_command_evidence_id(session),
+        evidence_id=evidence_id,
         start_order=_next_command_evidence_order(session),
         finish_order=0,
         source="native_command",
@@ -11595,6 +11760,7 @@ def _record_command_evidence_start(session, tool_call):
     evidence_dict = evidence.to_dict()
     session.setdefault("command_evidence", []).append(evidence_dict)
     tool_call["command_evidence_ref"] = dict(evidence.ref)
+    _record_command_run_from_evidence(session, tool_call, evidence_dict)
     return evidence_dict
 
 
@@ -11642,6 +11808,7 @@ def _record_command_evidence_finish(session, tool_call):
     else:
         session.setdefault("command_evidence", []).append(evidence_dict)
     tool_call["command_evidence_ref"] = dict(evidence.ref)
+    _record_command_run_from_evidence(session, tool_call, evidence_dict)
     return evidence_dict
 
 
@@ -11765,6 +11932,17 @@ def _record_long_command_run_from_tool_call(session, tool_call, evidence):
         stdout=result.get("stdout") or "",
         stderr=result.get("stderr") or "",
     )
+    contract = evidence.get("execution_contract") if isinstance(evidence.get("execution_contract"), dict) else {}
+    existing_contract = existing.get("execution_contract") if isinstance(existing, dict) and isinstance(existing.get("execution_contract"), dict) else {}
+    if not (contract and execution_contract_is_valid(contract) and not contract.get("fallback_used")):
+        contract = existing_contract if execution_contract_is_valid(existing_contract) and not existing_contract.get("fallback_used") else contract
+    resume_identity = contract.get("resume_identity") if isinstance(contract.get("resume_identity"), dict) else {}
+    if contract and execution_contract_is_valid(contract) and not contract.get("fallback_used") and resume_identity.get("idempotence_key"):
+        run["idempotence_key"] = str(resume_identity.get("idempotence_key"))
+    if contract and not contract.get("fallback_used"):
+        run["execution_contract"] = dict(contract)
+        if not run.get("stage"):
+            run["stage"] = str(contract.get("stage") or "")
     run["terminal"] = {
         "exit_code": result.get("exit_code"),
         "timed_out": bool(result.get("timed_out")),
@@ -11917,6 +12095,7 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
         entries.append(
             {
                 "tool_call_id": call.get("id"),
+                "command_run_id": parameters.get("command_run_id") or call.get("command_run_id") or "",
                 "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "status": call.get("status") or "unknown",
                 "tool": call.get("tool") or "unknown",
@@ -12091,9 +12270,10 @@ def format_work_session_commands(session, task=None, limit=8, include_tests=True
             if command_evidence_ref.get("id") is not None
             else ""
         )
+        command_run_suffix = f" command_run={entry.get('command_run_id')}" if entry.get("command_run_id") else ""
         lines.append(
             f"#{entry.get('tool_call_id')} [{entry.get('status')}] {entry.get('tool')} "
-            f"exit={format_exit_code(entry.get('exit_code'))}{evidence_suffix} {entry.get('command') or ''}"
+            f"exit={format_exit_code(entry.get('exit_code'))}{evidence_suffix}{command_run_suffix} {entry.get('command') or ''}"
         )
         if entry.get("cwd"):
             lines.append(f"cwd: {entry.get('cwd')}")

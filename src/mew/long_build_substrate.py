@@ -23,12 +23,91 @@ from .acceptance_evidence import (
 
 
 LONG_BUILD_SCHEMA_VERSION = 1
+EXECUTION_CONTRACT_SCHEMA_VERSION = 2
 ENV_SUMMARY_POLICY = "env_summary_v1"
 COMMAND_OUTPUT_CLIP_CHARS = 1200
 LONG_COMMAND_OUTPUT_MAX_BYTES = 1_000_000
 ENV_VALUE_CLIP_CHARS = 120
 NONTERMINAL_COMMAND_STATUSES = {"running", "yielded"}
 TERMINAL_NON_SUCCESS_COMMAND_STATUSES = {"failed", "timed_out", "killed", "interrupted"}
+COMMAND_RUN_TERMINAL_STATUSES = {"completed", "failed", "timed_out", "killed", "interrupted"}
+
+EXECUTION_CONTRACT_PURPOSES = {
+    "source_acquisition",
+    "source_authority_readback",
+    "configure",
+    "dependency_generation",
+    "build",
+    "runtime_build",
+    "runtime_install",
+    "smoke",
+    "artifact_proof",
+    "verification",
+    "diagnostic",
+    "cleanup",
+    "generic_command",
+}
+EXECUTION_CONTRACT_STAGES = {
+    "source_acquisition",
+    "source_authority",
+    "configure",
+    "dependency_generation",
+    "build",
+    "runtime_build",
+    "runtime_install",
+    "default_smoke",
+    "custom_runtime_smoke",
+    "artifact_proof",
+    "verification",
+    "diagnostic",
+    "cleanup",
+    "command",
+}
+EXECUTION_CONTRACT_PROOF_ROLES = {
+    "none",
+    "progress",
+    "source_authority",
+    "dependency_strategy",
+    "target_build",
+    "runtime_install",
+    "default_smoke",
+    "custom_runtime_smoke",
+    "final_artifact",
+    "verifier",
+    "negative_diagnostic",
+}
+EXECUTION_CONTRACT_ACCEPTANCE_KINDS = {
+    "not_acceptance",
+    "progress_only",
+    "candidate_source_authority",
+    "candidate_artifact_proof",
+    "candidate_runtime_smoke",
+    "candidate_final_proof",
+    "external_verifier",
+}
+EXECUTION_CONTRACT_RISK_CLASSES = {
+    "read_only",
+    "network_read",
+    "build_mutation",
+    "source_tree_mutation",
+    "runtime_install",
+    "system_mutation",
+    "destructive",
+    "unknown",
+}
+_PROOF_ROLE_ACCEPTANCE_KINDS = {
+    "none": {"not_acceptance", "progress_only"},
+    "progress": {"progress_only", "not_acceptance"},
+    "source_authority": {"candidate_source_authority", "candidate_final_proof"},
+    "target_build": {"progress_only", "candidate_artifact_proof", "candidate_final_proof"},
+    "final_artifact": {"candidate_artifact_proof", "candidate_final_proof", "external_verifier"},
+    "default_smoke": {"candidate_runtime_smoke", "candidate_final_proof", "external_verifier"},
+    "custom_runtime_smoke": {"candidate_runtime_smoke", "external_verifier"},
+    "runtime_install": {"progress_only", "candidate_final_proof"},
+    "verifier": {"external_verifier", "candidate_final_proof"},
+    "negative_diagnostic": {"not_acceptance", "progress_only"},
+    "dependency_strategy": {"progress_only", "not_acceptance"},
+}
 
 _SAFE_ENV_NAMES = {
     "AR",
@@ -160,6 +239,10 @@ class CommandEvidence:
     truncated: bool
     output_bytes: int | None
     source_tool_call_id: object | None = None
+    command_run_id: str = ""
+    execution_contract: dict = field(default_factory=dict)
+    fallback_used: bool = False
+    contract_invalid_reason: str = ""
     unknown_fields: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -206,6 +289,60 @@ class CommandEvidence:
             truncated=bool(data.get("truncated")),
             output_bytes=_coerce_int(data.get("output_bytes")),
             source_tool_call_id=data.get("source_tool_call_id"),
+            command_run_id=str(data.get("command_run_id") or ""),
+            execution_contract=dict(data.get("execution_contract") or {}),
+            fallback_used=bool(data.get("fallback_used")),
+            contract_invalid_reason=str(data.get("contract_invalid_reason") or ""),
+            unknown_fields=unknown,
+        )
+
+
+@dataclass(frozen=True)
+class CommandRun:
+    schema_version: int
+    id: str
+    session_id: str
+    task_id: str
+    tool_call_id: object | None
+    tool: str
+    command: str
+    cwd: str
+    status: str
+    command_evidence_ref: dict | None
+    terminal_command_evidence_ref: dict | None
+    execution_contract: dict
+    resume_identity: dict
+    output_ref: object | None
+    terminal: dict
+    unknown_fields: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        data = dict(self.unknown_fields)
+        data.update(asdict(self))
+        data.pop("unknown_fields", None)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "CommandRun":
+        data = dict(data or {})
+        known = {name for name in cls.__dataclass_fields__ if name != "unknown_fields"}
+        unknown = {key: value for key, value in data.items() if key not in known}
+        return cls(
+            schema_version=_coerce_int(data.get("schema_version"), default=0) or 0,
+            id=str(data.get("id") or ""),
+            session_id=str(data.get("session_id") or ""),
+            task_id=str(data.get("task_id") or ""),
+            tool_call_id=data.get("tool_call_id"),
+            tool=str(data.get("tool") or ""),
+            command=str(data.get("command") or ""),
+            cwd=str(data.get("cwd") or ""),
+            status=str(data.get("status") or ""),
+            command_evidence_ref=_optional_dict(data.get("command_evidence_ref")),
+            terminal_command_evidence_ref=_optional_dict(data.get("terminal_command_evidence_ref")),
+            execution_contract=dict(data.get("execution_contract") or {}),
+            resume_identity=dict(data.get("resume_identity") or {}),
+            output_ref=data.get("output_ref"),
+            terminal=dict(data.get("terminal") or {}),
             unknown_fields=unknown,
         )
 
@@ -364,8 +501,327 @@ class LongCommandRun:
         )
 
 
+def command_run_id(session_id: object, ordinal: object) -> str:
+    return f"work_session:{_stable_id_component(session_id)}:command_run:{_stable_id_component(ordinal)}"
+
+
 def long_command_run_id(session_id: object, ordinal: object) -> str:
     return f"work_session:{_stable_id_component(session_id)}:long_command:{_stable_id_component(ordinal)}"
+
+
+def normalize_execution_contract(
+    raw: object,
+    *,
+    tool: object = "",
+    command: object = "",
+    cwd: object = "",
+    task_contract: Mapping[str, object] | None = None,
+) -> dict:
+    """Normalize typed command semantics.
+
+    `command` remains execution payload. The normalized contract is semantic
+    intent; when absent, reducers may use legacy classifiers only as explicit
+    fallback.
+    """
+    fallback_used = not isinstance(raw, Mapping)
+    data = dict(raw or {}) if isinstance(raw, Mapping) else {}
+    tool_name = str(tool or "")
+    purpose_default = "verification" if tool_name == "run_tests" else "generic_command"
+    stage_default = "verification" if tool_name == "run_tests" else "command"
+    proof_default = "verifier" if tool_name == "run_tests" else "none"
+    acceptance_default = "external_verifier" if tool_name == "run_tests" else "not_acceptance"
+    invalid_reasons = []
+    if isinstance(raw, Mapping):
+        missing = [
+            key
+            for key in ("purpose", "stage", "proof_role", "acceptance_kind")
+            if key not in data or str(data.get(key) or "").strip() == ""
+        ]
+        if missing:
+            invalid_reasons.append("missing required execution_contract field(s): " + ", ".join(missing))
+
+    purpose = _enum_value(data.get("purpose"), EXECUTION_CONTRACT_PURPOSES, purpose_default)
+    stage = _enum_value(data.get("stage"), EXECUTION_CONTRACT_STAGES, stage_default)
+    proof_role = _enum_value(data.get("proof_role"), EXECUTION_CONTRACT_PROOF_ROLES, proof_default)
+    acceptance_kind = _enum_value(
+        data.get("acceptance_kind"),
+        EXECUTION_CONTRACT_ACCEPTANCE_KINDS,
+        acceptance_default,
+    )
+    risk_class = _enum_value(data.get("risk_class"), EXECUTION_CONTRACT_RISK_CLASSES, "unknown")
+    invalid_reasons.extend(
+        reason
+        for reason in [
+            _enum_invalid_reason(data.get("purpose"), EXECUTION_CONTRACT_PURPOSES, "purpose"),
+            _enum_invalid_reason(data.get("stage"), EXECUTION_CONTRACT_STAGES, "stage"),
+            _enum_invalid_reason(data.get("proof_role"), EXECUTION_CONTRACT_PROOF_ROLES, "proof_role"),
+            _enum_invalid_reason(data.get("acceptance_kind"), EXECUTION_CONTRACT_ACCEPTANCE_KINDS, "acceptance_kind"),
+            _enum_invalid_reason(data.get("risk_class"), EXECUTION_CONTRACT_RISK_CLASSES, "risk_class"),
+        ]
+        if reason
+    )
+    expected_artifacts = _list_of_dicts(data.get("expected_artifacts"))
+    declared_target_refs = _list_of_dicts(data.get("declared_target_refs"))
+    if not expected_artifacts and isinstance(task_contract, Mapping):
+        expected_artifacts = _list_of_dicts(task_contract.get("required_artifacts"))
+    if not declared_target_refs:
+        declared_target_refs = _declared_refs_from_artifacts(expected_artifacts)
+
+    source_authority_requirement = _normalize_source_authority_requirement(
+        data.get("source_authority_requirement"),
+        task_contract=task_contract,
+    )
+    resume_identity = _normalize_resume_identity(
+        data.get("resume_identity"),
+        contract_id=str(data.get("contract_id") or (task_contract or {}).get("id") or ""),
+        purpose=purpose,
+        stage=stage,
+        cwd=cwd,
+        command=command,
+        expected_artifacts=expected_artifacts,
+        declared_target_refs=declared_target_refs,
+        source_tree_ref=source_authority_requirement.get("source_tree_ref") or "",
+        execution_mode="argv" if tool_name == "run_tests" else "shell",
+    )
+    invalid_reason = _execution_contract_invalid_reason(
+        proof_role=proof_role,
+        acceptance_kind=acceptance_kind,
+        purpose=purpose,
+    )
+    if invalid_reason:
+        invalid_reasons.append(invalid_reason)
+    contract = {
+        "schema_version": EXECUTION_CONTRACT_SCHEMA_VERSION,
+        "purpose": purpose,
+        "stage": stage,
+        "proof_role": proof_role,
+        "expected_artifacts": expected_artifacts,
+        "declared_target_refs": declared_target_refs,
+        "acceptance_kind": acceptance_kind,
+        "continuation_policy": _normalize_continuation_policy(data.get("continuation_policy")),
+        "background_policy": _normalize_background_policy(data.get("background_policy"), tool=tool_name),
+        "source_authority_requirement": source_authority_requirement,
+        "resume_identity": resume_identity,
+        "risk_class": risk_class,
+        "evidence_refs": _list_of_dicts(data.get("evidence_refs")),
+        "notes": str(data.get("notes") or "")[:240],
+        "fallback_used": bool(fallback_used or data.get("fallback_used")),
+        "contract_invalid_reason": "; ".join(invalid_reasons),
+    }
+    substeps = _list_of_dicts(data.get("substeps"))
+    if substeps:
+        contract["substeps"] = [
+            normalize_execution_contract(
+                substep,
+                tool=tool_name,
+                command=command,
+                cwd=cwd,
+                task_contract=task_contract,
+            )
+            for substep in substeps
+        ]
+    if "contract_id" in data or (task_contract or {}).get("id"):
+        contract["contract_id"] = str(data.get("contract_id") or (task_contract or {}).get("id") or "")
+    return contract
+
+
+def execution_contract_is_valid(contract: object) -> bool:
+    return isinstance(contract, Mapping) and not str(contract.get("contract_invalid_reason") or "")
+
+
+def execution_contract_stage(contract: object) -> str:
+    if not execution_contract_is_valid(contract):
+        return ""
+    if bool((contract or {}).get("fallback_used")):
+        return ""
+    stage = str((contract or {}).get("stage") or "")
+    return stage if stage in EXECUTION_CONTRACT_STAGES else ""
+
+
+def execution_contract_continuation_policy(contract: object) -> dict:
+    if not isinstance(contract, Mapping):
+        return {}
+    policy = contract.get("continuation_policy")
+    return dict(policy) if isinstance(policy, Mapping) else {}
+
+
+def build_command_run(
+    *,
+    session_id: object,
+    task_id: object,
+    ordinal: object,
+    tool_call_id: object | None,
+    tool: object,
+    command: object,
+    cwd: object,
+    status: object,
+    command_evidence_ref: Mapping[str, object] | None = None,
+    terminal_command_evidence_ref: Mapping[str, object] | None = None,
+    execution_contract: Mapping[str, object] | None = None,
+    output_ref: object | None = None,
+    exit_code: object | None = None,
+    timed_out: object = False,
+) -> dict:
+    contract = dict(execution_contract or {})
+    run = CommandRun(
+        schema_version=EXECUTION_CONTRACT_SCHEMA_VERSION,
+        id=command_run_id(session_id, ordinal),
+        session_id=str(session_id or ""),
+        task_id=str(task_id or ""),
+        tool_call_id=tool_call_id,
+        tool=str(tool or ""),
+        command=str(command or ""),
+        cwd=str(cwd or ""),
+        status=str(status or ""),
+        command_evidence_ref=dict(command_evidence_ref or {}),
+        terminal_command_evidence_ref=dict(terminal_command_evidence_ref) if terminal_command_evidence_ref else None,
+        execution_contract=contract,
+        resume_identity=dict(contract.get("resume_identity") or {}),
+        output_ref=output_ref,
+        terminal={
+            "exit_code": _coerce_int(exit_code),
+            "timed_out": bool(timed_out),
+            "terminal": str(status or "").casefold() in COMMAND_RUN_TERMINAL_STATUSES,
+        },
+    )
+    return run.to_dict()
+
+
+def _enum_value(value: object, allowed: set[str], default: str) -> str:
+    text = str(value or "").strip()
+    return text if text in allowed else default
+
+
+def _enum_invalid_reason(value: object, allowed: set[str], field: str) -> str:
+    if value is None or str(value or "").strip() == "":
+        return ""
+    text = str(value or "").strip()
+    if text in allowed:
+        return ""
+    return f"invalid execution_contract {field}: {text!r}"
+
+
+def _list_of_dicts(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _declared_refs_from_artifacts(artifacts: Iterable[Mapping[str, object]]) -> list[dict]:
+    refs = []
+    for artifact in artifacts or []:
+        path = str((artifact or {}).get("path") or "")
+        if path:
+            refs.append({"kind": "artifact", "path": path})
+    return refs
+
+
+def _normalize_continuation_policy(value: object) -> dict:
+    policy = dict(value or {}) if isinstance(value, Mapping) else {}
+    mode = str(policy.get("mode") or "blocking").strip()
+    if mode not in {"blocking", "managed", "foreground_blocking", "foreground_yieldable", "none"}:
+        mode = "blocking"
+    return {
+        "mode": mode,
+        "yield_after_seconds": _coerce_int(policy.get("yield_after_seconds")),
+        "max_continuations": _coerce_int(policy.get("max_continuations"), default=3) or 3,
+        "resume_policy": str(policy.get("resume_policy") or "none"),
+        "terminal_required_for_acceptance": bool(policy.get("terminal_required_for_acceptance", True)),
+        "final_proof_reserve_seconds": _coerce_int(policy.get("final_proof_reserve_seconds"), default=60) or 60,
+    }
+
+
+def _normalize_background_policy(value: object, *, tool: str) -> dict:
+    policy = dict(value or {}) if isinstance(value, Mapping) else {}
+    mode = str(policy.get("mode") or ("foreground_blocking" if tool == "run_tests" else "foreground_yieldable"))
+    if mode not in {"foreground_blocking", "foreground_yieldable", "background_allowed"}:
+        mode = "foreground_blocking" if tool == "run_tests" else "foreground_yieldable"
+    return {
+        "mode": mode,
+        "allow_background": bool(policy.get("allow_background")),
+        "handoff": str(policy.get("handoff") or ""),
+    }
+
+
+def _normalize_source_authority_requirement(value: object, *, task_contract: Mapping[str, object] | None) -> dict:
+    policy = dict(value or {}) if isinstance(value, Mapping) else {}
+    task_source_policy = (task_contract or {}).get("source_policy") if isinstance(task_contract, Mapping) else {}
+    task_source_policy = task_source_policy if isinstance(task_source_policy, Mapping) else {}
+    mode = str(policy.get("mode") or "inherits_task_contract")
+    if mode not in {"inherits_task_contract", "produces_authority", "consumes_authority", "not_applicable"}:
+        mode = "inherits_task_contract"
+    return {
+        "mode": mode,
+        "required": bool(policy.get("required", task_source_policy.get("authority_required", False))),
+        "source_tree_ref": str(policy.get("source_tree_ref") or task_source_policy.get("source_tree_ref") or ""),
+        "authority_refs": [str(item) for item in policy.get("authority_refs") or [] if str(item or "")],
+        "same_source_tree_required": bool(policy.get("same_source_tree_required", True)),
+    }
+
+
+def _normalize_resume_identity(
+    value: object,
+    *,
+    contract_id: str,
+    purpose: str,
+    stage: str,
+    cwd: object,
+    command: object,
+    expected_artifacts: list[dict],
+    declared_target_refs: list[dict],
+    source_tree_ref: str,
+    execution_mode: str,
+) -> dict:
+    identity = dict(value or {}) if isinstance(value, Mapping) else {}
+    normalized = {
+        "contract_id": str(identity.get("contract_id") or contract_id),
+        "purpose": str(identity.get("purpose") or purpose),
+        "stage": str(identity.get("stage") or stage),
+        "declared_target_refs": _list_of_dicts(identity.get("declared_target_refs")) or declared_target_refs,
+        "expected_artifacts": _list_of_dicts(identity.get("expected_artifacts")) or expected_artifacts,
+        "source_tree_ref": str(identity.get("source_tree_ref") or source_tree_ref),
+        "cwd": str(identity.get("cwd") or cwd or ""),
+        "execution_mode": str(identity.get("execution_mode") or execution_mode),
+        "payload_hash": str(identity.get("payload_hash") or _sha256_text(command)),
+        "env_fingerprint": str(identity.get("env_fingerprint") or ""),
+    }
+    normalized["idempotence_key"] = str(identity.get("idempotence_key") or execution_contract_idempotence_key(normalized))
+    return normalized
+
+
+def execution_contract_idempotence_key(identity: Mapping[str, object]) -> str:
+    payload = {
+        "contract_id": str(identity.get("contract_id") or ""),
+        "purpose": str(identity.get("purpose") or ""),
+        "stage": str(identity.get("stage") or ""),
+        "cwd": str(identity.get("cwd") or ""),
+        "execution_mode": str(identity.get("execution_mode") or ""),
+        "payload_hash": str(identity.get("payload_hash") or ""),
+        "declared_target_refs_json": _stable_json(identity.get("declared_target_refs") or []),
+        "expected_artifacts_json": _stable_json(identity.get("expected_artifacts") or []),
+        "source_tree_ref": str(identity.get("source_tree_ref") or ""),
+        "env_fingerprint": str(identity.get("env_fingerprint") or ""),
+    }
+    return "sha256:" + hashlib.sha256(_stable_json(payload).encode("utf-8")).hexdigest()
+
+
+def _sha256_text(value: object) -> str:
+    return "sha256:" + hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def _stable_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _execution_contract_invalid_reason(*, proof_role: str, acceptance_kind: str, purpose: str) -> str:
+    allowed = _PROOF_ROLE_ACCEPTANCE_KINDS.get(proof_role, set())
+    if acceptance_kind not in allowed:
+        if proof_role == "final_artifact" and acceptance_kind == "not_acceptance" and purpose == "diagnostic":
+            return ""
+        return f"proof_role {proof_role!r} cannot use acceptance_kind {acceptance_kind!r}"
+    return ""
+
+
 
 
 def long_command_output_ref(session_id: object, ordinal: object, *, filename: str = "output.log") -> str:
@@ -596,6 +1052,13 @@ def build_attempts_from_command_evidence(
             produced_artifacts=_produced_artifacts(evidence, contract),
             mutation_refs=[],
             diagnostics=_diagnostics(evidence, contract),
+            unknown_fields={
+                "command_run_id": evidence.command_run_id,
+                "proof_role": (evidence.execution_contract or {}).get("proof_role") or "",
+                "acceptance_kind": (evidence.execution_contract or {}).get("acceptance_kind") or "",
+                "fallback_used": bool(evidence.fallback_used),
+                "contract_invalid_reason": evidence.contract_invalid_reason,
+            },
         )
         attempts.append(attempt.to_dict())
     return attempts
@@ -628,7 +1091,8 @@ def reduce_long_build_state(
     )
     for artifact in contract.get("required_artifacts") or []:
         path = str((artifact or {}).get("path") or "")
-        proof = fresh_long_dependency_artifact_evidence(normalized_evidence, path) if path else None
+        artifact_evidence = [evidence for evidence in normalized_evidence if _artifact_proof_contract_allows_acceptance(evidence)]
+        proof = fresh_long_dependency_artifact_evidence(artifact_evidence, path) if path else None
         produced_proof = _attempt_produced_artifact_proof(attempts, path, normalized_evidence) if path else None
         artifact_status.append(
             {
@@ -782,6 +1246,126 @@ def synthesize_command_evidence_from_session(session: object, *, source: str = "
     return synthesize_command_evidence_from_tool_calls(session.get("tool_calls") or [], source=source)
 
 
+def migrate_command_evidence_fixture_contracts(
+    evidences: Iterable[CommandEvidence | Mapping[str, object]],
+    contract: Mapping[str, object],
+    *,
+    fallback: bool = False,
+) -> list[dict]:
+    """Annotate legacy replay fixtures with explicit execution contracts.
+
+    This helper is intentionally fixture/replay oriented. It may use legacy
+    stage discovery to preserve old expected behavior. By default it writes
+    typed fixture contracts. Pass `fallback=True` only for fallback fixtures
+    that intentionally exercise legacy classifier behavior.
+    """
+    migrated = []
+    for item in evidences or []:
+        evidence = item if isinstance(item, CommandEvidence) else CommandEvidence.from_dict(item)
+        data = evidence.to_dict()
+        if isinstance(data.get("execution_contract"), dict) and not data["execution_contract"].get("fallback_used"):
+            migrated.append(data)
+            continue
+        stage = _command_stage(evidence, contract)
+        if (
+            stage not in {"artifact_proof", "default_smoke", "custom_runtime_smoke", "verification"}
+            and (_source_authority_signal(evidence) or _command_uses_source_acquisition_tool(evidence.command))
+        ):
+            stage = "source_acquisition"
+        proof_role, acceptance_kind = _fixture_contract_role_for_stage(stage)
+        continuation_policy = _fixture_contract_continuation_policy(stage, evidence)
+        raw_contract = {
+            "schema_version": EXECUTION_CONTRACT_SCHEMA_VERSION,
+            "contract_id": str(contract.get("id") or ""),
+            "purpose": _fixture_contract_purpose_for_stage(stage, evidence.tool),
+            "stage": stage or "command",
+            "proof_role": proof_role,
+            "acceptance_kind": acceptance_kind,
+            "expected_artifacts": _list_of_dicts(contract.get("required_artifacts")),
+            "declared_target_refs": _declared_refs_from_artifacts(_list_of_dicts(contract.get("required_artifacts"))),
+            "continuation_policy": continuation_policy,
+            "background_policy": {
+                "mode": "foreground_blocking" if evidence.tool == "run_tests" else "foreground_yieldable",
+                "allow_background": False,
+            },
+            "source_authority_requirement": {
+                "mode": "inherits_task_contract",
+                "required": bool((contract.get("source_policy") or {}).get("authority_required", False)),
+                "source_tree_ref": str((contract.get("source_policy") or {}).get("source_tree_ref") or ""),
+            },
+            "risk_class": "read_only" if evidence.tool == "run_tests" else "unknown",
+            "fallback_used": bool(fallback),
+        }
+        normalized = normalize_execution_contract(
+            raw_contract,
+            tool=evidence.tool,
+            command=evidence.command,
+            cwd=evidence.cwd,
+            task_contract=contract,
+        )
+        normalized["fallback_used"] = bool(fallback)
+        normalized["migration_source"] = "legacy_fixture_stage_classifier_v1"
+        data["execution_contract"] = normalized
+        data["fallback_used"] = bool(fallback)
+        data["contract_invalid_reason"] = normalized.get("contract_invalid_reason") or ""
+        migrated.append(data)
+    return migrated
+
+
+def _fixture_contract_role_for_stage(stage: object) -> tuple[str, str]:
+    stage_text = str(stage or "")
+    if stage_text in {"source_acquisition", "source_authority"}:
+        return "source_authority", "candidate_source_authority"
+    if stage_text == "artifact_proof":
+        return "final_artifact", "candidate_final_proof"
+    if stage_text == "default_smoke":
+        return "default_smoke", "candidate_runtime_smoke"
+    if stage_text == "custom_runtime_smoke":
+        return "custom_runtime_smoke", "candidate_runtime_smoke"
+    if stage_text == "verification":
+        return "verifier", "external_verifier"
+    if stage_text == "runtime_install":
+        return "runtime_install", "progress_only"
+    if stage_text == "dependency_generation":
+        return "dependency_strategy", "progress_only"
+    if stage_text in {"build", "runtime_build"}:
+        return "target_build", "progress_only"
+    if stage_text in {"configure", "diagnostic"}:
+        return "negative_diagnostic", "not_acceptance"
+    return "none", "not_acceptance"
+
+
+def _fixture_contract_purpose_for_stage(stage: object, tool: object) -> str:
+    if str(tool or "") == "run_tests":
+        return "verification"
+    stage_text = str(stage or "")
+    if stage_text in EXECUTION_CONTRACT_PURPOSES:
+        return stage_text
+    if stage_text == "source_authority":
+        return "source_authority_readback"
+    if stage_text == "default_smoke" or stage_text == "custom_runtime_smoke":
+        return "smoke"
+    if stage_text == "artifact_proof":
+        return "artifact_proof"
+    return "generic_command"
+
+
+def _fixture_contract_continuation_policy(stage: object, evidence: CommandEvidence) -> dict:
+    stage_text = str(stage or "")
+    effective_timeout = evidence.effective_timeout_seconds or evidence.requested_timeout_seconds or 0
+    managed = bool(evidence.timed_out) or (
+        stage_text in {"build", "runtime_build", "runtime_install", "dependency_generation"}
+        and int(effective_timeout or 0) >= 600
+    )
+    return {
+        "mode": "managed" if managed else "blocking",
+        "yield_after_seconds": 30 if managed else None,
+        "resume_policy": "same_resume_identity" if managed else "none",
+        "terminal_required_for_acceptance": True,
+        "final_proof_reserve_seconds": 60,
+    }
+
+
 def synthesize_command_evidence_from_tool_call(
     call: Mapping[str, object],
     *,
@@ -821,6 +1405,15 @@ def command_evidence_from_tool_call(
     output_bytes = len(output.encode("utf-8")) if output else None
     timed_out = bool(result.get("timed_out"))
     exit_code = _coerce_int(result.get("exit_code"))
+    raw_contract = parameters.get("execution_contract")
+    if raw_contract is None:
+        raw_contract = result.get("execution_contract")
+    execution_contract = normalize_execution_contract(
+        raw_contract,
+        tool=tool,
+        command=command,
+        cwd=cwd,
+    )
     wall_ceiling = _dict_value(parameters.get("wall_timeout_ceiling") or result.get("wall_timeout_ceiling"))
     requested_timeout = _coerce_int(wall_ceiling.get("requested_timeout_seconds"), default=_coerce_int(parameters.get("timeout")))
     effective_timeout = _coerce_int(
@@ -866,6 +1459,10 @@ def command_evidence_from_tool_call(
         truncated=any(len(value) > COMMAND_OUTPUT_CLIP_CHARS for value in (stdout, stderr, output)),
         output_bytes=output_bytes,
         source_tool_call_id=call.get("id"),
+        command_run_id=str(parameters.get("command_run_id") or result.get("command_run_id") or ""),
+        execution_contract=execution_contract,
+        fallback_used=bool(execution_contract.get("fallback_used")),
+        contract_invalid_reason=str(execution_contract.get("contract_invalid_reason") or ""),
     )
 
 
@@ -878,6 +1475,18 @@ def planned_long_build_command_stage(
     if str(action_type or "") not in COMMAND_EVIDENCE_TOOLS:
         return ""
     parameters = dict(parameters or {})
+    if isinstance(parameters.get("execution_contract"), Mapping):
+        contract_stage = execution_contract_stage(
+            normalize_execution_contract(
+                parameters.get("execution_contract"),
+                tool=action_type,
+                command=parameters.get("command") or "",
+                cwd=parameters.get("cwd") or "",
+                task_contract=contract,
+            )
+        )
+        if contract_stage:
+            return contract_stage
     call = {
         "id": "planned",
         "tool": str(action_type or ""),
@@ -906,6 +1515,18 @@ def planned_long_build_command_budget_stage(
     parameters: Mapping[str, object] | None,
     contract: Mapping[str, object],
 ) -> str:
+    if isinstance((parameters or {}).get("execution_contract"), Mapping):
+        contract_stage = execution_contract_stage(
+            normalize_execution_contract(
+                (parameters or {}).get("execution_contract"),
+                tool=action_type,
+                command=(parameters or {}).get("command") or "",
+                cwd=(parameters or {}).get("cwd") or "",
+                task_contract=contract,
+            )
+        )
+        if contract_stage:
+            return contract_stage
     stage = planned_long_build_command_stage(action_type, parameters, contract)
     command = str((parameters or {}).get("command") or "")
     if (
@@ -996,7 +1617,12 @@ def command_evidence_to_tool_call(evidence: CommandEvidence | Mapping[str, objec
         "status": evidence.get("status") or "",
         "started_at": evidence.get("started_at") or "",
         "finished_at": evidence.get("finished_at") or "",
-        "parameters": {"command": evidence.get("command") or "", "cwd": evidence.get("cwd") or ""},
+        "parameters": {
+            "command": evidence.get("command") or "",
+            "cwd": evidence.get("cwd") or "",
+            "command_run_id": evidence.get("command_run_id") or "",
+            "execution_contract": evidence.get("execution_contract") or {},
+        },
         "result": {
             "command": evidence.get("command") or "",
             "cwd": evidence.get("cwd") or "",
@@ -1029,6 +1655,8 @@ def long_dependency_artifact_proven_by_command_evidence(
 def command_evidence_terminal_acceptance_success(evidence: CommandEvidence | Mapping[str, object]) -> bool:
     if not isinstance(evidence, CommandEvidence):
         evidence = CommandEvidence.from_dict(evidence)
+    if _contract_blocks_acceptance(evidence):
+        return False
     if evidence.status != "completed":
         return False
     if evidence.exit_code != 0:
@@ -1255,7 +1883,96 @@ def _runtime_proof_reason(text: object, artifacts: Iterable[Mapping[str, object]
     return "artifact name is compiler/toolchain-like: " + ", ".join(name for name in names if name)
 
 
+def _typed_contract_present(evidence: CommandEvidence) -> bool:
+    contract = evidence.execution_contract
+    return isinstance(contract, Mapping) and int(contract.get("schema_version") or 0) >= EXECUTION_CONTRACT_SCHEMA_VERSION and not bool(
+        contract.get("fallback_used")
+    )
+
+
+def _contract_blocks_acceptance(evidence: CommandEvidence) -> bool:
+    return _typed_contract_present(evidence) and bool(evidence.contract_invalid_reason)
+
+
+def _legacy_stage_classifier_allowed(evidence: CommandEvidence) -> bool:
+    source = str(evidence.source or "")
+    return bool(evidence.fallback_used or (evidence.execution_contract or {}).get("fallback_used")) and source in {
+        "planned_timeout_policy",
+        "synthesized_fixture",
+    }
+
+
+def _typed_proof_matches(evidence: CommandEvidence, *, proof_roles: set[str], acceptance_kinds: set[str]) -> bool:
+    if _contract_blocks_acceptance(evidence):
+        return False
+    if _typed_contract_present(evidence):
+        contract = evidence.execution_contract or {}
+        primary_match = _contract_role_matches(contract, proof_roles=proof_roles, acceptance_kinds=acceptance_kinds)
+        substep_match = any(
+            isinstance(substep, Mapping)
+            and execution_contract_is_valid(substep)
+            and _contract_role_matches(substep, proof_roles=proof_roles, acceptance_kinds=acceptance_kinds)
+            for substep in contract.get("substeps") or []
+        )
+        if _compound_acceptance_requires_substeps(evidence):
+            return substep_match
+        return primary_match or substep_match
+    return _legacy_stage_classifier_allowed(evidence)
+
+
+def _contract_role_matches(contract: Mapping[str, object], *, proof_roles: set[str], acceptance_kinds: set[str]) -> bool:
+    proof_role = str((contract or {}).get("proof_role") or "")
+    acceptance_kind = str((contract or {}).get("acceptance_kind") or "")
+    return proof_role in proof_roles and acceptance_kind in acceptance_kinds
+
+
+def _compound_acceptance_requires_substeps(evidence: CommandEvidence) -> bool:
+    contract = evidence.execution_contract or {}
+    if contract.get("migration_source"):
+        return False
+    acceptance_kind = str(contract.get("acceptance_kind") or "")
+    if acceptance_kind in {"not_acceptance", "progress_only"}:
+        return False
+    command = str(evidence.command or "")
+    return len(split_unquoted_shell_command_segments(command)) > 1
+
+
+def _artifact_proof_contract_allows_acceptance(evidence: CommandEvidence) -> bool:
+    return _typed_proof_matches(
+        evidence,
+        proof_roles={"final_artifact", "target_build", "default_smoke", "custom_runtime_smoke"},
+        acceptance_kinds={
+            "candidate_artifact_proof",
+            "candidate_runtime_smoke",
+            "candidate_final_proof",
+        },
+    )
+
+
+def _source_authority_contract_allows_acceptance(evidence: CommandEvidence) -> bool:
+    return _typed_proof_matches(
+        evidence,
+        proof_roles={"source_authority"},
+        acceptance_kinds={"candidate_source_authority", "candidate_final_proof"},
+    )
+
+
+def _default_smoke_contract_allows_acceptance(evidence: CommandEvidence) -> bool:
+    return _typed_proof_matches(
+        evidence,
+        proof_roles={"default_smoke"},
+        acceptance_kinds={"candidate_runtime_smoke", "candidate_final_proof"},
+    )
+
+
 def _command_stage(evidence: CommandEvidence, contract: Mapping[str, object]) -> str:
+    if _contract_blocks_acceptance(evidence):
+        return "command"
+    contract_stage = execution_contract_stage(evidence.execution_contract)
+    if contract_stage:
+        return contract_stage
+    if not _legacy_stage_classifier_allowed(evidence):
+        return "command"
     text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}"
     if _custom_runtime_path_proof(evidence):
         return "custom_runtime_smoke"
@@ -1310,6 +2027,8 @@ def _attempt_result(evidence: CommandEvidence) -> str:
 
 
 def _produced_artifacts(evidence: CommandEvidence, contract: Mapping[str, object]) -> list[dict]:
+    if not _artifact_proof_contract_allows_acceptance(evidence):
+        return []
     produced = []
     for artifact in contract.get("required_artifacts") or []:
         path = str((artifact or {}).get("path") or "")
@@ -1342,6 +2061,8 @@ def _diagnostics(evidence: CommandEvidence, contract: Mapping[str, object] | Non
 
 
 def _source_authority_signal(evidence: CommandEvidence) -> bool:
+    if not _source_authority_contract_allows_acceptance(evidence):
+        return False
     text = f"{evidence.command}\n{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
     if _saved_authority_page_archive_signal(evidence, output_text):
@@ -1768,6 +2489,8 @@ def _source_authority_satisfied_by_correlated_archive_readback(evidences: Iterab
         [item for item in evidences or [] if isinstance(item, CommandEvidence)],
         key=lambda item: item.finish_order,
     ):
+        if not _source_authority_contract_allows_acceptance(evidence):
+            continue
         output_text = f"{evidence.output_head}\n{evidence.output_tail}\n{evidence.stderr_tail}"
         for path in _authoritative_source_archive_paths(evidence.command):
             if _authoritative_archive_acquisition_completed(
@@ -4660,7 +5383,7 @@ def _active_strategy_blockers(
         if code == "external_dependency_source_provenance_unverified" and source_satisfied:
             continue
         if target_runtime_satisfied and code not in _SOURCE_AUTHORITY_BLOCKER_CODES:
-            if not final_contract_satisfied:
+            if not final_contract_satisfied and blocker.get("source_tool_call_id") in evidence_by_tool_call_id:
                 active.append(blocker)
                 continue
             if latest_diagnostic_failure_class and _generic_failure_class(code) == latest_diagnostic_failure_class:
@@ -5103,6 +5826,8 @@ def _terminal_command_uses_required_artifact(evidence: CommandEvidence, artifact
 
 
 def _default_compile_link_smoke(evidence: CommandEvidence, contract: Mapping[str, object]) -> bool:
+    if not _default_smoke_contract_allows_acceptance(evidence):
+        return False
     if not command_evidence_terminal_acceptance_success(evidence):
         return False
     command = str(evidence.command or "")

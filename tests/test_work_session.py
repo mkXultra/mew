@@ -1896,6 +1896,10 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(started["command"], "echo hi")
         self.assertEqual(started["requested_timeout_seconds"], 12)
         self.assertEqual(started["env_summary"]["items"], [{"name": "CC", "value": "clang"}])
+        self.assertEqual(started["command_run_id"], "work_session:1:command_run:1")
+        self.assertEqual(len(session["command_runs"]), 1)
+        self.assertEqual(session["command_runs"][0]["status"], "running")
+        self.assertEqual(session["command_runs"][0]["command_evidence_ref"], {"kind": "command_evidence", "id": 1})
 
         finish_work_tool_call(
             state,
@@ -1910,6 +1914,140 @@ class WorkSessionTests(unittest.TestCase):
         self.assertTrue(finished["terminal_success"])
         self.assertEqual(finished["stdout_tail"], "hi\n")
         self.assertGreater(finished["finish_order"], finished["start_order"])
+        self.assertEqual(session["command_runs"][0]["status"], "completed")
+        self.assertEqual(session["command_runs"][0]["terminal_command_evidence_ref"], {"kind": "command_evidence", "id": 1})
+
+    def test_run_command_records_timed_out_command_run_status(self):
+        state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+        session = {"id": 1, "task_id": 1, "tool_calls": []}
+        state["work_sessions"].append(session)
+        call = start_work_tool_call(
+            state,
+            session,
+            "run_command",
+            {"command": "sleep 60", "cwd": ".", "timeout": 5},
+        )
+
+        finish_work_tool_call(
+            state,
+            1,
+            call["id"],
+            result={"command": "sleep 60", "cwd": ".", "exit_code": 124, "timed_out": True, "stderr": "timeout\n"},
+        )
+
+        self.assertEqual(session["command_runs"][0]["status"], "timed_out")
+        self.assertTrue(session["command_runs"][0]["terminal"]["timed_out"])
+        self.assertEqual(session["command_runs"][0]["terminal_command_evidence_ref"], {"kind": "command_evidence", "id": 1})
+
+    def test_run_command_records_typed_execution_contract_on_evidence_and_command_run(self):
+        state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+        session = {"id": 1, "task_id": 1, "tool_calls": []}
+        state["work_sessions"].append(session)
+
+        contract = {
+            "schema_version": 2,
+            "purpose": "build",
+            "stage": "build",
+            "proof_role": "final_artifact",
+            "acceptance_kind": "candidate_final_proof",
+            "expected_artifacts": [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+            "continuation_policy": {"mode": "managed", "yield_after_seconds": 5},
+            "background_policy": {"mode": "foreground_yieldable", "allow_background": False},
+            "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+            "risk_class": "build_mutation",
+        }
+        call = start_work_tool_call(
+            state,
+            session,
+            "run_command",
+            {"command": "make foocc", "cwd": "/tmp/FooCC", "timeout": 30, "execution_contract": contract},
+        )
+
+        evidence = session["command_evidence"][0]
+        self.assertEqual(evidence["execution_contract"]["stage"], "build")
+        self.assertEqual(evidence["execution_contract"]["proof_role"], "final_artifact")
+        self.assertFalse(evidence["fallback_used"])
+        self.assertEqual(evidence["command_run_id"], "work_session:1:command_run:1")
+        self.assertEqual(session["command_runs"][0]["execution_contract"]["stage"], "build")
+
+        finish_work_tool_call(
+            state,
+            1,
+            call["id"],
+            result={"command": "make foocc", "cwd": "/tmp/FooCC", "exit_code": 0, "stdout": "built\n"},
+        )
+
+        self.assertEqual(session["command_runs"][0]["status"], "completed")
+        self.assertEqual(session["command_evidence"][0]["execution_contract"]["acceptance_kind"], "candidate_final_proof")
+
+    def test_run_command_rejects_invalid_typed_execution_contract_before_execution(self):
+        with self.assertRaisesRegex(ValueError, "invalid execution_contract"):
+            execute_work_tool(
+                "run_command",
+                {
+                    "allow_shell": True,
+                    "command": "echo hi",
+                    "cwd": ".",
+                    "execution_contract": {
+                        "purpose": "build",
+                        "stage": "artifact_proof",
+                        "proof_role": "final_artifact",
+                        "acceptance_kind": "candidate_source_authority",
+                    },
+                },
+                allowed_read_roots=[Path(".")],
+            )
+
+    def test_run_command_rejects_non_object_execution_contract_before_execution(self):
+        with self.assertRaisesRegex(ValueError, "invalid execution_contract: expected object"):
+            execute_work_tool(
+                "run_command",
+                {
+                    "allow_shell": True,
+                    "command": "echo hi",
+                    "cwd": ".",
+                    "execution_contract": "diagnostic",
+                },
+                allowed_read_roots=[Path(".")],
+            )
+
+    def test_run_tests_rejects_background_execution_contract(self):
+        with self.assertRaisesRegex(ValueError, "run_tests execution_contract cannot allow background"):
+            execute_work_tool(
+                "run_tests",
+                {
+                    "allow_verify": True,
+                    "command": "pytest -q",
+                    "cwd": ".",
+                    "execution_contract": {
+                        "purpose": "verification",
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "background_policy": {"mode": "background_allowed", "allow_background": True},
+                    },
+                },
+                allowed_read_roots=[Path(".")],
+            )
+
+    def test_run_tests_rejects_allow_background_even_with_foreground_mode(self):
+        with self.assertRaisesRegex(ValueError, "run_tests execution_contract cannot allow background"):
+            execute_work_tool(
+                "run_tests",
+                {
+                    "allow_verify": True,
+                    "command": "pytest -q",
+                    "cwd": ".",
+                    "execution_contract": {
+                        "purpose": "verification",
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "background_policy": {"mode": "foreground_blocking", "allow_background": True},
+                    },
+                },
+                allowed_read_roots=[Path(".")],
+            )
 
     def test_command_evidence_ref_is_visible_when_tool_and_evidence_ids_diverge(self):
         from mew.work_session import build_work_session_command_entries, format_work_session_commands
@@ -5027,6 +5165,44 @@ class WorkSessionTests(unittest.TestCase):
                     "truncated": False,
                     "output_bytes": None,
                     "source_tool_call_id": 42,
+                    "execution_contract": {
+                        "schema_version": 2,
+                        "purpose": "artifact_proof",
+                        "stage": "artifact_proof",
+                        "proof_role": "final_artifact",
+                        "acceptance_kind": "candidate_final_proof",
+                        "substeps": [
+                            {
+                                "purpose": "artifact_proof",
+                                "stage": "artifact_proof",
+                                "proof_role": "final_artifact",
+                                "acceptance_kind": "candidate_final_proof",
+                                "expected_artifacts": [{"path": "/tmp/WidgetCLI/widget", "kind": "executable"}],
+                                "declared_target_refs": [{"kind": "artifact", "path": "/tmp/WidgetCLI/widget"}],
+                            }
+                        ],
+                        "expected_artifacts": [{"path": "/tmp/WidgetCLI/widget", "kind": "executable"}],
+                        "declared_target_refs": [{"kind": "artifact", "path": "/tmp/WidgetCLI/widget"}],
+                        "continuation_policy": {"mode": "blocking", "terminal_required_for_acceptance": True},
+                        "background_policy": {"mode": "foreground_yieldable", "allow_background": False},
+                        "source_authority_requirement": {"mode": "inherits_task_contract", "required": True},
+                        "resume_identity": {
+                            "contract_id": "work_session:1:long_build:1",
+                            "purpose": "artifact_proof",
+                            "stage": "artifact_proof",
+                            "declared_target_refs": [{"kind": "artifact", "path": "/tmp/WidgetCLI/widget"}],
+                            "expected_artifacts": [{"path": "/tmp/WidgetCLI/widget", "kind": "executable"}],
+                            "cwd": "/tmp/WidgetCLI",
+                            "execution_mode": "shell",
+                            "payload_hash": "sha256:test-fixture",
+                            "idempotence_key": "sha256:test-fixture",
+                        },
+                        "risk_class": "read_only",
+                        "fallback_used": False,
+                        "contract_invalid_reason": "",
+                    },
+                    "fallback_used": False,
+                    "contract_invalid_reason": "",
                 },
             ],
             "tool_calls": [
@@ -10967,6 +11143,93 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(session["command_evidence"][1]["status"], "completed")
         self.assertGreater(session["command_evidence"][1]["finish_order"], 0)
 
+    def test_typed_managed_long_command_preserves_idempotence_across_poll_without_contract(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": "Under /tmp/FooCC, build /tmp/FooCC/foocc from source.",
+        }
+        state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+        session = {"id": 1, "task_id": 1, "status": "active", "goal": task["description"], "tool_calls": []}
+        state["work_sessions"].append(session)
+        start_parameters = {
+            "command": "scripts/do-the-long-step",
+            "cwd": "/tmp/FooCC",
+            "timeout": 120,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "build",
+                "stage": "build",
+                "proof_role": "target_build",
+                "acceptance_kind": "progress_only",
+                "expected_artifacts": [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+                "continuation_policy": {"mode": "managed", "yield_after_seconds": 10},
+            },
+        }
+        policy = commands.work_tool_long_command_budget_policy("run_command", start_parameters, task=task, session=session)
+        commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            start_parameters,
+            max_wall_seconds=500,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+        expected_key = start_parameters["execution_contract"]["resume_identity"]["idempotence_key"]
+
+        start_call = start_work_tool_call(state, session, "run_command", start_parameters)
+        finish_work_tool_call(
+            state,
+            1,
+            start_call["id"],
+            result={
+                "command": "scripts/do-the-long-step",
+                "cwd": "/tmp/FooCC",
+                "exit_code": None,
+                "timed_out": False,
+                "managed_long_command": {"action_kind": "start_long_command", "status": "running", "stage": "build"},
+                "long_command_budget": start_parameters["long_command_budget"],
+            },
+        )
+
+        poll_parameters = {
+            "command": "sleep 1",
+            "cwd": "/tmp/FooCC",
+            "timeout": 5,
+            "long_command_budget": {
+                "action_kind": "poll_long_command",
+                "stage": "build",
+                "latest_long_command_run_id": "work_session:1:long_command:1",
+                "effective_timeout_seconds": 5,
+            },
+        }
+        poll_call = start_work_tool_call(state, session, "run_command", poll_parameters)
+        finish_work_tool_call(
+            state,
+            1,
+            poll_call["id"],
+            result={
+                "command": "scripts/do-the-long-step",
+                "cwd": "/tmp/FooCC",
+                "exit_code": 0,
+                "timed_out": False,
+                "managed_long_command": {
+                    "action_kind": "poll_long_command",
+                    "status": "completed",
+                    "stage": "build",
+                    "latest_long_command_run_id": "work_session:1:long_command:1",
+                },
+                "long_command_budget": poll_parameters["long_command_budget"],
+            },
+        )
+
+        self.assertEqual(len(session["long_command_runs"]), 1)
+        self.assertEqual(session["long_command_runs"][0]["idempotence_key"], expected_key)
+        self.assertEqual(
+            session["long_command_runs"][0]["execution_contract"]["resume_identity"]["idempotence_key"],
+            expected_key,
+        )
+
     def test_managed_long_command_killed_status_keeps_timeout_resume_semantics(self):
         task = {
             "id": 1,
@@ -11102,6 +11365,71 @@ EOF
         self.assertGreater(policy["reserve_seconds"], 0)
         self.assertFalse(ceiling.get("blocked", False))
         self.assertEqual(parameters["long_command_budget"]["action_kind"], "start_long_command")
+
+    def test_execution_contract_managed_policy_attaches_without_string_stage_classifier(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": "Under /tmp/FooCC, build /tmp/FooCC/foocc from source.",
+        }
+        session = {"id": 1, "task_id": 1, "status": "active", "goal": task["description"], "tool_calls": []}
+        parameters = {
+            "command": "scripts/do-the-long-step",
+            "cwd": "/tmp/FooCC",
+            "timeout": 120,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "build",
+                "stage": "build",
+                "proof_role": "target_build",
+                "acceptance_kind": "progress_only",
+                "expected_artifacts": [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+                "continuation_policy": {"mode": "managed", "yield_after_seconds": 10},
+                "risk_class": "build_mutation",
+            },
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=500,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertTrue(policy["applies"])
+        self.assertTrue(policy["execution_contract_managed"])
+        self.assertEqual(policy["stage"], "build")
+        self.assertEqual(parameters["long_command_budget"]["stage"], "build")
+        self.assertEqual(parameters["long_command_budget"]["yield_after_seconds"], 10)
+        self.assertFalse(ceiling.get("blocked", False))
+
+    def test_invalid_execution_contract_does_not_route_long_command_budget(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": "Under /tmp/FooCC, build /tmp/FooCC/foocc from source.",
+        }
+        session = {"id": 1, "task_id": 1, "status": "active", "goal": task["description"], "tool_calls": []}
+        parameters = {
+            "command": "scripts/do-the-long-step",
+            "cwd": "/tmp/FooCC",
+            "timeout": 120,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "build",
+                "stage": "build",
+                "proof_role": "final_artifact",
+                "acceptance_kind": "candidate_source_authority",
+                "continuation_policy": {"mode": "managed", "yield_after_seconds": 10},
+            },
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+
+        self.assertFalse(policy["applies"])
 
     def test_long_command_budget_policy_does_not_attach_to_pure_source_fetch(self):
         task = {

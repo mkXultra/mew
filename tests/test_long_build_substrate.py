@@ -17,11 +17,14 @@ from mew.long_build_substrate import (
     command_evidence_from_tool_call,
     command_evidence_terminal_acceptance_success,
     command_evidence_to_tool_call,
+    execution_contract_stage,
     fresh_long_dependency_artifact_evidence,
     long_command_idempotence_key,
     long_command_output_ref,
     long_command_yield_after_seconds,
     long_dependency_artifact_proven_by_command_evidence,
+    migrate_command_evidence_fixture_contracts,
+    normalize_execution_contract,
     planned_long_build_command_budget_stage,
     reduce_long_build_state,
     summarize_env,
@@ -100,7 +103,7 @@ def test_command_evidence_synthesis_ignores_write_tools_and_verify_command_field
 def test_planned_long_build_command_budget_stage_promotes_compound_configure_build_smoke():
     contract = build_long_build_contract(
         TASK_TEXT,
-        [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+        ["/tmp/FooCC/foocc"],
         contract_id="work_session:1:long_build:1",
     )
     command = """set -eu
@@ -122,6 +125,289 @@ EOF
     )
 
     assert stage in {"build", "default_smoke", "dependency_generation"}
+
+
+def test_execution_contract_normalizer_rejects_invalid_proof_acceptance_pair():
+    contract = normalize_execution_contract(
+        {
+            "purpose": "smoke",
+            "stage": "default_smoke",
+            "proof_role": "default_smoke",
+            "acceptance_kind": "candidate_source_authority",
+        },
+        tool="run_command",
+        command="/tmp/FooCC/foocc /tmp/probe.c -o /tmp/probe && /tmp/probe",
+        cwd="/tmp/FooCC",
+    )
+
+    assert contract["contract_invalid_reason"]
+    assert execution_contract_stage(contract) == ""
+
+
+def test_execution_contract_normalizer_rejects_invalid_enum_and_missing_required_fields():
+    contract = normalize_execution_contract(
+        {
+            "purpose": "build",
+            "stage": "definitely_not_a_stage",
+            "proof_role": "final_artifact",
+        },
+        tool="run_command",
+        command="make foocc",
+        cwd="/tmp/FooCC",
+    )
+
+    assert "missing required execution_contract field(s): acceptance_kind" in contract["contract_invalid_reason"]
+    assert "invalid execution_contract stage" in contract["contract_invalid_reason"]
+    assert execution_contract_stage(contract) == ""
+
+
+def test_invalid_typed_contract_cannot_fallback_into_artifact_acceptance():
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(
+                    1,
+                    "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+                    stdout="FooCC version 1.0\n",
+                ),
+                "parameters": {
+                    "command": "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+                    "cwd": "/tmp/FooCC",
+                    "execution_contract": {
+                        "purpose": "build",
+                        "stage": "artifact_proof",
+                        "proof_role": "final_artifact",
+                        "acceptance_kind": "candidate_source_authority",
+                    },
+                },
+            }
+        ]
+    )[0]
+    contract = build_long_build_contract(TASK_TEXT, ["/tmp/FooCC/foocc"])
+
+    attempts = build_attempts_from_command_evidence([evidence], contract)
+
+    assert evidence.contract_invalid_reason
+    assert not command_evidence_terminal_acceptance_success(evidence)
+    assert not long_dependency_artifact_proven_by_command_evidence(evidence, "/tmp/FooCC/foocc")
+    assert attempts[0]["stage"] == "command"
+    assert attempts[0]["produced_artifacts"] == []
+
+
+def test_untyped_native_command_cannot_prove_artifact_through_legacy_classifier():
+    evidence = command_evidence_from_tool_call(
+        _command_call(
+            1,
+            "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+            stdout="FooCC version 1.0\n",
+        ),
+        evidence_id=1,
+        start_order=1,
+        finish_order=2,
+        source="native_command",
+    )
+    contract = build_long_build_contract(TASK_TEXT, ["/tmp/FooCC/foocc"])
+
+    attempts = build_attempts_from_command_evidence([evidence], contract)
+    state = reduce_long_build_state(contract, attempts, [evidence])
+
+    assert evidence.fallback_used is True
+    assert attempts[0]["stage"] == "command"
+    assert attempts[0]["produced_artifacts"] == []
+    assert state["artifacts"][0]["status"] == "missing_or_unproven"
+
+
+def test_typed_target_build_candidate_artifact_can_prove_artifact_with_simple_command():
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(
+                    1,
+                    "/tmp/FooCC/foocc --version",
+                    stdout="FooCC version 1.0\n",
+                ),
+                "parameters": {
+                    "command": "/tmp/FooCC/foocc --version",
+                    "cwd": "/tmp/FooCC",
+                    "execution_contract": {
+                        "purpose": "build",
+                        "stage": "artifact_proof",
+                        "proof_role": "target_build",
+                        "acceptance_kind": "candidate_artifact_proof",
+                    },
+                },
+            }
+        ]
+    )[0]
+    contract = build_long_build_contract(TASK_TEXT, ["/tmp/FooCC/foocc"])
+
+    attempts = build_attempts_from_command_evidence([evidence], contract)
+
+    assert not evidence.contract_invalid_reason
+    assert attempts[0]["stage"] == "artifact_proof"
+    assert attempts[0]["produced_artifacts"] == [{"path": "/tmp/FooCC/foocc", "proof_evidence_id": 1}]
+
+
+def test_compound_typed_acceptance_requires_matching_substep():
+    contract = build_long_build_contract(TASK_TEXT, ["/tmp/FooCC/foocc"])
+    base_call = _command_call(
+        1,
+        "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+        stdout="FooCC version 1.0\n",
+    )
+    no_substep = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **base_call,
+                "parameters": {
+                    "command": base_call["parameters"]["command"],
+                    "cwd": "/tmp/FooCC",
+                    "execution_contract": {
+                        "purpose": "artifact_proof",
+                        "stage": "artifact_proof",
+                        "proof_role": "final_artifact",
+                        "acceptance_kind": "candidate_final_proof",
+                    },
+                },
+            }
+        ]
+    )[0]
+    with_substep = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **base_call,
+                "parameters": {
+                    "command": base_call["parameters"]["command"],
+                    "cwd": "/tmp/FooCC",
+                    "execution_contract": {
+                        "purpose": "artifact_proof",
+                        "stage": "artifact_proof",
+                        "proof_role": "progress",
+                        "acceptance_kind": "progress_only",
+                        "substeps": [
+                            {
+                                "purpose": "artifact_proof",
+                                "stage": "artifact_proof",
+                                "proof_role": "final_artifact",
+                                "acceptance_kind": "candidate_final_proof",
+                            }
+                        ],
+                    },
+                },
+            }
+        ]
+    )[0]
+
+    assert build_attempts_from_command_evidence([no_substep], contract)[0]["produced_artifacts"] == []
+    assert build_attempts_from_command_evidence([with_substep], contract)[0]["produced_artifacts"] == [
+        {"path": "/tmp/FooCC/foocc", "proof_evidence_id": 1}
+    ]
+
+
+def test_typed_diagnostic_contract_cannot_satisfy_source_authority():
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            {
+                **_command_call(
+                    1,
+                    "printf 'official release archive https://example.invalid/foo.tar.gz\\n'",
+                    stdout="official release archive https://example.invalid/foo.tar.gz\n",
+                ),
+                "parameters": {
+                    "command": "printf 'official release archive https://example.invalid/foo.tar.gz\\n'",
+                    "cwd": "/tmp/FooCC",
+                    "execution_contract": {
+                        "purpose": "diagnostic",
+                        "stage": "diagnostic",
+                        "proof_role": "negative_diagnostic",
+                        "acceptance_kind": "not_acceptance",
+                    },
+                },
+            }
+        ]
+    )[0]
+    contract = build_long_build_contract(TASK_TEXT, ["/tmp/FooCC/foocc"])
+
+    attempts = build_attempts_from_command_evidence([evidence], contract)
+    state = reduce_long_build_state(contract, attempts, [evidence])
+
+    source_stage = next(stage for stage in state["stages"] if stage["id"] == "source_authority")
+    assert attempts[0]["stage"] == "diagnostic"
+    assert not any(item.get("signal") == "source_authority" for item in attempts[0]["diagnostics"])
+    assert source_stage["status"] == "unknown"
+
+
+def test_typed_execution_contract_stage_takes_precedence_over_command_text_classifier():
+    contract = build_long_build_contract(
+        TASK_TEXT,
+        [{"path": "/tmp/FooCC/foocc", "kind": "executable"}],
+        contract_id="work_session:1:long_build:1",
+    )
+    stage = planned_long_build_command_budget_stage(
+        "run_command",
+        {
+            "command": "echo this mentions make depend and curl but is diagnostic only",
+            "cwd": "/tmp/FooCC",
+            "timeout": 1200,
+            "execution_contract": {
+                "purpose": "diagnostic",
+                "stage": "diagnostic",
+                "proof_role": "negative_diagnostic",
+                "acceptance_kind": "not_acceptance",
+            },
+        },
+        contract,
+    )
+
+    assert stage == "diagnostic"
+
+
+def test_fixture_contract_migration_writes_typed_artifact_proof_contract():
+    contract = build_long_build_contract(
+        TASK_TEXT,
+        ["/tmp/FooCC/foocc"],
+        contract_id="work_session:1:long_build:1",
+    )
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [
+            _command_call(
+                1,
+                "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version",
+                stdout="FooCC version 1.0\n",
+            )
+        ]
+    )
+
+    migrated = migrate_command_evidence_fixture_contracts(evidence, contract)
+    attempts = build_attempts_from_command_evidence(migrated, contract)
+
+    migrated_contract = migrated[0]["execution_contract"]
+    assert migrated[0]["fallback_used"] is False
+    assert migrated_contract["fallback_used"] is False
+    assert migrated_contract["migration_source"] == "legacy_fixture_stage_classifier_v1"
+    assert migrated_contract["stage"] == "artifact_proof"
+    assert migrated_contract["proof_role"] == "final_artifact"
+    assert migrated_contract["acceptance_kind"] == "candidate_final_proof"
+    assert migrated_contract["declared_target_refs"] == [{"kind": "artifact", "path": "/tmp/FooCC/foocc"}]
+    assert attempts[0]["stage"] == "artifact_proof"
+    assert attempts[0]["fallback_used"] is False
+    assert attempts[0]["produced_artifacts"] == [{"path": "/tmp/FooCC/foocc", "proof_evidence_id": 1}]
+
+
+def test_fixture_contract_migration_can_preserve_explicit_fallback_fixture():
+    contract = build_long_build_contract(TASK_TEXT, ["/tmp/FooCC/foocc"], contract_id="work_session:1:long_build:1")
+    evidence = synthesize_command_evidence_from_tool_calls(
+        [_command_call(1, "test -x /tmp/FooCC/foocc && /tmp/FooCC/foocc --version", stdout="FooCC version 1.0\n")]
+    )
+
+    migrated = migrate_command_evidence_fixture_contracts(evidence, contract, fallback=True)
+    attempts = build_attempts_from_command_evidence(migrated, contract)
+
+    assert migrated[0]["fallback_used"] is True
+    assert migrated[0]["execution_contract"]["fallback_used"] is True
+    assert execution_contract_stage(migrated[0]["execution_contract"]) == ""
+    assert attempts[0]["stage"] == "artifact_proof"
+    assert attempts[0]["fallback_used"] is True
 
 
 def test_planned_long_build_command_budget_stage_does_not_promote_pure_curl_source_fetch():
@@ -1102,6 +1388,7 @@ def test_build_timeout_masks_unreached_later_install_blocker_from_same_command()
             )
         ]
     )
+    evidence = migrate_command_evidence_fixture_contracts(evidence, contract)
     attempts = build_attempts_from_command_evidence(evidence, contract)
 
     state = reduce_long_build_state(
@@ -1147,6 +1434,7 @@ def test_build_timeout_does_not_mask_same_call_overbroad_build_blocker():
             )
         ]
     )
+    evidence = migrate_command_evidence_fixture_contracts(evidence, contract)
     attempts = build_attempts_from_command_evidence(evidence, contract)
 
     state = reduce_long_build_state(
@@ -2764,6 +3052,7 @@ def test_source_authority_correlates_absolute_fetch_with_parent_cwd_relative_rea
             ),
         ]
     )
+    evidence = migrate_command_evidence_fixture_contracts(evidence, contract)
     attempts = build_attempts_from_command_evidence(evidence, contract)
     state = reduce_long_build_state(
         contract,
@@ -10546,6 +10835,7 @@ def test_reducer_clears_non_source_strategy_blockers_after_target_and_runtime_pr
             )
         ]
     )
+    evidence = migrate_command_evidence_fixture_contracts(evidence, contract)
     attempts = build_attempts_from_command_evidence(evidence, contract)
     state = reduce_long_build_state(
         contract,
@@ -10605,6 +10895,7 @@ def test_reducer_surfaces_later_diagnostic_failure_instead_of_stale_non_source_b
             ),
         ]
     )
+    evidence = migrate_command_evidence_fixture_contracts(evidence, contract)
     attempts = build_attempts_from_command_evidence(evidence, contract)
     state = reduce_long_build_state(
         contract,
