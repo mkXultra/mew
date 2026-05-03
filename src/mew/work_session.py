@@ -2293,6 +2293,23 @@ def _command_run_output_path_from_ref(output_ref):
     return str((WORK_COMMAND_OUTPUT_ROOT / ref).resolve(strict=False))
 
 
+def _validated_command_output_path(output_path):
+    output_text = str(output_path or "").strip()
+    if not output_text:
+        return ""
+    path = Path(output_text).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve(strict=False)
+    else:
+        path = path.resolve(strict=False)
+    spool_root = (WORK_COMMAND_OUTPUT_ROOT / "work-session").resolve(strict=False)
+    try:
+        path.relative_to(spool_root)
+    except ValueError as exc:
+        raise ValueError("managed command output must stay under .mew/work-session") from exc
+    return str(path)
+
+
 def _managed_command_foreground_budget(parameters, effective_timeout):
     parameters = parameters or {}
     explicit = parameters.get("foreground_budget_seconds")
@@ -2371,7 +2388,9 @@ def _run_managed_command_for_work(command, cwd=".", timeout=300, on_output=None,
         command_run_id_value = f"adhoc:{digest}"
         parameters["command_run_id"] = command_run_id_value
     output_ref = str(parameters.get("output_ref") or _command_run_output_ref_from_id(command_run_id_value))
-    output_path = str(parameters.get("output_path") or _command_run_output_path_from_ref(output_ref))
+    output_path = _validated_command_output_path(
+        parameters.get("output_path") or _command_run_output_path_from_ref(output_ref)
+    )
     if action_kind in {"poll_long_command", "poll_command"}:
         wait_seconds = _float_or_default(parameters.get("wait_seconds"), _float_or_default(timeout, 5.0))
         try:
@@ -2701,14 +2720,8 @@ def read_work_command_output(parameters):
         output_path = _command_run_output_path_from_ref(output_ref)
     if not output_path:
         raise ValueError("read_command_output requires command_run_id, output_ref, or output_path")
-    path = Path(output_path).expanduser()
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve(strict=False)
-    else:
-        path = path.resolve(strict=False)
-    spool_root = (WORK_COMMAND_OUTPUT_ROOT / "work-session").resolve(strict=False)
     try:
-        path.relative_to(spool_root)
+        path = Path(_validated_command_output_path(output_path))
     except ValueError as exc:
         raise ValueError("read_command_output can only read managed command output under .mew/work-session") from exc
     max_chars = int(parameters.get("max_chars") or DEFAULT_READ_MAX_CHARS)

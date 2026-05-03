@@ -1360,6 +1360,8 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(scenario["artifacts"]["summary"]["upstream_tail_failed"])
             self.assertTrue(scenario["artifacts"]["summary"]["main_smoke_passed"])
             self.assertEqual(scenario["artifacts"]["summary"]["stop_reason"], "wall_timeout")
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_lost"])
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["managed_lost"])
             self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
             self.assertIn("m6_24-repository-test-tail-emulator: pass", text)
 

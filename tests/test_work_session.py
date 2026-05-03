@@ -2271,6 +2271,33 @@ class WorkSessionTests(unittest.TestCase):
                     allowed_read_roots=[],
                 )
 
+    def test_run_command_rejects_model_supplied_non_spool_output_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outside = Path(tmp) / "outside.log"
+            with self.assertRaisesRegex(ValueError, "managed command output must stay under"):
+                execute_work_tool(
+                    "run_command",
+                    {
+                        "allow_shell": True,
+                        "command": "echo should-not-write",
+                        "output_path": str(outside),
+                    },
+                    allowed_read_roots=[],
+                )
+            self.assertFalse(outside.exists())
+
+    def test_run_command_rejects_traversing_output_ref(self):
+        with self.assertRaisesRegex(ValueError, "managed command output must stay under"):
+            execute_work_tool(
+                "run_command",
+                {
+                    "allow_shell": True,
+                    "command": "echo should-not-write",
+                    "output_ref": "../../outside.log",
+                },
+                allowed_read_roots=[],
+            )
+
     def test_read_command_output_uses_stable_spool_root_across_cwd_changes(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as other:
             root = (Path(tmp) / ".mew").resolve()
@@ -42366,6 +42393,99 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
 
         invalid = work_tool_parameters_from_action({"type": "run_command", "command": "make", "timeout": "soon"})
         self.assertNotIn("timeout", invalid)
+
+    def test_work_model_preserves_managed_run_command_contract_fields(self):
+        from mew.work_loop import normalize_work_model_action, work_tool_parameters_from_action
+
+        contract = {
+            "schema_version": 2,
+            "purpose": "build",
+            "stage": "build",
+            "proof_role": "progress",
+            "acceptance_kind": "progress_only",
+            "expected_artifacts": [],
+            "declared_target_refs": [{"kind": "source_tree", "path": "/app/src", "ref": "git:abc"}],
+            "continuation_policy": {
+                "mode": "managed",
+                "yield_after_seconds": 30,
+                "resume_policy": "same_resume_identity",
+                "terminal_required_for_acceptance": True,
+            },
+            "background_policy": {"mode": "foreground_yieldable", "allow_background": False},
+            "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+            "risk_class": "runtime_install",
+        }
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "run_command",
+                    "command": "python -m pip install --no-build-isolation -v .",
+                    "timeout": 300,
+                    "foreground_budget_seconds": 30,
+                    "execution_contract": contract,
+                }
+            }
+        )
+        params = work_tool_parameters_from_action(action, allow_shell=True, default_cwd="/app/src")
+
+        self.assertEqual(action["foreground_budget_seconds"], 30)
+        self.assertEqual(action["execution_contract"]["stage"], "build")
+        self.assertEqual(params["foreground_budget_seconds"], 30)
+        self.assertEqual(params["execution_contract"]["proof_role"], "progress")
+
+    def test_work_model_does_not_preserve_start_command_spool_identity_fields(self):
+        from mew.work_loop import normalize_work_model_action
+
+        action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "run_command",
+                    "command": "echo ok",
+                    "command_run_id": "work_session:1:command_run:1",
+                    "output_ref": "../../outside.log",
+                    "output_path": "/tmp/outside.log",
+                }
+            }
+        )
+
+        self.assertEqual(action["type"], "run_command")
+        self.assertNotIn("command_run_id", action)
+        self.assertNotIn("output_ref", action)
+        self.assertNotIn("output_path", action)
+
+    def test_work_model_preserves_command_lifecycle_identity_fields(self):
+        from mew.work_loop import normalize_work_model_action, work_tool_parameters_from_action
+
+        read_action = normalize_work_model_action(
+            {
+                "summary": "read captured output",
+                "action": {
+                    "type": "read_command_output",
+                    "command_run_id": "work_session:1:command_run:2",
+                    "tail": True,
+                    "max_chars": 2000,
+                    "reason": "inspect failed build output",
+                },
+            }
+        )
+        self.assertEqual(read_action["command_run_id"], "work_session:1:command_run:2")
+        self.assertTrue(read_action["tail"])
+        read_params = work_tool_parameters_from_action(read_action)
+        self.assertEqual(read_params["command_run_id"], "work_session:1:command_run:2")
+        self.assertTrue(read_params["tail"])
+
+        poll_action = normalize_work_model_action(
+            {
+                "action": {
+                    "type": "poll_command",
+                    "command_run_id": "work_session:1:command_run:2",
+                    "wait_seconds": 5,
+                }
+            }
+        )
+        self.assertEqual(poll_action["command_run_id"], "work_session:1:command_run:2")
+        self.assertEqual(poll_action["wait_seconds"], 5)
 
     def test_work_model_splits_pipe_search_text_queries(self):
         from mew.work_loop import normalize_work_model_action

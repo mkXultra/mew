@@ -15174,6 +15174,97 @@ def _write_repository_test_tail_fixture_json(path, *, replay, summary, contexts)
     return payload
 
 
+def _evaluate_managed_action_projection(contexts):
+    from .work_loop import normalize_work_model_action
+
+    lifecycle_required_types = {"poll_command", "cancel_command", "read_command_output"}
+    managed_required_types = {"run_command", "run_tests"}
+    lifecycle_cases = []
+    managed_cases = []
+    for context in contexts or []:
+        fixture = (context or {}).get("fixture") if isinstance((context or {}).get("fixture"), dict) else {}
+        raw_action = dict(fixture.get("raw_action") or {})
+        action_type = str(raw_action.get("type") or raw_action.get("tool") or "")
+        if not action_type:
+            continue
+        current = normalize_work_model_action({"action": raw_action})
+        historical = fixture.get("post_policy_action") if isinstance(fixture.get("post_policy_action"), dict) else {}
+        if action_type in lifecycle_required_types:
+            raw_identity = {
+                key: raw_action.get(key)
+                for key in ("command_run_id", "output_ref", "output_path")
+                if raw_action.get(key) not in (None, "")
+            }
+            if raw_identity:
+                lifecycle_cases.append(
+                    {
+                        "step_index": fixture.get("step_index"),
+                        "action_type": action_type,
+                        "raw_identity_keys": sorted(raw_identity),
+                        "current_identity_keys": sorted(
+                            key
+                            for key in ("command_run_id", "output_ref", "output_path")
+                            if current.get(key) not in (None, "")
+                        ),
+                        "historical_identity_keys": sorted(
+                            key
+                            for key in ("command_run_id", "output_ref", "output_path")
+                            if historical.get(key) not in (None, "")
+                        ),
+                    }
+                )
+        if action_type in managed_required_types:
+            raw_keys = [
+                key
+                for key in ("foreground_budget_seconds", "execution_contract")
+                if raw_action.get(key) not in (None, "")
+            ]
+            if raw_keys:
+                managed_cases.append(
+                    {
+                        "step_index": fixture.get("step_index"),
+                        "action_type": action_type,
+                        "raw_managed_keys": sorted(raw_keys),
+                        "current_managed_keys": sorted(
+                            key
+                            for key in ("foreground_budget_seconds", "execution_contract")
+                            if current.get(key) not in (None, "")
+                        ),
+                        "historical_managed_keys": sorted(
+                            key
+                            for key in ("foreground_budget_seconds", "execution_contract")
+                            if historical.get(key) not in (None, "")
+                        ),
+                    }
+                )
+    lifecycle_lost = [
+        item
+        for item in lifecycle_cases
+        if set(item["raw_identity_keys"]) - set(item["current_identity_keys"])
+    ]
+    managed_lost = [
+        item
+        for item in managed_cases
+        if set(item["raw_managed_keys"]) - set(item["current_managed_keys"])
+    ]
+    return {
+        "lifecycle_cases": lifecycle_cases,
+        "managed_cases": managed_cases,
+        "lifecycle_lost": lifecycle_lost,
+        "managed_lost": managed_lost,
+        "historical_lifecycle_loss_count": sum(
+            1
+            for item in lifecycle_cases
+            if set(item["raw_identity_keys"]) - set(item["historical_identity_keys"])
+        ),
+        "historical_managed_loss_count": sum(
+            1
+            for item in managed_cases
+            if set(item["raw_managed_keys"]) - set(item["historical_managed_keys"])
+        ),
+    }
+
+
 def _select_compile_compcert_emulator_context(contexts):
     for context in reversed(contexts or []):
         raw_action = (((context or {}).get("fixture") or {}).get("raw_action") or {})
@@ -15432,6 +15523,7 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         verifier_stdout = first_trial.get("verifier_stdout_excerpt") or ""
     summary = _repository_test_tail_summary(verifier_stdout, first_trial)
     contexts = terminal_bench_llm_action_fixture_contexts(source, task=task_filter)
+    projection = _evaluate_managed_action_projection(contexts)
     fixture_path = Path(workspace) / "repository-test-tail-frontier-fixture.json"
     fixture = _write_repository_test_tail_fixture_json(
         fixture_path,
@@ -15461,12 +15553,35 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         summary,
         "repository test wrapper failure detected; upstream failing test is optional if verifier output clipped it",
     )
+    if summary.get("stop_reason") == "tool_failed":
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_tool_failed_frontier_stop",
+            summary.get("stop_reason") == "tool_failed" and summary.get("mew_exit_code") not in (0, None),
+            summary,
+            "mew stopped by tool_failed before closing the repository-test frontier",
+        )
+    else:
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_wall_timeout",
+            bool(summary.get("wall_timeout")) and summary.get("stop_reason") == "wall_timeout",
+            summary,
+            "mew stopped by wall_timeout before closing the repository-test frontier",
+        )
     _scenario_check(
         checks,
-        "m6_24_repository_test_tail_emulator_detects_wall_timeout",
-        bool(summary.get("wall_timeout")) and summary.get("stop_reason") == "wall_timeout",
-        summary,
-        "mew stopped by wall_timeout before closing the repository-test frontier",
+        "m6_24_repository_test_tail_emulator_preserves_lifecycle_identity_projection",
+        not projection.get("lifecycle_lost"),
+        projection,
+        "current normalize_work_model_action preserves command_run_id/output_ref/output_path for lifecycle actions",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_preserves_managed_contract_projection",
+        not projection.get("managed_lost"),
+        projection,
+        "current normalize_work_model_action preserves foreground_budget_seconds/execution_contract for managed run actions",
     )
     _scenario_check(
         checks,
@@ -15486,6 +15601,7 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         "first_trial": first_trial.get("trial_name") or "",
         "summary": summary,
         "llm_action_fixture_count": len(contexts),
+        "managed_action_projection": projection,
     }
     return report
 

@@ -6971,6 +6971,8 @@ def normalize_work_model_action(
         "pattern",
         "max_chars",
         "max_output_chars",
+        "max_rows",
+        "max_extrema",
         "timeout",
         "detail",
         "prompt",
@@ -6996,9 +6998,24 @@ def normalize_work_model_action(
     ):
         if action.get(key) is not None:
             normalized[key] = action.get(key)
+    if action_type in {"run_command", "run_tests"}:
+        for key in ("foreground_budget_seconds", "execution_contract"):
+            if action.get(key) is not None:
+                normalized[key] = action.get(key)
+    if action_type in {"poll_command", "cancel_command", "read_command_output"}:
+        if action.get("command_run_id") is not None:
+            normalized["command_run_id"] = action.get("command_run_id")
+    if action_type == "poll_command" and action.get("wait_seconds") is not None:
+        normalized["wait_seconds"] = action.get("wait_seconds")
+    if action_type == "read_command_output":
+        for key in ("output_ref", "output_path"):
+            if action.get(key) is not None:
+                normalized[key] = action.get(key)
     for key in ("create", "replace_all", "staged", "stat", "task_done"):
         if action.get(key) is not None:
             normalized[key] = bool(action.get(key))
+    if action_type == "read_command_output" and action.get("tail") is not None:
+        normalized["tail"] = bool(action.get("tail"))
     if action_type == "read_file" and normalized.get("line_start") is None:
         for alias in ("start_line", "line"):
             if action.get(alias) is not None:
