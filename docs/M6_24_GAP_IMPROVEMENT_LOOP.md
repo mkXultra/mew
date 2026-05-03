@@ -29,10 +29,10 @@ decision ledger records why measurement is higher value than repairing the
 selected gap class.
 
 Current selected gap class:
-`long_dependency_toolchain_build_strategy_contract`.
+`structural_tool_runtime_budget`.
 
 Current selected next action:
-`M6.24 -> long_dependency/toolchain gap -> final artifact/default-smoke closeout classification -> repair or written defer`.
+`M6.24 -> compile-compcert typed read-only diagnostic repair floor -> UT -> replay -> dogfood -> compile-compcert emulator -> exactly one same-shape speed_1`.
 
 Active authoritative design:
 `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`.
@@ -68,12 +68,14 @@ active next action is to classify this moved internal closeout gap before
 `proof_5` or broad measurement.
 
 The one-run timeout-shape diagnostic is now recorded as classification evidence.
-The previous rerun redirected the controller from `long-build wall-time /
-continuation budget` to config/source-script external-hook repair, then to
-production continuation dispatch, nonterminal handoff, and now compound
-budget-stage promotion and non-timeout source-acquisition retry repair. Do not
-spend another `proof_5` or broad measurement run until the pre-speed operation
-and same-shape speed rerun after this repair are recorded.
+The previous reruns redirected the controller from `long-build wall-time /
+continuation budget` to config/source-script external-hook repair, production
+continuation dispatch, nonterminal handoff, compound budget-stage promotion,
+non-timeout source-acquisition retry repair, managed timeout resume-budget
+repair, and now typed read-only diagnostic repair-floor handling. Do not spend
+another `proof_5` or broad measurement run until the full
+UT/replay/dogfood/emulator pre-speed operation and same-shape speed rerun after
+this repair are recorded.
 
 Do not grow the budget classifier into a broad shell classifier. The durable
 decision is in `docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md`: keep
@@ -104,13 +106,20 @@ For every candidate gap, run this decision chain:
 4. Before spending a live speed same-shape rerun, did the pre-speed operation
    pass on current head?
    required:
-     1. focused local validation for the changed gap surface
+     1. focused UT / local validation for the changed gap surface
      2. `mew replay terminal-bench` against the latest relevant saved Harbor
         artifact, or a synthetic same-shape replay fixture if no artifact exists
      3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
         `--terminal-bench-job-dir` and explicit `--terminal-bench-assert-*`
         flags when validating an existing Harbor artifact
-   no  -> fix the local/replay/dogfood failure before live speed proof
+     4. for `compile-compcert` long-build repairs, run
+        `mew dogfood --scenario m6_24-compile-compcert-emulator`; pass
+        `--terminal-bench-job-dir <latest-saved-job>` after every speed proof
+        so the raw model action fixture is refreshed from the latest
+        `mew-report.json`
+     5. only after 1-4 pass, spend exactly one selected same-shape live
+        `speed_1`
+   no  -> fix the UT/replay/dogfood/emulator failure before live speed proof
    yes -> spend exactly the selected same-shape speed rerun
 
 5. Did the speed same-shape rerun improve the selected gap class?
@@ -141,6 +150,20 @@ Harbor output. Reproduce the exact saved artifact first:
 
 If dogfood cannot express the current failure shape, fix dogfood
 instrumentation before repairing the product gap.
+
+For `compile-compcert`, also refresh the emulator fixture from the saved
+artifact:
+
+```text
+mew dogfood --scenario m6_24-compile-compcert-emulator \
+  --terminal-bench-job-dir <saved-job>
+```
+
+This does not rebuild CompCert. It extracts the model-turn action JSON that mew
+parsed from the speed proof, writes a local JSONL fixture, recomputes the
+long-build state, and re-runs the raw action through budget/continuation
+policy. If this emulator fails, repair the emulator-detected substrate gap
+before spending another live speed proof.
 
 ## Gap-Class Repair History Rule
 

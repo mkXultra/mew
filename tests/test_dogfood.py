@@ -1286,6 +1286,31 @@ class DogfoodTests(unittest.TestCase):
                 "dependency_strategy_unresolved",
             )
 
+    def test_run_dogfood_m6_24_compile_compcert_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-compile-compcert-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-compile-compcert-emulator")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertGreaterEqual(scenario["artifacts"]["llm_action_fixture_count"], 1)
+            self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
+            self.assertTrue(scenario["artifacts"]["budget_policy"]["diagnostic_budget"])
+            self.assertEqual(scenario["artifacts"]["budget_policy"]["minimum_timeout_seconds"], 30.0)
+            self.assertEqual(scenario["artifacts"]["ceiling"], {})
+            self.assertIn("m6_24-compile-compcert-emulator: pass", text)
+
     def test_run_dogfood_m6_11_draft_timeout_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

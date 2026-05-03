@@ -2488,7 +2488,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.24 improvement_phase -> execution-contract Phase 0-6 pre-speed gate -> clean compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
+`M6.24 improvement_phase -> selected compile-compcert gap -> UT -> replay -> dogfood -> compile-compcert emulator -> exactly one same-shape speed_1 -> decide proof_5/next repair from decision ledger`
 
 Acceptable near-term work:
 
@@ -2499,8 +2499,14 @@ Acceptable near-term work:
 - execution-contract Phase 0-6 is committed at `4dbd099`; current-head local
   validation, replay, dogfood, ruff, diff check, and codex-ultra phase review
   passed with `PHASE_GATE: safe_to_commit_pre_speed`
-- next, run the pre-speed operation and one same-shape `compile-compcert`
-  speed_1 with refreshable `~/.codex/auth.json`; escalate to sequential
+- next, run the pre-speed operation in this order: focused UT/local validation,
+  `mew replay terminal-bench`, `mew dogfood --scenario
+  m6_24-terminal-bench-replay`, `mew dogfood --scenario
+  m6_24-compile-compcert-emulator`, then one same-shape `compile-compcert`
+  speed_1 with refreshable `~/.codex/auth.json`; pass
+  `--terminal-bench-job-dir <latest-saved-job>` to the emulator after every
+  speed proof so the parsed raw model action fixture tracks the latest
+  `mew-report.json`; escalate to sequential
   proof_5 only after speed_1 shows external reward `1.0`, runner errors `0`,
   command transcript exit `0`, clean `mew-report` closeout, no stale
   `resume.long_build_state.current_failure`, and no active stale strategy

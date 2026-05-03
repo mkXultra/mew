@@ -111,6 +111,50 @@ def _model_turns_from_work_report(report):
     return turns
 
 
+def _raw_action_from_model_turn(turn):
+    if not isinstance(turn, dict):
+        return {}
+    for key in ("action_plan", "decision_plan"):
+        plan = turn.get(key)
+        if isinstance(plan, dict) and isinstance(plan.get("action"), dict):
+            return dict(plan["action"])
+    action = turn.get("action")
+    if isinstance(action, dict) and isinstance(action.get("blocked_action"), dict):
+        return dict(action["blocked_action"])
+    return dict(action) if isinstance(action, dict) else {}
+
+
+def _llm_action_fixture_from_step(step):
+    if not isinstance(step, dict):
+        return {}
+    turn = step.get("model_turn")
+    if not isinstance(turn, dict):
+        return {}
+    raw_action = _raw_action_from_model_turn(turn)
+    if not raw_action:
+        return {}
+    post_policy_action = turn.get("action") if isinstance(turn.get("action"), dict) else {}
+    return {
+        "step_index": step.get("index"),
+        "step_status": step.get("status") or "",
+        "model_turn_id": turn.get("id"),
+        "model_turn_status": turn.get("status") or "",
+        "raw_action": raw_action,
+        "post_policy_action": dict(post_policy_action),
+        "source": "model_turn.action_plan.action",
+    }
+
+
+def _llm_action_fixtures_from_work_report(report):
+    steps = ((report.get("work_report") or {}).get("steps") or []) if isinstance(report, dict) else []
+    fixtures = []
+    for step in steps:
+        fixture = _llm_action_fixture_from_step(step)
+        if fixture:
+            fixtures.append(fixture)
+    return fixtures
+
+
 def _task_from_report(report, resume):
     task_id = report.get("task_id") or resume.get("task_id") or 1
     return {
@@ -204,6 +248,7 @@ def _trial_entry_from_report(report_path):
     verifier_stdout = _read_text(trial_dir / "verifier" / "test-stdout.txt")
     stored_long = _summarize_long_build_state(stored_resume.get("long_build_state") or {})
     current_long = _summarize_long_build_state(recomputed_resume.get("long_build_state") or {})
+    llm_action_fixtures = _llm_action_fixtures_from_work_report(report)
     return {
         "trial_name": _trial_name_from_result(trial_result, trial_dir),
         "trial_dir": str(trial_dir),
@@ -217,6 +262,8 @@ def _trial_entry_from_report(report_path):
         "wall_timeout": bool((report.get("work_report") or {}).get("wall_timeout")),
         "command_exit_code": transcript.get("exit_code") if isinstance(transcript, dict) else None,
         "command_timed_out": bool(transcript.get("timed_out")) if isinstance(transcript, dict) else False,
+        "llm_action_fixture_count": len(llm_action_fixtures),
+        "latest_llm_action_fixture": llm_action_fixtures[-1] if llm_action_fixtures else {},
         "stored": {
             "phase": stored_resume.get("phase") or "",
             "next_action": stored_resume.get("next_action") or "",
@@ -231,6 +278,42 @@ def _trial_entry_from_report(report_path):
         },
         "verifier_stdout_excerpt": "\n".join((verifier_stdout or "").splitlines()[-12:]),
     }
+
+
+def terminal_bench_llm_action_fixture_contexts(job_dir, *, task=None, trial=None):
+    """Return replay contexts for model-chosen actions saved in Harbor artifacts.
+
+    The provider's exact raw text is not persisted in all historical artifacts.
+    This exposes the raw action JSON that mew parsed from each model turn, plus
+    the reconstructed session/task needed to re-run policy checks around that
+    action without rerunning Harbor.
+    """
+    contexts = []
+    for report_path in _trial_report_paths(job_dir):
+        report_path = Path(report_path)
+        report = _read_json(report_path)
+        trial_dir = _find_parent_with_result(report_path)
+        trial_result = _read_json(trial_dir / "result.json")
+        trial_name = _trial_name_from_result(trial_result, trial_dir)
+        if task and task not in trial_name and task not in str(trial_dir):
+            continue
+        if trial and trial != trial_name and trial not in str(trial_dir):
+            continue
+        stored_resume = _primary_resume(report)
+        session = _session_from_report(report)
+        task_data = _task_from_report(report, stored_resume)
+        for fixture in _llm_action_fixtures_from_work_report(report):
+            contexts.append(
+                {
+                    "trial_name": trial_name,
+                    "trial_dir": str(trial_dir),
+                    "report_path": str(report_path),
+                    "fixture": fixture,
+                    "session": session,
+                    "task": task_data,
+                }
+            )
+    return contexts
 
 
 def _check_assertions(entry, assertions):

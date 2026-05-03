@@ -51,13 +51,20 @@ Improvement phase requirements:
    record why the next fix is not duplicating an earlier detector/prompt patch.
 9. Before any live same-shape `speed_1` or `proof_5`, run the pre-speed
    operation on current head:
-   1. focused local validation for the changed gap surface,
+   1. focused UT / local validation for the changed gap surface,
    2. `mew replay terminal-bench` against the latest relevant saved Harbor
       artifact, or a synthetic same-shape replay fixture if no artifact exists,
    3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
       `--terminal-bench-job-dir` and explicit `--terminal-bench-assert-*`
-      flags when validating an existing Harbor artifact.
-   Fix any local/replay/dogfood failure before spending live benchmark budget.
+      flags when validating an existing Harbor artifact,
+   4. for `compile-compcert` long-build repairs, run
+      `mew dogfood --scenario m6_24-compile-compcert-emulator`; pass
+      `--terminal-bench-job-dir <latest-saved-job>` after every speed proof to
+      refresh the parsed raw model action fixture from `mew-report.json`,
+   5. only after 1-4 pass, spend exactly one selected same-shape live
+      `speed_1`.
+   Fix any UT/replay/dogfood/emulator failure before spending live benchmark
+   budget.
 10. After any live `speed_1` or `proof_5` miss, do not edit code directly from
     the live Harbor output. First reproduce the exact saved artifact through
     `mew replay terminal-bench` and `mew dogfood --scenario
@@ -445,3 +452,36 @@ ruff, JSONL parse, and diff check pass. codex-ultra review session
 `019dec74-191f-75b1-97f0-da6e0ed306fe` approved; its minor direct-policy-test
 note was addressed. The next action is the pre-speed operation, then exactly
 one same-shape `compile-compcert` speed_1.
+
+Compile-compcert emulator checkpoint:
+
+The managed timeout resume-budget speed rerun
+`mew-m6-24-managed-timeout-resume-budget-compile-compcert-1attempt-20260503-1519`
+scored `0/1` with runner errors `0`. The failure shape moved again: mew chose
+a read-only diagnostic action after a terminal long-command failure, but the
+budget layer treated it as a build repair and blocked its 90s timeout behind
+the 600s repair floor. codex-ultra classification session
+`019dec87-b8c0-7681-a22a-417bc8f863e7` classified this as
+`structural_tool_runtime_budget` /
+`typed_read_only_diagnostic_repair_floor_overconstrained` with `REPAIR_NOW`
+and route `typed_read_only_diagnostic_budget_gate`. The repair now adds
+`m6_24-compile-compcert-emulator`, a synthetic/live-artifact dogfood scenario
+that extracts parsed raw model actions from `mew-report.json`, writes a JSONL
+fixture, recomputes long-build state, and re-runs the selected raw action
+through budget/continuation policy without rebuilding CompCert. The
+pre-speed operation for `compile-compcert` now requires this emulator; after
+each speed proof, pass `--terminal-bench-job-dir <latest-saved-job>` so the
+raw model action fixture tracks the latest live model output. This is a
+pre-speed substrate regression detector, not a task-specific CompCert solver.
+
+Repair update: the typed read-only diagnostic budget gate is implemented. It
+keeps the long repair floor for side-effecting build repairs, but routes
+typed/read-only diagnostic actions through the diagnostic floor when the command
+surface is conservatively read-only. Current-head validation passed: focused
+UT/local validation, exact `mew replay terminal-bench` on
+`mew-m6-24-managed-timeout-resume-budget-compile-compcert-1attempt-20260503-1519`,
+`mew dogfood --scenario m6_24-terminal-bench-replay` on that same saved job,
+and `mew dogfood --scenario m6_24-compile-compcert-emulator
+--terminal-bench-job-dir <same-job>` all pass. The next action is exactly one
+same-shape `compile-compcert` speed_1; do not run `proof_5` or broad
+measurement first.

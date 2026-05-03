@@ -6,7 +6,11 @@ import unittest
 
 from mew.cli import build_parser
 from mew.dogfood import _write_terminal_bench_replay_fixture
-from mew.terminal_bench_replay import format_terminal_bench_replay, replay_terminal_bench_job
+from mew.terminal_bench_replay import (
+    format_terminal_bench_replay,
+    replay_terminal_bench_job,
+    terminal_bench_llm_action_fixture_contexts,
+)
 
 
 class TerminalBenchReplayTests(unittest.TestCase):
@@ -67,6 +71,19 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(payload["status"], "pass")
             self.assertEqual(payload["trial_count"], 1)
+
+    def test_terminal_bench_llm_action_fixture_contexts_extract_model_actions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_terminal_bench_replay_fixture(tmp)
+
+            contexts = terminal_bench_llm_action_fixture_contexts(job_dir, task="compile-compcert")
+
+            self.assertGreaterEqual(len(contexts), 1)
+            first = contexts[0]
+            self.assertEqual(first["trial_name"], "compile-compcert__fixture")
+            self.assertEqual(first["fixture"]["raw_action"]["type"], "run_command")
+            self.assertIn("session", first)
+            self.assertIn("task", first)
 
 
 if __name__ == "__main__":

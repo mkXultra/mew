@@ -12236,6 +12236,94 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertEqual(policy["budget_blocked_reason"], "")
         self.assertEqual(ceiling, {})
 
+    def test_long_command_budget_policy_allows_compile_compcert_read_only_diagnostic_after_failed_build(self):
+        task = {
+            "id": 1,
+            "title": "Compile CompCert from source",
+            "description": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="build",
+            selected_target="/tmp/CompCert/ccomp",
+            command="./configure x86_64-linux && make -j10 ccomp",
+            cwd="/tmp/CompCert",
+            status="failed",
+            effective_timeout_seconds=1296,
+            work_wall_remaining_seconds=1354,
+            stdout=(
+                "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                "Error: cannot determine the location of the Menhir API library.\n"
+            ),
+        )
+        run["terminal"]["exit_code"] = 2
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {
+            "command": (
+                "set -euxo pipefail\n"
+                "cd /tmp/CompCert\n"
+                "./configure --help\n"
+                "grep -nE 'Coq|Menhir|external|system|prebuilt|library' configure Makefile Makefile.menhir 2>/dev/null | head -250\n"
+                "apt-cache policy coq libcoq-stdlib libcoq-core-ocaml libcoq-flocq menhir libmenhir-ocaml-dev opam || true\n"
+                "dpkg -L menhir 2>/dev/null | grep -Ei 'menhirLib|MenhirLib|META|\\.cmxa$|\\.cma$|\\.cmi$' | head -100 || true\n"
+                "ocamlfind list 2>/dev/null | grep -i menhir || true"
+            ),
+            "cwd": "/app",
+            "timeout": 90,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "diagnostic",
+                "stage": "diagnostic",
+                "proof_role": "dependency_strategy",
+                "acceptance_kind": "progress_only",
+                "risk_class": "read_only",
+                "declared_target_refs": [
+                    {"kind": "artifact", "path": "/tmp/CompCert/ccomp", "ref": "required-final-artifact"},
+                ],
+                "continuation_policy": {
+                    "mode": "blocking",
+                    "yield_after_seconds": 30,
+                    "resume_policy": "none",
+                    "terminal_required_for_acceptance": True,
+                },
+                "background_policy": {"mode": "foreground_blocking", "allow_background": False},
+            },
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=1800,
+            run_started_at=time.monotonic() - 450,
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "recover_long_command")
+        self.assertEqual(policy["recovery_decision_kind"], "repair_failed_long_command")
+        self.assertEqual(policy["stage"], "diagnostic")
+        self.assertTrue(policy["diagnostic_budget"])
+        self.assertEqual(policy["minimum_timeout_seconds"], 30.0)
+        self.assertEqual(policy["budget_blocked_reason"], "")
+        self.assertEqual(ceiling, {})
+
     def test_long_command_budget_policy_blocks_short_side_effecting_dependency_repair_after_build_failure(self):
         task = {
             "id": 1,

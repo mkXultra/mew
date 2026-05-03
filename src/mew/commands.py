@@ -6155,10 +6155,27 @@ _FAILED_LONG_COMMAND_REPAIR_MINIMUM_TIMEOUT_BY_STAGE = {
     "configure": 120.0,
 }
 
-_READ_ONLY_DIAGNOSTIC_COMMANDS = {"cat", "grep", "ls", "pwd", "sha256sum", "test", "wc"}
+_READ_ONLY_DIAGNOSTIC_COMMANDS = {
+    "apt-cache",
+    "cat",
+    "command",
+    "dpkg",
+    "grep",
+    "head",
+    "ls",
+    "ocamlfind",
+    "printf",
+    "pwd",
+    "sha256sum",
+    "test",
+    "uname",
+    "wc",
+}
 _WRITE_REDIRECT_RE = re.compile(r"(?:^|[\s])(?:\d*)?(?:>>?|>\||&>>|&>)(?!&\d)")
 _HEREDOC_RE = re.compile(r"(?:^|[\s])(?:<<|<<<)")
 _FD_DUP_REDIRECT_RE = re.compile(r"^\d*>&\d+$")
+_DEV_NULL_REDIRECT_RE = re.compile(r"(?:^|[\s])(?:\d*)?>\s*/dev/null(?=$|[\s|&;])")
+_DEV_NULL_REDIRECT_TOKEN_RE = re.compile(r"^\d*>/dev/null$")
 
 _LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES = {
     "build_system_target_surface_probe": {"artifact_proof", "build", "default_smoke", "runtime_build", "runtime_install"},
@@ -6198,10 +6215,12 @@ def _diagnostic_executable_name(token):
 
 
 def _diagnostic_segment_has_write_redirect(segment):
-    text = str(segment or "")
+    text = _DEV_NULL_REDIRECT_RE.sub(" ", str(segment or ""))
     if _HEREDOC_RE.search(text) or _WRITE_REDIRECT_RE.search(text):
         return True
     for token in _shell_segment_tokens_for_read_only_diagnostic(segment):
+        if _DEV_NULL_REDIRECT_TOKEN_RE.match(token):
+            continue
         if ">" in token and not _FD_DUP_REDIRECT_RE.match(token):
             return True
         if token in {">", ">>", ">|", "&>", "&>>", "<>", "<<<"}:
@@ -6245,7 +6264,19 @@ def _sed_tokens_are_read_only(tokens):
     return not any(token == "--in-place" or token.startswith("--in-place=") or token.startswith("-i") for token in tokens[1:])
 
 
-def _shell_segment_is_read_only_diagnostic(segment):
+def _tokens_are_help_only(tokens):
+    if not tokens:
+        return False
+    return any(token in {"--help", "-h", "help"} for token in tokens[1:])
+
+
+def _typed_contract_claims_read_only_diagnostic(typed_contract):
+    if not isinstance(typed_contract, dict):
+        return False
+    return str(typed_contract.get("purpose") or "") == "diagnostic" and str(typed_contract.get("risk_class") or "") == "read_only"
+
+
+def _shell_segment_is_read_only_diagnostic(segment, *, typed_contract=None):
     if _diagnostic_segment_has_write_redirect(segment):
         return False
     tokens = _shell_segment_tokens_for_read_only_diagnostic(segment)
@@ -6255,6 +6286,8 @@ def _shell_segment_is_read_only_diagnostic(segment):
     if command in {"cd", "set", "true", ":"}:
         return True
     if command in _READ_ONLY_DIAGNOSTIC_COMMANDS:
+        return True
+    if _tokens_are_help_only(tokens) and _typed_contract_claims_read_only_diagnostic(typed_contract):
         return True
     if command == "find":
         return _find_tokens_are_read_only(tokens)
@@ -6271,7 +6304,7 @@ def _failed_long_command_repair_is_read_only_diagnostic(command, typed_contract=
     command = str(command or "")
     saw_diagnostic = False
     for segment in split_unquoted_shell_command_segments(command):
-        if not _shell_segment_is_read_only_diagnostic(segment):
+        if not _shell_segment_is_read_only_diagnostic(segment, typed_contract=typed_contract):
             return False
         tokens = _shell_segment_tokens_for_read_only_diagnostic(segment)
         command_name = _diagnostic_executable_name(tokens[0]) if tokens else ""
@@ -6494,8 +6527,14 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
                 budget_blocked_reason = "repeat_same_timeout_without_budget_change"
             reserve = _long_build_reserve_seconds(contract, recovery_decision)
         elif recovery_decision_kind == "repair_failed_long_command":
+            effective_repair_stage = _failed_long_command_repair_effective_stage_for_minimum(
+                stage,
+                command,
+                typed_contract=typed_contract,
+            )
+            diagnostic_budget = effective_repair_stage == "diagnostic"
             minimum_timeout_seconds = _failed_long_command_repair_minimum_timeout_seconds(
-                _failed_long_command_repair_effective_stage_for_minimum(stage, command, typed_contract=typed_contract),
+                effective_repair_stage,
                 budget,
             )
             failed_idempotence_key = str(allowed_next.get("failed_idempotence_key") or "")

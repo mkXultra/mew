@@ -22,6 +22,7 @@ from .model_backends import (
     model_backend_default_model,
     normalize_model_backend,
 )
+from .long_build_substrate import build_long_build_contract, build_long_command_run
 from .patch_draft import (
     PATCH_BLOCKER_RECOVERY_ACTIONS,
     PATCH_DRAFT_VALIDATOR_VERSION,
@@ -31,7 +32,7 @@ from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
 from .state import add_question, default_state, migrate_state, next_id, reconcile_next_ids
-from .terminal_bench_replay import replay_terminal_bench_job
+from .terminal_bench_replay import replay_terminal_bench_job, terminal_bench_llm_action_fixture_contexts
 from .tasks import find_task
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
@@ -107,6 +108,7 @@ DOGFOOD_SCENARIOS = (
     "m6_9-alignment-decay-rehearsal",
     "m6_13-deliberation-internalization",
     "m6_24-terminal-bench-replay",
+    "m6_24-compile-compcert-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -14663,6 +14665,357 @@ def _write_terminal_bench_replay_fixture(workspace):
     return job_dir
 
 
+def _compile_compcert_task_description():
+    return (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+
+
+def _compile_compcert_long_build_execution_contract(*, stage="build", purpose="build", acceptance_kind="terminal"):
+    return {
+        "schema_version": 2,
+        "purpose": purpose,
+        "stage": stage,
+        "proof_role": "dependency_strategy" if purpose == "diagnostic" else "final_artifact",
+        "acceptance_kind": acceptance_kind,
+        "expected_artifacts": [] if purpose == "diagnostic" else [{"path": "/tmp/CompCert/ccomp", "kind": "executable"}],
+        "declared_target_refs": [
+            {"kind": "artifact", "path": "/tmp/CompCert/ccomp", "ref": "required-final-artifact"},
+            {"kind": "source_tree", "path": "/tmp/CompCert", "ref": "source-tree:CompCert-v3.13.1"},
+        ],
+        "continuation_policy": {
+            "mode": "blocking" if purpose == "diagnostic" else "managed",
+            "yield_after_seconds": 30,
+            "resume_policy": "none" if purpose == "diagnostic" else "idempotent_resume",
+            "terminal_required_for_acceptance": purpose != "diagnostic",
+            "final_proof_reserve_seconds": 60,
+        },
+        "background_policy": {"mode": "foreground_blocking", "allow_background": False},
+        "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+        "risk_class": "read_only" if purpose == "diagnostic" else "write",
+    }
+
+
+def _compile_compcert_diagnostic_action():
+    return {
+        "type": "run_command",
+        "cwd": "/app",
+        "timeout": 90,
+        "command": (
+            "set -euxo pipefail\n"
+            "cd /tmp/CompCert\n"
+            "printf '=== configure --help ===\\n'\n"
+            "./configure --help\n"
+            "printf '\\n=== relevant configure/make references ===\\n'\n"
+            "grep -nE 'Coq|coq|COQ|Rocq|rocq|Menhir|menhir|MENHIR|menhirLib|MenhirLib|external|system|prebuilt|library|LIBRARY|ignore|unsupported|VERSION' configure Makefile Makefile.menhir 2>/dev/null | head -250\n"
+            "printf '\\n=== installed and candidate package versions ===\\n'\n"
+            "apt-cache policy coq libcoq-stdlib libcoq-core-ocaml libcoq-flocq menhir libmenhir-ocaml-dev opam || true\n"
+            "printf '\\n=== installed menhir library files ===\\n'\n"
+            "dpkg -L menhir 2>/dev/null | grep -Ei 'menhirLib|MenhirLib|META|\\.cmxa$|\\.cma$|\\.cmi$' | head -100 || true\n"
+            "printf '\\n=== ocamlfind menhir packages ===\\n'\n"
+            "ocamlfind list 2>/dev/null | grep -i menhir || true"
+        ),
+        "execution_contract": _compile_compcert_long_build_execution_contract(
+            stage="diagnostic",
+            purpose="diagnostic",
+            acceptance_kind="progress_only",
+        ),
+        "reason": (
+            "The latest failed configure identified Coq version and Menhir API issues; inspect the "
+            "source-provided configure surface and installed package state before installing/building "
+            "alternate toolchains or retrying."
+        ),
+        "summary": "Diagnose the configure failure before retrying the build.",
+        "task_done": False,
+    }
+
+
+def _write_compile_compcert_emulator_fixture(workspace):
+    job_dir = Path(workspace) / "compile-compcert-emulator-fixture"
+    trial_dir = job_dir / "compile-compcert__emulator"
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    verifier_dir = trial_dir / "verifier"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "compile-compcert-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": "compile-compcert__emulator",
+                "task_name": "terminal-bench/compile-compcert",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text("missing /tmp/CompCert/ccomp\n", encoding="utf-8")
+    build_command = (
+        "set -euxo pipefail\n"
+        "mkdir -p /tmp/CompCert-source\n"
+        "wget -O /tmp/CompCert-source/compcert-3.13.1.tar.gz https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz\n"
+        "tar -xzf /tmp/CompCert-source/compcert-3.13.1.tar.gz -C /tmp/CompCert-source\n"
+        "mv /tmp/CompCert-source/CompCert-3.13.1 /tmp/CompCert\n"
+        "cd /tmp/CompCert\n"
+        "./configure x86_64-linux\n"
+        "make -j\"$(nproc)\" ccomp\n"
+        "test -x /tmp/CompCert/ccomp"
+    )
+    diagnostic_action = _compile_compcert_diagnostic_action()
+    contract = build_long_build_contract(
+        _compile_compcert_task_description(),
+        ["/tmp/CompCert/ccomp"],
+        contract_id="work_session:1:long_build:1",
+    )
+    failed_run = build_long_command_run(
+        session_id=1,
+        ordinal=1,
+        task_id=1,
+        contract_id="work_session:1:long_build:1",
+        attempt_id="attempt-1",
+        tool_call_id=1,
+        stage="build",
+        selected_target="/tmp/CompCert/ccomp",
+        command=build_command,
+        cwd="/app",
+        status="failed",
+        requested_timeout_seconds=1296,
+        effective_timeout_seconds=1296,
+        work_wall_remaining_seconds=1354,
+        stdout=(
+            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+            "Error: cannot determine the location of the Menhir API library.\n"
+        ),
+        stderr="make: *** [Makefile:200: ccomp] Error 2\n",
+    )
+    failed_run["terminal"]["exit_code"] = 2
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": 1,
+        "session_id": 1,
+        "work_exit_code": 1,
+        "resume": {
+            "session_id": 1,
+            "task_id": 1,
+            "title": "Compile CompCert from source",
+            "goal": _compile_compcert_task_description(),
+            "phase": "failed",
+            "next_action": "diagnose the terminal configure failure before retrying",
+            "long_build_state": {
+                "kind": "long_build_state",
+                "contract": contract,
+                "long_command_runs": [failed_run],
+                "latest_long_command_run_id": failed_run["id"],
+                "latest_long_command_status": "failed",
+            },
+        },
+        "work_report": {
+            "session_id": 1,
+            "task_id": 1,
+            "stop_reason": "long_command_budget_blocked",
+            "wall_timeout": False,
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {"type": "run_command", "command": build_command, "timeout": 1296},
+                    "model_turn": {
+                        "id": 1,
+                        "status": "completed",
+                        "action_plan": {
+                            "summary": "Fetch, configure, and build the required ccomp artifact.",
+                            "action": {
+                                "type": "run_command",
+                                "cwd": "/app",
+                                "timeout": 1296,
+                                "command": build_command,
+                                "execution_contract": _compile_compcert_long_build_execution_contract(),
+                            },
+                        },
+                        "decision_plan": {
+                            "summary": "Ground source and run the shortest build for /tmp/CompCert/ccomp.",
+                            "action": {
+                                "type": "run_command",
+                                "cwd": "/app",
+                                "timeout": 1296,
+                                "command": build_command,
+                                "execution_contract": _compile_compcert_long_build_execution_contract(),
+                            },
+                        },
+                        "action": {"type": "run_command", "command": build_command, "timeout": 1296},
+                    },
+                    "tool_call": {
+                        "id": 1,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {
+                            "cwd": "/app",
+                            "command": build_command,
+                            "timeout": 1296,
+                            "execution_contract": _compile_compcert_long_build_execution_contract(),
+                            "long_command_budget": {
+                                "action_kind": "start_long_command",
+                                "stage": "build",
+                                "effective_timeout_seconds": 1296.0,
+                                "requested_timeout_seconds": 1296.0,
+                                "minimum_timeout_seconds": 31.0,
+                                "yield_after_seconds": 30,
+                                "yield_eligible": True,
+                            },
+                        },
+                        "result": {
+                            "cwd": "/app",
+                            "command": build_command,
+                            "exit_code": 2,
+                            "stdout": (
+                                "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                                "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                                "Error: cannot determine the location of the Menhir API library.\n"
+                            ),
+                            "stderr": "make: *** [Makefile:200: ccomp] Error 2\n",
+                        },
+                    },
+                },
+                {
+                    "index": 2,
+                    "status": "planned",
+                    "action": dict(diagnostic_action),
+                    "model_turn": {
+                        "id": 2,
+                        "status": "planned",
+                        "decision_plan": {
+                            "summary": diagnostic_action["summary"],
+                            "action": dict(diagnostic_action),
+                        },
+                        "action_plan": {
+                            "summary": diagnostic_action["summary"],
+                            "action": dict(diagnostic_action),
+                        },
+                        "action": dict(diagnostic_action),
+                    },
+                },
+            ],
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps(
+            {
+                "command": "mew work --oneshot --instruction compile-compcert-emulator",
+                "exit_code": 1,
+                "timed_out": False,
+                "timeout_seconds": 1800,
+                "mew_max_wall_seconds": 1740,
+                "stdout": "",
+                "stderr": "",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def _public_llm_action_fixture(context):
+    fixture = dict((context or {}).get("fixture") or {})
+    raw_action = dict(fixture.get("raw_action") or {})
+    contract = raw_action.get("execution_contract") if isinstance(raw_action.get("execution_contract"), dict) else {}
+    return {
+        "trial_name": (context or {}).get("trial_name") or "",
+        "report_path": (context or {}).get("report_path") or "",
+        "step_index": fixture.get("step_index"),
+        "step_status": fixture.get("step_status") or "",
+        "model_turn_id": fixture.get("model_turn_id"),
+        "raw_action_type": raw_action.get("type") or raw_action.get("tool") or "",
+        "raw_action_timeout": raw_action.get("timeout"),
+        "raw_action_command": raw_action.get("command") or "",
+        "execution_contract": {
+            "purpose": contract.get("purpose") or "",
+            "stage": contract.get("stage") or "",
+            "proof_role": contract.get("proof_role") or "",
+            "acceptance_kind": contract.get("acceptance_kind") or "",
+            "risk_class": contract.get("risk_class") or "",
+        },
+    }
+
+
+def _write_llm_action_fixtures_jsonl(path, contexts):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for context in contexts:
+            fh.write(json.dumps(_public_llm_action_fixture(context), ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _select_compile_compcert_emulator_context(contexts):
+    for context in reversed(contexts or []):
+        raw_action = (((context or {}).get("fixture") or {}).get("raw_action") or {})
+        contract = raw_action.get("execution_contract") if isinstance(raw_action.get("execution_contract"), dict) else {}
+        if (
+            str(raw_action.get("type") or raw_action.get("tool") or "") == "run_command"
+            and str(contract.get("purpose") or "") == "diagnostic"
+        ):
+            return context
+    for context in reversed(contexts or []):
+        raw_action = (((context or {}).get("fixture") or {}).get("raw_action") or {})
+        if str(raw_action.get("type") or raw_action.get("tool") or "") == "run_command":
+            return context
+    return {}
+
+
+def _evaluate_compile_compcert_emulator_action(context):
+    from .commands import apply_work_tool_wall_timeout_ceiling, work_tool_long_command_budget_policy
+
+    fixture = ((context or {}).get("fixture") or {})
+    raw_action = dict(fixture.get("raw_action") or {})
+    action_type = str(raw_action.pop("type", "") or raw_action.pop("tool", "") or "")
+    parameters = dict(raw_action)
+    if not action_type:
+        return {"policy": {}, "ceiling": {"blocked": True, "reason": "no raw action type"}, "parameters": parameters}
+    policy = work_tool_long_command_budget_policy(
+        action_type,
+        parameters,
+        task=(context or {}).get("task") or {},
+        session=(context or {}).get("session") or {},
+    )
+    ceiling_parameters = dict(parameters)
+    ceiling = apply_work_tool_wall_timeout_ceiling(
+        action_type,
+        ceiling_parameters,
+        max_wall_seconds=1800,
+        run_started_at=time.monotonic() - 450,
+        recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+        long_command_budget_policy=policy,
+    )
+    return {"policy": policy, "ceiling": ceiling, "parameters": ceiling_parameters}
+
+
 def _m6_24_terminal_bench_replay_assertions(
     *,
     job_dir=None,
@@ -14755,6 +15108,96 @@ def run_m6_24_terminal_bench_replay_scenario(
         "replay_status": replay.get("status"),
         "first_trial": first_trial.get("trial_name") or "",
         "current_long_build": current_long,
+    }
+    return report
+
+
+def run_m6_24_compile_compcert_emulator_scenario(
+    workspace,
+    *,
+    job_dir=None,
+):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_compile_compcert_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="compile-compcert",
+        assertions={
+            "long_build_status": "blocked",
+            "current_failure": "long_command_failed",
+            "recovery_action": "repair_failed_long_command",
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+        },
+    )
+    contexts = terminal_bench_llm_action_fixture_contexts(source, task="compile-compcert")
+    fixture_path = Path(workspace) / "compile-compcert-llm-action-fixtures.jsonl"
+    _write_llm_action_fixtures_jsonl(fixture_path, contexts)
+    selected = _select_compile_compcert_emulator_context(contexts)
+    evaluation = _evaluate_compile_compcert_emulator_action(selected)
+    policy = evaluation.get("policy") if isinstance(evaluation.get("policy"), dict) else {}
+    ceiling = evaluation.get("ceiling") if isinstance(evaluation.get("ceiling"), dict) else {}
+    parameters = evaluation.get("parameters") if isinstance(evaluation.get("parameters"), dict) else {}
+    long_command_budget = (
+        parameters.get("long_command_budget") if isinstance(parameters.get("long_command_budget"), dict) else {}
+    )
+
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_extracts_llm_actions",
+        bool(contexts),
+        {"count": len(contexts), "fixture_path": str(fixture_path)},
+        ">=1 model action fixture",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_selects_diagnostic_run_command",
+        bool(selected)
+        and str((((selected.get("fixture") or {}).get("raw_action") or {}).get("type") or "")) == "run_command",
+        _public_llm_action_fixture(selected) if selected else {},
+        "run_command raw action fixture",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_uses_diagnostic_budget",
+        bool(policy.get("applies"))
+        and bool(policy.get("diagnostic_budget"))
+        and float(policy.get("minimum_timeout_seconds") or 0.0) <= 90.0,
+        {
+            "applies": policy.get("applies"),
+            "diagnostic_budget": policy.get("diagnostic_budget"),
+            "minimum_timeout_seconds": policy.get("minimum_timeout_seconds"),
+            "budget_blocked_reason": policy.get("budget_blocked_reason"),
+            "long_command_budget": long_command_budget,
+        },
+        "diagnostic raw action keeps short diagnostic repair budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_does_not_block_raw_diagnostic_action",
+        not bool(ceiling.get("blocked")),
+        {"ceiling": ceiling, "long_command_budget": long_command_budget},
+        "no wall-time/budget block for read-only diagnostic action",
+    )
+
+    report = _scenario_report("m6_24-compile-compcert-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "fixture_path": str(fixture_path),
+        "llm_action_fixture_count": len(contexts),
+        "selected_llm_action_fixture": _public_llm_action_fixture(selected) if selected else {},
+        "replay_status": replay.get("status"),
+        "budget_policy": policy,
+        "ceiling": ceiling,
+        "post_policy_parameters": parameters,
     }
     return report
 
@@ -14864,6 +15307,13 @@ def run_dogfood_scenario(args):
                     blockers=getattr(args, "terminal_bench_assert_blocker", None),
                     mew_exit_code=getattr(args, "terminal_bench_assert_mew_exit_code", None),
                     external_reward=getattr(args, "terminal_bench_assert_external_reward", None),
+                )
+            )
+        elif name == "m6_24-compile-compcert-emulator":
+            reports.append(
+                run_m6_24_compile_compcert_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
                 )
             )
         elif name == "m6_9-active-memory-recall":
