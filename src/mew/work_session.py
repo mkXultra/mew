@@ -11902,6 +11902,11 @@ def _record_long_command_run_from_tool_call(session, tool_call, evidence):
         work_wall_remaining_seconds = evidence.get("wall_budget_after_seconds")
         if work_wall_remaining_seconds is None:
             work_wall_remaining_seconds = wall_ceiling.get("remaining_seconds") or existing_budget.get("work_wall_remaining_seconds")
+    action_kind = str(budget.get("action_kind") or managed.get("action_kind") or "")
+    if action_kind == "poll_long_command" and existing_budget:
+        final_proof_reserve_seconds = existing_budget.get("final_proof_reserve_seconds") or wall_ceiling.get("reserve_seconds")
+    else:
+        final_proof_reserve_seconds = wall_ceiling.get("reserve_seconds") or existing_budget.get("final_proof_reserve_seconds")
 
     run = build_long_command_run(
         session_id=session.get("id") or "unknown",
@@ -11926,7 +11931,7 @@ def _record_long_command_run_from_tool_call(session, tool_call, evidence):
         requested_timeout_seconds=budget.get("requested_timeout_seconds") or existing_budget.get("requested_timeout_seconds"),
         effective_timeout_seconds=budget.get("effective_timeout_seconds") or existing_budget.get("effective_timeout_seconds"),
         work_wall_remaining_seconds=work_wall_remaining_seconds,
-        final_proof_reserve_seconds=wall_ceiling.get("reserve_seconds") or existing_budget.get("final_proof_reserve_seconds"),
+        final_proof_reserve_seconds=final_proof_reserve_seconds,
         continuation_count=existing_budget.get("continuation_count") if existing_budget else 0,
         max_continuations=existing_budget.get("max_continuations") if existing_budget else 3,
         stdout=result.get("stdout") or "",

@@ -471,3 +471,19 @@ floor only after segment/token validation. codex-ultra review session
 `019debfe-47ae-71c0-b778-744d4aa70d99` approved after two request-change
 rounds. The next action is the pre-speed operation on current head, then
 exactly one same-shape `compile-compcert` speed_1.
+
+Update 2026-05-03 13:56 JST: that same-shape speed_1 was run and classified.
+The prior dependency-generation diagnostic budget gate moved; the current
+selected gap is `managed_long_command_poll_blocked_by_final_proof_reserve` in
+`tool_runtime_budget`. The exact Harbor artifact was reproduced through both
+`mew replay terminal-bench` and `mew dogfood --scenario
+m6_24-terminal-bench-replay` with explicit assertions. codex-ultra session
+`019dec30-429e-77d2-a75d-a233bdeb3af7` classified this as structural and
+recommended repair now. The next action is a narrow generic repair: allow only
+`poll_long_command` for an already running/yielded managed command to spend the
+final-proof reserve, while preserving reserve for start/resume/recover/new
+commands and preserving terminal-only artifact proof. The local repair is
+implemented and codex-ultra review session
+`019dec39-7f1d-7901-af16-e2d1950b0a3e` approved after one request-change
+round. The next action is the pre-speed operation on current head, then exactly
+one same-shape `compile-compcert` speed_1.

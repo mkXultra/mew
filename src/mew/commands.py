@@ -6454,6 +6454,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
     budget_blocked_reason = ""
     minimum_timeout_seconds = WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
     diagnostic_budget = False
+    poll_spends_final_proof_reserve = False
     if recovery_decision:
         allowed_next = recovery_decision.get("allowed_next_action")
         allowed_next = allowed_next if isinstance(allowed_next, dict) else {}
@@ -6466,7 +6467,12 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
             action_kind = "recover_long_command"
         if recovery_decision_kind == "poll_long_command":
             minimum_timeout_seconds = _positive_float_or_none(budget.get("minimum_poll_seconds")) or 5.0
-            reserve = _long_build_reserve_seconds(contract, recovery_decision)
+            # Polling an already-running managed command is the only path that
+            # can finalize its evidence. Holding the final-proof reserve for the
+            # poll itself can strand the active process even though no new build
+            # work is being started.
+            reserve = 0.0
+            poll_spends_final_proof_reserve = True
             if effective_timeout < minimum_timeout_seconds:
                 budget_blocked_reason = "poll timeout is below minimum_poll_seconds"
         elif recovery_decision_kind == "resume_idempotent_long_command":
@@ -6514,7 +6520,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
             and _long_build_recovery_action_allows_stage(recovery_decision, stage)
         ):
             reserve = 0.0
-        elif not reserve:
+        elif not reserve and not poll_spends_final_proof_reserve:
             reserve = _long_build_reserve_seconds(contract, recovery_decision)
     elif typed_managed:
         reserve = _positive_float_or_none(typed_continuation.get("final_proof_reserve_seconds")) or _long_build_reserve_seconds(
@@ -6545,6 +6551,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
             "budget_blocked_reason": budget_blocked_reason,
             "diagnostic_budget": diagnostic_budget,
             "execution_contract_managed": typed_managed,
+            "poll_spends_final_proof_reserve": poll_spends_final_proof_reserve,
         }
     )
     return policy
@@ -6727,6 +6734,16 @@ def apply_work_tool_wall_timeout_ceiling(
             parameters["long_command_budget"].get("latest_effective_timeout_seconds")
         )
         diagnostic_budget = bool(parameters["long_command_budget"].get("diagnostic_budget"))
+        if action_kind == "poll_long_command" and minimum_timeout is not None and parameters["timeout"] < minimum_timeout:
+            ceiling.update(
+                {
+                    "blocked": True,
+                    "reason": "poll timeout is below minimum_poll_seconds",
+                    "stop_reason": "long_command_budget_blocked",
+                }
+            )
+            parameters["wall_timeout_ceiling"] = ceiling
+            return ceiling
         if action_kind == "recover_long_command" and minimum_timeout is not None and parameters["timeout"] < minimum_timeout:
             ceiling.update(
                 {

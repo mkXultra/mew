@@ -11143,6 +11143,123 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(session["command_evidence"][1]["status"], "completed")
         self.assertGreater(session["command_evidence"][1]["finish_order"], 0)
 
+    def test_managed_poll_preserves_logical_final_proof_reserve_for_later_repair(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        state = {
+            "next_ids": {"work_tool_call": 1},
+            "work_sessions": [
+                {
+                    "id": 1,
+                    "task_id": 1,
+                    "status": "active",
+                    "goal": task["description"],
+                    "tool_calls": [],
+                    "model_turns": [],
+                }
+            ],
+        }
+        session = state["work_sessions"][0]
+        start_parameters = {
+            "command": "make -j2 foocc",
+            "cwd": "/tmp/FooCC",
+            "timeout": 900,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "build",
+                "effective_timeout_seconds": 900,
+                "yield_after_seconds": 30,
+                "final_proof_reserve_seconds": 60,
+            },
+        }
+        start_call = start_work_tool_call(state, session, "run_command", start_parameters)
+        finish_work_tool_call(
+            state,
+            1,
+            start_call["id"],
+            result={
+                "command": "make -j2 foocc",
+                "cwd": "/tmp/FooCC",
+                "status": "running",
+                "pid": 4321,
+                "process_group_id": 4321,
+                "exit_code": None,
+                "timed_out": False,
+                "stdout": "building\n",
+                "stderr": "",
+                "managed_long_command": {"action_kind": "start_long_command", "status": "running", "stage": "build"},
+                "long_command_budget": start_parameters["long_command_budget"],
+            },
+        )
+        poll_parameters = {
+            "command": "sleep 38",
+            "cwd": "/tmp/FooCC",
+            "timeout": 38,
+            "wall_timeout_ceiling": {"remaining_seconds": 40, "reserve_seconds": 2, "capped_timeout_seconds": 38},
+            "long_command_budget": {
+                "action_kind": "poll_long_command",
+                "stage": "build",
+                "latest_long_command_run_id": "work_session:1:long_command:1",
+                "latest_long_command_status": "running",
+                "effective_timeout_seconds": 38,
+                "yield_after_seconds": 30,
+            },
+        }
+        poll_call = start_work_tool_call(state, session, "run_command", poll_parameters)
+        finish_work_tool_call(
+            state,
+            1,
+            poll_call["id"],
+            result={
+                "command": "make -j2 foocc",
+                "cwd": "/tmp/FooCC",
+                "status": "failed",
+                "exit_code": 2,
+                "timed_out": False,
+                "duration_seconds": 38,
+                "stdout": "",
+                "stderr": "build failed\n",
+                "managed_long_command": {
+                    "action_kind": "poll_long_command",
+                    "status": "failed",
+                    "stage": "build",
+                    "latest_long_command_run_id": "work_session:1:long_command:1",
+                },
+                "long_command_budget": poll_parameters["long_command_budget"],
+            },
+        )
+
+        self.assertEqual(len(session["long_command_runs"]), 1)
+        self.assertEqual(session["long_command_runs"][0]["status"], "failed")
+        self.assertEqual(session["long_command_runs"][0]["budget"]["final_proof_reserve_seconds"], 60)
+
+        repair_parameters = {"command": "make -j2 foocc VERBOSE=1", "cwd": "/tmp/FooCC", "timeout": 600}
+        policy = commands.work_tool_long_command_budget_policy(
+            "run_command",
+            repair_parameters,
+            task=task,
+            session=session,
+        )
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            repair_parameters,
+            max_wall_seconds=40,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "recover_long_command")
+        self.assertEqual(policy["reserve_seconds"], 60.0)
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+
     def test_typed_managed_long_command_preserves_idempotence_across_poll_without_contract(self):
         task = {
             "id": 1,
@@ -11559,6 +11676,161 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertEqual(ceiling, {})
         self.assertEqual(parameters["long_command_budget"]["action_kind"], "poll_long_command")
         self.assertEqual(parameters["long_command_budget"]["latest_long_command_status"], "running")
+
+    def test_long_command_poll_can_spend_final_proof_reserve(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="build",
+            selected_target="/tmp/FooCC/foocc",
+            command="make -j10 foocc",
+            cwd="/tmp/FooCC",
+            status="running",
+            effective_timeout_seconds=900,
+            work_wall_remaining_seconds=900,
+            final_proof_reserve_seconds=60,
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": "sleep 60", "timeout": 60}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=40,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "poll_long_command")
+        self.assertEqual(policy["reserve_seconds"], 0.0)
+        self.assertTrue(policy["poll_spends_final_proof_reserve"])
+        self.assertFalse(ceiling["blocked"])
+        self.assertEqual(ceiling["reserve_seconds"], commands.WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS)
+        self.assertLess(parameters["timeout"], 40)
+        self.assertEqual(parameters["long_command_budget"]["action_kind"], "poll_long_command")
+        self.assertEqual(parameters["long_command_budget"]["latest_long_command_status"], "running")
+
+    def test_long_command_poll_still_requires_minimum_poll_seconds_after_cap(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="build",
+            selected_target="/tmp/FooCC/foocc",
+            command="make -j10 foocc",
+            cwd="/tmp/FooCC",
+            status="running",
+            effective_timeout_seconds=900,
+            work_wall_remaining_seconds=900,
+            final_proof_reserve_seconds=60,
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": "sleep 60", "timeout": 60}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=6,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "poll_long_command")
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(ceiling["reason"], "poll timeout is below minimum_poll_seconds")
+
+    def test_long_command_repair_still_preserves_final_proof_reserve(self):
+        task = {
+            "id": 1,
+            "title": "Build FooCC compiler",
+            "description": (
+                "Under /tmp/FooCC, build the FooCC compiler from source. "
+                "Ensure /tmp/FooCC/foocc can be invoked."
+            ),
+        }
+        run = build_long_command_run(
+            session_id=1,
+            ordinal=1,
+            task_id=1,
+            contract_id="work_session:1:long_build:1",
+            attempt_id="attempt-1",
+            tool_call_id=10,
+            stage="build",
+            selected_target="/tmp/FooCC/foocc",
+            command="make -j10 foocc",
+            cwd="/tmp/FooCC",
+            status="failed",
+            effective_timeout_seconds=900,
+            work_wall_remaining_seconds=900,
+            final_proof_reserve_seconds=60,
+        )
+        session = {
+            "id": 1,
+            "task_id": 1,
+            "status": "active",
+            "goal": task["description"],
+            "tool_calls": [],
+            "long_command_runs": [run],
+        }
+        parameters = {"command": "make -j10 foocc", "timeout": 600}
+
+        policy = commands.work_tool_long_command_budget_policy("run_command", parameters, task=task, session=session)
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_command",
+            parameters,
+            max_wall_seconds=40,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertEqual(policy["action_kind"], "recover_long_command")
+        self.assertEqual(policy["reserve_seconds"], 60.0)
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(ceiling["reason"], "not enough wall-clock budget remains for a long-command continuation action")
 
     def test_long_command_budget_policy_blocks_same_timeout_resume(self):
         task = {
