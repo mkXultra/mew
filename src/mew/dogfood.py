@@ -14528,9 +14528,10 @@ def run_m6_9_alignment_decay_rehearsal_scenario(workspace, env=None):
     return report
 
 
-def _write_terminal_bench_replay_fixture(workspace):
+def _write_terminal_bench_replay_fixture(workspace, *, task="compile-compcert"):
     job_dir = Path(workspace) / "terminal-bench-replay-fixture"
-    trial_dir = job_dir / "compile-compcert__fixture"
+    trial_name = f"{task}__fixture"
+    trial_dir = job_dir / trial_name
     artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
     verifier_dir = trial_dir / "verifier"
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -14560,8 +14561,8 @@ def _write_terminal_bench_replay_fixture(workspace):
     (trial_dir / "result.json").write_text(
         json.dumps(
             {
-                "trial_name": "compile-compcert__fixture",
-                "task_name": "terminal-bench/compile-compcert",
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
                 "verifier_result": {"reward": 0.0},
             },
             indent=2,
@@ -15054,6 +15055,7 @@ def run_m6_24_terminal_bench_replay_scenario(
     workspace,
     *,
     job_dir=None,
+    task=None,
     long_build_status=None,
     current_failure=None,
     recovery_action=None,
@@ -15075,7 +15077,7 @@ def run_m6_24_terminal_bench_replay_scenario(
     )
     replay = replay_terminal_bench_job(
         source,
-        task="compile-compcert",
+        task=task,
         assertions=assertions,
     )
     _scenario_check(
@@ -15104,6 +15106,7 @@ def run_m6_24_terminal_bench_replay_scenario(
     report = _scenario_report("m6_24-terminal-bench-replay", workspace, commands, checks)
     report["artifacts"] = {
         "job_dir": str(source),
+        "task": task or "",
         "trial_count": replay.get("trial_count"),
         "replay_status": replay.get("status"),
         "first_trial": first_trial.get("trial_name") or "",
@@ -15301,6 +15304,7 @@ def run_dogfood_scenario(args):
                 run_m6_24_terminal_bench_replay_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
+                    task=getattr(args, "terminal_bench_task", None),
                     long_build_status=getattr(args, "terminal_bench_assert_long_build_status", None),
                     current_failure=getattr(args, "terminal_bench_assert_current_failure", None),
                     recovery_action=getattr(args, "terminal_bench_assert_recovery_action", None),

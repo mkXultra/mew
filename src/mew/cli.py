@@ -901,6 +901,10 @@ def build_parser():
         help="for terminal-bench replay dogfood, replay an existing Harbor job, trial, or artifact directory",
     )
     dogfood_parser.add_argument(
+        "--terminal-bench-task",
+        help="for terminal-bench replay dogfood, optionally filter replayed trials by task name",
+    )
+    dogfood_parser.add_argument(
         "--terminal-bench-assert-long-build-status",
         help="for terminal-bench replay dogfood, require recomputed long_build_state.status",
     )

@@ -27,11 +27,45 @@ band, but M6.24 is already in improvement phase and `build-cython-ext` remains
 a large repeated in-scope gap with many repair cycles. The controller should
 classify and repair one selected gap before broad scoped measurement resumes.
 
+## Current-Head Recheck
+
+After the execution-contract and prompt-section architecture changed, the next
+step was remeasurement rather than repairing from the older dossier alone.
+
+Current-head live recheck:
+
+- Job: `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936/result.json`
+- Trial: `build-cython-ext__MQPEBk8`
+- Result: `0/1`
+- Runtime: `29m30s`
+- Harbor runner errors: `0`
+- `mew-report.work_exit_code`: `1`
+- `work_report.stop_reason`: `wall_timeout`
+
+The old selected gap is not stale enough to discard: current-head mew still
+misses `build-cython-ext`. The failure shape did move materially. The run fixed
+or passed the earlier source/build/import smoke path, including extension
+imports and the README example, and external verifier output shows `10/11`
+Harbor tests passed. The remaining failure is the original repository test tail:
+`test_pyknotid_repository_tests` fails because the cloned upstream tests still
+have one failing `tests/test_spacecurve.py::test_reconstructed_space_curve`.
+
+This refines the active gap from a broad historical sibling-frontier hypothesis
+to a current-head shape:
+
+```text
+verified_sibling_repair_frontier_not_exhausted
+  -> repository-test-tail repair frontier not exhausted before wall timeout
+```
+
+Do not use the older `build-cython-ext` artifacts as the sole repair basis. The
+latest saved artifact above is now the first replay/dogfood/emulator input.
+
 ## Per-Task Rebaseline
 
 | Task | Codex target | Mew best/current | State | Evidence |
 |---|---:|---:|---|---|
-| `build-cython-ext` | 5/5 | best 1/5, latest 0/5 | below target | `docs/M6_24_BATCH_1_RUNS_2026-04-28.md` |
+| `build-cython-ext` | 5/5 | best 1/5, latest 0/1 current-head recheck | below target | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936/result.json` |
 | `circuit-fibsqrt` | 5/5 | 5/5 | target met | scoped historical artifact set |
 | `cobol-modernization` | 5/5 | 5/5 | target met | scoped historical artifact set |
 | `distribution-search` | 5/5 | 5/5 | target met | scoped historical artifact set |
@@ -74,10 +108,13 @@ Reason:
 Selected generic gap class:
 `verified_sibling_repair_frontier_not_exhausted`.
 
+Current-head subtype:
+`repository_test_tail_frontier_not_exhausted_before_wall_timeout`.
+
 One-line controller chain:
 
 ```text
-M6.24 -> verified_sibling_repair_frontier_not_exhausted -> build-cython-ext dossier -> generic verifier sibling frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1
+M6.24 -> verified_sibling_repair_frontier_not_exhausted -> current-head build-cython-ext artifact -> replay/dogfood/emulator classification -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1
 ```
 
 Do not add `pyknotid`, NumPy, Cython, or Terminal-Bench specific solvers. Any

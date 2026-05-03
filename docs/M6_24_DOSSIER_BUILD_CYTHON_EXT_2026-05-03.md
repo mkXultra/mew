@@ -13,7 +13,7 @@ Frozen Codex target: `5/5`.
 Mew:
 
 - best observed: `1/5`
-- latest observed: `0/5`
+- latest current-head recheck: `0/1`
 - latest Harbor errors: `0`
 
 Primary artifacts:
@@ -24,6 +24,7 @@ Primary artifacts:
 - `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-wall-timeout-reduced-20260428-0755/result.json`
 - `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-sibling-search-20260428-0818/result.json`
 - `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-same-file-batch-wait-20260428-0841/result.json`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936/result.json`
 
 ## Chronology
 
@@ -39,6 +40,7 @@ Primary artifacts:
 | Reduced wall-timeout model turns | 0/5 | Attempts reached deeper verifier state | Remaining blockers concentrated on same-family compatibility symbols and repository-test tail. |
 | Verifier sibling searches | 1/5 | One trial reached full success; failed attempts found concrete sibling anchors | Duplicate same-file write batch normalized to `wait`; short budget near solution remained. |
 | Same-file batch blocker repair | 0/5 | Duplicate same-file batch wait did not recur | All trials wall-timed near solution; verifier tails still concentrated on source compatibility siblings and repository tests. |
+| Current-head architecture recheck | 0/1 | Execution-contract and prompt-section architecture moved the failure deeper: extension build/import, neutral README smoke, and 10/11 external verifier tests passed. | `work_report.stop_reason=wall_timeout`; remaining failure is repository-test tail, specifically upstream `tests/test_spacecurve.py::test_reconstructed_space_curve`, after mew found but did not finish the next narrow source repair before wall budget expired. |
 
 ## Repaired Or Rejected Duplicate Fixes
 
@@ -68,6 +70,9 @@ Explicitly rejected:
 Selected class:
 `verified_sibling_repair_frontier_not_exhausted`.
 
+Current-head subtype:
+`repository_test_tail_frontier_not_exhausted_before_wall_timeout`.
+
 Definition:
 
 The loop can extract verifier failure families and search anchors, but it does
@@ -85,6 +90,11 @@ Signals from artifacts:
 - Latest failed trials after the same-file repair no longer stopped on the
   duplicate write-batch blocker, but still wall-timed around the same
   compatibility family and repository-test tail.
+- Current-head trial `build-cython-ext__MQPEBk8` passed the main install/import
+  and README example path, and external verifier output shows `10 passed, 1
+  failed`. The remaining failure is no longer broad source acquisition or Cython
+  build setup; it is a repository-test-tail repair frontier that did not get a
+  final edit/proof before wall timeout.
 
 Why this is generic:
 
@@ -111,6 +121,10 @@ Candidate behavior:
   already available;
 - treat a timeout or wait before applying known sibling repairs as a recoverable
   frontier-continuation state, not as permission to rediscover the project.
+- preserve the external verifier repository-test tail as first-class failure
+  evidence. A run that has passed the main smoke path and has one remaining
+  repository test should not spend repeated turns rediscovering packaging or
+  Cython build facts.
 
 Rollback condition:
 
@@ -121,7 +135,8 @@ Rollback condition:
 
 ## Pre-Speed Operation
 
-Before any live `build-cython-ext` `speed_1`, run:
+Before any live `build-cython-ext` `speed_1`, run against the current-head
+artifact first:
 
 1. focused UT for verifier agenda / sibling frontier / same-file edit behavior;
 2. `mew replay terminal-bench` against the latest relevant saved
@@ -134,10 +149,23 @@ Before any live `build-cython-ext` `speed_1`, run:
    and resume state containing same-family verifier failures plus sibling
    search anchors.
 
+The first saved artifact for this pre-speed operation is:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936`.
+
+Current pre-speed status:
+
+- `mew replay terminal-bench` passes on the current-head artifact with
+  `--task build-cython-ext --assert-mew-exit-code 1 --assert-external-reward 0`.
+- `mew dogfood --scenario m6_24-terminal-bench-replay` now passes on the same
+  artifact after removing the scenario's hard-coded `compile-compcert` task
+  filter and adding `--terminal-bench-task`.
+- A same-shape emulator for this repository-test-tail frontier is still needed
+  before live `speed_1`.
+
 Only after all four pass, spend exactly one `build-cython-ext` `speed_1`.
 
 ## Controller Chain
 
 ```text
-M6.24 -> verified_sibling_repair_frontier_not_exhausted -> implementation_profile/tiny lane -> create frontier repair + pre-speed emulator -> same-shape build-cython-ext speed_1 only after pre-speed passes
+M6.24 -> verified_sibling_repair_frontier_not_exhausted -> current-head repository-test-tail artifact -> replay/dogfood/emulator classification -> implementation_profile/tiny lane -> create frontier repair + pre-speed emulator -> same-shape build-cython-ext speed_1 only after pre-speed passes
 ```

@@ -110,6 +110,8 @@ class DogfoodTests(unittest.TestCase):
                 "m6_24-terminal-bench-replay",
                 "--terminal-bench-job-dir",
                 "/tmp/job",
+                "--terminal-bench-task",
+                "build-cython-ext",
                 "--terminal-bench-assert-long-build-status",
                 "blocked",
                 "--terminal-bench-assert-current-failure",
@@ -127,6 +129,7 @@ class DogfoodTests(unittest.TestCase):
         )
 
         self.assertEqual(args.terminal_bench_job_dir, "/tmp/job")
+        self.assertEqual(args.terminal_bench_task, "build-cython-ext")
         self.assertEqual(args.terminal_bench_assert_long_build_status, "blocked")
         self.assertEqual(args.terminal_bench_assert_current_failure, "long_command_failed")
         self.assertEqual(args.terminal_bench_assert_recovery_action, "repair_failed_long_command")
@@ -1285,6 +1288,28 @@ class DogfoodTests(unittest.TestCase):
                 scenario["artifacts"]["current_long_build"]["current_failure_class"],
                 "dependency_strategy_unresolved",
             )
+
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_non_compile_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _write_terminal_bench_replay_fixture(Path(tmp) / "fixture", task="build-cython-ext")
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=str(fixture),
+                terminal_bench_task="build-cython-ext",
+                terminal_bench_assert_mew_exit_code=1,
+                terminal_bench_assert_external_reward=0.0,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["task"], "build-cython-ext")
+            self.assertEqual(scenario["artifacts"]["first_trial"], "build-cython-ext__fixture")
 
     def test_run_dogfood_m6_24_compile_compcert_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

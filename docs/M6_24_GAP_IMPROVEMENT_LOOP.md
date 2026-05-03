@@ -15,6 +15,15 @@ rebaseline is now recorded, and the active proof target is the selected
 retained as historical build-orchestration substrate evidence, not as the
 active M6.24 close gate.
 
+Current-head remeasurement decision on 2026-05-03: after substantial
+architecture changes, remeasure before repairing. The current-head
+`build-cython-ext` one-attempt run
+`mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936` scored `0/1`
+with runner errors `0`, runtime `29m30s`, and
+`work_report.stop_reason=wall_timeout`. The active gap remains
+`verified_sibling_repair_frontier_not_exhausted`, but the current subtype is
+now repository-test-tail repair frontier exhaustion, not broad Cython setup.
+
 Authoritative inputs:
 
 - `docs/M6_24_DECISION_LEDGER.md`
@@ -34,15 +43,27 @@ Authoritative inputs:
 - `docs/REVIEW_2026-05-02_CODEX_CLI_LONG_BUILD_CONTINUATION_PATTERNS.md`
 - `docs/REVIEW_2026-05-02_CLAUDE_CODE_LONG_BUILD_CONTINUATION_PATTERNS.md`
 
-Do not resume new scoped Terminal-Bench measurement until this controller or the
-decision ledger records why measurement is higher value than repairing the
-selected gap class.
+Do not resume broad scoped Terminal-Bench measurement until this controller or
+the decision ledger records why measurement is higher value than repairing the
+selected gap class. The current-head recheck has already answered the immediate
+"architecture changed, remeasure first" question for `build-cython-ext`.
 
 Current selected gap class:
 `verified_sibling_repair_frontier_not_exhausted`.
 
 Current selected next action:
-`M6.24 -> build-cython-ext gap dossier -> generic verifier sibling frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
+`M6.24 -> current-head build-cython-ext artifact -> replay/dogfood pass -> create repository-test-tail emulator -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
+
+Current pre-speed status:
+
+- replay: pass on
+  `mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936` with
+  `--task build-cython-ext`, `mew_exit_code=1`, and `external_reward=0`.
+- dogfood: pass on the same artifact after adding dogfood
+  `--terminal-bench-task`; the previous failure was a measurement-infra defect
+  caused by a hard-coded `compile-compcert` filter.
+- emulator: pending. Build the smallest same-shape repository-test-tail
+  emulator before code repair or the next live `speed_1`.
 
 Active authoritative design:
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
