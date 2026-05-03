@@ -318,7 +318,7 @@ same-shape rerun are pending. Broad measurement remains paused.
 
 Current selected next action:
 
-`M6.24 -> long_dependency/toolchain gap -> compatibility-override probe + terminal long-command budget repair -> broader regression -> codex re-review -> same-shape speed_1`
+`M6.24 -> long_dependency/toolchain gap -> execution-contract Phase 0-6 pre-speed gate -> same-shape speed_1`
 
 Latest same-shape rerun:
 
@@ -342,3 +342,16 @@ dominance, or recovery-state inversion appears, use
 `docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md` to open a deliberate
 all-command generic managed-exec design slice before more local classifier
 patches.
+
+Execution-contract checkpoint:
+
+`docs/DESIGN_2026-05-03_M6_24_EXECUTION_CONTRACT.md` Phase 0-6 is implemented
+and committed in `4dbd099`. Validation passed on current head: long-build
+substrate tests `365 passed`; work-session tests `905 passed`, `70 subtests`;
+focused terminal-bench replay/dogfood tests `3 passed`; live dogfood scenario
+`m6_24-terminal-bench-replay` passed; synthetic compile-compcert replay
+assertions passed; scoped ruff and `git diff --check` passed. codex-ultra
+review session `019debb3-afc8-7ff2-9f4e-039eeaaa7dd3` approved with
+`PHASE_GATE: safe_to_commit_pre_speed`. Do not run `proof_5` or broad
+measurement next. Spend exactly one same-shape `compile-compcert` speed_1, then
+classify the result before any escalation.

@@ -2488,7 +2488,7 @@ These caveats are preserved; they do not reopen the milestones by default.
 
 The next implementation task should map to this chain:
 
-`M6.24 improvement_phase -> clean long-build closeout state repair -> pre-speed operation -> clean compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
+`M6.24 improvement_phase -> execution-contract Phase 0-6 pre-speed gate -> clean compile-compcert same-shape speed_1 -> decide proof_5/next repair from decision ledger`
 
 Acceptable near-term work:
 
@@ -2496,17 +2496,15 @@ Acceptable near-term work:
   no-Terminal-Bench-specific-solver constraint
 - preserve the no-task-specific-acceptance-parser decision recorded in
   `docs/M6_24_ACCEPTANCE_EVIDENCE_STRUCTURE_REPAIR_2026-05-01.md`
-- after the clean closeout state repair, run the pre-speed operation on current
-  head: focused local validation, `mew replay terminal-bench` against the latest
-  relevant saved Harbor artifact or synthetic same-shape fixture, and
-  `mew dogfood --scenario m6_24-terminal-bench-replay` with
-  `--terminal-bench-job-dir` when validating an existing artifact
-- only after the pre-speed operation passes, rerun one same-shape
-  `compile-compcert` speed_1 with refreshable `~/.codex/auth.json`; escalate
-  to sequential proof_5 only after speed_1 shows external reward `1.0`, runner
-  errors `0`, command transcript exit `0`, clean `mew-report` closeout, no
-  stale `resume.long_build_state.current_failure`, and no active stale
-  strategy blockers for resolved runtime/toolchain/source blockers
+- execution-contract Phase 0-6 is committed at `4dbd099`; current-head local
+  validation, replay, dogfood, ruff, diff check, and codex-ultra phase review
+  passed with `PHASE_GATE: safe_to_commit_pre_speed`
+- next, rerun one same-shape `compile-compcert` speed_1 with refreshable
+  `~/.codex/auth.json`; escalate to sequential proof_5 only after speed_1 shows
+  external reward `1.0`, runner errors `0`, command transcript exit `0`, clean
+  `mew-report` closeout, no stale `resume.long_build_state.current_failure`,
+  and no active stale strategy blockers for resolved runtime/toolchain/source
+  blockers
 - if proof_5 misses the frozen `5/5` close target, read
   `docs/M6_24_DOSSIER_LONG_DEPENDENCY_TOOLCHAIN.md` before selecting any next
   repair, and update `proof-artifacts/m6_24_gap_ledger.jsonl`

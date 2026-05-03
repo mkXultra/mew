@@ -408,7 +408,7 @@ channel retry as `repeat_same_timeout_without_budget_change`.
 
 Selected chain:
 
-`M6.24 -> long_dependency/toolchain gap -> final artifact/default-smoke closeout repair -> codex re-review -> pre-speed operation -> same-shape speed_1`
+`M6.24 -> long_dependency/toolchain gap -> execution-contract Phase 0-6 pre-speed gate -> same-shape speed_1`
 
 The current repair is generic detector/resume-state policy: only timed-out or
 killed long commands require same-idempotence resume with larger budget.
@@ -418,11 +418,14 @@ same-shape rerun recorded a newer narrower gap: external pass with stale
 internal long-build closeout. codex-ultra classified it as reducer/closeout
 `REPAIR_NOW`; the generic local repair plus codex-requested hardening is
 implemented and locally validated in
-`docs/M6_24_FINAL_CLOSEOUT_PROJECTION_REPAIR_2026-05-03.md`. Before spending
-the live same-shape `speed_1`, run the pre-speed operation: focused local
-validation for the closeout repair, `mew replay terminal-bench` against the
-latest relevant saved Harbor artifact, and
-`mew dogfood --scenario m6_24-terminal-bench-replay` using that artifact when
-available. Do not run broad measurement or `proof_5` until that repair is
-re-reviewed, the pre-speed operation passes, and one same-shape rerun records
-clean internal closeout or a newer narrower gap.
+`docs/M6_24_FINAL_CLOSEOUT_PROJECTION_REPAIR_2026-05-03.md`. The follow-on
+flag-day execution-contract repair in
+`docs/DESIGN_2026-05-03_M6_24_EXECUTION_CONTRACT.md` is implemented through
+Phase 6 and committed as `4dbd099`. It shifts acceptance/reducer/recovery proof
+from task-semantic shell labels toward typed `ExecutionContract` and
+`CommandRun` evidence, while keeping safety/display parsers and negative
+fallback fixtures as guardrails. The pre-speed operation has passed on current
+head, and codex-ultra approved the phase gate as
+`safe_to_commit_pre_speed`. Do not run broad measurement or `proof_5` next.
+Spend exactly one same-shape `compile-compcert` speed_1, then classify the
+result as clean closeout, moved narrower gap, or regression.
