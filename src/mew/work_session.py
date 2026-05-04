@@ -2293,6 +2293,17 @@ def _command_run_output_path_from_ref(output_ref):
     return str((WORK_COMMAND_OUTPUT_ROOT / ref).resolve(strict=False))
 
 
+def _command_output_ref_is_stream_alias(output_ref):
+    return str(output_ref or "").strip().casefold() in {
+        "combined",
+        "full",
+        "output",
+        "stderr",
+        "stdout",
+        "tail",
+    }
+
+
 def _validated_command_output_path(output_path):
     output_text = str(output_path or "").strip()
     if not output_text:
@@ -2715,6 +2726,8 @@ def read_work_command_output(parameters):
     output_path = str(parameters.get("output_path") or "").strip()
     if not output_path:
         output_ref = str(parameters.get("output_ref") or "").strip()
+        if output_ref and parameters.get("command_run_id") and _command_output_ref_is_stream_alias(output_ref):
+            output_ref = _command_run_output_ref_from_id(parameters.get("command_run_id"))
         if not output_ref and parameters.get("command_run_id"):
             output_ref = _command_run_output_ref_from_id(parameters.get("command_run_id"))
         output_path = _command_run_output_path_from_ref(output_ref)

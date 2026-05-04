@@ -2316,6 +2316,62 @@ class WorkSessionTests(unittest.TestCase):
             self.assertEqual(result["content"], "stable spool\n")
             self.assertEqual(Path(result["output_path"]), output_path)
 
+    def test_read_command_output_treats_stream_ref_as_command_run_spool_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = (Path(tmp) / ".mew").resolve()
+            run_id = "work_session:1:command_run:2"
+            output_ref = "work-session/1/command/2/output.log"
+            output_path = root / output_ref
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text("stdout line\nstderr detail\n", encoding="utf-8")
+
+            with patch.object(work_session_module, "WORK_COMMAND_OUTPUT_ROOT", root):
+                result = work_session_module.read_work_command_output(
+                    {
+                        "command_run_id": run_id,
+                        "output_ref": "stderr",
+                        "tail": True,
+                        "max_chars": 200,
+                    }
+                )
+
+            self.assertEqual(Path(result["output_path"]), output_path)
+            self.assertIn("stderr detail", result["content"])
+
+    def test_run_work_tool_shell_command_uses_stable_output_ref_for_stream_alias_read(self):
+        work_session_module._WORK_MANAGED_COMMAND_RUNNER.cancel("test cleanup")
+        with tempfile.TemporaryDirectory() as tmp:
+            state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
+            session = {"id": 1, "task_id": 1, "tool_calls": []}
+            state["work_sessions"].append(session)
+            command = f"cd {shlex.quote(tmp)} && {shlex.quote(sys.executable)} -c \"import sys; print('hello'); print('boom', file=sys.stderr); sys.exit(2)\""
+
+            call = work_session_module.run_work_tool(
+                state,
+                session,
+                "run_command",
+                {
+                    "allow_shell": True,
+                    "command": command,
+                    "cwd": tmp,
+                    "timeout": 5,
+                },
+                allowed_read_roots=[Path(tmp)],
+            )
+
+            run_id = call["command_run_id"]
+            self.assertEqual(call["result"]["command_run_id"], run_id)
+            self.assertEqual(call["result"]["output_ref"], "work-session/1/command/1/output.log")
+            output_call = work_session_module.run_work_tool(
+                state,
+                session,
+                "read_command_output",
+                {"command_run_id": run_id, "output_ref": "stderr", "tail": True, "max_chars": 200},
+                allowed_read_roots=[],
+            )
+
+            self.assertIn("boom", output_call["result"]["content"])
+
     def test_command_evidence_ref_is_visible_when_tool_and_evidence_ids_diverge(self):
         from mew.work_session import build_work_session_command_entries, format_work_session_commands
         from mew.work_loop import work_tool_call_for_model
