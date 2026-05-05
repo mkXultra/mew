@@ -52,7 +52,7 @@ Current selected gap class:
 `final_verifier_budget_blocked_after_near_solution`.
 
 Current selected next action:
-`M6.24 -> latest build-cython-ext artifact 20260505-1909 -> final-verifier-budget repair validated/reviewed -> exactly one build-cython-ext speed_1 with selected_lane=implement_v2, guarded by reference-step comparison`.
+`M6.24 -> latest build-cython-ext artifact 20260505-1909 -> final-verifier-budget repair validated/reviewed -> first true-v2 build-cython-ext speed attempt excluded as harness-invalid because /workspace was missing before mew launched -> exactly one build-cython-ext speed_1 rerun with selected_lane=implement_v2 and task-correct /app cwd, guarded by reference-step comparison`.
 
 Current live proof status on 2026-05-06 JST: the selected gap moved past the
 active compatibility frontier loops. The latest same-shape run
@@ -108,6 +108,13 @@ Current pre-speed status:
   and replay-valid v2 proof artifacts. This proves the explicit v2 lane can
   execute independently of the v1 THINK/ACT planner; it does not yet prove
   provider-specific native tool-call transport.
+- first true-v2 `build-cython-ext` attempt:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215`
+  is harness-invalid only. Docker failed before `mew` started because the
+  command used cwd `/workspace`, which does not exist for this task. The task
+  instruction and previous valid `build-cython-ext` artifact use `/app`; rerun
+  with `command_cwd=/app` and `mew work --cwd /app` before judging v2 step
+  flow.
 
 Active authoritative design:
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.

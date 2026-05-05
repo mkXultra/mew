@@ -97,6 +97,10 @@ Scope:
   user decision selects `implement_v2` for the next same-shape
   `build-cython-ext` speed/debug run. Any fallback execution must be a separate
   attempt and cannot count as v2 success.
+- The first true-v2 `build-cython-ext` speed attempt
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
+  product evidence: Docker failed before `mew` launched because the harness
+  used missing cwd `/workspace`. This task should be rerun with `/app`.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded
@@ -152,7 +156,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1 with selected_lane=implement_v2 -> stop and debug if step flow diverges from the Codex/Claude Code reference pattern
+M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> focused UT/replay/dogfood/emulator passed -> first v2 speed attempt excluded as /workspace harness-invalid before mew launch -> exactly one build-cython-ext speed_1 rerun with selected_lane=implement_v2 and /app cwd -> stop and debug if step flow diverges from the Codex/Claude Code reference pattern
 ```
 
 The 2026-05-05 Codex/Claude Code reference traces both pass
@@ -201,7 +205,8 @@ Useful historical files:
 
 1. Resume M6.24 on the scoped `software-engineering,coding` cohort with
    explicit `selected_lane=implement_v2` attribution in the next
-   `build-cython-ext` speed/debug artifact.
+   `build-cython-ext` speed/debug artifact, rerun with task-correct `/app`
+   cwd.
 2. Before spending a live proof item, run the existing pre-speed checks:
    focused UT, replay, dogfood, and emulator where available.
 3. If the v2 step flow leaves the Codex/Claude Code reference pattern before
