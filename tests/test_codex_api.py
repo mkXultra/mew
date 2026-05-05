@@ -13,6 +13,7 @@ from mew.codex_api import (
     call_codex_json,
     call_codex_web_api,
     decode_sse_data_line,
+    extract_json_object,
     extract_response_refusal,
     extract_sse_text,
     extract_sse_response_parts,
@@ -559,6 +560,15 @@ class CodexApiTests(unittest.TestCase):
                     "https://example.invalid",
                     5,
                 )
+
+    def test_extract_json_object_accepts_valid_object_before_trailing_text(self):
+        payload = extract_json_object('{"summary":"ok","tool_calls":[]} trailing note {"ignored": true}')
+
+        self.assertEqual(payload, {"summary": "ok", "tool_calls": []})
+
+    def test_extract_json_object_does_not_skip_malformed_outer_object_for_nested_object(self):
+        with self.assertRaisesRegex(CodexApiError, "response did not contain valid JSON object"):
+            extract_json_object('{"summary": {"nested": true} trailing')
 
     def test_call_codex_web_api_enforces_total_timeout_while_streaming(self):
         lines = [

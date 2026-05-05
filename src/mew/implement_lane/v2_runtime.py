@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import time
 
+from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
@@ -104,6 +105,7 @@ def run_live_json_implement_v2(
     model_elapsed_seconds = 0.0
     prompt_chars_total = 0
     model_turns = 0
+    model_error: dict[str, object] = {}
     cleanup_payloads: tuple[dict[str, object], ...] = ()
     closeout_payloads: tuple[dict[str, object], ...] = ()
     run_started = time.monotonic()
@@ -123,15 +125,56 @@ def run_live_json_implement_v2(
             if progress:
                 progress(f"implement_v2 turn #{turn_index}: model_json start")
             started = time.monotonic()
-            payload = model_json_callable(
-                lane_input.model_backend,
-                model_auth,
-                prompt,
-                lane_input.model,
-                base_url,
-                timeout,
-                log_prefix=f"implement_v2 live_json session={lane_input.work_session_id} turn={turn_index}",
-            )
+            try:
+                payload = model_json_callable(
+                    lane_input.model_backend,
+                    model_auth,
+                    prompt,
+                    lane_input.model,
+                    base_url,
+                    timeout,
+                    log_prefix=f"implement_v2 live_json session={lane_input.work_session_id} turn={turn_index}",
+                )
+            except ModelBackendError as exc:
+                model_elapsed_seconds += time.monotonic() - started
+                model_error = _live_json_model_error(exc)
+                finish_arguments = {
+                    "outcome": "failed",
+                    "summary": str(model_error.get("message") or "model_json call failed"),
+                    "failure_class": model_error.get("failure_class") or "model_backend_error",
+                }
+                transcript.extend(
+                    adapter.transcript_events_for_turn(
+                        lane=IMPLEMENT_V2_LANE,
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        text=str(model_error.get("message") or ""),
+                        tool_calls=(),
+                    )
+                )
+                transcript.append(
+                    adapter.finish_event_for_turn(
+                        lane=IMPLEMENT_V2_LANE,
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        finish_arguments=finish_arguments,
+                    )
+                )
+                history.append(
+                    {
+                        "turn": turn_index,
+                        "summary": "model_json_error",
+                        "model_error": dict(model_error),
+                        "tool_calls": [],
+                        "tool_results": [],
+                    }
+                )
+                if progress:
+                    progress(
+                        f"implement_v2 turn #{turn_index}: model_json failed "
+                        f"class={model_error.get('failure_class')}"
+                    )
+                break
             model_elapsed_seconds += time.monotonic() - started
             normalized = _normalize_live_json_payload(payload, turn_index=turn_index)
             finish_arguments = normalized.get("finish") or {}
@@ -278,6 +321,7 @@ def run_live_json_implement_v2(
             "tool_calls": len(tool_calls),
             "tool_results": len(tool_results),
             "model_turns": model_turns,
+            "model_error": dict(model_error),
             "command_closeout_count": len(closeout_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
         },
@@ -325,6 +369,7 @@ def run_live_json_implement_v2(
             "tool_calls": len(tool_calls),
             "tool_results": len(tool_results),
             "model_turns": model_turns,
+            "model_error": dict(model_error),
             "model_elapsed_seconds": round(model_elapsed_seconds, 3),
             "prompt_chars_total": prompt_chars_total,
             "prompt_sections": prompt_metrics,
@@ -1313,6 +1358,31 @@ def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[st
         if not outcome:
             finish["outcome"] = "completed"
     return {"summary": summary, "tool_calls": tuple(calls), "finish": finish}
+
+
+def _live_json_model_error(exc: BaseException) -> dict[str, object]:
+    message = str(exc)
+    lowered = message.casefold()
+    if "failed to parse json plan" in lowered or "response did not contain json" in lowered:
+        failure_class = "model_json_parse_error"
+    elif "request timed out" in lowered or "timed out" in lowered or "timeout" in lowered:
+        failure_class = "model_timeout"
+    else:
+        failure_class = "model_backend_error"
+    return {
+        "failure_class": failure_class,
+        "error_type": exc.__class__.__name__,
+        "message": message,
+        "raw_excerpt": _extract_raw_excerpt_from_model_error(message),
+    }
+
+
+def _extract_raw_excerpt_from_model_error(message: str, limit: int = 500) -> str:
+    marker = "raw="
+    index = message.find(marker)
+    if index == -1:
+        return ""
+    return message[index + len(marker) : index + len(marker) + limit]
 
 
 def _auto_approval_records(lane_input: ImplementLaneInput, tool_calls) -> tuple[dict[str, object], ...]:

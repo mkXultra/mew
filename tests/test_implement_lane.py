@@ -1,9 +1,11 @@
 import hashlib
+import json
 import shlex
 import subprocess
 import sys
 
 import mew.implement_lane.read_runtime as read_runtime
+from mew.errors import ModelBackendError
 from mew.implement_lane import (
     FakeProviderAdapter,
     FakeProviderToolCall,
@@ -279,6 +281,43 @@ def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_pa
     manifest = result.updated_lane_state["proof_manifest"]
     assert manifest["tool_results"][1]["status"] == "invalid"
     assert "duplicate_provider_call_id_across_turns" in manifest["tool_results"][1]["content"][0]["reason"]
+
+
+def test_implement_v2_live_json_model_parse_error_is_replayable_lane_failure(tmp_path) -> None:
+    artifact_dir = tmp_path / "artifacts"
+
+    def fake_model(*_args, **_kwargs):
+        raise ModelBackendError('failed to parse JSON plan: Extra data; raw={"summary":"bad"} trailing')
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "artifact_dir": str(artifact_dir),
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "failed"
+    assert result.metrics["replay_valid"] is True
+    assert result.metrics["model_error"]["failure_class"] == "model_json_parse_error"
+    manifest = result.updated_lane_state["proof_manifest"]
+    assert manifest["tool_calls"] == []
+    assert manifest["tool_results"] == []
+    history = json.loads((artifact_dir / "implement_v2" / "history.json").read_text(encoding="utf-8"))
+    assert history[0]["model_error"]["failure_class"] == "model_json_parse_error"
 
 
 def test_implement_v2_live_json_drains_active_command_at_max_turns(tmp_path) -> None:

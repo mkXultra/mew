@@ -60,7 +60,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `circuit-fibsqrt` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-circuit-fibsqrt-speed1-20260506-0335` | proof_5 deferred until controller selects close proof |
 | `cobol-modernization` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-cobol-modernization-speed1-20260506-0348` | proof_5 deferred until controller selects close proof |
 | `distribution-search` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-distribution-search-speed1-20260506-0350` | proof_5 deferred until controller selects close proof |
-| `feal-differential-cryptanalysis` | 5/5 | pending | none | run v2 speed_1 |
+| `feal-differential-cryptanalysis` | 5/5 | pass 1/1 after model-json repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0413-json-repair` | proof_5 deferred until controller selects close proof |
 | `feal-linear-cryptanalysis` | 5/5 | pending | none | run v2 speed_1 |
 | `fix-git` | 5/5 | pending | none | run v2 speed_1 |
 | `hf-model-inference` | 5/5 | pending | none | run v2 speed_1 |
@@ -81,6 +81,27 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `reshard-c4-data` | 5/5 | pending | none | run v2 speed_1 |
 | `schemelike-metacircular-eval` | 5/5 | pending | none | run v2 speed_1 |
 | `write-compressor` | 5/5 | pending | none | run v2 speed_1 |
+
+## Repair Notes
+
+- `feal-differential-cryptanalysis` first v2 attempt
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
+  scored `0.0` with runner errors `0` because `implement_v2` stopped on a
+  first-turn `model_json_parse_error` and the saved report had no replayable
+  v2 artifact. The generic repair makes JSON extraction accept the first valid
+  object before trailing text, records model JSON failures as replayable v2
+  lane failures, and lets terminal-bench replay/dogfood classify the historical
+  miss as `repair model_json parse failure before another live speed run`.
+  Focused UT, exact replay, and exact dogfood passed before the same-shape
+  rerun.
+- The same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0413-json-repair`
+  scored reward `1.0` with runner errors `0`, total runtime `5m48s`,
+  `work_exit_code=0`, `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, `model_turns=8`, `tool_calls=11`, `tool_results=11`,
+  and external verifier `1/1` passing. Exact replay and matching
+  terminal-bench replay dogfood passed.
 
 ## Repair Trigger
 

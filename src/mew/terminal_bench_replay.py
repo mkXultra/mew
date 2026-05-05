@@ -166,7 +166,7 @@ def _implement_v2_replay_summary(report_path, report):
     work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
     result = work_report.get("implement_lane_result") if isinstance(work_report.get("implement_lane_result"), dict) else {}
     metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
-    runtime_id = str(metrics.get("runtime_id") or result.get("runtime_id") or "")
+    runtime_id = str(metrics.get("runtime_id") or result.get("runtime_id") or work_report.get("runtime_id") or "")
     selected_lane = str(work_report.get("selected_lane") or result.get("lane") or "")
     if runtime_id != "implement_v2_model_json_tool_loop" and selected_lane != "implement_v2":
         return {}
@@ -176,7 +176,8 @@ def _implement_v2_replay_summary(report_path, report):
     if not isinstance(history, list):
         history = []
     tool_results = manifest.get("tool_results") if isinstance(manifest.get("tool_results"), list) else []
-    if not history and not tool_results:
+    model_error = _implement_v2_model_error_from_report(report, history=history, metrics=metrics, manifest=manifest)
+    if not history and not tool_results and not model_error:
         return {}
     failed_results = [
         result for result in tool_results
@@ -189,7 +190,7 @@ def _implement_v2_replay_summary(report_path, report):
     return {
         "runtime_id": runtime_id or "implement_v2_model_json_tool_loop",
         "lane": selected_lane or "implement_v2",
-        "lane_status": str(result.get("status") or ""),
+        "lane_status": str(result.get("status") or _implement_v2_step_status(work_report) or ""),
         "replay_valid": bool(metrics.get("replay_valid", True)),
         "history_turn_count": len(history),
         "tool_call_count": sum(len(turn.get("tool_calls") or []) for turn in history if isinstance(turn, dict)),
@@ -199,10 +200,78 @@ def _implement_v2_replay_summary(report_path, report):
         "terminal_evidence_count": int(metrics.get("terminal_evidence_count") or 0),
         "write_evidence_count": int(metrics.get("write_evidence_count") or 0),
         "latest_failure": _implement_v2_latest_failure(failed_results),
+        "model_error": model_error,
         "active_command_closeout_failed": _implement_v2_active_command_closeout_failed(failed_results),
         "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
         "artifact_dir": str(artifact_dir) if artifact_dir else "",
     }
+
+
+def _implement_v2_step_status(work_report):
+    steps = work_report.get("steps") if isinstance(work_report, dict) else []
+    if not isinstance(steps, list) or not steps:
+        return ""
+    for step in reversed(steps):
+        if isinstance(step, dict) and step.get("status"):
+            return str(step.get("status") or "")
+    return ""
+
+
+def _implement_v2_model_error_from_report(report, *, history, metrics, manifest):
+    manifest_metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    for source in (metrics, manifest_metrics):
+        model_error = source.get("model_error") if isinstance(source, dict) else {}
+        if isinstance(model_error, dict) and model_error:
+            return _normalize_implement_v2_model_error(model_error)
+    for turn in reversed(history):
+        if isinstance(turn, dict) and isinstance(turn.get("model_error"), dict):
+            return _normalize_implement_v2_model_error(turn["model_error"])
+    work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
+    steps = work_report.get("steps") if isinstance(work_report.get("steps"), list) else []
+    for step in reversed(steps):
+        if not isinstance(step, dict):
+            continue
+        model_turn = step.get("model_turn") if isinstance(step.get("model_turn"), dict) else {}
+        if str(step.get("status") or "") != "failed" and str(model_turn.get("status") or "") != "failed":
+            continue
+        model_metrics = model_turn.get("model_metrics") if isinstance(model_turn.get("model_metrics"), dict) else {}
+        candidates = [
+            model_metrics.get("error") if isinstance(model_metrics, dict) else "",
+            model_turn.get("error") if isinstance(model_turn, dict) else "",
+            step.get("error"),
+        ]
+        for candidate in candidates:
+            text = str(candidate or "")
+            if text:
+                return _normalize_implement_v2_model_error({"message": text, "error_type": "ModelBackendError"})
+    return {}
+
+
+def _normalize_implement_v2_model_error(model_error):
+    message = str(model_error.get("message") or model_error.get("error") or "")
+    failure_class = str(model_error.get("failure_class") or "")
+    lowered = message.casefold()
+    if not failure_class:
+        if "failed to parse json plan" in lowered or "response did not contain json" in lowered:
+            failure_class = "model_json_parse_error"
+        elif "request timed out" in lowered or "timed out" in lowered or "timeout" in lowered:
+            failure_class = "model_timeout"
+        else:
+            failure_class = "model_backend_error"
+    return {
+        "failure_class": failure_class,
+        "error_type": str(model_error.get("error_type") or "ModelBackendError"),
+        "message": _clip_text(message),
+        "raw_excerpt": _clip_text(model_error.get("raw_excerpt") or _raw_excerpt_from_error_text(message)),
+    }
+
+
+def _raw_excerpt_from_error_text(message):
+    marker = "raw="
+    index = str(message).find(marker)
+    if index == -1:
+        return ""
+    return str(message)[index + len(marker) :]
 
 
 def _implement_v2_latest_failure(failed_results):
@@ -262,6 +331,11 @@ def _implement_v2_next_action(summary):
         return ""
     if str(summary.get("lane_status") or "") == "completed" and bool(summary.get("replay_valid", True)):
         return "record implement_v2 pass and continue M6.24 scoped parity"
+    model_error = summary.get("model_error") if isinstance(summary.get("model_error"), dict) else {}
+    if model_error.get("failure_class") == "model_json_parse_error":
+        return "debug implement_v2 divergence: repair model_json parse failure before another live speed run"
+    if model_error:
+        return "debug implement_v2 divergence: inspect model backend failure before another live speed run"
     latest = summary.get("latest_failure") if isinstance(summary.get("latest_failure"), dict) else {}
     if not summary.get("compiled_source_frontier_observed"):
         return "debug implement_v2 divergence: broaden compiled/native source frontier before another live speed run"

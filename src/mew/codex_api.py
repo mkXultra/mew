@@ -614,12 +614,16 @@ def extract_json_object(text):
     except json.JSONDecodeError:
         pass
 
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise CodexApiError("response did not contain JSON")
+    decoder = json.JSONDecoder()
+    start = 0 if stripped.startswith("{") else stripped.find("{")
+    if start != -1:
+        try:
+            value, _end = decoder.raw_decode(stripped[start:])
+        except json.JSONDecodeError as exc:
+            raise CodexApiError("response did not contain valid JSON object") from exc
+        return value
 
-    return json.loads(stripped[start : end + 1])
+    raise CodexApiError("response did not contain JSON")
 
 def call_codex_json(auth, prompt, model, base_url, timeout, on_text_delta=None):
     text = call_codex_web_api(auth, prompt, model, base_url, timeout, on_text_delta=on_text_delta)

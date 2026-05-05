@@ -88,6 +88,64 @@ class TerminalBenchReplayTests(unittest.TestCase):
         )
         return trial_dir.parent
 
+    def _write_implement_v2_model_error_fixture(self, root):
+        trial_dir = Path(root) / "job" / "feal-differential-cryptanalysis__v2modelerror"
+        agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+        verifier_dir = trial_dir / "verifier"
+        agent_dir.mkdir(parents=True)
+        verifier_dir.mkdir(parents=True)
+        (trial_dir / "result.json").write_text(
+            json.dumps(
+                {
+                    "trial_name": "feal-differential-cryptanalysis__v2modelerror",
+                    "verifier_result": {"reward": 0.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (verifier_dir / "test-stdout.txt").write_text(
+            "ModuleNotFoundError: No module named 'attack'\n",
+            encoding="utf-8",
+        )
+        (agent_dir / "command-transcript.json").write_text(
+            json.dumps({"exit_code": 1, "timed_out": False}),
+            encoding="utf-8",
+        )
+        parse_error = 'failed to parse JSON plan: Extra data; raw={"summary":"bad"} trailing'
+        (agent_dir / "mew-report.json").write_text(
+            json.dumps(
+                {
+                    "work_exit_code": 1,
+                    "resume": {},
+                    "work_report": {
+                        "stop_reason": "implement_v2_failed",
+                        "runtime_id": "implement_v2_model_json_tool_loop",
+                        "selected_lane": "implement_v2",
+                        "steps": [
+                            {
+                                "status": "failed",
+                                "action": {
+                                    "type": "implement_lane",
+                                    "lane": "implement_v2",
+                                    "runtime_id": "implement_v2_model_json_tool_loop",
+                                },
+                                "error": parse_error,
+                                "model_turn": {
+                                    "status": "failed",
+                                    "model_metrics": {
+                                        "runtime_id": "implement_v2_model_json_tool_loop",
+                                        "error": parse_error,
+                                    },
+                                },
+                            }
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return trial_dir.parent
+
     def test_replay_terminal_bench_job_recomputes_current_resume_from_fixture(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = _write_terminal_bench_replay_fixture(tmp)
@@ -165,6 +223,23 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertFalse(current_v2["compiled_source_frontier_observed"])
             self.assertIn("compiled/native source frontier", trial["current"]["next_action"])
             self.assertIn("implement_v2:", text)
+
+    def test_replay_terminal_bench_job_accepts_implement_v2_model_parse_error_without_tool_calls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_model_error_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="feal-differential-cryptanalysis",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(trial["current"]["recomputed"])
+            self.assertEqual(current_v2["model_error"]["failure_class"], "model_json_parse_error")
+            self.assertIn("model_json parse failure", trial["current"]["next_action"])
 
     def test_replay_terminal_bench_job_detects_implement_v2_active_command_closeout_gap(self):
         with tempfile.TemporaryDirectory() as tmp:
