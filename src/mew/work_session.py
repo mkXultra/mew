@@ -14,6 +14,7 @@ from .acceptance import (
 )
 from .acceptance_evidence import COMMAND_EVIDENCE_TOOLS, long_dependency_artifact_proven_by_call
 from .cli_command import mew_command, mew_executable
+from .compatibility_frontier import update_session_active_compatibility_frontier
 from .data_tools import analyze_table
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
@@ -10679,6 +10680,14 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         limit=4,
     )
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
+    search_anchor_observations = build_search_anchor_observations(calls, limit=5)
+    update_session_active_compatibility_frontier(
+        session,
+        calls,
+        verifier_failure_repair_agenda=verifier_failure_repair_agenda,
+        search_anchor_observations=search_anchor_observations,
+        current_time=current_time or session.get("updated_at"),
+    )
     stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
     final_verifier_state_transfer = build_final_verifier_state_transfer(task, calls, session=session)
     long_build_state = build_long_build_state(task, calls, session=session)
@@ -10755,7 +10764,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
-        "search_anchor_observations": build_search_anchor_observations(calls, limit=5),
+        "search_anchor_observations": search_anchor_observations,
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": adjacent_read_observations,
         "demoted_adjacent_read_observations": demoted_adjacent_read_observations,

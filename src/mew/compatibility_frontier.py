@@ -1,0 +1,873 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+
+
+SCHEMA_VERSION = 1
+FINGERPRINT_VERSION = "active_compatibility_frontier_failure_signature_v1"
+PRIMARY_TOKEN_CATEGORIES = (
+    "error_tokens",
+    "missing_symbol_tokens",
+    "failing_test_tokens",
+    "stack_anchor_tokens",
+)
+OPEN_CANDIDATE_STATUSES = {"unexplored", "read", "anchored", "edited"}
+
+
+def _clip_text(value, limit=160):
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 3)]}..."
+
+
+def _dedupe(items):
+    result = []
+    seen = set()
+    for item in items or []:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _stable_token(value, *, lower=True):
+    text = str(value or "").strip()
+    text = text.replace("\\", "/")
+    text = re.sub(r"\[[^\]]+\]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip(" \t\r\n\"'`.,:;")
+    return text.casefold() if lower else text
+
+
+def _normalize_path(value, *, cwd=""):
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    cwd = str(cwd or "").strip().replace("\\", "/")
+    if cwd and text == cwd:
+        return "<repo>"
+    if cwd and text.startswith(f"{cwd}/"):
+        text = f"<repo>/{text[len(cwd) + 1:]}"
+    text = re.sub(r"/private/var/folders/[^ \t\r\n\"']+", "<tmp>", text)
+    text = re.sub(r"/var/folders/[^ \t\r\n\"']+", "<tmp>", text)
+    text = re.sub(r"/tmp/[^ \t\r\n\"']+", "<tmp>", text)
+    text = re.sub(r"/(?:Users|home)/[^/]+/\.cache/[^ \t\r\n\"']+", "<cache>", text)
+    return text
+
+
+def _normalize_shape(value, *, cwd=""):
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    if cwd:
+        cwd_text = str(cwd).strip().replace("\\", "/")
+        text = text.replace(cwd_text, "<repo>")
+    text = _normalize_path(text, cwd=cwd)
+    text = re.sub(r"0x[0-9a-fA-F]+", "0x<hex>", text)
+    text = re.sub(r"\b\d+(?:\.\d+)?s\b", "<duration>", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _canonical_hash(core):
+    canonical = json.dumps(core, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(f"{FINGERPRINT_VERSION}\n{canonical}".encode("utf-8")).hexdigest()
+
+
+def _short_id(prefix, core):
+    return f"{prefix}-{_canonical_hash(core)[:12]}"
+
+
+def _call_id(call):
+    if not isinstance(call, dict):
+        return None
+    return call.get("id")
+
+
+def _find_call(calls, tool_call_id):
+    wanted = str(tool_call_id or "")
+    if not wanted:
+        return {}
+    for call in calls or []:
+        if isinstance(call, dict) and str(call.get("id") or "") == wanted:
+            return call
+    return {}
+
+
+def _source_call_for_agenda(calls, agenda):
+    return _find_call(calls, (agenda or {}).get("source_tool_call_id"))
+
+
+def _exit_class(source_call, agenda):
+    source_call = source_call if isinstance(source_call, dict) else {}
+    result = source_call.get("result") if isinstance(source_call.get("result"), dict) else {}
+    exit_code = (agenda or {}).get("exit_code")
+    if exit_code is None:
+        exit_code = result.get("exit_code")
+    status = str(source_call.get("status") or "").casefold()
+    error_text = str(source_call.get("error") or "").casefold()
+    if "timeout" in status or "timeout" in error_text or "timed out" in error_text:
+        return "timeout"
+    if exit_code not in (None, "", 0, "0"):
+        return "nonzero"
+    if status in {"failed", "interrupted"}:
+        return "tool_failed"
+    return "tool_failed" if (agenda or {}).get("error_lines") else "unknown"
+
+
+def _error_tokens(error_lines):
+    tokens = []
+    for line in error_lines or []:
+        text = str(line or "")
+        for token in re.findall(r"\b([A-Za-z_][\w.]*?(?:Error|Exception|Failure|Timeout|Fault))\b", text):
+            tokens.append(token.rsplit(".", 1)[-1].casefold())
+        lowered = text.casefold()
+        for phrase, token in (
+            ("segmentation fault", "segmentation_fault"),
+            ("assertion failed", "assertion_failed"),
+            ("command not found", "command_not_found"),
+            ("permission denied", "permission_denied"),
+        ):
+            if phrase in lowered:
+                tokens.append(token)
+    return sorted(_dedupe(tokens))
+
+
+def _missing_symbol_tokens(agenda):
+    tokens = []
+    for symbol in (agenda or {}).get("symbols") or []:
+        token = _stable_token(symbol, lower=False)
+        if token:
+            tokens.append(token)
+    for line in (agenda or {}).get("error_lines") or []:
+        text = str(line or "")
+        for pattern in (
+            r"has no attribute ['\"]([^'\"]+)['\"]",
+            r"cannot import name ['\"]([^'\"]+)['\"]",
+            r"No module named ['\"]([^'\"]+)['\"]",
+            r"undefined symbol:?\s+([A-Za-z_][\w.]*)",
+            r"unresolved symbol:?\s+([A-Za-z_][\w.]*)",
+        ):
+            for match in re.findall(pattern, text):
+                token = _stable_token(match, lower=False)
+                if token:
+                    tokens.append(token)
+    return sorted(_dedupe(tokens), key=lambda item: item.casefold())
+
+
+def _normalize_test_token(value):
+    text = str(value or "").strip().replace("\\", "/")
+    text = re.sub(r"\[[^\]]+\]", "", text)
+    text = text.rstrip(":.,")
+    return text
+
+
+def _failing_test_tokens(error_lines):
+    tokens = []
+    for line in error_lines or []:
+        text = str(line or "")
+        for match in re.findall(r"\b(?:FAILED|ERROR)\s+([^\s]+)", text):
+            token = _normalize_test_token(match)
+            if token:
+                tokens.append(token)
+        for match in re.findall(r"((?:tests?/|[^:\s]+/tests?/)[^:\s]*\.py(?:::[A-Za-z_][\w.\-]*)?)", text):
+            token = _normalize_test_token(match)
+            if token:
+                tokens.append(token)
+        for match in re.findall(r"\b([^:\s]+test[^:\s]*\.py):\d+\b", text):
+            token = _normalize_test_token(match)
+            if token:
+                tokens.append(token)
+    return sorted(_dedupe(tokens), key=lambda item: item.casefold())
+
+
+def _stack_anchor_tokens(source_locations, *, cwd=""):
+    tokens = []
+    for location in source_locations or []:
+        if not isinstance(location, dict):
+            continue
+        path = _normalize_path(location.get("path") or "", cwd=cwd)
+        if path:
+            tokens.append(path)
+    return sorted(_dedupe(tokens), key=lambda item: item.casefold())
+
+
+def _runtime_component_kind(agenda, error_lines, command_shape):
+    runtime_gap = (agenda or {}).get("runtime_contract_gap")
+    if isinstance(runtime_gap, dict) and runtime_gap:
+        gap_kind = str(runtime_gap.get("kind") or "").casefold()
+        if any(token in gap_kind for token in ("opcode", "instruction", "program", "syscall", "register")):
+            return "custom_runtime"
+        return "custom_runtime"
+    text = "\n".join(str(line or "") for line in error_lines or [])
+    combined = f"{text}\n{command_shape}".casefold()
+    if any(token in combined for token in ("dlopen", "ctypes", "cffi", "ffi.load")):
+        return "shared_library"
+    if re.search(r"\.(so|pyd|dylib|dll)\b", combined):
+        if any(token in combined for token in ("import", "initialization", "module")):
+            return "native_module"
+        return "shared_library"
+    if any(token in combined for token in ("plugin", "entrypoint", "entry point")):
+        return "plugin"
+    if any(token in combined for token in ("exec format", "permission denied", "command not found", "spawn", "shebang")):
+        return "executable"
+    if any(token in combined for token in ("opcode", "program counter", "pc=", "pc=0x", "register", "frame artifact")):
+        return "custom_runtime"
+    return "unknown"
+
+
+def _platform_tokens(error_lines, command_shape):
+    text = f"{command_shape}\n" + "\n".join(str(line or "") for line in error_lines or [])
+    tokens = []
+    for major, minor in re.findall(r"\bpython(?:\s|-)?([23])\.(\d+)\b", text, flags=re.IGNORECASE):
+        tokens.append(f"python-{major}.{minor}")
+    lowered = text.casefold()
+    for token in ("linux", "darwin", "windows", "macos"):
+        if token in lowered:
+            tokens.append("darwin" if token == "macos" else token)
+    return sorted(_dedupe(tokens))
+
+
+def _execution_contract(source_call):
+    source_call = source_call if isinstance(source_call, dict) else {}
+    parameters = source_call.get("parameters") if isinstance(source_call.get("parameters"), dict) else {}
+    contract = parameters.get("execution_contract") if isinstance(parameters.get("execution_contract"), dict) else {}
+    return {
+        key: _stable_token(contract.get(key))
+        for key in ("purpose", "stage", "proof_role", "acceptance_kind", "risk_class")
+        if str(contract.get(key) or "").strip()
+    }
+
+
+def _command_evidence_ref(source_call):
+    source_call = source_call if isinstance(source_call, dict) else {}
+    ref = source_call.get("command_evidence_ref")
+    if not isinstance(ref, dict) or not ref:
+        return {}
+    result = {}
+    for key in ("kind", "id", "path", "command_run_id"):
+        if ref.get(key) not in (None, "", [], {}):
+            result[key] = ref.get(key)
+    if not result:
+        result = {"kind": "command_evidence"}
+    result.setdefault("kind", "command_evidence")
+    return result
+
+
+def build_failure_signature(verifier_failure_repair_agenda, source_call=None):
+    agenda = verifier_failure_repair_agenda if isinstance(verifier_failure_repair_agenda, dict) else {}
+    if not agenda:
+        return {}
+    source_call = source_call if isinstance(source_call, dict) else {}
+    result = source_call.get("result") if isinstance(source_call.get("result"), dict) else {}
+    parameters = source_call.get("parameters") if isinstance(source_call.get("parameters"), dict) else {}
+    command = agenda.get("command") or result.get("command") or parameters.get("command") or ""
+    cwd = agenda.get("cwd") or result.get("cwd") or parameters.get("cwd") or ""
+    command_shape = _normalize_shape(command, cwd=cwd)
+    cwd_shape = "<repo>" if cwd and _normalize_path(cwd, cwd=cwd) == "<repo>" else _normalize_path(cwd, cwd=cwd)
+    error_lines = list(agenda.get("error_lines") or [])
+    runtime_component_kind = _runtime_component_kind(agenda, error_lines, command_shape)
+    kind = "runtime_failure" if runtime_component_kind != "unknown" else "verifier_failure"
+    token_categories = {
+        "error_tokens": _error_tokens(error_lines),
+        "missing_symbol_tokens": _missing_symbol_tokens(agenda),
+        "failing_test_tokens": _failing_test_tokens(error_lines),
+        "stack_anchor_tokens": _stack_anchor_tokens(agenda.get("source_locations") or [], cwd=cwd),
+        "component_tokens": [] if runtime_component_kind == "unknown" else [runtime_component_kind],
+        "platform_tokens": _platform_tokens(error_lines, command_shape),
+    }
+    execution_contract = _execution_contract(source_call)
+    exit_class = _exit_class(source_call, agenda)
+    strict_core = {
+        "schema_version": SCHEMA_VERSION,
+        "fingerprint_version": FINGERPRINT_VERSION,
+        "kind": kind,
+        "tool": _stable_token(agenda.get("tool") or source_call.get("tool") or ""),
+        "command_shape": command_shape,
+        "cwd_shape": cwd_shape,
+        "execution_contract": execution_contract,
+        "exit_class": exit_class,
+        "error_tokens": token_categories["error_tokens"],
+        "missing_symbol_tokens": token_categories["missing_symbol_tokens"],
+        "failing_test_tokens": token_categories["failing_test_tokens"],
+        "stack_anchor_tokens": token_categories["stack_anchor_tokens"][:3],
+        "runtime_component_kind": runtime_component_kind,
+        "platform_facts": token_categories["platform_tokens"],
+    }
+    family_core = {
+        "kind": kind,
+        "stage": execution_contract.get("stage") or "",
+        "proof_role": execution_contract.get("proof_role") or "",
+        "error_tokens": token_categories["error_tokens"],
+        "missing_symbol_tokens": token_categories["missing_symbol_tokens"],
+        "failing_test_tokens": token_categories["failing_test_tokens"],
+        "runtime_component_kind": runtime_component_kind,
+        "first_stable_stack_anchor": (token_categories["stack_anchor_tokens"] or [""])[0],
+    }
+    command_ref = _command_evidence_ref(source_call)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "fingerprint_version": FINGERPRINT_VERSION,
+        "kind": kind,
+        "fingerprint": _canonical_hash(strict_core),
+        "family_key": _canonical_hash(family_core),
+        "source_tool_call_id": agenda.get("source_tool_call_id") or source_call.get("id"),
+        "command_evidence_ref": command_ref,
+        "tool": agenda.get("tool") or source_call.get("tool") or "",
+        "command_shape": command_shape,
+        "cwd_shape": cwd_shape,
+        "execution_contract": execution_contract,
+        "exit_class": exit_class,
+        "error_fingerprint": "|".join(
+            token_categories["error_tokens"]
+            + token_categories["missing_symbol_tokens"]
+            + token_categories["failing_test_tokens"][:3]
+            + token_categories["stack_anchor_tokens"][:3]
+        ),
+        "failing_tests": token_categories["failing_test_tokens"],
+        "runtime_component_kind": runtime_component_kind,
+        "platform_facts": token_categories["platform_tokens"],
+        "token_categories": token_categories,
+    }
+
+
+def _evidence_refs(agenda, source_call, search_anchor_observations):
+    refs = []
+    command_ref = _command_evidence_ref(source_call)
+    if command_ref:
+        ref = dict(command_ref)
+        ref["summary"] = "command evidence for compatibility frontier failure"
+        refs.append(ref)
+    source_id = (agenda or {}).get("source_tool_call_id") or _call_id(source_call)
+    if source_id not in (None, ""):
+        refs.append(
+            {
+                "kind": "tool_call",
+                "id": source_id,
+                "summary": (
+                    f"{(agenda or {}).get('tool') or (source_call or {}).get('tool') or 'tool'} "
+                    f"exit={(agenda or {}).get('exit_code')}"
+                ),
+            }
+        )
+    if agenda:
+        refs.append(
+            {
+                "kind": "resume_key",
+                "key": "verifier_failure_repair_agenda",
+                "summary": "normalized verifier failure agenda",
+            }
+        )
+    for observation in search_anchor_observations or []:
+        if not isinstance(observation, dict) or observation.get("tool_call_id") in (None, ""):
+            continue
+        refs.append(
+            {
+                "kind": "tool_call",
+                "id": observation.get("tool_call_id"),
+                "summary": f"successful search anchor for {observation.get('path') or observation.get('query') or 'candidate'}",
+            }
+        )
+    return _merge_dicts_by_identity([], refs, limit=20)
+
+
+def _line_number(value):
+    try:
+        if value in (None, ""):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _anchor(kind, *, subject="", path="", line=None, query="", source_event=None, read_status="unread", evidence_refs=None):
+    source_event = source_event if isinstance(source_event, dict) else {}
+    anchor = {
+        "id": _short_id("anchor", {"kind": kind, "subject": subject, "path": path, "line": line, "query": query}),
+        "kind": kind,
+        "subject": subject,
+        "path": path,
+        "line": line,
+        "query": query,
+        "source_event": source_event,
+        "read_status": read_status,
+        "evidence_refs": list(evidence_refs or [])[:5],
+    }
+    return {key: value for key, value in anchor.items() if value not in (None, "", [], {})}
+
+
+def _build_anchors(agenda, signature, search_anchor_observations, evidence_refs, *, cwd=""):
+    anchors = []
+    source_event = {"kind": "tool_call", "id": (agenda or {}).get("source_tool_call_id")}
+    for location in (agenda or {}).get("source_locations") or []:
+        if not isinstance(location, dict):
+            continue
+        path = _normalize_path(location.get("path") or "", cwd=cwd)
+        if not path:
+            continue
+        line = _line_number(location.get("line"))
+        subject = f"{path}:{line}" if line else path
+        anchors.append(
+            _anchor(
+                "source_location",
+                subject=subject,
+                path=path,
+                line=line,
+                source_event=source_event,
+                evidence_refs=evidence_refs,
+            )
+        )
+    for test_name in (signature or {}).get("failing_tests") or []:
+        anchors.append(
+            _anchor(
+                "test_name",
+                subject=test_name,
+                source_event=source_event,
+                read_status="not_needed",
+                evidence_refs=evidence_refs,
+            )
+        )
+    for query in (agenda or {}).get("sibling_search_queries") or []:
+        query_text = _clip_text(query, 160)
+        if query_text:
+            anchors.append(
+                _anchor(
+                    "search_query",
+                    subject=query_text,
+                    query=query_text,
+                    source_event=source_event,
+                    evidence_refs=evidence_refs,
+                )
+            )
+    for observation in search_anchor_observations or []:
+        if not isinstance(observation, dict):
+            continue
+        path = _normalize_path(observation.get("path") or "")
+        line = _line_number(observation.get("first_match_line"))
+        query = _clip_text(observation.get("query") or observation.get("pattern") or "", 160)
+        subject = f"{path}:{line}" if path and line else path or query
+        anchors.append(
+            _anchor(
+                "search_match",
+                subject=subject,
+                path=path,
+                line=line,
+                query=query,
+                source_event={"kind": "tool_call", "id": observation.get("tool_call_id")},
+                evidence_refs=evidence_refs,
+            )
+        )
+    return _merge_dicts_by_identity([], anchors, id_key="id", limit=30)
+
+
+def _candidate(kind, *, subject="", path="", anchors=None, reason="", status="unexplored", evidence_refs=None):
+    candidate = {
+        "id": _short_id("candidate", {"kind": kind, "subject": subject, "path": path}),
+        "kind": kind,
+        "subject": subject,
+        "path": path,
+        "anchors": list(anchors or [])[:10],
+        "reason": _clip_text(reason, 240),
+        "status": status,
+        "rejection_reason": "",
+        "evidence_refs": list(evidence_refs or [])[:5],
+    }
+    return {key: value for key, value in candidate.items() if value not in (None, "", [], {})}
+
+
+def _build_candidates(agenda, signature, anchors, evidence_refs):
+    candidates = []
+    anchors_by_path = {}
+    anchors_by_subject = {}
+    for anchor in anchors or []:
+        path = anchor.get("path")
+        subject = anchor.get("subject")
+        if path:
+            anchors_by_path.setdefault(path, []).append(anchor.get("id"))
+        if subject:
+            anchors_by_subject.setdefault(subject, []).append(anchor.get("id"))
+    for path, anchor_ids in anchors_by_path.items():
+        candidates.append(
+            _candidate(
+                "file",
+                subject=path,
+                path=path,
+                anchors=anchor_ids,
+                reason="verifier or search evidence names this source surface",
+                status="anchored",
+                evidence_refs=evidence_refs,
+            )
+        )
+    for test_name in (signature or {}).get("failing_tests") or []:
+        candidates.append(
+            _candidate(
+                "test",
+                subject=test_name,
+                anchors=anchors_by_subject.get(test_name) or [],
+                reason="verifier output identifies this failing test or check",
+                status="anchored",
+                evidence_refs=evidence_refs,
+            )
+        )
+    for symbol in (agenda or {}).get("symbols") or []:
+        subject = _stable_token(symbol, lower=False)
+        if not subject:
+            continue
+        candidates.append(
+            _candidate(
+                "symbol",
+                subject=subject,
+                anchors=[],
+                reason="verifier output names a missing or incompatible symbol",
+                status="unexplored",
+                evidence_refs=evidence_refs,
+            )
+        )
+    runtime_kind = (signature or {}).get("runtime_component_kind") or "unknown"
+    if runtime_kind != "unknown":
+        candidates.append(
+            _candidate(
+                "runtime_entrypoint",
+                subject=runtime_kind,
+                anchors=[],
+                reason="positive runtime-component evidence is present in the verifier failure",
+                status="unexplored",
+                evidence_refs=evidence_refs,
+            )
+        )
+    return _merge_dicts_by_identity([], candidates, id_key="id", limit=30)
+
+
+def _open_candidates(candidates):
+    return [item for item in candidates or [] if str(item.get("status") or "") in OPEN_CANDIDATE_STATUSES]
+
+
+def _closure_state(anchors, candidates, signature):
+    unread_anchors = [
+        item
+        for item in anchors or []
+        if item.get("read_status") == "unread" and item.get("kind") in {"source_location", "search_match"}
+    ]
+    search_queries = [item for item in anchors or [] if item.get("kind") == "search_query"]
+    open_candidates = _open_candidates(candidates)
+    runtime_kind = (signature or {}).get("runtime_component_kind") or "unknown"
+    verifier_obligations = []
+    if runtime_kind != "unknown":
+        verifier_obligations.append("invoke behavior through original runtime context")
+    if unread_anchors:
+        state = "read_needed"
+        next_action = f"read_file {unread_anchors[0].get('path')}:{unread_anchors[0].get('line') or 1}"
+    elif search_queries:
+        state = "search_needed"
+        next_action = f"search_text {search_queries[0].get('query')}"
+    elif open_candidates:
+        state = "edit_needed"
+        next_action = "repair the open same-family sibling candidates"
+    else:
+        state = "cheap_verify_needed"
+        next_action = "run the cheapest verifier that exercises this failure family"
+    has_signature = bool((signature or {}).get("fingerprint"))
+    evidence_strength = "none"
+    if has_signature:
+        evidence_strength = "actionable"
+    broad_blocker = bool(unread_anchors or search_queries or open_candidates)
+    finish_blocker = bool(verifier_obligations or broad_blocker)
+    if finish_blocker:
+        evidence_strength = "blocking"
+    blocked_actions = []
+    if broad_blocker or finish_blocker:
+        blocked_actions.append("broad_verifier")
+    if finish_blocker:
+        blocked_actions.append("finish")
+    if unread_anchors or search_queries:
+        blocked_actions.append("repeat_search")
+    guard_mode = "observe_only"
+    if evidence_strength == "actionable":
+        guard_mode = "prompt_nudge"
+    if "broad_verifier" in blocked_actions:
+        guard_mode = "block_broad"
+    if "finish" in blocked_actions:
+        guard_mode = "block_finish"
+    return {
+        "state": state,
+        "reason": "same-family compatibility frontier has open evidence obligations",
+        "evidence_strength": evidence_strength,
+        "guard_mode": guard_mode,
+        "open_candidate_count": len(open_candidates),
+        "unread_anchor_count": len(unread_anchors),
+        "unverified_patch_batch_count": 0,
+        "verifier_obligations": verifier_obligations,
+        "blocked_action_kinds": blocked_actions,
+        "blocked_action_fingerprints": [],
+        "broad_verifier_allowed": "broad_verifier" not in blocked_actions
+        and state in {"broad_verify_ready", "closed", "deferred"},
+        "finish_allowed": "finish" not in blocked_actions and state in {"closed", "deferred"} and not verifier_obligations,
+        "next_action": _clip_text(next_action, 220),
+    }
+
+
+def _hypotheses(candidates, closure_state, current_time):
+    open_candidate_ids = [item.get("id") for item in _open_candidates(candidates)]
+    required_next_action = {
+        "search_needed": "search",
+        "read_needed": "read",
+        "edit_needed": "edit",
+        "cheap_verify_needed": "cheap_verify",
+        "broad_verify_ready": "broad_verify",
+        "closed": "finish",
+        "deferred": "defer",
+    }.get((closure_state or {}).get("state"), "search")
+    return [
+        {
+            "id": _short_id("hypothesis", {"candidate_ids": open_candidate_ids, "action": required_next_action}),
+            "summary": "same-family compatibility repair remains open in visible siblings",
+            "status": "open",
+            "candidate_ids": open_candidate_ids[:10],
+            "expected_effect": "cheap verifier changes or clears the failure signature",
+            "required_next_action": required_next_action,
+            "blocking_evidence_refs": [],
+            "updated_at": current_time,
+        }
+    ]
+
+
+def _verifier_history_entry(signature, agenda, source_call, transition):
+    source_call = source_call if isinstance(source_call, dict) else {}
+    exit_code = (agenda or {}).get("exit_code")
+    if exit_code is None:
+        result = source_call.get("result") if isinstance(source_call.get("result"), dict) else {}
+        exit_code = result.get("exit_code")
+    command_ref = (signature or {}).get("command_evidence_ref") or {}
+    scope = "broad"
+    contract = (signature or {}).get("execution_contract") or {}
+    if contract.get("proof_role") in {"targeted", "cheap", "behavior"} or contract.get("stage") in {"targeted", "behavior"}:
+        scope = "targeted"
+    return {
+        "id": _short_id(
+            "verifier",
+            {
+                "tool_call_id": (agenda or {}).get("source_tool_call_id") or source_call.get("id"),
+                "signature": (signature or {}).get("fingerprint"),
+            },
+        ),
+        "kind": "targeted_test" if scope == "targeted" else "broad_build",
+        "scope": scope,
+        "command_evidence_ref": command_ref,
+        "tool_call_id": (agenda or {}).get("source_tool_call_id") or source_call.get("id"),
+        "exit_code": exit_code,
+        "signature_fingerprint": (signature or {}).get("fingerprint") or "",
+        "family_changed": transition not in {"same", "narrower"},
+        "closed_candidate_ids": [],
+        "opened_candidate_ids": [],
+        "notes": f"{(signature or {}).get('kind') or 'failure'} observed; transition={transition}",
+    }
+
+
+def _dict_identity(item, id_key="id"):
+    if not isinstance(item, dict):
+        return str(item)
+    if item.get(id_key) not in (None, ""):
+        return f"{id_key}:{item.get(id_key)}"
+    stable = {key: value for key, value in item.items() if key not in {"summary", "notes", "updated_at"}}
+    return json.dumps(stable, sort_keys=True, default=str)
+
+
+def _merge_dicts_by_identity(existing, incoming, *, id_key="id", limit=50):
+    merged = []
+    seen = set()
+    for item in list(existing or []) + list(incoming or []):
+        if not isinstance(item, dict):
+            continue
+        identity = _dict_identity(item, id_key=id_key)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        merged.append(dict(item))
+    return merged[-limit:]
+
+
+def category_overlap(new_signature, previous_signature):
+    new_categories = (new_signature or {}).get("token_categories") or {}
+    previous_categories = (previous_signature or {}).get("token_categories") or {}
+    overlap_categories = []
+    contradiction_categories = []
+    narrowed_categories = []
+    for category in PRIMARY_TOKEN_CATEGORIES:
+        new_tokens = set(new_categories.get(category) or [])
+        previous_tokens = set(previous_categories.get(category) or [])
+        if not new_tokens or not previous_tokens:
+            continue
+        if new_tokens & previous_tokens:
+            overlap_categories.append(category)
+            if len(new_tokens) < len(previous_tokens):
+                narrowed_categories.append(category)
+        else:
+            contradiction_categories.append(category)
+    primary_overlap = bool(overlap_categories)
+    execution_new = (new_signature or {}).get("execution_contract") or {}
+    execution_previous = (previous_signature or {}).get("execution_contract") or {}
+    command_stage_moved = any(
+        execution_new.get(key)
+        and execution_previous.get(key)
+        and execution_new.get(key) != execution_previous.get(key)
+        for key in ("stage", "proof_role")
+    )
+    new_stack = set(new_categories.get("stack_anchor_tokens") or [])
+    previous_stack = set(previous_categories.get("stack_anchor_tokens") or [])
+    stack_moved = bool(new_stack and previous_stack and not (new_stack & previous_stack))
+    behavior_surface_moved = bool(
+        (new_signature or {}).get("command_shape")
+        and (previous_signature or {}).get("command_shape")
+        and (new_signature or {}).get("command_shape") != (previous_signature or {}).get("command_shape")
+    )
+    return {
+        "primary_overlap": primary_overlap,
+        "overlap_categories": overlap_categories,
+        "contradiction_categories": contradiction_categories,
+        "narrowed_categories": narrowed_categories,
+        "narrower": primary_overlap and not contradiction_categories and bool(narrowed_categories),
+        "moved": primary_overlap and (stack_moved or command_stage_moved or behavior_surface_moved),
+    }
+
+
+def family_transition(new_signature, previous_frontier):
+    previous_signature = (previous_frontier or {}).get("failure_signature") if isinstance(previous_frontier, dict) else {}
+    if not previous_signature:
+        return "new", category_overlap(new_signature, {})
+    overlap = category_overlap(new_signature, previous_signature)
+    if (new_signature or {}).get("family_key") and (new_signature or {}).get("family_key") == previous_signature.get("family_key"):
+        if overlap.get("primary_overlap") or (
+            (new_signature or {}).get("fingerprint")
+            and (new_signature or {}).get("fingerprint") == previous_signature.get("fingerprint")
+        ):
+            return "same", overlap
+        return "new", overlap
+    if overlap.get("narrower"):
+        return "narrower", overlap
+    if overlap.get("moved"):
+        return "moved", overlap
+    return "new", overlap
+
+
+def _next_frontier_id(session):
+    session = session if isinstance(session, dict) else {}
+    try:
+        ordinal = int(session.get("active_compatibility_frontier_ordinal") or 0) + 1
+    except (TypeError, ValueError):
+        ordinal = 1
+    session["active_compatibility_frontier_ordinal"] = ordinal
+    session_id = session.get("id") or "session"
+    return f"compat-frontier-{session_id}-{ordinal}"
+
+
+def _compact_summary(frontier):
+    signature = (frontier or {}).get("failure_signature") or {}
+    closure = (frontier or {}).get("closure_state") or {}
+    open_candidates = [item.get("id") for item in _open_candidates((frontier or {}).get("sibling_candidates") or [])]
+    one_line = (
+        f"{signature.get('kind') or 'compatibility'} frontier; "
+        f"{len(open_candidates)} sibling candidates open"
+    )
+    return {
+        "one_line": one_line,
+        "failure_signature": signature.get("fingerprint") or "",
+        "evidence_refs": list((frontier or {}).get("evidence_refs") or [])[:8],
+        "open_candidates": open_candidates[:8],
+        "next_action": closure.get("next_action") or "",
+        "guard_mode": closure.get("guard_mode") or "observe_only",
+        "blocked_action_kinds": list(closure.get("blocked_action_kinds") or []),
+    }
+
+
+def build_active_compatibility_frontier(
+    session,
+    calls,
+    *,
+    verifier_failure_repair_agenda=None,
+    search_anchor_observations=None,
+    current_time=None,
+):
+    session = session if isinstance(session, dict) else {}
+    agenda = verifier_failure_repair_agenda if isinstance(verifier_failure_repair_agenda, dict) else {}
+    previous = session.get("active_compatibility_frontier")
+    previous = previous if isinstance(previous, dict) else {}
+    if not agenda:
+        return previous or {}
+    search_anchor_observations = list(search_anchor_observations or [])
+    source_call = _source_call_for_agenda(calls, agenda)
+    signature = build_failure_signature(agenda, source_call=source_call)
+    if not signature:
+        return previous or {}
+    transition, overlap = family_transition(signature, previous)
+    evidence_refs = _evidence_refs(agenda, source_call, search_anchor_observations)
+    source_result = source_call.get("result") if isinstance(source_call.get("result"), dict) else {}
+    source_parameters = source_call.get("parameters") if isinstance(source_call.get("parameters"), dict) else {}
+    source_cwd = agenda.get("cwd") or source_result.get("cwd") or source_parameters.get("cwd") or ""
+    anchors = _build_anchors(agenda, signature, search_anchor_observations, evidence_refs, cwd=source_cwd)
+    candidates = _build_candidates(agenda, signature, anchors, evidence_refs)
+    closure = _closure_state(anchors, candidates, signature)
+    verifier_entry = _verifier_history_entry(signature, agenda, source_call, transition)
+    keep_previous = transition in {"same", "narrower"}
+    frontier = {
+        "schema_version": SCHEMA_VERSION,
+        "id": previous.get("id") if keep_previous and previous.get("id") else _next_frontier_id(session),
+        "status": "open",
+        "created_at": previous.get("created_at") if keep_previous and previous.get("created_at") else current_time,
+        "updated_at": current_time,
+        "failure_signature": signature,
+        "family_transition": {
+            "state": transition,
+            "overlap": overlap,
+            "previous_frontier_id": previous.get("id") if previous and not keep_previous else "",
+        },
+        "evidence_refs": _merge_dicts_by_identity(previous.get("evidence_refs") if keep_previous else [], evidence_refs, limit=30),
+        "anchors": _merge_dicts_by_identity(previous.get("anchors") if keep_previous else [], anchors, id_key="id", limit=40),
+        "sibling_candidates": _merge_dicts_by_identity(
+            previous.get("sibling_candidates") if keep_previous else [],
+            candidates,
+            id_key="id",
+            limit=40,
+        ),
+        "hypotheses": _hypotheses(candidates, closure, current_time),
+        "patch_batch": previous.get("patch_batch") if keep_previous and isinstance(previous.get("patch_batch"), dict) else {},
+        "verifier_history": _merge_dicts_by_identity(
+            previous.get("verifier_history") if keep_previous else [],
+            [verifier_entry],
+            id_key="id",
+            limit=20,
+        ),
+        "closure_state": closure,
+    }
+    if previous and transition == "moved":
+        frontier["evidence_refs"] = _merge_dicts_by_identity(previous.get("evidence_refs") or [], frontier["evidence_refs"], limit=30)
+    frontier["compact_summary"] = _compact_summary(frontier)
+    return frontier
+
+
+def update_session_active_compatibility_frontier(
+    session,
+    calls,
+    *,
+    verifier_failure_repair_agenda=None,
+    search_anchor_observations=None,
+    current_time=None,
+):
+    if not isinstance(session, dict):
+        return {}
+    frontier = build_active_compatibility_frontier(
+        session,
+        calls,
+        verifier_failure_repair_agenda=verifier_failure_repair_agenda,
+        search_anchor_observations=search_anchor_observations,
+        current_time=current_time,
+    )
+    if frontier:
+        session["active_compatibility_frontier"] = frontier
+    return frontier
