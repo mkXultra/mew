@@ -9,6 +9,7 @@ from .types import ToolCallEnvelope, ToolResultEnvelope, ToolResultStatus
 ERROR_RESULT_STATUSES: frozenset[ToolResultStatus] = frozenset(
     {"failed", "denied", "invalid", "interrupted"}
 )
+WRITE_TOOL_NAMES = frozenset({"write_file", "edit_file", "apply_patch"})
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,55 @@ def validate_proof_manifest_pairing(manifest) -> PairingValidationResult:
     )
 
 
+def validate_proof_manifest_write_safety(manifest) -> PairingValidationResult:
+    """Validate write-result safety invariants beyond provider call pairing."""
+
+    errors: list[str] = []
+    tool_calls = tuple(manifest.tool_calls)
+    tool_results = tuple(manifest.tool_results)
+
+    for result in tool_results:
+        if result.tool_name not in WRITE_TOOL_NAMES:
+            continue
+        payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+        side_effects = tuple(effect for effect in result.side_effects if isinstance(effect, dict))
+        if side_effects and result.status != "completed":
+            errors.append(f"write_side_effect_on_non_completed_result:{result.provider_call_id}:{result.status}")
+        if side_effects and result.is_error:
+            errors.append(f"write_side_effect_on_error_result:{result.provider_call_id}")
+        if side_effects and not result.evidence_refs:
+            errors.append(f"write_side_effect_missing_evidence_ref:{result.provider_call_id}")
+        if payload.get("dry_run") is True and side_effects:
+            errors.append(f"dry_run_result_has_side_effect:{result.provider_call_id}")
+        if payload.get("written") and not side_effects:
+            errors.append(f"written_payload_missing_side_effect:{result.provider_call_id}")
+        if payload.get("dry_run") is False and payload.get("written") and result.status == "completed":
+            approval_id = str(payload.get("approval_id") or "").strip()
+            approval_source = str(payload.get("approval_source") or "").strip()
+            if not approval_id or not approval_source:
+                errors.append(f"write_apply_missing_independent_approval:{result.provider_call_id}")
+        for index, effect in enumerate(side_effects):
+            if effect.get("kind") != "file_write":
+                errors.append(f"unknown_write_side_effect_kind:{result.provider_call_id}:{index}")
+            if effect.get("dry_run") is not False:
+                errors.append(f"write_side_effect_not_marked_non_dry_run:{result.provider_call_id}:{index}")
+            if effect.get("written") is not True:
+                errors.append(f"write_side_effect_not_marked_written:{result.provider_call_id}:{index}")
+            if not str(effect.get("path") or "").strip():
+                errors.append(f"write_side_effect_missing_path:{result.provider_call_id}:{index}")
+            if not str(effect.get("approval_id") or "").strip():
+                errors.append(f"write_side_effect_missing_approval_id:{result.provider_call_id}:{index}")
+            if not str(effect.get("approval_source") or "").strip():
+                errors.append(f"write_side_effect_missing_approval_source:{result.provider_call_id}:{index}")
+
+    return PairingValidationResult(
+        valid=not errors,
+        errors=tuple(errors),
+        call_count=len(tool_calls),
+        result_count=len(tool_results),
+    )
+
+
 def build_invalid_tool_result(call: ToolCallEnvelope, *, reason: str) -> ToolResultEnvelope:
     """Build the paired model-visible invalid result for a rejected call."""
 
@@ -121,5 +171,6 @@ __all__ = [
     "PairingValidationResult",
     "build_invalid_tool_result",
     "validate_proof_manifest_pairing",
+    "validate_proof_manifest_write_safety",
     "validate_tool_result_pairing",
 ]

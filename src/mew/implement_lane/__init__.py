@@ -32,8 +32,10 @@ from .v2_runtime import (
     describe_implement_v2_runtime,
     run_fake_exec_implement_v2,
     run_fake_read_only_implement_v2,
+    run_fake_write_implement_v2,
     run_unavailable_implement_v2,
 )
+from .write_runtime import ImplementV2WriteRuntime
 
 __all__ = [
     "IMPLEMENT_LANE_REGISTRY_VERSION",
@@ -47,6 +49,7 @@ __all__ = [
     "ImplementLaneToolSpec",
     "ImplementV1AdapterDescriptor",
     "ImplementV2ManagedExecRuntime",
+    "ImplementV2WriteRuntime",
     "PairingValidationResult",
     "ToolCallEnvelope",
     "ToolResultEnvelope",
@@ -65,6 +68,7 @@ __all__ = [
     "implement_v2_prompt_section_metrics",
     "run_fake_exec_implement_v2",
     "run_fake_read_only_implement_v2",
+    "run_fake_write_implement_v2",
     "run_unavailable_implement_v2",
     "select_implement_lane_runtime",
     "validate_proof_manifest_pairing",

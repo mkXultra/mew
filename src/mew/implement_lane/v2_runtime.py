@@ -7,11 +7,12 @@ from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
-from .replay import build_invalid_tool_result, validate_proof_manifest_pairing
+from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
 from .tool_policy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode
 from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
 from .types import ToolResultEnvelope
+from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 
 
 def describe_implement_v2_runtime(*, work_session_id: object, task_id: object) -> dict[str, object]:
@@ -287,6 +288,139 @@ def run_fake_exec_implement_v2(
     )
 
 
+def run_fake_write_implement_v2(
+    lane_input: ImplementLaneInput,
+    *,
+    provider_calls: tuple[FakeProviderToolCall | dict[str, object], ...] | list[FakeProviderToolCall | dict[str, object]],
+    finish_arguments: dict[str, object] | None = None,
+    provider_message_text: str = "",
+) -> ImplementLaneResult:
+    """Run a deterministic write-mode v2 attempt with the fake provider."""
+
+    lane_attempt_id = _lane_attempt_id(lane_input, mode="write")
+    if str(lane_input.lane_config.get("mode") or "").strip() != "write":
+        return _write_mode_disabled_result(lane_input=lane_input, lane_attempt_id=lane_attempt_id)
+    turn_id = "turn-1"
+    adapter = FakeProviderAdapter()
+    tool_calls = adapter.normalize_tool_calls(
+        lane_attempt_id=lane_attempt_id,
+        turn_index=1,
+        calls=provider_calls,
+    )
+    call_errors = _tool_call_identity_errors(tool_calls, expected_lane_attempt_id=lane_attempt_id)
+    if call_errors:
+        tool_results = tuple(
+            build_invalid_tool_result(call, reason=f"tool_call_identity_invalid: {'; '.join(call_errors)}")
+            for call in tool_calls
+        )
+        cleanup_payloads: tuple[dict[str, object], ...] = ()
+    else:
+        exec_runtime = ImplementV2ManagedExecRuntime(
+            workspace=lane_input.workspace,
+            allowed_roots=_allowed_read_roots(lane_input),
+        )
+        write_runtime = ImplementV2WriteRuntime(
+            workspace=lane_input.workspace,
+            allowed_write_roots=_allowed_write_roots(lane_input),
+            approved_write_calls=_approved_write_calls(lane_input),
+            allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+        )
+        try:
+            tool_results = tuple(
+                _execute_write_exec_or_read_tool(
+                    call,
+                    lane_input=lane_input,
+                    exec_runtime=exec_runtime,
+                    write_runtime=write_runtime,
+                )
+                for call in tool_calls
+            )
+        finally:
+            cleanup_payloads = exec_runtime.cancel_active_commands(
+                reason="implement_v2 write attempt closed before command finalized"
+            )
+        tool_results = _project_orphaned_command_cleanup(tool_results, cleanup_payloads)
+    manifest = ImplementLaneProofManifest(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id=lane_attempt_id,
+        artifact_namespace=lane_artifact_namespace(
+            work_session_id=lane_input.work_session_id,
+            task_id=lane_input.task_id,
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        tool_calls=tool_calls,
+        tool_results=tool_results,
+        metrics={
+            "mode": "write",
+            "tool_calls": len(tool_calls),
+            "tool_results": len(tool_results),
+            "orphaned_command_cleanup_count": len(cleanup_payloads),
+        },
+    )
+    validation = _validate_write_proof_manifest(manifest)
+    finish_arguments = dict(finish_arguments or {"outcome": "analysis_ready", "kind": "plan"})
+    write_evidence_count = sum(1 for result in tool_results if result.side_effects and result.status == "completed")
+    transcript = (
+        *adapter.transcript_events_for_turn(
+            lane=IMPLEMENT_V2_LANE,
+            lane_attempt_id=lane_attempt_id,
+            turn_id=turn_id,
+            text=provider_message_text,
+            tool_calls=tool_calls,
+        ),
+        *_tool_result_transcript_events(
+            lane_attempt_id=lane_attempt_id,
+            turn_id=turn_id,
+            tool_results=tool_results,
+        ),
+        adapter.finish_event_for_turn(
+            lane=IMPLEMENT_V2_LANE,
+            lane_attempt_id=lane_attempt_id,
+            turn_id=turn_id,
+            finish_arguments=finish_arguments,
+        ),
+    )
+    status = _write_finish_status(
+        finish_arguments,
+        validation_valid=validation.valid,
+        tool_results=tool_results,
+    )
+    write_result = _write_result(
+        finish_arguments=finish_arguments,
+        write_evidence_count=write_evidence_count,
+        tool_results=tool_results,
+    )
+    return ImplementLaneResult(
+        status=status,
+        lane=IMPLEMENT_V2_LANE,
+        user_visible_summary=_write_summary(status=status, write_result=write_result),
+        proof_artifacts=(manifest.artifact_namespace,),
+        next_reentry_hint={
+            "lane": IMPLEMENT_V2_LANE,
+            "mode": "write",
+            "status": status,
+            "write_ready_is_completion": False,
+            "replay_valid": validation.valid,
+        },
+        updated_lane_state={
+            "write_result": write_result,
+            "proof_manifest": manifest.as_dict(),
+        },
+        metrics={
+            "completion_credit": False,
+            "mode": "write",
+            "provider": adapter.provider,
+            "replay_valid": validation.valid,
+            "replay_errors": list(validation.errors),
+            "write_evidence_count": write_evidence_count,
+            "orphaned_command_cleanup_count": len(cleanup_payloads),
+            "tool_calls": len(tool_calls),
+            "tool_results": len(tool_results),
+        },
+        transcript=transcript,
+    )
+
+
 def _exec_mode_disabled_result(*, lane_input: ImplementLaneInput, lane_attempt_id: str) -> ImplementLaneResult:
     return ImplementLaneResult(
         status="blocked",
@@ -320,6 +454,45 @@ def _exec_mode_disabled_result(*, lane_input: ImplementLaneInput, lane_attempt_i
             "completion_credit": False,
             "mode": "exec",
             "exec_mode_enabled": False,
+            "tool_calls": 0,
+            "tool_results": 0,
+        },
+    )
+
+
+def _write_mode_disabled_result(*, lane_input: ImplementLaneInput, lane_attempt_id: str) -> ImplementLaneResult:
+    return ImplementLaneResult(
+        status="blocked",
+        lane=IMPLEMENT_V2_LANE,
+        user_visible_summary="implement_v2 write mode is not enabled for this lane attempt.",
+        proof_artifacts=(
+            lane_artifact_namespace(
+                work_session_id=lane_input.work_session_id,
+                task_id=lane_input.task_id,
+                lane=IMPLEMENT_V2_LANE,
+            ),
+        ),
+        next_reentry_hint={
+            "lane": IMPLEMENT_V2_LANE,
+            "mode": "write",
+            "status": "blocked",
+            "reason": "write_mode_not_enabled",
+            "write_ready_is_completion": False,
+        },
+        updated_lane_state={
+            "lane_attempt_id": lane_attempt_id,
+            "write_result": {
+                "kind": "write_preview_or_apply",
+                "summary": "write mode is disabled",
+                "write_evidence_count": 0,
+                "tool_statuses": [],
+                "written_paths": [],
+            },
+        },
+        metrics={
+            "completion_credit": False,
+            "mode": "write",
+            "write_mode_enabled": False,
             "tool_calls": 0,
             "tool_results": 0,
         },
@@ -372,6 +545,30 @@ def _result_command_run_id(result: ToolResultEnvelope) -> str:
     return ""
 
 
+def _execute_write_exec_or_read_tool(
+    call,
+    *,
+    lane_input: ImplementLaneInput,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    write_runtime: ImplementV2WriteRuntime,
+):
+    if call.tool_name in WRITE_TOOL_NAMES:
+        return write_runtime.execute(call)
+    if call.tool_name in EXEC_TOOL_NAMES:
+        return build_invalid_tool_result(
+            call,
+            reason=(
+                f"{call.tool_name} is not available in implement_v2 write mode; "
+                "use exec mode for managed command execution and keep write mode mutation-gated"
+            ),
+        )
+    return execute_read_only_tool_call(
+        call,
+        workspace=lane_input.workspace,
+        allowed_roots=_allowed_read_roots(lane_input),
+    )
+
+
 def _execute_exec_or_read_tool(
     call,
     *,
@@ -419,6 +616,34 @@ def _allowed_read_roots(lane_input: ImplementLaneInput) -> tuple[str, ...]:
     else:
         roots = []
     return tuple(roots or [lane_input.workspace])
+
+
+def _allowed_write_roots(lane_input: ImplementLaneInput) -> tuple[str, ...]:
+    raw_roots = lane_input.lane_config.get("allowed_write_roots")
+    if isinstance(raw_roots, (list, tuple)):
+        return tuple(str(root) for root in raw_roots if str(root or "").strip())
+    return ()
+
+
+def _approved_write_calls(lane_input: ImplementLaneInput) -> tuple[object, ...]:
+    raw_approvals = lane_input.lane_config.get("approved_write_calls")
+    if isinstance(raw_approvals, (list, tuple)):
+        return tuple(raw_approvals)
+    return ()
+
+
+def _validate_write_proof_manifest(manifest: ImplementLaneProofManifest):
+    pairing = validate_proof_manifest_pairing(manifest)
+    safety = validate_proof_manifest_write_safety(manifest)
+    errors = (*pairing.errors, *safety.errors)
+    if not errors and pairing.call_count == safety.call_count and pairing.result_count == safety.result_count:
+        return pairing
+    return type(pairing)(
+        valid=not errors,
+        errors=errors,
+        call_count=pairing.call_count,
+        result_count=pairing.result_count,
+    )
 
 
 def _tool_result_transcript_events(
@@ -513,6 +738,55 @@ def _exec_finish_status(
     return "blocked"
 
 
+def _write_finish_status(
+    finish_arguments: dict[str, object],
+    *,
+    validation_valid: bool,
+    tool_results,
+) -> str:
+    if not validation_valid:
+        return "failed"
+    if any(result.status in {"failed", "interrupted", "invalid", "denied"} for result in tool_results):
+        return "blocked"
+    outcome = str(finish_arguments.get("outcome") or "").strip()
+    if outcome in {"completed", "task_complete"}:
+        return "blocked"
+    if outcome == "analysis_ready" and any(result.status == "completed" for result in tool_results):
+        return "analysis_ready"
+    if outcome in {"blocked", "failed", "deferred"}:
+        return outcome
+    return "blocked"
+
+
+def _write_result(
+    *,
+    finish_arguments: dict[str, object],
+    write_evidence_count: int,
+    tool_results,
+) -> dict[str, object]:
+    return {
+        "kind": "write_preview_or_apply",
+        "summary": str(finish_arguments.get("summary") or ""),
+        "write_evidence_count": write_evidence_count,
+        "tool_statuses": [result.status for result in tool_results],
+        "written_paths": [
+            str(effect.get("path") or "")
+            for result in tool_results
+            for effect in result.side_effects
+            if isinstance(effect, dict) and effect.get("path")
+        ],
+    }
+
+
+def _write_summary(*, status: str, write_result: dict[str, object]) -> str:
+    summary = str(write_result.get("summary") or "").strip()
+    if summary and status == "analysis_ready":
+        return summary
+    if summary:
+        return f"implement_v2 write attempt ended with status={status}: {summary}"
+    return f"implement_v2 write attempt ended with status={status}."
+
+
 def _command_result(
     *,
     finish_arguments: dict[str, object],
@@ -563,5 +837,6 @@ __all__ = [
     "describe_implement_v2_runtime",
     "run_fake_exec_implement_v2",
     "run_fake_read_only_implement_v2",
+    "run_fake_write_implement_v2",
     "run_unavailable_implement_v2",
 ]

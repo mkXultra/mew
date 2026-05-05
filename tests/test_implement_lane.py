@@ -23,6 +23,7 @@ from mew.implement_lane import (
     list_v2_tool_specs_for_mode,
     run_fake_exec_implement_v2,
     run_fake_read_only_implement_v2,
+    run_fake_write_implement_v2,
     run_unavailable_implement_v2,
     select_implement_lane_runtime,
     validate_proof_manifest_pairing,
@@ -453,6 +454,14 @@ def test_implement_v2_exec_mode_surfaces_lifecycle_tools() -> None:
 
     assert {"run_command", "run_tests", "poll_command", "cancel_command", "read_command_output"} <= tools
     assert "write_file" not in tools
+
+
+def test_implement_v2_write_mode_surfaces_write_tools() -> None:
+    tools = {spec.name for spec in list_v2_tool_specs_for_mode("write")}
+
+    assert {"write_file", "edit_file", "apply_patch"} <= tools
+    assert {"read_file", "finish"} <= tools
+    assert "run_command" not in tools
 
 
 def test_implement_v2_read_only_fake_runtime_can_inspect_workspace_and_finish_analysis(tmp_path) -> None:
@@ -1226,6 +1235,458 @@ def test_implement_v2_exec_rejects_duplicate_provider_call_ids_before_side_effec
     assert not (tmp_path / "side_effect.txt").exists()
 
 
+def test_implement_v2_write_file_dry_run_does_not_mutate(tmp_path) -> None:
+    target = tmp_path / "out.txt"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {"path": "out.txt", "content": "ok\n", "create": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "dry run ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert result.metrics["completion_credit"] is False
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["dry_run"] is True
+    assert tool_result["content"][0]["written"] is False
+    assert tool_result["content_refs"]
+    assert not target.exists()
+
+
+def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_path) -> None:
+    target = tmp_path / "out.txt"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "out.txt",
+                    "content": "ok\n",
+                    "create": True,
+                    "apply": True,
+                    "approval_status": "approved",
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "write applied"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert target.read_text(encoding="utf-8") == "ok\n"
+    assert result.metrics["write_evidence_count"] == 1
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["dry_run"] is False
+    assert tool_result["content"][0]["written"] is True
+    assert tool_result["evidence_refs"]
+    assert tool_result["content"][0]["approval_id"] == "approval-1"
+    assert tool_result["side_effects"][0]["approval_status"] == "approved"
+    assert tool_result["side_effects"][0]["approval_id"] == "approval-1"
+
+
+def test_implement_v2_write_file_provider_self_approval_is_ignored(tmp_path) -> None:
+    target = tmp_path / "out.txt"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "out.txt",
+                    "content": "ok\n",
+                    "create": True,
+                    "apply": True,
+                    "approval_status": "approved",
+                    "approval": {"status": "approved", "approval_id": "self-approved"},
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "provider self-approval ignored"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert result.metrics["write_evidence_count"] == 0
+    assert result.metrics["replay_valid"] is True
+    assert tool_result["status"] == "denied"
+    assert "provider-supplied approval arguments are ignored" in tool_result["content"][0]["reason"]
+    assert not target.exists()
+
+
+def test_implement_v2_write_file_denied_approval_does_not_mutate(tmp_path) -> None:
+    target = tmp_path / "out.txt"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "out.txt",
+                    "content": "ok\n",
+                    "create": True,
+                    "apply": True,
+                    "approval_status": "denied",
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "write denied"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "denied"
+    assert tool_result["is_error"] is True
+    assert not target.exists()
+
+
+def test_implement_v2_write_mode_without_explicit_mode_does_not_mutate(tmp_path) -> None:
+    result = run_fake_write_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "allowed_write_roots": ["."],
+                "approved_write_calls": [{"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"}],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "out.txt",
+                    "content": "bad\n",
+                    "create": True,
+                    "apply": True,
+                    "approval_status": "approved",
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "must not run"},
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["write_mode_enabled"] is False
+    assert not (tmp_path / "out.txt").exists()
+
+
+def test_implement_v2_write_rejects_paths_outside_allowed_write_roots(tmp_path) -> None:
+    outside = tmp_path.parent / "outside.txt"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": str(outside),
+                    "content": "bad\n",
+                    "create": True,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "outside rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "outside allowed write roots" in tool_result["content"][0]["reason"]
+    assert not outside.exists()
+
+
+def test_implement_v2_edit_file_exact_old_dry_run_and_no_match_failure(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("alpha\n", encoding="utf-8")
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "edit_file",
+                "arguments": {"path": "README.md", "old": "alpha\n", "new": "beta\n"},
+            },
+            {
+                "provider_call_id": "call-2",
+                "tool_name": "edit_file",
+                "arguments": {"path": "README.md", "old": "missing\n", "new": "nope\n"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "edit preview"},
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+
+    assert result.status == "blocked"
+    assert manifest["tool_results"][0]["status"] == "completed"
+    assert manifest["tool_results"][0]["content"][0]["dry_run"] is True
+    assert manifest["tool_results"][1]["status"] == "failed"
+    assert target.read_text(encoding="utf-8") == "alpha\n"
+
+
+def test_implement_v2_edit_file_ambiguous_match_fails_closed(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("same\nsame\n", encoding="utf-8")
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "edit_file",
+                "arguments": {"path": "README.md", "old": "same\n", "new": "other\n"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "ambiguous"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "old text matched 2 times" in tool_result["content"][0]["reason"]
+    assert target.read_text(encoding="utf-8") == "same\nsame\n"
+
+
+def test_implement_v2_apply_patch_parse_failure_pairs_error(tmp_path) -> None:
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": "*** End Patch\n"}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "parse failure"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "must start with *** Begin Patch" in tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("old\n", encoding="utf-8")
+    patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch\n"
+
+    dry_run = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch preview"},
+    )
+    apply = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"patch": patch, "apply": True, "approval_status": "approved"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch applied"},
+    )
+
+    assert dry_run.status == "analysis_ready"
+    assert dry_run.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]["dry_run"] is True
+    assert apply.status == "analysis_ready"
+    assert target.read_text(encoding="utf-8") == "new\n"
+    assert apply.updated_lane_state["proof_manifest"]["tool_results"][0]["evidence_refs"]
+
+
+def test_implement_v2_apply_patch_denied_approval_does_not_mutate(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("old\n", encoding="utf-8")
+    patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"patch": patch, "apply": True, "approval_status": "rejected"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch denied"},
+    )
+
+    assert result.status == "blocked"
+    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "denied"
+    assert target.read_text(encoding="utf-8") == "old\n"
+
+
+def test_implement_v2_write_rejects_symlink_escape(tmp_path) -> None:
+    outside = tmp_path.parent / "outside-link-target.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(outside)
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "link.txt",
+                    "content": "bad\n",
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "symlink rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+
+
+def test_implement_v2_write_rejects_governance_paths_by_default(tmp_path) -> None:
+    target = tmp_path / "ROADMAP_STATUS.md"
+    target.write_text("old\n", encoding="utf-8")
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {"path": "ROADMAP_STATUS.md", "content": "new\n"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "governance preview rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "governance write path is protected" in tool_result["content"][0]["reason"]
+    assert target.read_text(encoding="utf-8") == "old\n"
+
+
+def test_implement_v2_write_replay_rejects_mutation_without_independent_approval(tmp_path) -> None:
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {"path": "out.txt", "content": "ok\n", "create": True, "apply": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "write applied"},
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    manifest["tool_results"][0]["side_effects"][0]["approval_id"] = ""
+    from mew.implement_lane.replay import validate_proof_manifest_write_safety
+    from mew.implement_lane.types import ImplementLaneProofManifest, ToolCallEnvelope, ToolResultEnvelope
+
+    rebuilt_manifest = ImplementLaneProofManifest(
+        lane=manifest["lane"],
+        lane_attempt_id=manifest["lane_attempt_id"],
+        artifact_namespace=manifest["artifact_namespace"],
+        tool_calls=tuple(ToolCallEnvelope(**_without_schema_version(item)) for item in manifest["tool_calls"]),
+        tool_results=tuple(ToolResultEnvelope(**_without_schema_version(item)) for item in manifest["tool_results"]),
+    )
+    validation = validate_proof_manifest_write_safety(rebuilt_manifest)
+
+    assert validation.valid is False
+    assert "write_side_effect_missing_approval_id:call-1:0" in validation.errors
+
+
+def test_implement_v2_write_mode_rejects_run_command_hidden_mutation(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('out.txt').write_text('hidden', encoding='utf-8')",
+        ]
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "hidden mutation rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
+    assert tool_result["status"] == "invalid"
+    assert "not available in implement_v2 write mode" in tool_result["content"][0]["reason"]
+    assert not (tmp_path / "out.txt").exists()
+
+
 def _expected_command_run_id(*, lane_attempt_id: str, provider_call_id: str) -> str:
     digest = hashlib.sha256(f"{lane_attempt_id}:{provider_call_id}".encode()).hexdigest()
     return f"{lane_attempt_id}:command:{provider_call_id}-{digest[:8]}"
+
+
+def _write_lane_input(tmp_path, *, approved_write_calls=()) -> ImplementLaneInput:
+    return ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={
+            "mode": "write",
+            "allowed_write_roots": ["."],
+            "approved_write_calls": list(approved_write_calls),
+        },
+    )
+
+
+def _without_schema_version(item: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in item.items() if key != "schema_version"}

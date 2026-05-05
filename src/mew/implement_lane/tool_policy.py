@@ -132,7 +132,7 @@ def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ..
     if mode_name == "exec":
         return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "execute", "finish"})
     if mode_name == "write":
-        return V2_BASE_TOOL_SPECS
+        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "write", "finish"})
     return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "finish"})
 
 
