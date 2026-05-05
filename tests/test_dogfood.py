@@ -1362,12 +1362,55 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(scenario["artifacts"]["summary"]["upstream_tail_failed"])
             self.assertTrue(scenario["artifacts"]["summary"]["main_smoke_passed"])
             self.assertEqual(scenario["artifacts"]["summary"]["stop_reason"], "wall_timeout")
+            self.assertTrue(scenario["artifacts"]["first_trial"]["current"]["active_compatibility_frontier"]["signature"])
+            self.assertTrue(
+                scenario["artifacts"]["first_trial"]["current"]["active_compatibility_frontier"]["next_action"]
+            )
+            self.assertGreaterEqual(
+                scenario["artifacts"]["first_trial"]["current"]["active_compatibility_frontier"]["open_candidate_count"],
+                1,
+            )
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_lost"])
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["managed_lost"])
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["runtime_identity_mismatches"])
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_parameter_pollution"])
             self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
             self.assertIn("m6_24-repository-test-tail-emulator: pass", text)
+
+    def test_run_dogfood_m6_24_same_family_compatibility_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-same-family-compatibility-emulator",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-same-family-compatibility-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["frontier"]["signature"], "same-family-frontier-fixture")
+            self.assertEqual(scenario["artifacts"]["guard_decision"]["blocked_action_kind"], "broad_verifier")
+            self.assertEqual(scenario["artifacts"]["replacement_action"]["type"], "read_file")
+
+    def test_run_dogfood_m6_24_runtime_finish_gate_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-runtime-finish-gate-emulator",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-runtime-finish-gate-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["import_only_decision"]["decision"], "block_continue")
+            self.assertEqual(scenario["artifacts"]["behavior_decision"]["decision"], "allow_complete")
 
     def test_m6_24_projection_detects_lifecycle_parameter_pollution(self):
         projection = _evaluate_managed_action_projection(

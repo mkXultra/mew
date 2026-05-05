@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 
-from mew.reference_trace_runner import ReferenceTraceRun, build_harbor_command, make_jobs_dir
+from mew.reference_trace_runner import (
+    ReferenceTraceRun,
+    build_harbor_command,
+    make_jobs_dir,
+    summarize_frontier_reference_metrics,
+)
 
 
 def test_build_codex_harbor_command_includes_defaults(tmp_path):
@@ -73,3 +78,27 @@ def test_make_jobs_dir_is_stable_and_human_readable(tmp_path):
     )
 
     assert jobs_dir == tmp_path / "claude-code-prove-plus-comm-20260505-123456"
+
+
+def test_summarize_frontier_reference_metrics_aggregates_normalized_trace_fields():
+    summary = summarize_frontier_reference_metrics(
+        [
+            {
+                "time_from_first_anchor_to_first_patch_seconds": 4.5,
+                "same_frontier_broad_cycle_count": 2,
+            },
+            {
+                "time_from_first_anchor_to_first_patch_seconds": 7.0,
+                "same_frontier_broad_cycle_count": 1,
+            },
+            {
+                "same_frontier_broad_cycle_count": 3,
+            },
+        ]
+    )
+
+    assert summary["trace_count"] == 3
+    assert summary["anchor_to_patch_observed_count"] == 2
+    assert summary["min_time_from_first_anchor_to_first_patch_seconds"] == 4.5
+    assert summary["max_time_from_first_anchor_to_first_patch_seconds"] == 7.0
+    assert summary["same_frontier_broad_cycle_count"] == 6

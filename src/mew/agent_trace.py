@@ -380,6 +380,9 @@ def _events_from_atif_tool_call(
         step_id=step_id,
         duration_ms=duration_ms,
     )
+    if isinstance(arguments, dict) and arguments:
+        started["arguments"] = dict(arguments)
+        completed["arguments"] = dict(arguments)
     return [started, completed]
 
 
@@ -537,6 +540,17 @@ def normalize_mew_report(report_path: Path) -> list[dict[str, Any]]:
         metrics = model_turn.get("metrics") if isinstance(model_turn.get("metrics"), dict) else {}
         if metrics:
             event["model_metrics"] = metrics
+        arguments = {
+            key: action.get(key)
+            for key in ("cmd", "command", "path", "query", "pattern")
+            if action.get(key) not in (None, "", [], {})
+        }
+        if arguments:
+            event["arguments"] = arguments
+        if isinstance(action.get("reason"), str) and action.get("reason"):
+            event["reason"] = _truncate(action.get("reason"))
+        if isinstance(step.get("elapsed_ms"), int):
+            event["elapsed_ms"] = step.get("elapsed_ms")
         execution_contract = action.get("execution_contract")
         if isinstance(execution_contract, dict):
             event["execution_contract"] = {
@@ -645,6 +659,7 @@ def summarize_trace(
         for event in command_events
         if event.get("phase") == "completed" and isinstance(event.get("duration_ms"), int)
     ]
+    frontier_metrics = summarize_frontier_trace_metrics(events)
     return {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "agent": agent,
@@ -673,6 +688,7 @@ def summarize_trace(
         "first_verifier_seconds": _first_elapsed_seconds(verifier_events),
         "command_duration_seconds": round(sum(command_durations) / 1000, 3) if command_durations else None,
         "command_duration_observed_count": len(command_durations),
+        **frontier_metrics,
     }
 
 
@@ -690,6 +706,118 @@ def _is_verifier_event(event: dict[str, Any]) -> bool:
     if "coqc" in summary and "--version" not in summary:
         return True
     return False
+
+
+def _event_text(event: dict[str, Any]) -> str:
+    chunks = []
+    for key in ("summary", "message", "text", "tool", "action_type", "reason"):
+        if event.get(key):
+            chunks.append(str(event.get(key)))
+    arguments = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+    for key in ("cmd", "command", "path", "query", "pattern"):
+        if arguments.get(key):
+            chunks.append(str(arguments.get(key)))
+    return "\n".join(chunks).casefold()
+
+
+def _event_elapsed_ms(event: dict[str, Any]) -> int | None:
+    value = event.get("elapsed_ms")
+    return value if isinstance(value, int) else None
+
+
+def _event_command_text(event: dict[str, Any]) -> str:
+    arguments = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+    for key in ("cmd", "command"):
+        if arguments.get(key):
+            return str(arguments.get(key)).casefold()
+    return _event_text(event)
+
+
+def _is_frontier_anchor_event(event: dict[str, Any]) -> bool:
+    if event.get("kind") != "tool_call":
+        return False
+    tool = str(event.get("tool") or "").casefold()
+    arguments = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+    if tool in {"read_file", "search_text"}:
+        if tool == "read_file":
+            return bool(arguments.get("path") or event.get("summary"))
+        return bool(arguments.get("query") or arguments.get("pattern") or event.get("summary"))
+    command = _event_command_text(event)
+    return bool(re.search(r"(?:^|\s)(?:rg|grep|git grep|sed|awk)\b", command))
+
+
+def _is_patch_event(event: dict[str, Any]) -> bool:
+    if event.get("kind") != "tool_call":
+        return False
+    tool = str(event.get("tool") or "").casefold()
+    text = _event_text(event)
+    return any(token in tool for token in ("edit", "patch", "write")) or any(
+        token in text for token in ("apply_patch", "edit_file", "write_file")
+    )
+
+
+def _is_same_frontier_broad_cycle_event(event: dict[str, Any]) -> bool:
+    if event.get("kind") != "tool_call":
+        return False
+    if event.get("phase") not in (None, "", "completed"):
+        return False
+    model_metrics = event.get("model_metrics") if isinstance(event.get("model_metrics"), dict) else {}
+    guard = model_metrics.get("active_compatibility_frontier_guard")
+    if isinstance(guard, dict) and guard.get("blocked_action_kind") == "broad_verifier":
+        return True
+    tool = str(event.get("tool") or "").casefold()
+    if tool == "run_tests":
+        return True
+    command = _event_command_text(event)
+    execution_contract = event.get("execution_contract") if isinstance(event.get("execution_contract"), dict) else {}
+    proof_role = str(execution_contract.get("proof_role") or "").casefold()
+    if tool in {"run_command", "exec_command", "command_execution", "bash", "bashoutput"}:
+        if proof_role in {"acceptance", "broad", "full_suite"}:
+            return True
+        return bool(
+            re.search(
+                r"(?:^|\s)(?:pytest|tox|nox|cargo\s+test|npm\s+test|pnpm\s+test|yarn\s+test|go\s+test|make|ninja)\b",
+                command,
+            )
+        )
+    return False
+
+
+def summarize_frontier_trace_metrics(events: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    anchor_elapsed = [
+        elapsed
+        for event in events
+        for elapsed in [_event_elapsed_ms(event)]
+        if elapsed is not None and _is_frontier_anchor_event(event)
+    ]
+    first_anchor = min(anchor_elapsed) if anchor_elapsed else None
+    first_patch = None
+    if first_anchor is not None:
+        patch_elapsed = [
+            elapsed
+            for event in events
+            for elapsed in [_event_elapsed_ms(event)]
+            if elapsed is not None and elapsed >= first_anchor and _is_patch_event(event)
+        ]
+        first_patch = min(patch_elapsed) if patch_elapsed else None
+    broad_cycle_count = 0
+    if first_anchor is not None:
+        for event in events:
+            elapsed = _event_elapsed_ms(event)
+            if elapsed is None or elapsed < first_anchor:
+                continue
+            if first_patch is not None and elapsed > first_patch:
+                continue
+            if _is_same_frontier_broad_cycle_event(event):
+                broad_cycle_count += 1
+    return {
+        "frontier_first_anchor_seconds": round(first_anchor / 1000, 3) if first_anchor is not None else None,
+        "frontier_first_patch_seconds": round(first_patch / 1000, 3) if first_patch is not None else None,
+        "time_from_first_anchor_to_first_patch_seconds": round((first_patch - first_anchor) / 1000, 3)
+        if first_anchor is not None and first_patch is not None
+        else None,
+        "same_frontier_broad_cycle_count": broad_cycle_count,
+    }
 
 
 def _first_elapsed_seconds(events: Sequence[dict[str, Any]]) -> float | None:

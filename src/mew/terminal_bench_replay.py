@@ -172,7 +172,7 @@ def _session_from_report(report):
     session_id = work_report.get("session_id") or report.get("session_id") or resume.get("session_id") or 1
     task_id = work_report.get("task_id") or report.get("task_id") or resume.get("task_id") or 1
     long_build_state = resume.get("long_build_state") if isinstance(resume.get("long_build_state"), dict) else {}
-    return {
+    session = {
         "id": session_id,
         "task_id": task_id,
         "status": "active",
@@ -184,6 +184,45 @@ def _session_from_report(report):
         "long_command_runs": list(long_build_state.get("long_command_runs") or []),
         "default_options": {"verify_disabled": True},
         "_allow_synthesized_command_evidence": True,
+    }
+    frontier = resume.get("active_compatibility_frontier")
+    if isinstance(frontier, dict) and frontier:
+        session["active_compatibility_frontier"] = dict(frontier)
+    return session
+
+
+def _summarize_active_compatibility_frontier(frontier):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    if not frontier:
+        return {}
+    signature = frontier.get("failure_signature") if isinstance(frontier.get("failure_signature"), dict) else {}
+    closure = frontier.get("closure_state") if isinstance(frontier.get("closure_state"), dict) else {}
+    compact = frontier.get("compact_summary") if isinstance(frontier.get("compact_summary"), dict) else {}
+    candidates = frontier.get("open_candidates") or frontier.get("sibling_candidates") or compact.get("open_candidates") or []
+    open_candidate_ids = []
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            status = str(candidate.get("status") or "unexplored")
+            if status in {"verified", "rejected", "deferred"}:
+                continue
+            if candidate.get("id"):
+                open_candidate_ids.append(candidate.get("id"))
+        elif candidate:
+            open_candidate_ids.append(str(candidate))
+    next_action = closure.get("next_action") or compact.get("next_action") or ""
+    return {
+        "id": frontier.get("id") or "",
+        "status": frontier.get("status") or "",
+        "signature": signature.get("fingerprint") or compact.get("failure_signature") or "",
+        "kind": signature.get("kind") or "",
+        "family_key": signature.get("family_key") or "",
+        "runtime_component_kind": signature.get("runtime_component_kind") or "",
+        "next_action": next_action,
+        "guard_mode": closure.get("guard_mode") or compact.get("guard_mode") or "",
+        "blocked_action_kinds": list(closure.get("blocked_action_kinds") or compact.get("blocked_action_kinds") or []),
+        "open_candidate_count": len(open_candidate_ids),
+        "open_candidate_ids": open_candidate_ids[:8],
+        "evidence_ref_count": len(frontier.get("evidence_refs") or compact.get("evidence_refs") or []),
     }
 
 
@@ -240,6 +279,9 @@ def _trial_entry_from_report(report_path):
     if session.get("tool_calls"):
         try:
             recomputed_resume = build_work_session_resume(session, task=task) or {}
+            stored_frontier = stored_resume.get("active_compatibility_frontier")
+            if isinstance(stored_frontier, dict) and stored_frontier:
+                recomputed_resume["active_compatibility_frontier"] = dict(stored_frontier)
         except Exception as exc:  # pragma: no cover - defensive replay should report, not crash.
             replay_error = str(exc)
     else:
@@ -248,6 +290,10 @@ def _trial_entry_from_report(report_path):
     verifier_stdout = _read_text(trial_dir / "verifier" / "test-stdout.txt")
     stored_long = _summarize_long_build_state(stored_resume.get("long_build_state") or {})
     current_long = _summarize_long_build_state(recomputed_resume.get("long_build_state") or {})
+    stored_frontier = _summarize_active_compatibility_frontier(stored_resume.get("active_compatibility_frontier"))
+    current_frontier = _summarize_active_compatibility_frontier(
+        recomputed_resume.get("active_compatibility_frontier")
+    )
     llm_action_fixtures = _llm_action_fixtures_from_work_report(report)
     return {
         "trial_name": _trial_name_from_result(trial_result, trial_dir),
@@ -268,6 +314,7 @@ def _trial_entry_from_report(report_path):
             "phase": stored_resume.get("phase") or "",
             "next_action": stored_resume.get("next_action") or "",
             "long_build_state": stored_long,
+            "active_compatibility_frontier": stored_frontier,
         },
         "current": {
             "recomputed": bool(recomputed_resume),
@@ -275,6 +322,7 @@ def _trial_entry_from_report(report_path):
             "phase": recomputed_resume.get("phase") or "",
             "next_action": recomputed_resume.get("next_action") or "",
             "long_build_state": current_long,
+            "active_compatibility_frontier": current_frontier,
         },
         "verifier_stdout_excerpt": "\n".join((verifier_stdout or "").splitlines()[-12:]),
     }
@@ -350,6 +398,64 @@ def _check_assertions(entry, assertions):
     if expected:
         observed = (entry.get("current") or {}).get("next_action") or ""
         add("next_action_contains", expected in observed, observed, expected)
+    current_frontier = ((entry.get("current") or {}).get("active_compatibility_frontier") or {})
+    expected = assertions.get("frontier_signature")
+    if expected:
+        observed = current_frontier.get("signature") or ""
+        add("frontier_signature", observed == expected, observed, expected)
+    if assertions.get("frontier_signature_required"):
+        observed = current_frontier.get("signature") or ""
+        add("frontier_signature_required", bool(observed), observed, "non-empty frontier signature")
+    stored_frontier = ((entry.get("stored") or {}).get("active_compatibility_frontier") or {})
+    if assertions.get("frontier_signature_matches_stored"):
+        observed = current_frontier.get("signature") or ""
+        expected_stored = stored_frontier.get("signature") or ""
+        add("frontier_signature_matches_stored", bool(expected_stored) and observed == expected_stored, observed, expected_stored)
+    expected = assertions.get("frontier_family_key")
+    if expected:
+        observed = current_frontier.get("family_key") or ""
+        add("frontier_family_key", observed == expected, observed, expected)
+    if assertions.get("frontier_family_key_matches_stored"):
+        observed = current_frontier.get("family_key") or ""
+        expected_stored = stored_frontier.get("family_key") or ""
+        add("frontier_family_key_matches_stored", bool(expected_stored) and observed == expected_stored, observed, expected_stored)
+    expected = assertions.get("frontier_next_action_contains")
+    if expected:
+        observed = current_frontier.get("next_action") or ""
+        add("frontier_next_action_contains", expected in observed, observed, expected)
+    if assertions.get("frontier_next_action_required"):
+        observed = current_frontier.get("next_action") or ""
+        add("frontier_next_action_required", bool(observed), observed, "non-empty frontier next_action")
+    if assertions.get("frontier_next_action_matches_stored"):
+        observed = current_frontier.get("next_action") or ""
+        expected_stored = stored_frontier.get("next_action") or ""
+        add("frontier_next_action_matches_stored", bool(expected_stored) and observed == expected_stored, observed, expected_stored)
+    expected = assertions.get("frontier_open_candidate_count_min")
+    if expected is not None:
+        observed = current_frontier.get("open_candidate_count") or 0
+        add("frontier_open_candidate_count_min", observed >= int(expected), observed, f">={expected}")
+    if assertions.get("frontier_open_candidate_ids_match_stored"):
+        observed = current_frontier.get("open_candidate_ids") or []
+        expected_stored = stored_frontier.get("open_candidate_ids") or []
+        add(
+            "frontier_open_candidate_ids_match_stored",
+            bool(expected_stored) and observed == expected_stored,
+            observed,
+            expected_stored,
+        )
+    expected = assertions.get("frontier_evidence_ref_count_min")
+    if expected is not None:
+        observed = current_frontier.get("evidence_ref_count") or 0
+        add("frontier_evidence_ref_count_min", observed >= int(expected), observed, f">={expected}")
+    if assertions.get("frontier_evidence_ref_count_matches_stored"):
+        observed = current_frontier.get("evidence_ref_count") or 0
+        expected_stored = stored_frontier.get("evidence_ref_count") or 0
+        add(
+            "frontier_evidence_ref_count_matches_stored",
+            expected_stored > 0 and observed == expected_stored,
+            observed,
+            expected_stored,
+        )
     return checks
 
 

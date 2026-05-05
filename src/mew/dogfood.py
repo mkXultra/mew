@@ -110,6 +110,8 @@ DOGFOOD_SCENARIOS = (
     "m6_24-terminal-bench-replay",
     "m6_24-compile-compcert-emulator",
     "m6_24-repository-test-tail-emulator",
+    "m6_24-same-family-compatibility-emulator",
+    "m6_24-runtime-finish-gate-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -14733,6 +14735,65 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
     )
     test_command_run_id = "work_session:1:command_run:1"
     next_action = "patch the remaining repository test failure, reinstall, and rerun the repository test tail"
+    frontier_fingerprint = "repository-tail-frontier-fixture"
+    active_frontier = {
+        "schema_version": 1,
+        "id": "compat-frontier-repository-tail-1",
+        "status": "open",
+        "failure_signature": {
+            "schema_version": 1,
+            "kind": "verifier_failure",
+            "fingerprint": frontier_fingerprint,
+            "family_key": "repository-tail-family-fixture",
+            "command_shape": "repository test tail",
+            "exit_class": "nonzero",
+            "runtime_component_kind": "unknown",
+            "token_categories": {
+                "error_tokens": ["repository_tail_failed"],
+                "failing_test_tokens": ["tests/test_repository_tail.py::test_tail"],
+                "stack_anchor_tokens": [],
+            },
+        },
+        "evidence_refs": [{"kind": "command_evidence", "id": 1, "summary": "repository-tail verifier failure"}],
+        "anchors": [
+            {
+                "id": "anchor-repository-tail",
+                "kind": "test_name",
+                "subject": "tests/test_repository_tail.py::test_tail",
+                "read_status": "not_needed",
+            }
+        ],
+        "sibling_candidates": [
+            {
+                "id": "candidate-repository-tail",
+                "kind": "test",
+                "subject": "tests/test_repository_tail.py::test_tail",
+                "status": "anchored",
+                "reason": "repository tail remains failing after the main smoke passed",
+                "evidence_refs": [{"kind": "command_evidence", "id": 1}],
+            }
+        ],
+        "closure_state": {
+            "state": "cheap_verify_needed",
+            "reason": "repository test tail remains open",
+            "evidence_strength": "blocking",
+            "guard_mode": "block_finish",
+            "open_candidate_count": 1,
+            "verifier_obligations": ["rerun repository-test-tail proof"],
+            "blocked_action_kinds": ["finish"],
+            "finish_allowed": False,
+            "next_action": next_action,
+        },
+        "compact_summary": {
+            "one_line": "repository-test-tail frontier; 1 sibling candidate open",
+            "failure_signature": frontier_fingerprint,
+            "evidence_refs": [{"kind": "command_evidence", "id": 1}],
+            "open_candidates": ["candidate-repository-tail"],
+            "next_action": next_action,
+            "guard_mode": "block_finish",
+            "blocked_action_kinds": ["finish"],
+        },
+    }
     report = {
         "summary": "mew work --oneshot completed generic work-session attempt",
         "task_id": 1,
@@ -14749,6 +14810,7 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
             "phase": "failed",
             "next_action": next_action,
             "long_build_state": {},
+            "active_compatibility_frontier": active_frontier,
         },
         "work_report": {
             "session_id": 1,
@@ -15603,7 +15665,17 @@ def run_m6_24_repository_test_tail_emulator_scenario(
     replay = replay_terminal_bench_job(
         source,
         task=task_filter,
-        assertions={"external_reward": 0.0},
+        assertions={
+            "external_reward": 0.0,
+            "frontier_signature_required": True,
+            "frontier_next_action_required": True,
+            "frontier_open_candidate_count_min": 1,
+            "frontier_signature_matches_stored": True,
+            "frontier_family_key_matches_stored": True,
+            "frontier_next_action_matches_stored": True,
+            "frontier_open_candidate_ids_match_stored": True,
+            "frontier_evidence_ref_count_matches_stored": True,
+        },
     )
     first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
     verifier_path = Path(first_trial.get("verifier_stdout_path") or "")
@@ -15628,6 +15700,20 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         replay.get("status") == "pass",
         replay.get("checks") or [],
         "terminal-bench replay pass",
+    )
+    current_frontier = ((first_trial.get("current") or {}).get("active_compatibility_frontier") or {})
+    stored_frontier = ((first_trial.get("stored") or {}).get("active_compatibility_frontier") or {})
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_preserves_active_frontier",
+        bool(current_frontier.get("signature"))
+        and current_frontier.get("signature") == stored_frontier.get("signature")
+        and current_frontier.get("family_key") == stored_frontier.get("family_key")
+        and bool(current_frontier.get("next_action"))
+        and current_frontier.get("next_action") == stored_frontier.get("next_action")
+        and int(current_frontier.get("open_candidate_count") or 0) >= 1,
+        {"stored": stored_frontier, "current": current_frontier},
+        "stored frontier signature, family, next action, and open candidates preserved across replay",
     )
     _scenario_check(
         checks,
@@ -15717,10 +15803,208 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         "fixture_path": str(fixture_path),
         "replay_status": replay.get("status"),
         "trial_count": replay.get("trial_count"),
-        "first_trial": first_trial.get("trial_name") or "",
+        "first_trial": first_trial,
         "summary": summary,
         "llm_action_fixture_count": len(contexts),
         "managed_action_projection": projection,
+    }
+    return report
+
+
+def _same_family_compatibility_frontier_fixture():
+    return {
+        "schema_version": 1,
+        "id": "compat-frontier-same-family-1",
+        "status": "open",
+        "failure_signature": {
+            "schema_version": 1,
+            "kind": "verifier_failure",
+            "fingerprint": "same-family-frontier-fixture",
+            "family_key": "same-family-fixture",
+            "command_shape": "generic compatibility verifier",
+            "exit_class": "nonzero",
+            "runtime_component_kind": "unknown",
+            "failing_tests": ["tests/test_widget.py::test_same_family_tail"],
+            "token_categories": {
+                "error_tokens": ["compatibility_failure"],
+                "failing_test_tokens": ["tests/test_widget.py::test_same_family_tail"],
+                "stack_anchor_tokens": ["src/widget.py"],
+            },
+        },
+        "evidence_refs": [{"kind": "command_evidence", "id": 7, "summary": "same-family verifier failure"}],
+        "anchors": [
+            {
+                "id": "anchor-widget-source",
+                "kind": "source_location",
+                "subject": "src/widget.py:42",
+                "path": "src/widget.py",
+                "line": 42,
+                "read_status": "unread",
+                "evidence_refs": [{"kind": "command_evidence", "id": 7}],
+            }
+        ],
+        "sibling_candidates": [
+            {
+                "id": "candidate-widget-source",
+                "kind": "file",
+                "subject": "src/widget.py",
+                "path": "src/widget.py",
+                "status": "anchored",
+                "reason": "same-family verifier output names this source surface",
+                "evidence_refs": [{"kind": "command_evidence", "id": 7}],
+            }
+        ],
+        "closure_state": {
+            "state": "read_needed",
+            "reason": "same-family compatibility frontier has unread anchors",
+            "evidence_strength": "blocking",
+            "guard_mode": "block_broad",
+            "open_candidate_count": 1,
+            "unread_anchor_count": 1,
+            "unverified_patch_batch_count": 0,
+            "verifier_obligations": ["read same-family source anchor before broad verifier"],
+            "blocked_action_kinds": ["broad_verifier", "finish"],
+            "broad_verifier_allowed": False,
+            "finish_allowed": False,
+            "next_action": "read_file src/widget.py:42",
+        },
+    }
+
+
+def run_m6_24_same_family_compatibility_emulator_scenario(workspace):
+    from .compatibility_frontier import active_compatibility_frontier_action_guard
+
+    checks = []
+    commands = []
+    frontier = _same_family_compatibility_frontier_fixture()
+    broad_action = {
+        "type": "run_tests",
+        "command": "pytest -q",
+        "reason": "try the broad verifier again",
+    }
+    replacement, decision = active_compatibility_frontier_action_guard(
+        frontier,
+        broad_action,
+        resume={"phase": "active"},
+    )
+    _scenario_check(
+        checks,
+        "m6_24_same_family_compatibility_emulator_blocks_broad_cycle",
+        bool(decision.get("applied")) and decision.get("blocked_action_kind") == "broad_verifier",
+        {"decision": decision, "replacement": replacement},
+        "open same-family frontier redirects broad verifier",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_same_family_compatibility_emulator_preserves_frontier_obligations",
+        frontier["failure_signature"]["fingerprint"] == "same-family-frontier-fixture"
+        and frontier["closure_state"]["next_action"] == "read_file src/widget.py:42"
+        and len(frontier["sibling_candidates"]) >= 1,
+        {
+            "signature": frontier["failure_signature"].get("fingerprint"),
+            "next_action": frontier["closure_state"].get("next_action"),
+            "candidate_count": len(frontier.get("sibling_candidates") or []),
+        },
+        "frontier signature, next action, and candidate obligation",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_same_family_compatibility_emulator_redirects_to_anchor_read",
+        replacement.get("type") == "read_file" and replacement.get("path") == "src/widget.py",
+        replacement,
+        "read_file replacement for unread source anchor",
+    )
+    report = _scenario_report("m6_24-same-family-compatibility-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "frontier": {
+            "id": frontier.get("id"),
+            "signature": frontier["failure_signature"].get("fingerprint"),
+            "next_action": frontier["closure_state"].get("next_action"),
+            "candidate_count": len(frontier.get("sibling_candidates") or []),
+        },
+        "guard_decision": decision,
+        "replacement_action": replacement,
+    }
+    return report
+
+
+def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
+    from .acceptance import acceptance_done_gate_decision
+
+    checks = []
+    commands = []
+    task_description = "The native module should run in its original runtime context."
+    session = {
+        "command_evidence": [
+            {
+                "id": 1,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.__file__)'",
+                "output_tail": "/tmp/native_module.so\n",
+            },
+            {
+                "id": 2,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.run())'",
+                "output_tail": "ok\n",
+            },
+        ]
+    }
+    import_only_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Runtime component behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #1 imported the module and printed its path.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 1}],
+            }
+        ],
+    }
+    behavior_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Runtime component behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #2 invoked native_module.run().",
+                "evidence_refs": [{"kind": "command_evidence", "id": 2}],
+            }
+        ],
+    }
+    import_only_decision = acceptance_done_gate_decision(task_description, import_only_action, session=session)
+    behavior_decision = acceptance_done_gate_decision(task_description, behavior_action, session=session)
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_blocks_import_path_only_finish",
+        import_only_decision.get("decision") == "block_continue"
+        and any(
+            blocker.get("code") == "runtime_component_behavior_evidence"
+            for blocker in import_only_decision.get("blockers") or []
+            if isinstance(blocker, dict)
+        ),
+        import_only_decision,
+        "import/path proof is blocked before finish",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_allows_callable_behavior_finish",
+        behavior_decision.get("decision") == "allow_complete",
+        behavior_decision,
+        "explicit callable behavior proof allows finish",
+    )
+    report = _scenario_report("m6_24-runtime-finish-gate-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "import_only_decision": import_only_decision,
+        "behavior_decision": behavior_decision,
     }
     return report
 
@@ -15848,6 +16132,10 @@ def run_dogfood_scenario(args):
                     task=getattr(args, "terminal_bench_task", None),
                 )
             )
+        elif name == "m6_24-same-family-compatibility-emulator":
+            reports.append(run_m6_24_same_family_compatibility_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-runtime-finish-gate-emulator":
+            reports.append(run_m6_24_runtime_finish_gate_emulator_scenario(scenario_workspace))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-repeated-task-recall":

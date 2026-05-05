@@ -3,9 +3,10 @@ import io
 import json
 import tempfile
 import unittest
+from pathlib import Path
 
 from mew.cli import build_parser
-from mew.dogfood import _write_terminal_bench_replay_fixture
+from mew.dogfood import _write_repository_test_tail_emulator_fixture, _write_terminal_bench_replay_fixture
 from mew.terminal_bench_replay import (
     format_terminal_bench_replay,
     replay_terminal_bench_job,
@@ -84,6 +85,61 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(first["fixture"]["raw_action"]["type"], "run_command")
             self.assertIn("session", first)
             self.assertIn("task", first)
+
+    def test_replay_terminal_bench_job_asserts_frontier_signature_and_next_action(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_repository_test_tail_emulator_fixture(tmp, task="generic-compatibility")
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="generic-compatibility",
+                assertions={
+                    "external_reward": 0.0,
+                    "frontier_signature_required": True,
+                    "frontier_next_action_required": True,
+                    "frontier_open_candidate_count_min": 1,
+                    "frontier_signature_matches_stored": True,
+                    "frontier_family_key_matches_stored": True,
+                    "frontier_next_action_matches_stored": True,
+                    "frontier_open_candidate_ids_match_stored": True,
+                    "frontier_evidence_ref_count_matches_stored": True,
+                },
+            )
+            trial = report["trials"][0]
+            frontier = trial["current"]["active_compatibility_frontier"]
+            stored_frontier = trial["stored"]["active_compatibility_frontier"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(frontier["signature"])
+            self.assertTrue(frontier["next_action"])
+            self.assertGreaterEqual(frontier["open_candidate_count"], 1)
+            self.assertEqual(frontier["signature"], stored_frontier["signature"])
+            self.assertEqual(frontier["next_action"], stored_frontier["next_action"])
+            self.assertEqual(frontier["open_candidate_ids"], stored_frontier["open_candidate_ids"])
+
+    def test_replay_terminal_bench_job_fails_if_frontier_reduced_to_summary_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_repository_test_tail_emulator_fixture(tmp, task="generic-compatibility")
+            report_path = next(Path(job_dir).rglob("mew-report.json"))
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            payload["resume"].pop("active_compatibility_frontier", None)
+            payload["resume"]["next_action"] = "frontier summary says repository test tail remains"
+            payload["work_report"]["steps"] = []
+            report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="generic-compatibility",
+                assertions={
+                    "frontier_signature_required": True,
+                    "frontier_next_action_required": True,
+                    "frontier_open_candidate_count_min": 1,
+                },
+            )
+
+            self.assertEqual(report["status"], "fail")
+            failed = [check["name"] for check in report["checks"] if not check["passed"]]
+            self.assertIn("frontier_signature_required", failed)
 
 
 if __name__ == "__main__":

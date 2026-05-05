@@ -259,6 +259,147 @@ def test_normalize_mew_report_steps(tmp_path):
     assert summary["verifier_count"] == 1
 
 
+def test_summarize_trace_reports_frontier_anchor_to_patch_and_broad_cycles(tmp_path):
+    task_dir = tmp_path / "task"
+    report = {
+        "work_report": {
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {
+                        "type": "search_text",
+                        "query": "same-family anchor",
+                        "reason": "active compatibility frontier anchor search",
+                    },
+                    "elapsed_ms": 1000,
+                },
+                {
+                    "index": 2,
+                    "status": "completed",
+                    "action": {
+                        "type": "run_tests",
+                        "command": "pytest -q",
+                        "reason": "active compatibility frontier broad verifier cycle",
+                    },
+                    "elapsed_ms": 3000,
+                },
+                {
+                    "index": 3,
+                    "status": "completed",
+                    "action": {
+                        "type": "edit_file",
+                        "path": "src/widget.py",
+                        "reason": "patch same-family frontier candidate",
+                    },
+                    "elapsed_ms": 7000,
+                },
+            ]
+        }
+    }
+    (task_dir / "mew-report.json").parent.mkdir(parents=True, exist_ok=True)
+    (task_dir / "mew-report.json").write_text(json.dumps(report), encoding="utf-8")
+
+    _events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["frontier_first_anchor_seconds"] == 1.0
+    assert summary["frontier_first_patch_seconds"] == 7.0
+    assert summary["time_from_first_anchor_to_first_patch_seconds"] == 6.0
+    assert summary["same_frontier_broad_cycle_count"] == 1
+
+
+def test_summarize_trace_counts_structured_broad_cycle_without_frontier_words(tmp_path):
+    task_dir = tmp_path / "task"
+    report = {
+        "work_report": {
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {"type": "search_text", "query": "WidgetError"},
+                    "elapsed_ms": 1000,
+                },
+                {
+                    "index": 2,
+                    "status": "completed",
+                    "action": {"type": "run_tests", "command": "pytest -q", "reason": "rerun broad suite"},
+                    "model_turn": {
+                        "metrics": {
+                            "active_compatibility_frontier_guard": {
+                                "blocked_action_kind": "broad_verifier",
+                                "original_action_type": "run_tests",
+                                "replacement_action_type": "read_file",
+                            }
+                        }
+                    },
+                    "elapsed_ms": 3000,
+                },
+                {
+                    "index": 3,
+                    "status": "completed",
+                    "action": {"type": "edit_file", "path": "src/widget.py"},
+                    "elapsed_ms": 7000,
+                },
+            ]
+        }
+    }
+    (task_dir / "mew-report.json").parent.mkdir(parents=True, exist_ok=True)
+    (task_dir / "mew-report.json").write_text(json.dumps(report), encoding="utf-8")
+
+    _events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["frontier_first_anchor_seconds"] == 1.0
+    assert summary["frontier_first_patch_seconds"] == 7.0
+    assert summary["time_from_first_anchor_to_first_patch_seconds"] == 6.0
+    assert summary["same_frontier_broad_cycle_count"] == 1
+
+
+def test_summarize_reference_style_trace_counts_anchor_patch_and_broad_cycle(tmp_path):
+    task_dir = tmp_path / "task"
+    trajectory = {
+        "steps": [
+            {"step_id": 1, "timestamp": "2026-05-05T00:00:00.000Z", "source": "user", "message": "fix"},
+            {
+                "step_id": 2,
+                "timestamp": "2026-05-05T00:00:01.000Z",
+                "source": "agent",
+                "message": "Executed exec_command call-1",
+                "tool_calls": [
+                    {"tool_call_id": "call-1", "function_name": "exec_command", "arguments": {"cmd": "rg WidgetError src"}}
+                ],
+            },
+            {
+                "step_id": 3,
+                "timestamp": "2026-05-05T00:00:03.000Z",
+                "source": "agent",
+                "message": "Executed exec_command call-2",
+                "tool_calls": [
+                    {"tool_call_id": "call-2", "function_name": "exec_command", "arguments": {"cmd": "pytest -q"}}
+                ],
+            },
+            {
+                "step_id": 4,
+                "timestamp": "2026-05-05T00:00:07.000Z",
+                "source": "agent",
+                "message": "Executed apply_patch call-3",
+                "tool_calls": [
+                    {"tool_call_id": "call-3", "function_name": "apply_patch", "arguments": {"input": "*** Begin Patch\n*** End Patch\n"}}
+                ],
+            },
+        ]
+    }
+    trajectory_path = task_dir / "agent" / "trajectory.json"
+    trajectory_path.parent.mkdir(parents=True, exist_ok=True)
+    trajectory_path.write_text(json.dumps(trajectory), encoding="utf-8")
+
+    _events, summary = normalize_harbor_agent_trace(agent="codex", task_dir=task_dir)
+
+    assert summary["frontier_first_anchor_seconds"] == 1.0
+    assert summary["frontier_first_patch_seconds"] == 7.0
+    assert summary["time_from_first_anchor_to_first_patch_seconds"] == 6.0
+    assert summary["same_frontier_broad_cycle_count"] == 1
+
+
 def test_agent_trace_cli_writes_outputs(tmp_path, capsys):
     task_dir = tmp_path / "task"
     write_jsonl(task_dir / "raw" / "stdout.jsonl", [{"item": {"type": "agent_message", "text": "ok"}}])
