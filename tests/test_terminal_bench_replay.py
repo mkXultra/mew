@@ -166,6 +166,68 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertIn("compiled/native source frontier", trial["current"]["next_action"])
             self.assertIn("implement_v2:", text)
 
+    def test_replay_terminal_bench_job_detects_implement_v2_active_command_closeout_gap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "history.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "turn": 1,
+                            "tool_calls": [
+                                {
+                                    "tool_name": "glob",
+                                    "arguments": {"path": "/app/pyknotid", "pattern": "**/*.pyx"},
+                                }
+                            ],
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "final-command",
+                                "tool_name": "run_command",
+                                "status": "interrupted",
+                                "content": [
+                                    {
+                                        "command_run_id": "command-final",
+                                        "reason": "implement_v2 live_json attempt closed before command finalized",
+                                        "kill_status": "process_group_terminated",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["compiled_source_frontier_observed"])
+            self.assertTrue(current_v2["active_command_closeout_failed"])
+            self.assertIn("active command closeout", trial["current"]["next_action"])
+
     def test_terminal_bench_llm_action_fixture_contexts_extract_model_actions(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = _write_terminal_bench_replay_fixture(tmp)

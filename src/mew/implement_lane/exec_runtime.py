@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 import re
 import shlex
+import time
 
 from ..acceptance_evidence import split_unquoted_shell_command_segments
 from ..read_tools import resolve_allowed_path
@@ -63,6 +64,18 @@ class ImplementV2ManagedExecRuntime:
         while self.runner.active is not None:
             cancelled.append(self.runner.cancel(reason=reason))
         return tuple(cancelled)
+
+    def finalize_active_commands(self, *, timeout_seconds: float | None = None) -> tuple[dict[str, object], ...]:
+        finalized = []
+        while self.runner.active is not None:
+            handle = self.runner.active
+            command_remaining = max(0.0, float(handle.timeout) - max(0.0, time.monotonic() - handle.started_monotonic))
+            if timeout_seconds is None:
+                effective_timeout = command_remaining
+            else:
+                effective_timeout = min(max(0.0, float(timeout_seconds)), command_remaining)
+            finalized.append(self.runner.finalize(timeout=effective_timeout))
+        return tuple(finalized)
 
     def _run_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)

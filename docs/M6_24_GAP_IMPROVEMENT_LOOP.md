@@ -665,3 +665,22 @@ Pre-speed assertion update: use both replay and dogfood with
 `next_action_contains=compiled/native source frontier` on the latest true-v2
 miss before another live speed item. The dogfood CLI supports this as
 `--terminal-bench-assert-next-action-contains`.
+
+Update 2026-05-06 JST: the next true-v2 `/app` same-shape speed/debug run
+`mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0245-appcwd` scored `0.0`
+in `8m52s` with runner errors `0`, but the gap moved. v2 now observes the
+compiled source frontier and starts a broad final compatibility repair; the
+latest failure is that `max_turns` closed the live JSON attempt while a managed
+final rebuild/install/smoke command was still running. Replay/dogfood classify
+the exact artifact with `next_action_contains=active command closeout`.
+
+Repair status: implement_v2 now closeouts active managed commands on normal
+attempt close using the remaining wall budget, projects completed terminal
+evidence into the proof manifest, and still cancels active commands on
+exceptions. Closeout is capped by both the command's own remaining timeout and
+the work-session wall budget; explicit `command_closeout_seconds` is only an
+additional upper bound. codex-ultra re-review approved this repair. Before any
+new live `build-cython-ext` proof, run focused UT, exact replay, exact dogfood,
+and any available cheap emulator/canary on current head. Then spend exactly one
+same-shape v2 proof and classify it as clean pass, moved narrower gap, or
+regression.

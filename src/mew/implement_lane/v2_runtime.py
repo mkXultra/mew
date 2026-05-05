@@ -105,6 +105,8 @@ def run_live_json_implement_v2(
     prompt_chars_total = 0
     model_turns = 0
     cleanup_payloads: tuple[dict[str, object], ...] = ()
+    closeout_payloads: tuple[dict[str, object], ...] = ()
+    run_started = time.monotonic()
 
     try:
         for turn_index in range(1, max(1, int(max_turns)) + 1):
@@ -241,12 +243,24 @@ def run_live_json_implement_v2(
                 "outcome": "blocked",
                 "summary": "implement_v2 reached max_turns before finish",
             }
-    finally:
+    except BaseException:
         cleanup_payloads = exec_runtime.cancel_active_commands(
             reason="implement_v2 live_json attempt closed before command finalized"
         )
-    if cleanup_payloads:
-        tool_results = list(_project_orphaned_command_cleanup(tuple(tool_results), cleanup_payloads))
+        raise
+    closeout_payloads, cleanup_payloads = _closeout_active_commands(
+        exec_runtime,
+        lane_input=lane_input,
+        run_started=run_started,
+    )
+    if closeout_payloads or cleanup_payloads:
+        tool_results = list(
+            _project_command_closeouts(
+                tuple(tool_results),
+                closeout_payloads=closeout_payloads,
+                cleanup_payloads=cleanup_payloads,
+            )
+        )
 
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
@@ -264,6 +278,7 @@ def run_live_json_implement_v2(
             "tool_calls": len(tool_calls),
             "tool_results": len(tool_results),
             "model_turns": model_turns,
+            "command_closeout_count": len(closeout_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
         },
     )
@@ -315,6 +330,7 @@ def run_live_json_implement_v2(
             "prompt_sections": prompt_metrics,
             "write_evidence_count": _write_evidence_count(tool_results),
             "terminal_evidence_count": _terminal_evidence_count(tool_results),
+            "command_closeout_count": len(closeout_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
         },
         transcript=tuple(transcript),
@@ -761,35 +777,48 @@ def _write_mode_disabled_result(*, lane_input: ImplementLaneInput, lane_attempt_
     )
 
 
-def _project_orphaned_command_cleanup(
+def _project_command_closeouts(
     tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    closeout_payloads: tuple[dict[str, object], ...],
     cleanup_payloads: tuple[dict[str, object], ...],
 ) -> tuple[ToolResultEnvelope, ...]:
-    if not cleanup_payloads:
+    if not closeout_payloads and not cleanup_payloads:
         return tool_results
+    closeout_by_run_id = {
+        str(payload.get("command_run_id") or ""): dict(payload)
+        for payload in closeout_payloads
+        if str(payload.get("command_run_id") or "").strip()
+    }
     cleanup_by_run_id = {
         str(payload.get("command_run_id") or ""): dict(payload)
         for payload in cleanup_payloads
         if str(payload.get("command_run_id") or "").strip()
     }
-    if not cleanup_by_run_id:
+    if not closeout_by_run_id and not cleanup_by_run_id:
         return tool_results
     projected = []
     for result in tool_results:
         command_run_id = _result_command_run_id(result)
+        closeout_payload = closeout_by_run_id.get(command_run_id)
         cleanup_payload = cleanup_by_run_id.get(command_run_id)
-        if result.status == "yielded" and cleanup_payload:
+        payload = closeout_payload or cleanup_payload
+        if result.status == "yielded" and payload:
+            status = _projected_command_closeout_status(payload)
+            evidence_refs = result.evidence_refs
+            if status == "completed" and result.tool_name in EXEC_TOOL_NAMES and not evidence_refs:
+                evidence_refs = (f"implement-v2-exec://{result.lane_attempt_id}/{command_run_id}/terminal",)
             projected.append(
                 ToolResultEnvelope(
                     lane_attempt_id=result.lane_attempt_id,
                     provider_call_id=result.provider_call_id,
                     mew_tool_call_id=result.mew_tool_call_id,
                     tool_name=result.tool_name,
-                    status="interrupted",
-                    is_error=True,
-                    content=(cleanup_payload,),
+                    status=status,
+                    is_error=status in {"failed", "interrupted"},
+                    content=(payload,),
                     content_refs=result.content_refs,
-                    evidence_refs=(),
+                    evidence_refs=evidence_refs,
                     side_effects=result.side_effects,
                     started_at=result.started_at,
                     finished_at=result.finished_at,
@@ -798,6 +827,67 @@ def _project_orphaned_command_cleanup(
         else:
             projected.append(result)
     return tuple(projected)
+
+
+def _project_orphaned_command_cleanup(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    cleanup_payloads: tuple[dict[str, object], ...],
+) -> tuple[ToolResultEnvelope, ...]:
+    return _project_command_closeouts(tool_results, closeout_payloads=(), cleanup_payloads=cleanup_payloads)
+
+
+def _closeout_active_commands(
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    *,
+    lane_input: ImplementLaneInput,
+    run_started: float,
+) -> tuple[tuple[dict[str, object], ...], tuple[dict[str, object], ...]]:
+    budget = _active_command_closeout_budget_seconds(lane_input, run_started=run_started)
+    if budget <= 0:
+        cleanup_payloads = exec_runtime.cancel_active_commands(
+            reason="implement_v2 active command closeout budget exhausted"
+        )
+        return (), cleanup_payloads
+    closeout_payloads = exec_runtime.finalize_active_commands(timeout_seconds=budget)
+    return closeout_payloads, ()
+
+
+def _active_command_closeout_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float:
+    wall_remaining = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    configured = lane_input.lane_config.get("command_closeout_seconds")
+    if configured not in (None, ""):
+        try:
+            configured_budget = max(0.0, min(3600.0, float(configured)))
+        except (TypeError, ValueError):
+            return 0.0
+        if wall_remaining is None:
+            return configured_budget
+        return min(configured_budget, wall_remaining)
+    if wall_remaining is None:
+        return 60.0
+    return wall_remaining
+
+
+def _remaining_wall_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float | None:
+    max_wall = lane_input.task_contract.get("max_wall_seconds")
+    if max_wall in (None, ""):
+        return None
+    try:
+        remaining = float(max_wall) - max(0.0, time.monotonic() - run_started)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(600.0, remaining))
+
+
+def _projected_command_closeout_status(payload: dict[str, object]) -> str:
+    status = str(payload.get("status") or "")
+    if status == "completed" or payload.get("exit_code") == 0:
+        return "completed"
+    if status == "killed":
+        return "interrupted"
+    if status in {"failed", "timed_out", "orphaned"} or payload.get("exit_code") is not None or payload.get("timed_out"):
+        return "failed"
+    return "interrupted"
 
 
 def _result_command_run_id(result: ToolResultEnvelope) -> str:

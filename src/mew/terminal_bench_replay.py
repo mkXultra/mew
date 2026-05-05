@@ -199,6 +199,7 @@ def _implement_v2_replay_summary(report_path, report):
         "terminal_evidence_count": int(metrics.get("terminal_evidence_count") or 0),
         "write_evidence_count": int(metrics.get("write_evidence_count") or 0),
         "latest_failure": _implement_v2_latest_failure(failed_results),
+        "active_command_closeout_failed": _implement_v2_active_command_closeout_failed(failed_results),
         "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
         "artifact_dir": str(artifact_dir) if artifact_dir else "",
     }
@@ -215,11 +216,25 @@ def _implement_v2_latest_failure(failed_results):
         "tool_name": str(result.get("tool_name") or ""),
         "status": str(result.get("status") or ""),
         "reason": str(first_content.get("reason") or ""),
+        "kill_status": str(first_content.get("kill_status") or ""),
         "exit_code": first_content.get("exit_code"),
         "timed_out": bool(first_content.get("timed_out")),
         "stderr_tail": _clip_text(first_content.get("stderr_tail") or first_content.get("stderr") or ""),
         "stdout_tail": _clip_text(first_content.get("stdout_tail") or first_content.get("stdout") or ""),
     }
+
+
+def _implement_v2_active_command_closeout_failed(failed_results):
+    for result in failed_results:
+        if not isinstance(result, dict):
+            continue
+        content = result.get("content")
+        first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+        reason = str(first_content.get("reason") or "")
+        status = str(result.get("status") or "")
+        if status == "interrupted" and "closed before command finalized" in reason:
+            return True
+    return False
 
 
 def _clip_text(text, limit=500):
@@ -248,6 +263,8 @@ def _implement_v2_next_action(summary):
     latest = summary.get("latest_failure") if isinstance(summary.get("latest_failure"), dict) else {}
     if not summary.get("compiled_source_frontier_observed"):
         return "debug implement_v2 divergence: broaden compiled/native source frontier before another live speed run"
+    if summary.get("active_command_closeout_failed"):
+        return "debug implement_v2 divergence: repair active command closeout before another live speed run"
     if latest:
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"

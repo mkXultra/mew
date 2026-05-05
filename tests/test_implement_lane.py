@@ -281,6 +281,174 @@ def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_pa
     assert "duplicate_provider_call_id_across_turns" in manifest["tool_results"][1]["content"][0]["reason"]
 
 
+def test_implement_v2_live_json_drains_active_command_at_max_turns(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import time; "
+                "print('start', flush=True); time.sleep(0.05); "
+                "Path('done.txt').write_text('done', encoding='utf-8'); "
+                "print('done', flush=True)"
+            ),
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "start final command",
+            "tool_calls": [
+                {
+                    "id": "call-final",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0.001,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"max_wall_seconds": 5},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    tool_result = manifest["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "completed"
+    assert tool_result["evidence_refs"]
+    assert "done" in tool_result["content"][0]["stdout"]
+    assert (tmp_path / "done.txt").read_text(encoding="utf-8") == "done"
+    assert result.metrics["command_closeout_count"] == 1
+    assert result.metrics["orphaned_command_cleanup_count"] == 0
+    assert result.metrics["terminal_evidence_count"] == 1
+
+
+def test_implement_v2_closeout_preserves_command_timeout(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "import time; print('start', flush=True); time.sleep(3)"])
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "start command with shorter command timeout than wall budget",
+            "tool_calls": [
+                {
+                    "id": "call-timeout",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 1,
+                        "foreground_budget_seconds": 0.001,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"max_wall_seconds": 5},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    content = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert content["timed_out"] is True
+    assert content["timeout_seconds"] <= 1
+    assert result.metrics["command_closeout_count"] == 1
+
+
+def test_implement_v2_closeout_config_is_capped_by_remaining_wall_budget(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "import time; print('start', flush=True); time.sleep(3)"])
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "start command with closeout config above wall budget",
+            "tool_calls": [
+                {
+                    "id": "call-wall-cap",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0.001,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"max_wall_seconds": 0.1},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "command_closeout_seconds": 5,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    content = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert content["timed_out"] is True
+    assert content["timeout_seconds"] < 1
+    assert result.metrics["command_closeout_count"] == 1
+
+
 def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     specs = {spec.name: spec for spec in list_v2_base_tool_specs()}
 

@@ -112,9 +112,16 @@ Scope:
 - Current repair status: v2 tool-surface mismatch is repaired, true-v2
   artifacts replay through `implement_v2/history.json` and
   `proof-manifest.json`, and generic compiled/native Python compatibility
-  frontier guidance is present. Before the next live speed run, exercise the
-  compiled-source frontier with a cheap canary/emulator or exact same-shape
-  pre-speed check; do not treat old v1 replay-only gates as enough for v2.
+  frontier guidance is present. The follow-up `/app` true-v2 run
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0245-appcwd` moved the
+  gap: v2 applied the broad Python/Cython NumPy alias repair, then killed the
+  final rebuild/install/smoke command when `max_turns` closed the attempt.
+  The generic active-command closeout repair now drains a running managed
+  command within remaining wall budget on normal close and records terminal
+  evidence instead of immediately cancelling it. Before the next live speed
+  run, exercise focused UT, exact replay/dogfood, and any cheap same-shape
+  emulator/canary on current head; do not treat old v1 replay-only gates as
+  enough for v2.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded
@@ -170,7 +177,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> focused UT/replay/dogfood/emulator passed -> first v2 speed attempt excluded as /workspace harness-invalid before mew launch -> exactly one build-cython-ext speed_1 rerun with selected_lane=implement_v2 and /app cwd -> stop and debug if step flow diverges from the Codex/Claude Code reference pattern
+M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> first v2 speed attempt excluded as /workspace harness-invalid before mew launch -> /app v2 speed miss moved from tool-surface/frontier gap to active-command closeout gap -> closeout repair implemented -> run focused UT/replay/dogfood/emulator pre-speed -> exactly one build-cython-ext speed_1 rerun with selected_lane=implement_v2 and /app cwd -> stop and debug if step flow diverges from the Codex/Claude Code reference pattern
 ```
 
 The 2026-05-05 Codex/Claude Code reference traces both pass
