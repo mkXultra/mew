@@ -52,7 +52,7 @@ Current selected gap class:
 `final_verifier_budget_blocked_after_near_solution`.
 
 Current selected next action:
-`M6.24 -> latest build-cython-ext artifact 20260505-1909 -> final-verifier-budget repair validated/reviewed -> exactly one build-cython-ext speed_1 with selected_lane=implement_v1`.
+`M6.24 -> latest build-cython-ext artifact 20260505-1909 -> final-verifier-budget repair validated/reviewed -> exactly one build-cython-ext speed_1 with selected_lane=implement_v2, guarded by reference-step comparison`.
 
 Current live proof status on 2026-05-06 JST: the selected gap moved past the
 active compatibility frontier loops. The latest same-shape run
@@ -67,8 +67,11 @@ local repair is now validated: typed final verifier/proof actions may spend the
 final-proof reserve, non-final managed build/repair actions still preserve it,
 and a boundary regression still blocks when the remaining wall budget cannot
 satisfy `yield_after < effective_timeout`. The next allowed live action is
-exactly one same-shape `build-cython-ext` speed proof with
-`selected_lane=implement_v1`.
+exactly one same-shape `build-cython-ext` speed/debug proof with
+`selected_lane=implement_v2`. If the v2 attempt leaves the Codex/Claude Code
+reference step flow before reaching the selected gap shape, stop live speed
+spending and debug the divergence through saved artifact replay, dogfood, and
+trace comparison before another live run.
 
 Current pre-speed status:
 

@@ -147,7 +147,13 @@ Before spending another live `build-cython-ext` proof:
 2. replay on latest `build-cython-ext` artifact;
 3. dogfood scenario on the same artifact;
 4. same-shape emulator for repository-test-tail frontier;
-5. exactly one live `build-cython-ext speed_1`.
+5. exactly one live `build-cython-ext speed_1` with
+   `selected_lane=implement_v2`.
+
+Stop condition: the v2 speed run is useful only while it follows the reference
+step shape. If it leaves the shared Codex/Claude Code pattern before reaching
+the known final-verifier gap shape, stop live speed spending, preserve the
+artifact, and debug with replay/dogfood/trace comparison before another run.
 
 ## Next Controller Chain
 
@@ -157,4 +163,3 @@ active compatibility frontier v0 -> action selection frontier lock ->
 finish evidence guard -> mew timeline normalization -> UT/replay/dogfood/emulator ->
 one speed_1
 ```
-

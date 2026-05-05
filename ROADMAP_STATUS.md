@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-05
+Last updated: 2026-05-06
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; explicit `implement_v2` live JSON runtime canary passed on `prove-plus-comm`; default parity proof lane remains `implement_v1` unless a later decision selects v2 for an A/B attempt. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; explicit `implement_v2` live JSON runtime canary passed on `prove-plus-comm`; newest decision selects `implement_v2` for the next `build-cython-ext` speed/debug attempt. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_true_implement_v2_canary_passed_resume_explicit_lane_parity`.
+Current controller mode: `m6_24_true_implement_v2_build_cython_speed_debug`.
 
 Scope:
 
@@ -86,15 +86,17 @@ Scope:
   in `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`.
 - Phase 6 M6.24 reentry A/B gate is implemented, reviewed, and proved in
   `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`.
-- `implement_v1` remains the default lane for resumed M6.24 parity proof work.
+- `implement_v1` remains the compatibility/default lane, but it is not the
+  selected lane for the next `build-cython-ext` same-shape speed/debug attempt.
 - `implement_v2` now has a live `model_json` runtime that bypasses the v1
   THINK/ACT planner, emits v2 transcript/proof artifacts, and can write/verify
   through the v2 substrates. It remains explicit-selection only.
 - Provider-specific native tool-call transport is still future work; current
   v2 proof must be described as `model_json`, not provider-native.
-- M6.24 live proof work resumes only with explicit lane metadata. The default
-  next proof lane is `implement_v1`; any `implement_v2` proof is an explicit
-  A/B attempt and cannot count fallback execution as v2 success.
+- M6.24 live proof work resumes only with explicit lane metadata. The newest
+  user decision selects `implement_v2` for the next same-shape
+  `build-cython-ext` speed/debug run. Any fallback execution must be a separate
+  attempt and cannot count as v2 success.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded
@@ -115,7 +117,7 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v1 for the next M6.24 proof; every proof artifact must record lane id and lane attempt id
+selected_lane=implement_v2 for the next build-cython-ext M6.24 speed/debug proof; every proof artifact must record lane id and lane attempt id; if v2 leaves the Codex/Claude Code reference step flow, stop speed spending and debug the divergence through replay/dogfood/trace comparison before another live run
 ```
 
 ## Active M6.24 Context
@@ -150,7 +152,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> verified_sibling_repair_frontier_not_exhausted -> current-head build-cython-ext artifact -> replay/dogfood/emulator pass -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1
+M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1 with selected_lane=implement_v2 -> stop and debug if step flow diverges from the Codex/Claude Code reference pattern
 ```
 
 The 2026-05-05 Codex/Claude Code reference traces both pass
@@ -198,11 +200,12 @@ Useful historical files:
 ## Current Roadmap Focus
 
 1. Resume M6.24 on the scoped `software-engineering,coding` cohort with
-   explicit `selected_lane=implement_v1` attribution in the next proof artifact.
+   explicit `selected_lane=implement_v2` attribution in the next
+   `build-cython-ext` speed/debug artifact.
 2. Before spending a live proof item, run the existing pre-speed checks:
    focused UT, replay, dogfood, and emulator where available.
-3. If a measured gap exceeds the recorded improvement threshold, stop broad
-   measurement and enter the M6.24 gap-improvement loop before measuring new
-   tasks.
+3. If the v2 step flow leaves the Codex/Claude Code reference pattern before
+   reaching the known gap shape, stop speed spending and debug through
+   replay/dogfood/trace comparison before another live run.
 4. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
