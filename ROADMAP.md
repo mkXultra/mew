@@ -1339,6 +1339,42 @@ Why it matters:
   to see which failures share a shape, repair the shared mechanism, and prove
   the repair with benchmark deltas.
 
+## Milestone 6.23.2: Lane Isolation Substrate
+
+Create a lane boundary before implementing a provider-native implement lane v2.
+
+Target:
+
+- isolate lane selection so new lanes can be added without mutating the current
+  implement lane
+- keep the existing implement lane as `implement_v1` and default it through an
+  adapter with no behavior change
+- define lane input/result/transcript/tool-policy contracts that can support
+  implement, research, easy-task, deliberation, and future build-orchestration
+  lanes without sharing internal loop assumptions
+- add a default-off `implement_v2` plan that can use provider-native tool
+  calls after the lane boundary is in place
+- preserve M6.24 evidence quality by making any future Terminal-Bench proof
+  explicitly identify which lane produced the artifact
+
+Done when:
+
+- v1 remains the default and focused regression shows no intended behavior
+  change
+- v1 and v2 lane artifacts are namespaced and cannot collide
+- a placeholder lane can be registered without editing v1 runtime internals
+- the v2 implementation plan covers provider-native tool calls, tool results,
+  managed command execution, approval-gated writes, prompt sections, metrics,
+  and replay
+- M6.24 can resume with an explicit lane selection decision
+
+Why it matters:
+
+- Retrofitting Codex/Claude Code style tool loops directly into the current
+  implement lane would blur benchmark evidence and risk unrelated lane
+  behavior. Lane isolation lets mew evolve toward multiple resident work loops
+  while keeping each loop testable.
+
 ## Milestone 6.24: Software/Coding Terminal-Bench Parity Campaign
 
 Run a measurement / improvement loop against the frozen Terminal-Bench 2.0

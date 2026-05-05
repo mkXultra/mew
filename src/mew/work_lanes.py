@@ -11,6 +11,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 TINY_LANE = "tiny"
+IMPLEMENT_V1_LANE = "implement_v1"
+IMPLEMENT_V2_LANE = "implement_v2"
 MIRROR_LANE = "mirror"
 DELIBERATION_LANE = "deliberation"
 
@@ -29,6 +31,8 @@ LANE_DISPLAY_UNSUPPORTED = "unsupported"
 
 _LANE_DISPLAY_NAMES_BY_LANE = {
     TINY_LANE: LANE_DISPLAY_IMPLEMENTATION,
+    IMPLEMENT_V1_LANE: "implementation_v1",
+    IMPLEMENT_V2_LANE: "implementation_v2",
     MIRROR_LANE: MIRROR_LANE,
     DELIBERATION_LANE: DELIBERATION_LANE,
 }
@@ -46,6 +50,7 @@ class WorkLaneView:
     role: str
     requires_model_binding: bool = False
     fallback_lane: str = TINY_LANE
+    runtime_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -116,6 +121,26 @@ _SUPPORTED_WORK_LANES: tuple[WorkLaneView, ...] = (
         role=LANE_ROLE_AUTHORITATIVE,
     ),
     WorkLaneView(
+        name=IMPLEMENT_V1_LANE,
+        supported=True,
+        authoritative=True,
+        write_capable=True,
+        layout=LANE_LAYOUT_LANE_SCOPED,
+        role=LANE_ROLE_AUTHORITATIVE,
+        fallback_lane=TINY_LANE,
+    ),
+    WorkLaneView(
+        name=IMPLEMENT_V2_LANE,
+        supported=True,
+        authoritative=False,
+        write_capable=False,
+        layout=LANE_LAYOUT_LANE_SCOPED,
+        role=LANE_ROLE_SHADOW,
+        requires_model_binding=True,
+        fallback_lane=IMPLEMENT_V1_LANE,
+        runtime_available=False,
+    ),
+    WorkLaneView(
         name=MIRROR_LANE,
         supported=True,
         authoritative=False,
@@ -166,6 +191,7 @@ def get_work_lane_view(lane: object) -> WorkLaneView:
         write_capable=False,
         layout=LANE_LAYOUT_UNSUPPORTED,
         role=LANE_ROLE_UNSUPPORTED,
+        runtime_available=False,
     )
 
 
@@ -238,6 +264,8 @@ def build_lane_attempt_event(
 
 __all__ = [
     "DELIBERATION_LANE",
+    "IMPLEMENT_V1_LANE",
+    "IMPLEMENT_V2_LANE",
     "LANE_ATTEMPT_EVENT",
     "LANE_DISPLAY_IMPLEMENTATION",
     "LANE_DISPLAY_UNSUPPORTED",

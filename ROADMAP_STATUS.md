@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-03
+Last updated: 2026-05-05
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -56,7 +56,8 @@ not mean every idea in every design note has shipped.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Current-head `build-cython-ext` recheck still scores `0/1`; next repair is generic repository-test-tail frontier exhaustion after replay/dogfood/emulator classification. |
+| 6.23.2 Lane Isolation Substrate | `in_progress` | Active structural pause before the next M6.24 live proof: isolate lanes, keep v1 default, and plan default-off implement v2. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `pending` | Paused behind M6.23.2 so the next proof can identify an explicit lane and avoid mixing benchmark evidence with lane architecture changes. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -66,15 +67,35 @@ not mean every idea in every design note has shipped.
 
 ## Active Milestone
 
-Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
+Active work: **M6.23.2 Lane Isolation Substrate**.
 
-Current controller mode: `improvement_phase` with
-`verified_sibling_repair_frontier_not_exhausted`, current subtype
-`repository_test_tail_frontier_not_exhausted_before_wall_timeout`.
+Current controller mode: `lane_isolation_planning`.
 
 Scope:
 
-- M6.24 now focuses only on the 25 Terminal-Bench 2.0 tasks returned by the
+- M6.23.2 creates a lane boundary before implementing provider-native
+  `implement_v2`.
+- `implement_v1` remains the default and must route through an adapter with no
+  intended behavior change.
+- v2 is default-off until the lane registry, transcript namespace, tool policy,
+  and proof artifact boundary are in place.
+- M6.24 live proof work is paused until the next proof can explicitly state
+  which lane produced the artifact.
+
+Controller docs:
+
+- `docs/DESIGN_2026-05-05_M6_23_2_LANE_ISOLATION_SUBSTRATE.md`
+- `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
+
+Paused M6.24 resume action:
+
+```text
+M6.23.2 -> lane registry / v1 adapter plan -> lane transcript namespace -> default-off implement_v2 scaffold -> focused v1 regression -> resume M6.24 with explicit lane selection
+```
+
+## Paused M6.24 Context
+
+- M6.24 focuses only on the 25 Terminal-Bench 2.0 tasks returned by the
   `software-engineering,coding` filters.
 - The authoritative scoped task list is
   `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
@@ -151,15 +172,18 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Implement the selected generic `build-cython-ext` gap repair:
-   `verified_sibling_repair_frontier_not_exhausted` /
-   `repository_test_tail_frontier_not_exhausted_before_wall_timeout`, using the
-   2026-05-05 reference traces as evidence for an active compatibility frontier
-   rather than another task-specific prompt patch.
-2. Before any live `speed_1`, run focused UT, replay, dogfood, and a same-shape
-   emulator. If no emulator exists, build the smallest emulator fixture first.
-3. If the selected gap is local/polish, fix it and rerun the same scoped shape.
-4. If the selected gap is structural, pause M6.24 behind M6.14, repair the
-   generic substrate, rerun the same scoped shape, then resume M6.24.
+1. Finish M6.23.2 lane isolation design acceptance: resolve review findings on
+   the Lane Isolation Substrate and default-off `implement_v2` native tool-loop
+   design before any new M6.24 live proof.
+2. Preserve `implement_v1` as the default and keep v1 behavior/regression
+   evidence separate from v2 design and scaffold work.
+3. Close the lane boundary plan: explicit lane selection, lane-scoped
+   transcript/proof namespaces, provider-native v2 tool/result pairing design,
+   prompt-section metadata, metrics, rollback, and reviewer-approved phase
+   gates.
+4. Resume the paused M6.24 `build-cython-ext` repair path only after M6.23.2
+   records a clean resume decision with explicit lane selection, focused v1
+   regression, no accepted lane-isolation must-fix findings, and proof artifacts
+   able to name the producing lane.
 5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
