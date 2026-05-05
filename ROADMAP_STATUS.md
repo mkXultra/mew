@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; explicit `implement_v2` live JSON runtime canary passed on `prove-plus-comm`; newest decision selects `implement_v2` for the next `build-cython-ext` speed/debug attempt. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; explicit `implement_v2` live JSON runtime canary passed, and post-closeout `build-cython-ext` speed_1 now passes. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_true_implement_v2_build_cython_speed_debug`.
+Current controller mode: `m6_24_true_implement_v2_build_cython_speed_1_passed_select_next`.
 
 Scope:
 
@@ -86,29 +86,30 @@ Scope:
   in `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`.
 - Phase 6 M6.24 reentry A/B gate is implemented, reviewed, and proved in
   `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`.
-- `implement_v1` remains the compatibility/default lane, but it is not the
-  selected lane for the next `build-cython-ext` same-shape speed/debug attempt.
+- `implement_v1` remains the compatibility/default lane, but it was not the
+  selected lane for the latest `build-cython-ext` same-shape speed/debug
+  attempt.
 - `implement_v2` now has a live `model_json` runtime that bypasses the v1
   THINK/ACT planner, emits v2 transcript/proof artifacts, and can write/verify
   through the v2 substrates. It remains explicit-selection only.
 - Provider-specific native tool-call transport is still future work; current
   v2 proof must be described as `model_json`, not provider-native.
 - M6.24 live proof work resumes only with explicit lane metadata. The newest
-  user decision selects `implement_v2` for the next same-shape
-  `build-cython-ext` speed/debug run. Any fallback execution must be a separate
-  attempt and cannot count as v2 success.
+  completed same-shape `build-cython-ext` speed/debug run used
+  `selected_lane=implement_v2` and passed. Any fallback execution must be a
+  separate attempt and cannot count as v2 success.
 - The first true-v2 `build-cython-ext` speed attempt
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
   product evidence: Docker failed before `mew` launched because the harness
-  used missing cwd `/workspace`. This task should be rerun with `/app`.
+  used missing cwd `/workspace`. The task was rerun with `/app`.
 - The first task-correct `/app` true-v2 `build-cython-ext` run
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd` completed
   in `4m43s` with runner errors `0`, but scored `0.0`. It is valid divergence
   evidence, not a pass: v2 spent turns on tool-surface mismatches (`cmd`,
   `argv`, compound shell strings, and edit aliases), then fixed Python files
-  but missed the sibling Cython `*.pyx`/`*.pxd` NumPy-alias frontier. Stop live
-  speed spending until that generic v2 I/F/frontier gap is repaired and
-  covered by focused UT plus replay/dogfood/emulator checks.
+  but missed the sibling Cython `*.pyx`/`*.pxd` NumPy-alias frontier. Live
+  speed spending was stopped until that generic v2 I/F/frontier gap was
+  repaired and covered by focused UT plus replay/dogfood/emulator checks.
 - Current repair status: v2 tool-surface mismatch is repaired, true-v2
   artifacts replay through `implement_v2/history.json` and
   `proof-manifest.json`, and generic compiled/native Python compatibility
@@ -118,10 +119,17 @@ Scope:
   final rebuild/install/smoke command when `max_turns` closed the attempt.
   The generic active-command closeout repair now drains a running managed
   command within remaining wall budget on normal close and records terminal
-  evidence instead of immediately cancelling it. Before the next live speed
-  run, exercise focused UT, exact replay/dogfood, and any cheap same-shape
-  emulator/canary on current head; do not treat old v1 replay-only gates as
-  enough for v2.
+  evidence instead of immediately cancelling it. The current-head pre-speed
+  gate was run before the post-repair live proof; old v1 replay-only gates are
+  not enough for v2.
+- Post-closeout proof status: the current-head `/app` true-v2 run
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout` passed
+  with reward `1.0`, runner errors `0`, runtime `4m52s`, `work_exit_code=0`,
+  `stop_reason=finish`, `selected_lane=implement_v2`, and external verifier
+  `11/11` passing. Exact replay and dogfood on the passing artifact also pass.
+  Do not rerun the same speed_1 shape blindly; the next action is a controller
+  decision between same-shape `build-cython-ext` proof_5 and the next scoped
+  below-target software/coding task.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded
@@ -142,8 +150,13 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 for the next build-cython-ext M6.24 speed/debug proof; every proof artifact must record lane id and lane attempt id; if v2 leaves the Codex/Claude Code reference step flow, stop speed spending and debug the divergence through replay/dogfood/trace comparison before another live run
+selected_lane=implement_v2 for build-cython-ext M6.24 speed/debug proof; every proof artifact must record lane id and lane attempt id; the post-closeout speed_1 passed, so do not rerun speed_1 blindly; choose proof_5 or the next scoped below-target task explicitly
 ```
+
+Latest update: that selected `build-cython-ext` speed/debug proof passed after
+the active-command closeout repair. The current decision is no longer "run the
+next speed_1"; it is "choose proof_5 for this selected repair or move to the
+next scoped below-target task."
 
 ## Active M6.24 Context
 
@@ -177,7 +190,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> first v2 speed attempt excluded as /workspace harness-invalid before mew launch -> /app v2 speed miss moved from tool-surface/frontier gap to active-command closeout gap -> closeout repair implemented -> run focused UT/replay/dogfood/emulator pre-speed -> exactly one build-cython-ext speed_1 rerun with selected_lane=implement_v2 and /app cwd -> stop and debug if step flow diverges from the Codex/Claude Code reference pattern
+M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> first v2 speed attempt excluded as /workspace harness-invalid before mew launch -> /app v2 speed miss moved from tool-surface/frontier gap to active-command closeout gap -> closeout repair implemented -> focused UT/replay/dogfood/emulator pre-speed passed -> selected_lane=implement_v2 build-cython-ext speed_1 passed -> choose proof_5 or next scoped below-target task
 ```
 
 The 2026-05-05 Codex/Claude Code reference traces both pass
@@ -224,14 +237,14 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Resume M6.24 on the scoped `software-engineering,coding` cohort with
-   explicit `selected_lane=implement_v2` attribution in the next
-   `build-cython-ext` speed/debug artifact, rerun with task-correct `/app`
-   cwd.
-2. Before spending a live proof item, run the existing pre-speed checks:
-   focused UT, replay, dogfood, and emulator where available.
-3. If the v2 step flow leaves the Codex/Claude Code reference pattern before
-   reaching the known gap shape, stop speed spending and debug through
-   replay/dogfood/trace comparison before another live run.
+1. Record the passing true-v2 `build-cython-ext` speed_1 as current M6.24
+   evidence; do not spend another same-shape speed_1.
+2. Decide the next controller action explicitly: either run same-shape
+   `build-cython-ext` proof_5 to close the selected repair against the frozen
+   Codex target, or choose the next scoped below-target software/coding task if
+   threshold logic says measurement should resume.
+3. Before any further live proof item, run the existing pre-speed checks:
+   focused UT, replay, dogfood, and emulator where available. If a proof misses,
+   reproduce the exact artifact through replay/dogfood before code repair.
 4. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.

@@ -260,6 +260,8 @@ def _implement_v2_history_mentions_compiled_source_frontier(history):
 def _implement_v2_next_action(summary):
     if not summary:
         return ""
+    if str(summary.get("lane_status") or "") == "completed" and bool(summary.get("replay_valid", True)):
+        return "record implement_v2 pass and continue M6.24 scoped parity"
     latest = summary.get("latest_failure") if isinstance(summary.get("latest_failure"), dict) else {}
     if not summary.get("compiled_source_frontier_observed"):
         return "debug implement_v2 divergence: broaden compiled/native source frontier before another live speed run"
