@@ -110,6 +110,35 @@ def _normalize_shape(value, *, cwd=""):
     return text.strip()
 
 
+def _frontier_actionable_read_path(value, *, cwd=""):
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    if cwd:
+        text = _normalize_path(text, cwd=cwd)
+    if re.fullmatch(r"<[^>/\\]+>", text):
+        return ""
+    if text.startswith(("<tmp>", "<cache>")):
+        return ""
+    lowered = text.casefold()
+    if re.search(r"(?:^|/)(?:site-packages|dist-packages)(?:/|$)", lowered):
+        return ""
+    if re.match(r"^/(?:usr/(?:local/)?lib|opt/homebrew/lib)/python\d+(?:\.\d+)?/", lowered):
+        return ""
+    if text == "<repo>":
+        return "."
+    if text.startswith("<repo>/"):
+        text = text[len("<repo>/") :]
+        lowered = text.casefold()
+        if re.search(r"(?:^|/)(?:site-packages|dist-packages)(?:/|$)", lowered):
+            return ""
+    if text.startswith("/"):
+        return ""
+    if text.startswith("./"):
+        text = text[2:]
+    return text
+
+
 def _canonical_hash(core):
     canonical = json.dumps(core, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(f"{FINGERPRINT_VERSION}\n{canonical}".encode("utf-8")).hexdigest()
@@ -227,7 +256,7 @@ def _stack_anchor_tokens(source_locations, *, cwd=""):
     for location in source_locations or []:
         if not isinstance(location, dict):
             continue
-        path = _normalize_path(location.get("path") or "", cwd=cwd)
+        path = _frontier_actionable_read_path(location.get("path") or "", cwd=cwd)
         if path:
             tokens.append(path)
     return sorted(_dedupe(tokens), key=lambda item: item.casefold())
@@ -443,7 +472,7 @@ def _build_anchors(agenda, signature, search_anchor_observations, evidence_refs,
     for location in (agenda or {}).get("source_locations") or []:
         if not isinstance(location, dict):
             continue
-        path = _normalize_path(location.get("path") or "", cwd=cwd)
+        path = _frontier_actionable_read_path(location.get("path") or "", cwd=cwd)
         if not path:
             continue
         line = _line_number(location.get("line"))
@@ -483,7 +512,9 @@ def _build_anchors(agenda, signature, search_anchor_observations, evidence_refs,
     for observation in search_anchor_observations or []:
         if not isinstance(observation, dict):
             continue
-        path = _normalize_path(observation.get("path") or "")
+        path = _frontier_actionable_read_path(observation.get("path") or "", cwd=cwd)
+        if not path:
+            continue
         line = _line_number(observation.get("first_match_line"))
         query = _clip_text(observation.get("query") or observation.get("pattern") or "", 160)
         subject = f"{path}:{line}" if path and line else path or query
@@ -1540,7 +1571,7 @@ def _frontier_first_unread_anchor_action(frontier, reason):
             continue
         if anchor.get("kind") not in {"source_location", "search_match"}:
             continue
-        path = anchor.get("path")
+        path = _frontier_actionable_read_path(anchor.get("path") or "")
         if not path:
             continue
         try:
@@ -1559,7 +1590,7 @@ def _frontier_first_unread_anchor_action(frontier, reason):
 
 def _frontier_first_candidate_read_action(frontier, reason):
     for candidate in _frontier_candidates(frontier):
-        path = candidate.get("path")
+        path = _frontier_actionable_read_path(candidate.get("path") or "")
         if not path:
             continue
         return {
@@ -1579,9 +1610,10 @@ def _frontier_first_search_action(frontier, reason):
         query = str(anchor.get("query") or "").strip()
         if not query:
             continue
+        path = _frontier_actionable_read_path(anchor.get("path") or "") or "."
         action = {
             "type": "search_text",
-            "path": anchor.get("path") or ".",
+            "path": path,
             "query": query,
             "reason": reason,
         }
@@ -1593,7 +1625,6 @@ def _frontier_first_search_action(frontier, reason):
 
 def _frontier_replacement_action(frontier, *, blocked_action_kind):
     closure = _frontier_closure(frontier)
-    state = str(closure.get("state") or "open").strip()
     base_reason = (
         "active compatibility frontier requires "
         f"{closure.get('next_action') or 'closing open evidence obligations'} "
@@ -1602,17 +1633,12 @@ def _frontier_replacement_action(frontier, *, blocked_action_kind):
     action = _frontier_first_unread_anchor_action(frontier, base_reason)
     if action:
         return action
-    if state == "search_needed":
-        action = _frontier_first_search_action(frontier, base_reason)
-        if action:
-            return action
+    action = _frontier_first_search_action(frontier, base_reason)
+    if action:
+        return action
     action = _frontier_first_candidate_read_action(frontier, base_reason)
     if action:
         return action
-    if state == "search_needed":
-        action = _frontier_first_search_action(frontier, base_reason)
-        if action:
-            return action
     return {
         "type": "wait",
         "reason": base_reason,

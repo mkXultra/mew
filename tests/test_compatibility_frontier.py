@@ -297,6 +297,140 @@ class CompatibilityFrontierTests(unittest.TestCase):
         self.assertNotIn("Traceback (most recent call last):", json.dumps(frontier))
         self.assertNotIn("module 'runtime' has no attribute", json.dumps(frontier))
 
+    def test_virtual_and_installed_source_locations_fall_back_to_search_frontier(self):
+        session = {"id": 17, "updated_at": "2026-05-05T00:00:00Z"}
+        agenda = {
+            "source_tool_call_id": 9,
+            "tool": "run_tests",
+            "command": "python - <<'PY'\nimport pkg\nPY",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": [
+                '  File "<stdin>", line 17, in <module>',
+                '  File "/usr/local/lib/python3.13/site-packages/pkg/runtime.py", line 13, in run',
+                "ImportError: cannot import name 'gcd' from 'fractions'",
+            ],
+            "source_locations": [
+                {"path": "<stdin>", "line": "17"},
+                {"path": "/usr/local/lib/python3.13/site-packages/pkg/runtime.py", "line": "13"},
+                {"path": "/repo/.venv/lib/python3.13/site-packages/pkg/runtime.py", "line": "21"},
+            ],
+            "symbols": ["gcd"],
+            "sibling_search_queries": ["from fractions import gcd"],
+        }
+        calls = [
+            {
+                "id": 9,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+            }
+        ]
+
+        frontier = update_session_active_compatibility_frontier(
+            session,
+            calls,
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[],
+            current_time="2026-05-05T00:00:01Z",
+        )
+        source_anchors = [anchor for anchor in frontier["anchors"] if anchor["kind"] == "source_location"]
+
+        self.assertEqual(source_anchors, [])
+        self.assertNotIn("<stdin>", frontier["failure_signature"]["token_categories"]["stack_anchor_tokens"])
+        self.assertNotIn("site-packages", json.dumps(frontier["failure_signature"]["token_categories"]))
+        self.assertNotIn(".venv", json.dumps(frontier["failure_signature"]["token_categories"]))
+        self.assertEqual(frontier["closure_state"]["state"], "search_needed")
+        self.assertEqual(frontier["closure_state"]["next_action"], "search_text from fractions import gcd")
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            {"type": "run_tests", "command": "pytest -q"},
+            resume={"phase": "idle"},
+        )
+
+        self.assertTrue(decision["applied"])
+        self.assertEqual(action["type"], "search_text")
+        self.assertEqual(action["path"], ".")
+        self.assertEqual(action["query"], "from fractions import gcd")
+
+    def test_filtered_search_anchor_observations_do_not_create_empty_read_anchors(self):
+        session = {"id": 19, "updated_at": "2026-05-05T00:00:00Z"}
+        agenda = {
+            "source_tool_call_id": 11,
+            "tool": "run_tests",
+            "command": "python -m pytest",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": ["ImportError: cannot import name 'gcd' from 'fractions'"],
+            "source_locations": [],
+            "symbols": ["gcd"],
+            "sibling_search_queries": ["from fractions import gcd"],
+        }
+        calls = [
+            {
+                "id": 11,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+            }
+        ]
+
+        frontier = update_session_active_compatibility_frontier(
+            session,
+            calls,
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[
+                {
+                    "tool": "search_text",
+                    "path": "/repo/.venv/lib/python3.13/site-packages/pkg/runtime.py",
+                    "query": "from fractions import gcd",
+                    "tool_call_id": 12,
+                    "first_match_line": 13,
+                }
+            ],
+            current_time="2026-05-05T00:00:01Z",
+        )
+
+        self.assertFalse(any(anchor["kind"] == "search_match" for anchor in frontier["anchors"]))
+        self.assertEqual(frontier["closure_state"]["state"], "search_needed")
+        self.assertEqual(frontier["closure_state"]["next_action"], "search_text from fractions import gcd")
+
+    def test_repo_source_locations_remain_readable_frontier_anchors(self):
+        session = {"id": 18, "updated_at": "2026-05-05T00:00:00Z"}
+        agenda = {
+            "source_tool_call_id": 10,
+            "tool": "run_tests",
+            "command": "pytest tests/test_runtime.py::test_behavior",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": ["RuntimeError: adapter failed"],
+            "source_locations": [{"path": "/repo/src/runtime_adapter.py", "line": "12"}],
+            "symbols": [],
+        }
+        calls = [
+            {
+                "id": 10,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+            }
+        ]
+
+        frontier = update_session_active_compatibility_frontier(
+            session,
+            calls,
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[],
+            current_time="2026-05-05T00:00:01Z",
+        )
+
+        self.assertEqual(frontier["anchors"][0]["path"], "src/runtime_adapter.py")
+        self.assertEqual(frontier["closure_state"]["next_action"], "read_file src/runtime_adapter.py:12")
+
     def test_work_session_resume_updates_canonical_session_state_only_for_phase_1(self):
         stderr = "\n".join(
             [
@@ -579,6 +713,35 @@ class CompatibilityFrontierTests(unittest.TestCase):
 
         self.assertFalse(decision["applied"])
         self.assertEqual(action, original)
+
+    def test_action_guard_skips_stale_virtual_anchor_and_uses_search_query(self):
+        frontier = self._guard_frontier(state="read_needed")
+        frontier["anchors"] = [
+            {
+                "id": "anchor-virtual",
+                "kind": "source_location",
+                "path": "<stdin>",
+                "line": 17,
+                "read_status": "unread",
+            },
+            {
+                "id": "anchor-search-query",
+                "kind": "search_query",
+                "query": "from fractions import gcd",
+            },
+        ]
+        frontier["closure_state"]["next_action"] = "read_file <stdin>:17"
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            {"type": "run_tests", "command": "pytest -q"},
+            resume={"phase": "idle"},
+        )
+
+        self.assertTrue(decision["applied"])
+        self.assertEqual(action["type"], "search_text")
+        self.assertEqual(action["path"], ".")
+        self.assertEqual(action["query"], "from fractions import gcd")
 
     def test_action_guard_does_not_block_prompt_nudge_frontier(self):
         original = {"type": "run_tests", "command": "pytest -q"}
