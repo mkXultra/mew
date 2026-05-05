@@ -78,7 +78,7 @@ class ImplementLaneResult:
     lane: str
     user_visible_summary: str = ""
     proof_artifacts: tuple[str, ...] = ()
-    next_reentry_hint: str = ""
+    next_reentry_hint: dict[str, object] = field(default_factory=dict)
     updated_lane_state: dict[str, object] = field(default_factory=dict)
     metrics: dict[str, object] = field(default_factory=dict)
     transcript: tuple[ImplementLaneTranscriptEvent, ...] = ()
@@ -89,7 +89,7 @@ class ImplementLaneResult:
             "lane": self.lane,
             "user_visible_summary": self.user_visible_summary,
             "proof_artifacts": list(self.proof_artifacts),
-            "next_reentry_hint": self.next_reentry_hint,
+            "next_reentry_hint": dict(self.next_reentry_hint),
             "updated_lane_state": dict(self.updated_lane_state),
             "metrics": dict(self.metrics),
             "transcript": [event.as_dict() for event in self.transcript],

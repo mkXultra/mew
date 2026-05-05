@@ -30,10 +30,18 @@ def test_legacy_tiny_and_unknown_lanes_resolve_to_implement_v1_runtime() -> None
         assert get_implement_lane_runtime_view(lane).lane == IMPLEMENT_V1_LANE
 
 
-def test_implement_v2_selection_falls_back_until_runtime_is_available() -> None:
+def test_explicit_implement_v2_selection_returns_v2_even_when_unavailable() -> None:
     selected = select_implement_lane_runtime(requested_lane=IMPLEMENT_V2_LANE, allow_v2=True)
 
-    assert selected.lane == IMPLEMENT_V1_LANE
+    assert selected.lane == IMPLEMENT_V2_LANE
+    assert selected.runtime_available is False
+
+
+def test_explicit_implement_v2_selection_does_not_silently_route_to_v1() -> None:
+    selected = select_implement_lane_runtime(requested_lane=IMPLEMENT_V2_LANE)
+
+    assert selected.lane == IMPLEMENT_V2_LANE
+    assert selected.fallback_lane == IMPLEMENT_V1_LANE
 
 
 def test_implementation_lane_contract_shapes_are_serializable() -> None:
@@ -97,7 +105,9 @@ def test_implement_v2_scaffold_exposes_tools_but_returns_unavailable() -> None:
         "finish",
     }
     assert result.status == "unavailable"
-    assert result.updated_lane_state["fallback_lane"] == IMPLEMENT_V1_LANE
+    assert result.next_reentry_hint["fallback_lane"] == IMPLEMENT_V1_LANE
+    assert result.next_reentry_hint["requires_separate_lane_attempt"] is True
+    assert "fallback_lane" not in result.updated_lane_state
 
 
 def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:

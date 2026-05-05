@@ -84,12 +84,14 @@ def get_implement_lane_runtime_view(lane: object) -> ImplementLaneRuntimeView:
 def select_implement_lane_runtime(*, requested_lane: object = None, allow_v2: bool = False) -> ImplementLaneRuntimeView:
     """Select the implementation runtime without changing v1 defaults.
 
-    ``implement_v2`` is visible to callers but cannot become active unless the
-    caller explicitly opts in and the runtime is marked available.
+    Missing, legacy, and unknown lanes still select v1. An explicit
+    ``implement_v2`` request returns the v2 runtime view even when unavailable,
+    so callers can finalize the attempt as a v2 unavailable result instead of
+    silently routing the same attempt through v1.
     """
 
     runtime = get_implement_lane_runtime_view(requested_lane)
-    if runtime.lane == IMPLEMENT_V2_LANE and (not allow_v2 or not runtime.runtime_available):
+    if runtime.lane == IMPLEMENT_V2_LANE and not allow_v2 and runtime.runtime_available:
         return _IMPLEMENT_RUNTIMES_BY_LANE[IMPLEMENT_V1_LANE]
     return runtime
 

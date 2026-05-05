@@ -37,10 +37,13 @@ def run_unavailable_implement_v2(lane_input: ImplementLaneInput) -> ImplementLan
         status="unavailable",
         lane=runtime.lane,
         user_visible_summary="implement_v2 is registered but not available yet.",
-        next_reentry_hint="Use implement_v1 until the provider-native tool loop is implemented.",
+        next_reentry_hint={
+            "reason": "implement_v2_runtime_unavailable",
+            "fallback_lane": runtime.fallback_lane,
+            "requires_separate_lane_attempt": True,
+        },
         updated_lane_state={
             "runtime_available": runtime.runtime_available,
-            "fallback_lane": runtime.fallback_lane,
             "requested_task_id": lane_input.task_id,
         },
         metrics={
