@@ -32,6 +32,11 @@ class ImplementLaneToolSpec:
 
 V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
+        name="inspect_dir",
+        access="read",
+        description="List a workspace directory through the existing read substrate.",
+    ),
+    ImplementLaneToolSpec(
         name="read_file",
         access="read",
         description="Read a workspace file through the existing read substrate.",
@@ -40,6 +45,21 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="search_text",
         access="read",
         description="Search the workspace through rg-backed discovery.",
+    ),
+    ImplementLaneToolSpec(
+        name="glob",
+        access="read",
+        description="Glob workspace paths through the existing read substrate.",
+    ),
+    ImplementLaneToolSpec(
+        name="git_status",
+        access="read",
+        description="Inspect git status for an allowed workspace root.",
+    ),
+    ImplementLaneToolSpec(
+        name="git_diff",
+        access="read",
+        description="Inspect bounded git diff or diffstat for an allowed workspace root.",
     ),
     ImplementLaneToolSpec(
         name="run_command",

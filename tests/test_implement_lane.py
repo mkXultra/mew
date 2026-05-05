@@ -1,3 +1,6 @@
+import subprocess
+
+import mew.implement_lane.read_runtime as read_runtime
 from mew.implement_lane import (
     FakeProviderAdapter,
     FakeProviderToolCall,
@@ -15,6 +18,7 @@ from mew.implement_lane import (
     list_implement_lane_runtime_views,
     list_v2_base_tool_specs,
     list_v2_tool_specs_for_mode,
+    run_fake_read_only_implement_v2,
     run_unavailable_implement_v2,
     select_implement_lane_runtime,
     validate_proof_manifest_pairing,
@@ -106,8 +110,12 @@ def test_implement_v2_scaffold_exposes_tools_but_returns_unavailable() -> None:
     assert description["runtime_available"] is False
     assert description["artifact_namespace"] == "implement-lane/implement_v2/ws-1/task-1"
     assert {tool["name"] for tool in description["tool_specs"]} == {
+        "inspect_dir",
         "read_file",
         "search_text",
+        "glob",
+        "git_status",
+        "git_diff",
         "run_command",
         "write_file",
         "edit_file",
@@ -123,8 +131,12 @@ def test_implement_v2_scaffold_exposes_tools_but_returns_unavailable() -> None:
 def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     specs = {spec.name: spec for spec in list_v2_base_tool_specs()}
 
+    assert specs["inspect_dir"].approval_required is False
     assert specs["read_file"].approval_required is False
     assert specs["search_text"].approval_required is False
+    assert specs["glob"].approval_required is False
+    assert specs["git_status"].access == "read"
+    assert specs["git_diff"].access == "read"
     assert specs["run_command"].approval_required is True
     assert specs["write_file"].approval_required is True
     assert specs["edit_file"].dry_run_supported is True
@@ -410,6 +422,8 @@ def test_implement_v2_prompt_read_only_mode_does_not_surface_exec_or_write_tools
 
     assert "read_file" in tool_surface.content
     assert "search_text" in tool_surface.content
+    assert "glob" in tool_surface.content
+    assert "git_status" in tool_surface.content
     assert "finish" in tool_surface.content
     assert "run_command" not in tool_surface.content
     assert "write_file" not in tool_surface.content
@@ -419,4 +433,240 @@ def test_implement_v2_prompt_read_only_mode_does_not_surface_exec_or_write_tools
 def test_implement_v2_bypass_mode_fails_closed_until_explicit_policy_exists() -> None:
     tools = {spec.name for spec in list_v2_tool_specs_for_mode("bypass")}
 
-    assert tools == {"read_file", "search_text", "finish"}
+    assert tools == {"inspect_dir", "read_file", "search_text", "glob", "git_status", "git_diff", "finish"}
+
+
+def test_implement_v2_read_only_fake_runtime_can_inspect_workspace_and_finish_analysis(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def target():\n    return 'ok'\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "inspect_dir", "arguments": {"path": "."}},
+            {"provider_call_id": "call-2", "tool_name": "read_file", "arguments": {"path": "src/main.py"}},
+            {"provider_call_id": "call-3", "tool_name": "search_text", "arguments": {"query": "target", "path": "."}},
+            {"provider_call_id": "call-4", "tool_name": "glob", "arguments": {"pattern": "**/*.py", "path": "."}},
+        ),
+        finish_arguments={
+            "outcome": "analysis_ready",
+            "kind": "diagnosis",
+            "summary": "target function inspected",
+            "open_questions": ["none"],
+            "proposed_next_actions": ["run tests in a later write-capable phase"],
+        },
+    )
+
+    read_only_result = result.updated_lane_state["read_only_result"]
+    manifest = result.updated_lane_state["proof_manifest"]
+
+    assert result.status == "analysis_ready"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["replay_valid"] is True
+    assert read_only_result["kind"] == "diagnosis"
+    assert any(path.endswith("src/main.py") for path in read_only_result["inspected_paths"])
+    assert [event.kind for event in result.transcript].count("tool_call") == 4
+    assert manifest["lane"] == IMPLEMENT_V2_LANE
+    assert len(manifest["tool_calls"]) == 4
+    assert len(manifest["tool_results"]) == 4
+
+
+def test_implement_v2_read_only_finish_cannot_claim_completed(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=({"provider_call_id": "call-1", "tool_name": "read_file", "arguments": {"path": "README.md"}},),
+        finish_arguments={"outcome": "task_complete", "summary": "done"},
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.next_reentry_hint["analysis_ready_is_completion"] is False
+    assert result.user_visible_summary.startswith("implement_v2 read-only attempt ended with status=blocked:")
+
+
+def test_implement_v2_read_only_rejects_path_traversal_and_pairs_error(tmp_path) -> None:
+    outside = tmp_path.parent / "outside-secret.txt"
+    outside.write_text("secret\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "read_file", "arguments": {"path": "../outside-secret.txt"}},
+            {"provider_call_id": "call-2", "tool_name": "write_file", "arguments": {"path": "README.md", "content": "mutate"}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "errors inspected"},
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    statuses = [item["status"] for item in manifest["tool_results"]]
+
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
+    assert statuses == ["failed", "denied"]
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "hello\n"
+
+
+def test_implement_v2_read_only_large_result_gets_content_ref(tmp_path) -> None:
+    (tmp_path / "large.txt").write_text("x" * 20_000, encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "read_file",
+                "arguments": {"path": "large.txt", "max_chars": 20_000},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "large file inspected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["content_refs"] == ["implement-v2-read://implement_v2:ws-1:task-1:read-only/call-1/content"]
+    assert tool_result["content"][0]["mew_content_truncated"] is True
+
+
+def test_implement_v2_read_only_git_tools_are_bounded_and_paired(tmp_path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    (tmp_path / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("SECRET=1\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "git_status", "arguments": {"cwd": "."}},
+            {"provider_call_id": "call-2", "tool_name": "git_diff", "arguments": {"cwd": ".", "stat": True}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "kind": "plan", "summary": "git state inspected"},
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+
+    assert result.status == "analysis_ready"
+    assert result.metrics["replay_valid"] is True
+    assert [tool_result["status"] for tool_result in manifest["tool_results"]] == ["completed", "completed"]
+    assert manifest["tool_results"][1]["content"][0]["stat_forced"] is True
+    assert "SECRET=1" not in str(manifest["tool_results"])
+    assert result.updated_lane_state["read_only_result"]["kind"] == "plan"
+
+
+def test_implement_v2_read_only_git_rejects_parent_repo_outside_allowed_root(tmp_path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    workspace = tmp_path / "subdir"
+    workspace.mkdir()
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=({"provider_call_id": "call-1", "tool_name": "git_status", "arguments": {"cwd": "."}},),
+        finish_arguments={"outcome": "analysis_ready", "kind": "diagnosis", "summary": "parent repo rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "git repository root is outside allowed read roots" in tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_read_only_git_nonzero_exit_blocks_analysis_ready(tmp_path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "git_diff", "arguments": {"cwd": ".", "base": "missing-ref"}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "kind": "diagnosis", "summary": "invalid ref"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
+    assert tool_result["status"] == "failed"
+    assert tool_result["content"][0]["exit_code"] != 0
+    assert tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_read_only_git_timeout_still_pairs_result(tmp_path, monkeypatch) -> None:
+    def raise_timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["git"], timeout=15)
+
+    monkeypatch.setattr(read_runtime, "_run_git_probe", raise_timeout)
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=({"provider_call_id": "call-1", "tool_name": "git_status", "arguments": {"cwd": "."}},),
+        finish_arguments={"outcome": "analysis_ready", "kind": "diagnosis", "summary": "git timeout"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
+    assert tool_result["status"] == "failed"
+    assert tool_result["provider_call_id"] == "call-1"
+
+
+def test_implement_v2_read_only_git_redacts_sensitive_rename_paths(tmp_path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "mew"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "mew@example.invalid"], cwd=tmp_path, check=True)
+    (tmp_path / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".env"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "mv", ".env", "public.env"], cwd=tmp_path, check=True)
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=({"provider_call_id": "call-1", "tool_name": "git_status", "arguments": {"cwd": "."}},),
+        finish_arguments={"outcome": "analysis_ready", "kind": "diagnosis", "summary": "git status inspected"},
+    )
+    stdout = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]["stdout"]
+
+    assert "[sensitive path redacted]" in stdout
+    assert ".env" not in stdout
