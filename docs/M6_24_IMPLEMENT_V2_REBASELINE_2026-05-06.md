@@ -58,7 +58,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 |---|---:|---|---|---|
 | `build-cython-ext` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout` | proof_5 deferred until controller selects close proof |
 | `circuit-fibsqrt` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-circuit-fibsqrt-speed1-20260506-0335` | proof_5 deferred until controller selects close proof |
-| `cobol-modernization` | 5/5 | pending | none | run v2 speed_1 |
+| `cobol-modernization` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-cobol-modernization-speed1-20260506-0348` | proof_5 deferred until controller selects close proof |
 | `distribution-search` | 5/5 | pending | none | run v2 speed_1 |
 | `feal-differential-cryptanalysis` | 5/5 | pending | none | run v2 speed_1 |
 | `feal-linear-cryptanalysis` | 5/5 | pending | none | run v2 speed_1 |
