@@ -14,6 +14,7 @@ from mew.dogfood import (
     DOGFOOD_SCENARIOS,
     _evaluate_managed_action_projection,
     _repository_test_tail_summary,
+    _write_repository_test_tail_emulator_fixture,
     _write_terminal_bench_replay_fixture,
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
@@ -1376,6 +1377,138 @@ class DogfoodTests(unittest.TestCase):
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_parameter_pollution"])
             self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
             self.assertIn("m6_24-repository-test-tail-emulator: pass", text)
+
+    def test_run_dogfood_m6_24_repository_test_tail_emulator_accepts_historical_artifact_without_stored_frontier(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_dir = _write_repository_test_tail_emulator_fixture(root, task="build-cython-ext")
+            report_path = next(Path(job_dir).rglob("mew-report.json"))
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            payload["resume"].pop("active_compatibility_frontier", None)
+            report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m6_24-repository-test-tail-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=str(job_dir),
+                terminal_bench_task="build-cython-ext",
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(
+                scenario["artifacts"]["first_trial"]["current"]["active_compatibility_frontier"]["signature"]
+            )
+            self.assertEqual(
+                scenario["artifacts"]["first_trial"]["stored"].get("active_compatibility_frontier"),
+                {},
+            )
+
+    def test_run_dogfood_m6_24_repository_test_tail_emulator_accepts_historical_finish_false_positive(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_dir = _write_repository_test_tail_emulator_fixture(root, task="build-cython-ext")
+            report_path = next(Path(job_dir).rglob("mew-report.json"))
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            payload["work_exit_code"] = 0
+            payload["resume"].pop("active_compatibility_frontier", None)
+            payload["work_report"]["stop_reason"] = "finish"
+            payload["work_report"]["wall_timeout"] = False
+            report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m6_24-repository-test-tail-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=str(job_dir),
+                terminal_bench_task="build-cython-ext",
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(scenario["artifacts"]["summary"]["finish_false_positive"])
+
+    def test_run_dogfood_m6_24_repository_test_tail_emulator_preserves_stored_frontier_for_finish_false_positive(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_dir = _write_repository_test_tail_emulator_fixture(root, task="build-cython-ext")
+            report_path = next(Path(job_dir).rglob("mew-report.json"))
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            payload["work_exit_code"] = 0
+            payload["work_report"]["stop_reason"] = "finish"
+            payload["work_report"]["wall_timeout"] = False
+            report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m6_24-repository-test-tail-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=str(job_dir),
+                terminal_bench_task="build-cython-ext",
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+            first_trial = scenario["artifacts"]["first_trial"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(scenario["artifacts"]["summary"]["finish_false_positive"])
+            self.assertEqual(
+                first_trial["current"]["active_compatibility_frontier"]["signature"],
+                first_trial["stored"]["active_compatibility_frontier"]["signature"],
+            )
+            self.assertGreater(
+                first_trial["stored"]["active_compatibility_frontier"]["evidence_ref_count"],
+                0,
+            )
+
+    def test_run_dogfood_m6_24_repository_test_tail_emulator_rejects_malformed_stored_frontier_for_finish_false_positive(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_dir = _write_repository_test_tail_emulator_fixture(root, task="build-cython-ext")
+            report_path = next(Path(job_dir).rglob("mew-report.json"))
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            payload["work_exit_code"] = 0
+            payload["work_report"]["stop_reason"] = "finish"
+            payload["work_report"]["wall_timeout"] = False
+            frontier = payload["resume"]["active_compatibility_frontier"]
+            frontier["failure_signature"]["family_key"] = ""
+            frontier["evidence_refs"] = []
+            frontier["sibling_candidates"] = []
+            frontier["compact_summary"]["open_candidates"] = []
+            frontier["compact_summary"]["evidence_refs"] = []
+            report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m6_24-repository-test-tail-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=str(job_dir),
+                terminal_bench_task="build-cython-ext",
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+            preserve_check = next(
+                item
+                for item in scenario["checks"]
+                if item["name"] == "m6_24_repository_test_tail_emulator_preserves_active_frontier"
+            )
+
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(preserve_check["passed"])
 
     def test_run_dogfood_m6_24_same_family_compatibility_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

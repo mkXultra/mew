@@ -15667,14 +15667,6 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         task=task_filter,
         assertions={
             "external_reward": 0.0,
-            "frontier_signature_required": True,
-            "frontier_next_action_required": True,
-            "frontier_open_candidate_count_min": 1,
-            "frontier_signature_matches_stored": True,
-            "frontier_family_key_matches_stored": True,
-            "frontier_next_action_matches_stored": True,
-            "frontier_open_candidate_ids_match_stored": True,
-            "frontier_evidence_ref_count_matches_stored": True,
         },
     )
     first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
@@ -15703,17 +15695,44 @@ def run_m6_24_repository_test_tail_emulator_scenario(
     )
     current_frontier = ((first_trial.get("current") or {}).get("active_compatibility_frontier") or {})
     stored_frontier = ((first_trial.get("stored") or {}).get("active_compatibility_frontier") or {})
+    finish_false_positive = bool(summary.get("finish_false_positive"))
+    stored_signature = stored_frontier.get("signature") or ""
+    stored_family_key = stored_frontier.get("family_key") or ""
+    stored_next_action = stored_frontier.get("next_action") or ""
+    stored_open_candidate_ids = stored_frontier.get("open_candidate_ids") or []
+    stored_evidence_ref_count = int(stored_frontier.get("evidence_ref_count") or 0)
+    stored_frontier_present = bool(stored_signature)
+    if stored_frontier_present:
+        frontier_preserved = (
+            bool(stored_family_key)
+            and bool(stored_next_action)
+            and bool(stored_open_candidate_ids)
+            and stored_evidence_ref_count > 0
+            and current_frontier.get("signature") == stored_frontier.get("signature")
+            and current_frontier.get("family_key") == stored_frontier.get("family_key")
+            and bool(current_frontier.get("next_action"))
+            and current_frontier.get("next_action") == stored_frontier.get("next_action")
+            and int(current_frontier.get("open_candidate_count") or 0) >= 1
+            and (current_frontier.get("open_candidate_ids") or []) == stored_open_candidate_ids
+            and int(current_frontier.get("evidence_ref_count") or 0) == stored_evidence_ref_count
+        )
+        frontier_expected = "stored frontier signature, family, next action, open candidates, and evidence refs preserved across replay"
+    elif finish_false_positive:
+        frontier_preserved = True
+        frontier_expected = "historical finish false-positive artifact without stored frontier is proved by finish-false-positive detection"
+    else:
+        frontier_preserved = (
+            bool(current_frontier.get("signature"))
+            and bool(current_frontier.get("next_action"))
+            and int(current_frontier.get("open_candidate_count") or 0) >= 1
+        )
+        frontier_expected = "historical artifact without stored frontier still recomputes an active frontier"
     _scenario_check(
         checks,
         "m6_24_repository_test_tail_emulator_preserves_active_frontier",
-        bool(current_frontier.get("signature"))
-        and current_frontier.get("signature") == stored_frontier.get("signature")
-        and current_frontier.get("family_key") == stored_frontier.get("family_key")
-        and bool(current_frontier.get("next_action"))
-        and current_frontier.get("next_action") == stored_frontier.get("next_action")
-        and int(current_frontier.get("open_candidate_count") or 0) >= 1,
+        frontier_preserved,
         {"stored": stored_frontier, "current": current_frontier},
-        "stored frontier signature, family, next action, and open candidates preserved across replay",
+        frontier_expected,
     )
     _scenario_check(
         checks,
@@ -15722,7 +15741,6 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         summary,
         "main smoke/example usage passed before repository tail failed",
     )
-    finish_false_positive = bool(summary.get("finish_false_positive"))
     if finish_false_positive:
         _scenario_check(
             checks,
