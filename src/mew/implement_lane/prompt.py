@@ -34,7 +34,8 @@ def build_implement_v2_prompt_sections(
             title="Implement V2 Lane Base",
             content=(
                 "You are running inside the default-off implement_v2 lane. "
-                "Use provider-native tool calls, preserve paired tool results, "
+                "Use provider-shaped tool calls through the selected v2 transport, "
+                "preserve paired tool results, "
                 "and finish only through deterministic mew acceptance evidence."
             ),
             stability=STABILITY_STATIC,

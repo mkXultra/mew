@@ -44,12 +44,12 @@ _IMPLEMENT_RUNTIMES: tuple[ImplementLaneRuntimeView, ...] = (
     ),
     ImplementLaneRuntimeView(
         lane=IMPLEMENT_V2_LANE,
-        runtime_id="implement_v2_native_tool_loop",
-        version=0,
+        runtime_id="implement_v2_model_json_tool_loop",
+        version=1,
         default=False,
-        runtime_available=False,
-        provider_native_tool_loop=True,
-        writes_allowed=False,
+        runtime_available=True,
+        provider_native_tool_loop=False,
+        writes_allowed=True,
         fallback_lane=IMPLEMENT_V1_LANE,
         work_lane=get_work_lane_view(IMPLEMENT_V2_LANE),
     ),
@@ -85,15 +85,11 @@ def select_implement_lane_runtime(*, requested_lane: object = None, allow_v2: bo
     """Select the implementation runtime without changing v1 defaults.
 
     Missing, legacy, and unknown lanes still select v1. An explicit
-    ``implement_v2`` request returns the v2 runtime view even when unavailable,
-    so callers can finalize the attempt as a v2 unavailable result instead of
-    silently routing the same attempt through v1.
+    ``implement_v2`` request returns the v2 runtime view and must not be
+    silently routed through v1.
     """
 
-    runtime = get_implement_lane_runtime_view(requested_lane)
-    if runtime.lane == IMPLEMENT_V2_LANE and not allow_v2 and runtime.runtime_available:
-        return _IMPLEMENT_RUNTIMES_BY_LANE[IMPLEMENT_V1_LANE]
-    return runtime
+    return get_implement_lane_runtime_view(requested_lane)
 
 
 __all__ = [

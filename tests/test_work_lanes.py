@@ -54,17 +54,17 @@ class WorkLaneRegistryTests(unittest.TestCase):
         self.assertEqual(lane.fallback_lane, TINY_LANE)
         self.assertTrue(lane.runtime_available)
 
-    def test_work_lane_implement_v2_is_visible_but_runtime_unavailable(self):
+    def test_work_lane_implement_v2_is_explicit_authoritative_runtime(self):
         lane = get_work_lane_view(IMPLEMENT_V2_LANE)
 
         self.assertTrue(lane.supported)
-        self.assertFalse(lane.authoritative)
-        self.assertFalse(lane.write_capable)
+        self.assertTrue(lane.authoritative)
+        self.assertTrue(lane.write_capable)
         self.assertEqual(lane.layout, LANE_LAYOUT_LANE_SCOPED)
-        self.assertEqual(lane.role, LANE_ROLE_SHADOW)
+        self.assertEqual(lane.role, LANE_ROLE_AUTHORITATIVE)
         self.assertTrue(lane.requires_model_binding)
         self.assertEqual(lane.fallback_lane, IMPLEMENT_V1_LANE)
-        self.assertFalse(lane.runtime_available)
+        self.assertTrue(lane.runtime_available)
 
     def test_work_lane_mirror_is_non_authoritative_mirror_with_tiny_fallback(self):
         lane = get_work_lane_view(MIRROR_LANE)

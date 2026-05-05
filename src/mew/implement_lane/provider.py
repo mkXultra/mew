@@ -1,4 +1,4 @@
-"""Provider adapter primitives for the default-off implement_v2 lane."""
+"""Provider adapter primitives for the explicit implement_v2 lane."""
 
 from __future__ import annotations
 
@@ -137,6 +137,17 @@ class FakeProviderAdapter:
         }
 
 
+class JsonModelProviderAdapter(FakeProviderAdapter):
+    """Provider adapter for the live v2 JSON transport.
+
+    This is not provider-specific function calling yet. It gives the v2 lane a
+    real model-driven tool loop with provider-shaped call/result envelopes while
+    keeping the provider transport explicit in replay artifacts.
+    """
+
+    provider = "model_json"
+
+
 def _coerce_fake_tool_call(raw_call: FakeProviderToolCall | Mapping[str, object]) -> FakeProviderToolCall:
     if isinstance(raw_call, FakeProviderToolCall):
         return raw_call
@@ -149,4 +160,4 @@ def _coerce_fake_tool_call(raw_call: FakeProviderToolCall | Mapping[str, object]
     )
 
 
-__all__ = ["FakeProviderAdapter", "FakeProviderToolCall"]
+__all__ = ["FakeProviderAdapter", "FakeProviderToolCall", "JsonModelProviderAdapter"]

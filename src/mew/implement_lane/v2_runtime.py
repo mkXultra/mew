@@ -1,10 +1,16 @@
-"""Default-off implement_v2 runtime scaffold."""
+"""Implement_v2 runtime substrates and live JSON tool loop."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import time
+
 from ..work_lanes import IMPLEMENT_V2_LANE
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
-from .provider import FakeProviderAdapter, FakeProviderToolCall
+from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
+from ..prompt_sections import render_prompt_sections
+from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
 from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
@@ -56,6 +62,262 @@ def run_unavailable_implement_v2(lane_input: ImplementLaneInput) -> ImplementLan
             "provider_native_tool_loop": runtime.provider_native_tool_loop,
             "tool_specs_count": len(list_v2_base_tool_specs()),
         },
+    )
+
+
+def run_live_json_implement_v2(
+    lane_input: ImplementLaneInput,
+    *,
+    model_auth: dict[str, object],
+    base_url: str = "",
+    timeout: float = 60.0,
+    max_turns: int = 10,
+    model_json_callable=None,
+    progress=None,
+) -> ImplementLaneResult:
+    """Run a real implement_v2 attempt through the lane-local JSON tool loop.
+
+    This is the first production v2 runtime. It is intentionally separate from
+    the legacy v1 THINK/ACT action loop: the model returns provider-shaped tool
+    calls, mew pairs every call with a ToolResultEnvelope, and the final result
+    carries a v2 proof manifest. Provider-specific function-calling transport is
+    still a later optimization; the transport is recorded as ``model_json`` so
+    metrics do not confuse it with native provider tool calls.
+    """
+
+    if model_json_callable is None:
+        from ..agent import call_model_json_with_retries as model_json_callable
+
+    mode = str(lane_input.lane_config.get("mode") or "full").strip() or "full"
+    lane_attempt_id = _lane_attempt_id(lane_input, mode=mode)
+    adapter = JsonModelProviderAdapter()
+    exec_runtime = ImplementV2ManagedExecRuntime(
+        workspace=lane_input.workspace,
+        allowed_roots=_allowed_read_roots(lane_input),
+    )
+    transcript: list[ImplementLaneTranscriptEvent] = []
+    tool_calls: list[object] = []
+    tool_results: list[ToolResultEnvelope] = []
+    history: list[dict[str, object]] = []
+    finish_arguments: dict[str, object] = {}
+    seen_provider_call_ids: set[str] = set()
+    model_elapsed_seconds = 0.0
+    prompt_chars_total = 0
+    model_turns = 0
+    cleanup_payloads: tuple[dict[str, object], ...] = ()
+
+    try:
+        for turn_index in range(1, max(1, int(max_turns)) + 1):
+            model_turns = turn_index
+            turn_id = f"turn-{turn_index}"
+            prompt = _live_json_prompt(
+                lane_input,
+                lane_attempt_id=lane_attempt_id,
+                turn_index=turn_index,
+                max_turns=max_turns,
+                history=tuple(history),
+            )
+            prompt_chars_total += len(prompt)
+            if progress:
+                progress(f"implement_v2 turn #{turn_index}: model_json start")
+            started = time.monotonic()
+            payload = model_json_callable(
+                lane_input.model_backend,
+                model_auth,
+                prompt,
+                lane_input.model,
+                base_url,
+                timeout,
+                log_prefix=f"implement_v2 live_json session={lane_input.work_session_id} turn={turn_index}",
+            )
+            model_elapsed_seconds += time.monotonic() - started
+            normalized = _normalize_live_json_payload(payload, turn_index=turn_index)
+            finish_arguments = normalized.get("finish") or {}
+            raw_tool_calls = normalized.get("tool_calls") or ()
+            if not raw_tool_calls:
+                transcript.extend(
+                    adapter.transcript_events_for_turn(
+                        lane=IMPLEMENT_V2_LANE,
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        text=str(normalized.get("summary") or ""),
+                        tool_calls=(),
+                    )
+                )
+                if finish_arguments:
+                    transcript.append(
+                        adapter.finish_event_for_turn(
+                            lane=IMPLEMENT_V2_LANE,
+                            lane_attempt_id=lane_attempt_id,
+                            turn_id=turn_id,
+                            finish_arguments=finish_arguments,
+                        )
+                    )
+                    break
+                finish_arguments = {
+                    "outcome": "blocked",
+                    "summary": "model returned no tool calls and no finish object",
+                }
+                break
+
+            current_calls = adapter.normalize_tool_calls(
+                lane_attempt_id=lane_attempt_id,
+                turn_index=turn_index,
+                calls=raw_tool_calls,
+            )
+            identity_errors = _tool_call_identity_errors(
+                current_calls,
+                expected_lane_attempt_id=lane_attempt_id,
+                seen_provider_call_ids=seen_provider_call_ids,
+            )
+            if identity_errors:
+                current_results = tuple(
+                    build_invalid_tool_result(call, reason=f"tool_call_identity_invalid: {'; '.join(identity_errors)}")
+                    for call in current_calls
+                )
+            else:
+                approved_write_calls = _auto_approval_records(lane_input, current_calls)
+                write_runtime = ImplementV2WriteRuntime(
+                    workspace=lane_input.workspace,
+                    allowed_write_roots=_allowed_write_roots(lane_input),
+                    approved_write_calls=approved_write_calls,
+                    allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+                )
+                current_results = tuple(
+                    _execute_live_json_tool(
+                        call,
+                        lane_input=lane_input,
+                        exec_runtime=exec_runtime,
+                        write_runtime=write_runtime,
+                    )
+                    for call in current_calls
+                )
+                seen_provider_call_ids.update(call.provider_call_id for call in current_calls if call.provider_call_id)
+            tool_calls.extend(current_calls)
+            tool_results.extend(current_results)
+            transcript.extend(
+                adapter.transcript_events_for_turn(
+                    lane=IMPLEMENT_V2_LANE,
+                    lane_attempt_id=lane_attempt_id,
+                    turn_id=turn_id,
+                    text=str(normalized.get("summary") or ""),
+                    tool_calls=current_calls,
+                )
+            )
+            transcript.extend(
+                _tool_result_transcript_events(
+                    lane_attempt_id=lane_attempt_id,
+                    turn_id=turn_id,
+                    tool_results=current_results,
+                )
+            )
+            history.append(
+                {
+                    "turn": turn_index,
+                    "summary": str(normalized.get("summary") or ""),
+                    "tool_calls": [call.as_dict() for call in current_calls],
+                    "tool_results": [
+                        _provider_visible_tool_result_for_history(result) for result in current_results
+                    ],
+                }
+            )
+            if progress:
+                progress(
+                    f"implement_v2 turn #{turn_index}: "
+                    f"{len(current_calls)} call(s), statuses={','.join(result.status for result in current_results)}"
+                )
+            if _finish_outcome(finish_arguments) not in {"", "continue"}:
+                transcript.append(
+                    adapter.finish_event_for_turn(
+                        lane=IMPLEMENT_V2_LANE,
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        finish_arguments=finish_arguments,
+                    )
+                )
+                break
+        else:
+            finish_arguments = {
+                "outcome": "blocked",
+                "summary": "implement_v2 reached max_turns before finish",
+            }
+    finally:
+        cleanup_payloads = exec_runtime.cancel_active_commands(
+            reason="implement_v2 live_json attempt closed before command finalized"
+        )
+    if cleanup_payloads:
+        tool_results = list(_project_orphaned_command_cleanup(tuple(tool_results), cleanup_payloads))
+
+    manifest = ImplementLaneProofManifest(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id=lane_attempt_id,
+        artifact_namespace=lane_artifact_namespace(
+            work_session_id=lane_input.work_session_id,
+            task_id=lane_input.task_id,
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        tool_calls=tuple(tool_calls),
+        tool_results=tuple(tool_results),
+        metrics={
+            "mode": mode,
+            "transport": adapter.provider,
+            "tool_calls": len(tool_calls),
+            "tool_results": len(tool_results),
+            "model_turns": model_turns,
+            "orphaned_command_cleanup_count": len(cleanup_payloads),
+        },
+    )
+    validation = _validate_write_proof_manifest(manifest)
+    status = _live_finish_status(
+        finish_arguments,
+        validation_valid=validation.valid,
+        tool_results=tuple(tool_results),
+    )
+    prompt_metrics = implement_v2_prompt_section_metrics(lane_input)
+    artifact_paths = _write_live_json_artifacts(
+        lane_input,
+        manifest=manifest,
+        transcript=tuple(transcript),
+        history=tuple(history),
+    )
+    summary = str(finish_arguments.get("summary") or "").strip() or _live_status_summary(status)
+    return ImplementLaneResult(
+        status=status,
+        lane=IMPLEMENT_V2_LANE,
+        user_visible_summary=summary,
+        proof_artifacts=tuple(artifact_paths) or (manifest.artifact_namespace,),
+        next_reentry_hint={
+            "lane": IMPLEMENT_V2_LANE,
+            "mode": mode,
+            "status": status,
+            "replay_valid": validation.valid,
+            "transport": adapter.provider,
+        },
+        updated_lane_state={
+            "lane_attempt_id": lane_attempt_id,
+            "finish": dict(finish_arguments),
+            "proof_manifest": manifest.as_dict(),
+            "artifact_paths": list(artifact_paths),
+        },
+        metrics={
+            "completion_credit": status == "completed",
+            "mode": mode,
+            "provider": adapter.provider,
+            "provider_native_tool_loop": False,
+            "runtime_id": "implement_v2_model_json_tool_loop",
+            "replay_valid": validation.valid,
+            "replay_errors": list(validation.errors),
+            "tool_calls": len(tool_calls),
+            "tool_results": len(tool_results),
+            "model_turns": model_turns,
+            "model_elapsed_seconds": round(model_elapsed_seconds, 3),
+            "prompt_chars_total": prompt_chars_total,
+            "prompt_sections": prompt_metrics,
+            "write_evidence_count": _write_evidence_count(tool_results),
+            "terminal_evidence_count": _terminal_evidence_count(tool_results),
+            "orphaned_command_cleanup_count": len(cleanup_payloads),
+        },
+        transcript=tuple(transcript),
     )
 
 
@@ -584,15 +846,47 @@ def _execute_exec_or_read_tool(
     )
 
 
-def _tool_call_identity_errors(tool_calls, *, expected_lane_attempt_id: str) -> tuple[str, ...]:
+def _execute_live_json_tool(
+    call,
+    *,
+    lane_input: ImplementLaneInput,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    write_runtime: ImplementV2WriteRuntime,
+):
+    if call.tool_name in WRITE_TOOL_NAMES:
+        if not _allowed_write_roots(lane_input):
+            return build_invalid_tool_result(call, reason="write tools are disabled; pass --allow-write PATH")
+        return write_runtime.execute(call)
+    if call.tool_name in EXEC_TOOL_NAMES:
+        if call.tool_name == "run_tests" and not bool(lane_input.lane_config.get("allow_verify")):
+            return build_invalid_tool_result(call, reason="run_tests is disabled; pass --allow-verify")
+        if call.tool_name == "run_command" and not bool(lane_input.lane_config.get("allow_shell")):
+            return build_invalid_tool_result(call, reason="run_command is disabled; pass --allow-shell")
+        return exec_runtime.execute(call)
+    return execute_read_only_tool_call(
+        call,
+        workspace=lane_input.workspace,
+        allowed_roots=_allowed_read_roots(lane_input),
+    )
+
+
+def _tool_call_identity_errors(
+    tool_calls,
+    *,
+    expected_lane_attempt_id: str,
+    seen_provider_call_ids: set[str] | None = None,
+) -> tuple[str, ...]:
     errors: list[str] = []
     provider_ids: set[str] = set()
     mew_ids: set[str] = set()
+    seen_provider_call_ids = set(seen_provider_call_ids or ())
     for call in tool_calls:
         if call.lane_attempt_id != expected_lane_attempt_id:
             errors.append(f"tool_call_wrong_lane_attempt_id:{call.provider_call_id}")
         if not call.provider_call_id:
             errors.append(f"tool_call_missing_provider_call_id:{call.mew_tool_call_id}")
+        if call.provider_call_id and call.provider_call_id in seen_provider_call_ids:
+            errors.append(f"duplicate_provider_call_id_across_turns:{call.provider_call_id}")
         if call.provider_call_id in provider_ids:
             errors.append(f"duplicate_provider_call_id:{call.provider_call_id}")
         provider_ids.add(call.provider_call_id)
@@ -833,8 +1127,212 @@ def _safe_id_part(value: object, default: str) -> str:
     return "".join(safe).strip("-") or default
 
 
+def _live_json_prompt(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    turn_index: int,
+    max_turns: int,
+    history: tuple[dict[str, object], ...],
+) -> str:
+    sections = render_prompt_sections(build_implement_v2_prompt_sections(lane_input))
+    response_contract = {
+        "summary": "short natural-language summary of this turn",
+        "tool_calls": [
+            {
+                "id": "stable-provider-call-id",
+                "name": "read_file | search_text | inspect_dir | glob | git_status | git_diff | run_command | run_tests | poll_command | cancel_command | read_command_output | write_file | edit_file | apply_patch",
+                "arguments": {"path": "relative/path"},
+            }
+        ],
+        "finish": {
+            "outcome": "continue | completed | blocked | failed",
+            "summary": "why this attempt can stop",
+            "acceptance_evidence": ["tool result or verifier evidence refs"],
+        },
+    }
+    return (
+        f"{sections}\n\n"
+        "[section:implement_v2_live_json_transport version=v0 stability=dynamic cache_policy=dynamic]\n"
+        "Implement V2 Live JSON Transport\n"
+        "This run is a real implement_v2 lane attempt. Do not emit v1 THINK/ACT actions. "
+        "Return exactly one JSON object. Use tool_calls for observations, edits, and commands. "
+        "Use finish only when the task is completed, blocked, or failed. If more work is needed, "
+        "set finish.outcome to continue or omit finish. For edits, prefer exact edit_file old/new "
+        "or apply_patch. If the CLI grants accept-edits, you may request apply=true; mew supplies "
+        "independent approval outside the model output. If tests or an external verifier matter, "
+        "run a concrete run_command or run_tests before claiming completed.\n"
+        f"lane_attempt_id: {lane_attempt_id}\n"
+        f"turn: {turn_index}/{max_turns}\n"
+        f"response_contract_json:\n{json.dumps(response_contract, ensure_ascii=False, indent=2)}\n"
+        f"history_json:\n{json.dumps(list(history)[-8:], ensure_ascii=False, indent=2)}\n"
+        "[/section:implement_v2_live_json_transport]"
+    )
+
+
+def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[str, object]:
+    if not isinstance(payload, dict):
+        return {
+            "summary": "invalid provider payload",
+            "tool_calls": (),
+            "finish": {"outcome": "failed", "summary": "model returned a non-object payload"},
+        }
+    summary = str(payload.get("summary") or payload.get("reason") or "")
+    finish = payload.get("finish") if isinstance(payload.get("finish"), dict) else {}
+    raw_calls = payload.get("tool_calls")
+    if raw_calls is None:
+        raw_calls = payload.get("tools")
+    if raw_calls is None:
+        raw_calls = payload.get("calls")
+    if not isinstance(raw_calls, list):
+        raw_calls = []
+    if not raw_calls and isinstance(payload.get("action"), dict):
+        action = dict(payload.get("action") or {})
+        action_type = str(action.get("type") or "").strip()
+        if action_type == "finish":
+            finish = {key: value for key, value in action.items() if key != "type"}
+            finish.setdefault("outcome", "completed")
+        elif action_type:
+            raw_calls = [action]
+    calls: list[dict[str, object]] = []
+    for index, raw in enumerate(raw_calls, start=1):
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or raw.get("tool_name") or raw.get("tool") or raw.get("type") or "").strip()
+        if name == "finish":
+            finish = dict(raw.get("arguments") if isinstance(raw.get("arguments"), dict) else raw)
+            finish.pop("name", None)
+            finish.pop("tool_name", None)
+            finish.pop("tool", None)
+            finish.pop("type", None)
+            continue
+        arguments = raw.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = raw.get("args") if isinstance(raw.get("args"), dict) else None
+        if not isinstance(arguments, dict):
+            arguments = {
+                key: value
+                for key, value in raw.items()
+                if key not in {"id", "provider_call_id", "name", "tool_name", "tool", "type", "args", "arguments"}
+            }
+        provider_call_id = str(raw.get("provider_call_id") or raw.get("id") or f"turn-{turn_index}-call-{index}")
+        calls.append({"provider_call_id": provider_call_id, "tool_name": name, "arguments": dict(arguments)})
+    if finish:
+        finish = dict(finish)
+        outcome = _finish_outcome(finish)
+        if not outcome:
+            finish["outcome"] = "completed"
+    return {"summary": summary, "tool_calls": tuple(calls), "finish": finish}
+
+
+def _auto_approval_records(lane_input: ImplementLaneInput, tool_calls) -> tuple[dict[str, object], ...]:
+    if not bool(lane_input.lane_config.get("auto_approve_writes")):
+        return ()
+    approvals = []
+    for call in tool_calls:
+        if call.tool_name not in WRITE_TOOL_NAMES:
+            continue
+        approvals.append(
+            {
+                "provider_call_id": call.provider_call_id,
+                "mew_tool_call_id": call.mew_tool_call_id,
+                "status": "approved",
+                "source": "cli_accept_edits",
+                "approval_id": f"cli_accept_edits:{call.provider_call_id}",
+            }
+        )
+    return tuple(approvals)
+
+
+def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
+    content = result.provider_visible_content()
+    return {
+        "provider_call_id": result.provider_call_id,
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "is_error": result.is_error,
+        "content": content,
+    }
+
+
+def _finish_outcome(finish_arguments: dict[str, object]) -> str:
+    return str((finish_arguments or {}).get("outcome") or (finish_arguments or {}).get("status") or "").strip()
+
+
+def _live_finish_status(
+    finish_arguments: dict[str, object],
+    *,
+    validation_valid: bool,
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> str:
+    if not validation_valid:
+        return "failed"
+    outcome = _finish_outcome(finish_arguments)
+    if outcome in {"completed", "task_complete", "done", "success"}:
+        if _latest_acceptance_result_completed(tool_results):
+            return "completed"
+        return "blocked"
+    if any(result.status in {"failed", "interrupted", "invalid", "denied"} for result in tool_results):
+        return "blocked"
+    if outcome in {"blocked", "failed", "deferred"}:
+        return outcome
+    return "blocked"
+
+
+def _terminal_evidence_count(tool_results) -> int:
+    return sum(
+        1
+        for result in tool_results
+        if result.tool_name in EXEC_TOOL_NAMES and result.status == "completed" and bool(result.evidence_refs)
+    )
+
+
+def _write_evidence_count(tool_results) -> int:
+    return sum(1 for result in tool_results if result.tool_name in WRITE_TOOL_NAMES and bool(result.side_effects))
+
+
+def _latest_acceptance_result_completed(tool_results) -> bool:
+    for result in reversed(tuple(tool_results)):
+        if result.tool_name in EXEC_TOOL_NAMES:
+            return result.status == "completed" and bool(result.evidence_refs)
+        if result.tool_name in WRITE_TOOL_NAMES:
+            return result.status == "completed" and bool(result.side_effects)
+    return False
+
+
+def _live_status_summary(status: str) -> str:
+    if status == "completed":
+        return "implement_v2 completed with paired tool evidence."
+    return f"implement_v2 live_json attempt ended with status={status}."
+
+
+def _write_live_json_artifacts(
+    lane_input: ImplementLaneInput,
+    *,
+    manifest: ImplementLaneProofManifest,
+    transcript: tuple[ImplementLaneTranscriptEvent, ...],
+    history: tuple[dict[str, object], ...],
+) -> tuple[str, ...]:
+    artifact_dir = str(lane_input.lane_config.get("artifact_dir") or "").strip()
+    if not artifact_dir:
+        return ()
+    root = Path(artifact_dir).expanduser().resolve(strict=False) / "implement_v2"
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = root / "proof-manifest.json"
+    transcript_path = root / "transcript.json"
+    history_path = root / "history.json"
+    manifest_path.write_text(json.dumps(manifest.as_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    transcript_path.write_text(
+        json.dumps([event.as_dict() for event in transcript], ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    history_path.write_text(json.dumps(list(history), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return (str(manifest_path), str(transcript_path), str(history_path))
+
+
 __all__ = [
     "describe_implement_v2_runtime",
+    "run_live_json_implement_v2",
     "run_fake_exec_implement_v2",
     "run_fake_read_only_implement_v2",
     "run_fake_write_implement_v2",

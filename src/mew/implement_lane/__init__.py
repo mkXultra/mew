@@ -8,7 +8,7 @@ from .registry import (
     select_implement_lane_runtime,
 )
 from .exec_runtime import ImplementV2ManagedExecRuntime
-from .provider import FakeProviderAdapter, FakeProviderToolCall
+from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .reentry_gate import M624ReentryABGateResult, evaluate_m6_24_reentry_ab_gate
@@ -31,6 +31,7 @@ from .types import (
 from .v1_adapter import ImplementV1AdapterDescriptor, describe_implement_v1_adapter
 from .v2_runtime import (
     describe_implement_v2_runtime,
+    run_live_json_implement_v2,
     run_fake_exec_implement_v2,
     run_fake_read_only_implement_v2,
     run_fake_write_implement_v2,
@@ -51,6 +52,7 @@ __all__ = [
     "ImplementV1AdapterDescriptor",
     "ImplementV2ManagedExecRuntime",
     "ImplementV2WriteRuntime",
+    "JsonModelProviderAdapter",
     "M624ReentryABGateResult",
     "PairingValidationResult",
     "ToolCallEnvelope",
@@ -72,6 +74,7 @@ __all__ = [
     "run_fake_exec_implement_v2",
     "run_fake_read_only_implement_v2",
     "run_fake_write_implement_v2",
+    "run_live_json_implement_v2",
     "run_unavailable_implement_v2",
     "select_implement_lane_runtime",
     "validate_proof_manifest_pairing",

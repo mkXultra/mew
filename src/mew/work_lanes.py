@@ -132,13 +132,13 @@ _SUPPORTED_WORK_LANES: tuple[WorkLaneView, ...] = (
     WorkLaneView(
         name=IMPLEMENT_V2_LANE,
         supported=True,
-        authoritative=False,
-        write_capable=False,
+        authoritative=True,
+        write_capable=True,
         layout=LANE_LAYOUT_LANE_SCOPED,
-        role=LANE_ROLE_SHADOW,
+        role=LANE_ROLE_AUTHORITATIVE,
         requires_model_binding=True,
         fallback_lane=IMPLEMENT_V1_LANE,
-        runtime_available=False,
+        runtime_available=True,
     ),
     WorkLaneView(
         name=MIRROR_LANE,

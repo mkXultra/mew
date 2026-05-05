@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; next proof uses explicit `implement_v1` lane attribution unless a later decision selects v2 for an A/B attempt. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; explicit `implement_v2` live JSON runtime canary passed on `prove-plus-comm`; default parity proof lane remains `implement_v1` unless a later decision selects v2 for an A/B attempt. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_resume_explicit_implement_v1_lane_next`.
+Current controller mode: `m6_24_true_implement_v2_canary_passed_resume_explicit_lane_parity`.
 
 Scope:
 
@@ -86,13 +86,21 @@ Scope:
   in `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`.
 - Phase 6 M6.24 reentry A/B gate is implemented, reviewed, and proved in
   `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`.
-- `implement_v1` remains the current production/default lane for resumed
-  M6.24 proof work.
-- `implement_v2` remains default-off after M6.23.2 close; it may be used only
-  by explicit lane selection.
+- `implement_v1` remains the default lane for resumed M6.24 parity proof work.
+- `implement_v2` now has a live `model_json` runtime that bypasses the v1
+  THINK/ACT planner, emits v2 transcript/proof artifacts, and can write/verify
+  through the v2 substrates. It remains explicit-selection only.
+- Provider-specific native tool-call transport is still future work; current
+  v2 proof must be described as `model_json`, not provider-native.
 - M6.24 live proof work resumes only with explicit lane metadata. The default
   next proof lane is `implement_v1`; any `implement_v2` proof is an explicit
   A/B attempt and cannot count fallback execution as v2 success.
+- True-v2 canary evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
+  scored `1.0` with runner errors `0`; the mew report recorded
+  `selected_lane=implement_v2`, `runtime_id=implement_v2_model_json_tool_loop`,
+  `lane_status=completed`, `work_exit_code=0`, replay-valid proof artifacts,
+  and no v1 planner call path.
 
 Controller docs:
 

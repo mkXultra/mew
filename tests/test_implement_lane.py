@@ -25,6 +25,7 @@ from mew.implement_lane import (
     run_fake_exec_implement_v2,
     run_fake_read_only_implement_v2,
     run_fake_write_implement_v2,
+    run_live_json_implement_v2,
     run_unavailable_implement_v2,
     select_implement_lane_runtime,
     validate_proof_manifest_pairing,
@@ -33,7 +34,7 @@ from mew.implement_lane import (
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
 
-def test_implementation_runtime_registry_keeps_v1_default_and_v2_default_off() -> None:
+def test_implementation_runtime_registry_keeps_v1_default_and_v2_explicit() -> None:
     runtimes = list_implement_lane_runtime_views()
 
     assert [runtime.lane for runtime in runtimes] == [IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE]
@@ -41,8 +42,10 @@ def test_implementation_runtime_registry_keeps_v1_default_and_v2_default_off() -
     assert runtimes[0].runtime_available is True
     assert runtimes[0].provider_native_tool_loop is False
     assert runtimes[1].default is False
-    assert runtimes[1].runtime_available is False
-    assert runtimes[1].provider_native_tool_loop is True
+    assert runtimes[1].runtime_available is True
+    assert runtimes[1].runtime_id == "implement_v2_model_json_tool_loop"
+    assert runtimes[1].provider_native_tool_loop is False
+    assert runtimes[1].writes_allowed is True
 
 
 def test_legacy_tiny_and_unknown_lanes_resolve_to_implement_v1_runtime() -> None:
@@ -50,11 +53,11 @@ def test_legacy_tiny_and_unknown_lanes_resolve_to_implement_v1_runtime() -> None
         assert get_implement_lane_runtime_view(lane).lane == IMPLEMENT_V1_LANE
 
 
-def test_explicit_implement_v2_selection_returns_v2_even_when_unavailable() -> None:
+def test_explicit_implement_v2_selection_returns_v2_runtime() -> None:
     selected = select_implement_lane_runtime(requested_lane=IMPLEMENT_V2_LANE, allow_v2=True)
 
     assert selected.lane == IMPLEMENT_V2_LANE
-    assert selected.runtime_available is False
+    assert selected.runtime_available is True
 
 
 def test_explicit_implement_v2_selection_does_not_silently_route_to_v1() -> None:
@@ -101,7 +104,7 @@ def test_implement_v1_adapter_has_distinct_namespace_without_running_legacy_loop
     assert descriptor.artifact_namespace == "implement-lane/implement_v1/ws-1/task-1"
 
 
-def test_implement_v2_scaffold_exposes_tools_but_returns_unavailable() -> None:
+def test_implement_v2_descriptor_exposes_live_runtime_and_tools() -> None:
     description = describe_implement_v2_runtime(work_session_id="ws-1", task_id="task-1")
     result = run_unavailable_implement_v2(
         ImplementLaneInput(
@@ -113,7 +116,8 @@ def test_implement_v2_scaffold_exposes_tools_but_returns_unavailable() -> None:
     )
 
     assert description["lane"] == IMPLEMENT_V2_LANE
-    assert description["runtime_available"] is False
+    assert description["runtime_available"] is True
+    assert description["provider_native_tool_loop"] is False
     assert description["artifact_namespace"] == "implement-lane/implement_v2/ws-1/task-1"
     assert {tool["name"] for tool in description["tool_specs"]} == {
         "inspect_dir",
@@ -136,6 +140,145 @@ def test_implement_v2_scaffold_exposes_tools_but_returns_unavailable() -> None:
     assert result.next_reentry_hint["fallback_lane"] == IMPLEMENT_V1_LANE
     assert result.next_reentry_hint["requires_separate_lane_attempt"] is True
     assert "fallback_lane" not in result.updated_lane_state
+
+
+def test_implement_v2_live_json_runtime_can_edit_verify_and_finish(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "inspect file",
+            "tool_calls": [
+                {"id": "read-1", "name": "read_file", "arguments": {"path": "sample.txt"}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "apply exact edit",
+            "tool_calls": [
+                {
+                    "id": "edit-1",
+                    "name": "edit_file",
+                    "arguments": {"path": "sample.txt", "old": "before\n", "new": "after\n", "apply": True},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "observe a failing verifier before recovery",
+            "tool_calls": [
+                {
+                    "id": "verify-bad-1",
+                    "name": "run_command",
+                    "arguments": {"command": "false", "cwd": ".", "use_shell": True, "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "verify behavior",
+            "tool_calls": [
+                {
+                    "id": "verify-1",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "test \"$(cat sample.txt)\" = after",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 10,
+                    },
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "file edited and verified"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=4,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["provider"] == "model_json"
+    assert result.metrics["tool_calls"] == 4
+    assert result.metrics["write_evidence_count"] == 1
+    assert result.metrics["terminal_evidence_count"] == 1
+    assert result.metrics["replay_valid"] is True
+    assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "read first",
+            "tool_calls": [
+                {"id": "duplicate-call", "name": "read_file", "arguments": {"path": "sample.txt"}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "try duplicate id for write",
+            "tool_calls": [
+                {
+                    "id": "duplicate-call",
+                    "name": "edit_file",
+                    "arguments": {"path": "sample.txt", "old": "before\n", "new": "after\n", "apply": True},
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "should not mutate"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "failed"
+    assert result.metrics["replay_valid"] is False
+    assert target.read_text(encoding="utf-8") == "before\n"
+    manifest = result.updated_lane_state["proof_manifest"]
+    assert manifest["tool_results"][1]["status"] == "invalid"
+    assert "duplicate_provider_call_id_across_turns" in manifest["tool_results"][1]["content"][0]["reason"]
 
 
 def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:

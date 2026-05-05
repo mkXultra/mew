@@ -88,6 +88,7 @@ from .implementation_lane_baseline import (
     format_implementation_lane_baseline_report,
     summarize_implementation_lane_baseline,
 )
+from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
 from .long_build_substrate import (
     build_long_build_contract,
     execution_contract_continuation_policy,
@@ -254,6 +255,7 @@ from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_git_tool
 from .validation import format_validation_issues, validate_state, validation_errors
 from .write_tools import edit_file, restore_write_snapshot, snapshot_write_path, summarize_write_result, write_file
+from .work_lanes import IMPLEMENT_V2_LANE
 from .work_session import (
     active_work_session,
     active_work_sessions,
@@ -6881,6 +6883,175 @@ def apply_work_tool_wall_timeout_ceiling(
     return ceiling
 
 
+def _work_guidance_selected_lane(guidance):
+    text = str(guidance or "")
+    for pattern in (
+        r"(?:^|\s)selected_lane\s*=\s*([A-Za-z0-9_.-]+)",
+        r"(?:^|\s)lane\s*=\s*([A-Za-z0-9_.-]+)",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    if isinstance(payload, dict):
+        return str(payload.get("selected_lane") or payload.get("lane") or "").strip()
+    return ""
+
+
+def _work_ai_workspace_roots(roots, workspace):
+    workspace_path = Path(str(workspace or ".")).expanduser().resolve(strict=False)
+    normalized = []
+    for root in roots or []:
+        root_path = Path(str(root)).expanduser()
+        if not root_path.is_absolute():
+            root_path = workspace_path / root_path
+        text = str(root_path.resolve(strict=False))
+        if text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def _work_ai_implement_v2_task_contract(task, *, max_steps, max_wall_seconds, guidance, verify_command):
+    return {
+        "title": (task or {}).get("title") or "",
+        "description": (task or {}).get("description") or (task or {}).get("notes") or "",
+        "cwd": (task or {}).get("cwd") or "",
+        "kind": task_kind(task or {}),
+        "max_steps": max_steps,
+        "max_wall_seconds": max_wall_seconds,
+        "guidance": guidance or "",
+        "verify_command": verify_command or "",
+    }
+
+
+def _run_work_ai_implement_v2(
+    args,
+    effective_args,
+    *,
+    report,
+    session_id,
+    task_id,
+    options,
+    model_auth,
+    model_backend,
+    model,
+    base_url,
+    max_steps,
+    max_wall_seconds,
+    progress,
+):
+    workspace = options.get("cwd") or os.getcwd()
+    selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
+    report["selected_lane"] = selected_lane
+    report["runtime_id"] = "implement_v2_model_json_tool_loop"
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        task = work_session_task(state, session) or find_task(state, task_id)
+        planning_turn = start_work_model_turn(
+            state,
+            session,
+            {"summary": "running implement_v2 lane"},
+            {"summary": "running implement_v2 lane"},
+            {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE},
+            guidance=getattr(effective_args, "work_guidance", None) or "",
+        )
+        planning_turn_id = planning_turn.get("id")
+        save_state(state)
+    lane_input = ImplementLaneInput(
+        work_session_id=str(session_id),
+        task_id=str(task_id),
+        workspace=str(workspace),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend=model_backend,
+        model=model,
+        effort=os.environ.get("MEW_CODEX_REASONING_EFFORT", ""),
+        task_contract=_work_ai_implement_v2_task_contract(
+            task,
+            max_steps=max_steps,
+            max_wall_seconds=max_wall_seconds,
+            guidance=getattr(effective_args, "work_guidance", None) or "",
+            verify_command=getattr(effective_args, "verify_command", None) or "",
+        ),
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
+            "allowed_write_roots": _work_ai_workspace_roots(effective_args.allow_write or [], workspace),
+            "allow_shell": bool(effective_args.allow_shell),
+            "allow_verify": bool(effective_args.allow_verify),
+            "verify_command": getattr(effective_args, "verify_command", None) or "",
+            "auto_approve_writes": work_auto_approve_edits_enabled(effective_args),
+            "artifact_dir": getattr(effective_args, "oneshot_artifacts", "") or "",
+            "max_steps": max_steps,
+        },
+    )
+    if progress:
+        progress("selected implement_v2 runtime; bypassing v1 THINK/ACT")
+    try:
+        result = run_live_json_implement_v2(
+            lane_input,
+            model_auth=model_auth,
+            base_url=base_url,
+            timeout=float(getattr(effective_args, "model_timeout", 60.0) or 60.0),
+            max_turns=max_steps,
+            progress=progress,
+        )
+    except Exception as exc:
+        result = None
+        error = str(exc)
+        status = "failed"
+    else:
+        error = "" if result.status == "completed" else result.user_visible_summary
+        status = result.status
+    action = {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE, "runtime_id": "implement_v2_model_json_tool_loop"}
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        turn = update_work_model_turn_plan(
+            state,
+            session_id,
+            planning_turn_id,
+            {"summary": "implement_v2 lane selected"},
+            {
+                "summary": (result.user_visible_summary if result else error) or "",
+                "action": action,
+                "act_mode": "implement_v2_model_json_tool_loop",
+            },
+            action,
+            model_metrics=(result.metrics if result else {"error": error, "runtime_id": "implement_v2_model_json_tool_loop"}),
+        )
+        turn = finish_work_model_turn(state, session_id, planning_turn_id, error=error if status != "completed" else "")
+        if session is not None:
+            add_work_session_note(
+                session,
+                f"implement_v2 attempt status={status}: {(result.user_visible_summary if result else error) or ''}",
+                source="system",
+            )
+        save_state(state)
+    step = {
+        "index": 1,
+        "status": status,
+        "action": action,
+        "model_turn": turn,
+        "summary": (result.user_visible_summary if result else error) or "",
+    }
+    if result is not None:
+        step["implement_lane_result"] = result.as_dict()
+        report["implement_lane_result"] = result.as_dict()
+    if error and status != "completed":
+        step["error"] = error
+    report["steps"].append(step)
+    report["stop_reason"] = "finish" if status == "completed" else f"implement_v2_{status or 'failed'}"
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_work_ai_report(report, compact=getattr(effective_args, "compact_live", False)))
+    return 0 if status == "completed" else 1
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -7052,6 +7223,26 @@ def cmd_work_ai(args):
         )
         print(format_work_cli_controls(session, args, compact=compact_cli_controls))
         return 1
+
+    selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
+    if selected_lane:
+        report["selected_lane"] = selected_lane
+    if selected_lane == IMPLEMENT_V2_LANE:
+        return _run_work_ai_implement_v2(
+            args,
+            effective_args,
+            report=report,
+            session_id=session_id,
+            task_id=task_id,
+            options=options,
+            model_auth=model_auth,
+            model_backend=model_backend,
+            model=model,
+            base_url=base_url,
+            max_steps=max_steps,
+            max_wall_seconds=max_wall_seconds,
+            progress=progress,
+        )
 
     for index in range(1, max_steps + 1):
         turn_model_timeout = float(getattr(effective_args, "model_timeout", 0) or 0)

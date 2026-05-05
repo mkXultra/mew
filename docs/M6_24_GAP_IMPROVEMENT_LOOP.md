@@ -97,6 +97,14 @@ Current pre-speed status:
   verifier `4/4` passing when run with the task's correct `/workspace` cwd.
   A prior `/app` cwd attempt is harness misconfiguration evidence only, not a
   mew product miss.
+- true `implement_v2` live canary: `prove-plus-comm` one-attempt run
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204`
+  passed with reward `1.0`, runner errors `0`, runtime `2m05s`,
+  `work_exit_code=0`, `selected_lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `lane_status=completed`,
+  and replay-valid v2 proof artifacts. This proves the explicit v2 lane can
+  execute independently of the v1 THINK/ACT planner; it does not yet prove
+  provider-specific native tool-call transport.
 
 Active authoritative design:
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
