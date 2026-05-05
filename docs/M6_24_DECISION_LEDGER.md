@@ -593,3 +593,9 @@ suite, `tests/test_terminal_bench_replay.py`, focused
 `mew replay terminal-bench` on
 `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd`, and exact
 `mew dogfood --scenario m6_24-terminal-bench-replay` all pass.
+Follow-up repair: terminal-bench replay dogfood now accepts
+`--terminal-bench-assert-next-action-contains`, matching the replay CLI's
+assertion surface. The exact v2 artifact now passes replay and dogfood with
+`next_action_contains=compiled/native source frontier`, so the pre-speed gate
+can assert that a v2 miss is routed back to the compiled-source frontier before
+spending another live proof.

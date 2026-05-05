@@ -15470,6 +15470,7 @@ def _m6_24_terminal_bench_replay_assertions(
     blockers=None,
     mew_exit_code=None,
     external_reward=None,
+    next_action_contains=None,
 ):
     if job_dir:
         assertions = {}
@@ -15492,6 +15493,8 @@ def _m6_24_terminal_bench_replay_assertions(
         assertions["mew_exit_code"] = mew_exit_code
     if external_reward is not None:
         assertions["external_reward"] = external_reward
+    if next_action_contains:
+        assertions["next_action_contains"] = next_action_contains
     return assertions
 
 
@@ -15506,6 +15509,7 @@ def run_m6_24_terminal_bench_replay_scenario(
     blockers=None,
     mew_exit_code=None,
     external_reward=None,
+    next_action_contains=None,
 ):
     checks = []
     commands = []
@@ -15518,6 +15522,7 @@ def run_m6_24_terminal_bench_replay_scenario(
         blockers=blockers,
         mew_exit_code=mew_exit_code,
         external_reward=external_reward,
+        next_action_contains=next_action_contains,
     )
     replay = replay_terminal_bench_job(
         source,
@@ -16361,6 +16366,7 @@ def run_dogfood_scenario(args):
                     blockers=getattr(args, "terminal_bench_assert_blocker", None),
                     mew_exit_code=getattr(args, "terminal_bench_assert_mew_exit_code", None),
                     external_reward=getattr(args, "terminal_bench_assert_external_reward", None),
+                    next_action_contains=getattr(args, "terminal_bench_assert_next_action_contains", None),
                 )
             )
         elif name == "m6_24-compile-compcert-emulator":

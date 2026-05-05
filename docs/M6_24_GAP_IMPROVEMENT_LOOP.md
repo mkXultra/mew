@@ -660,3 +660,8 @@ also implemented because true-v2 runs store evidence under
 `work_report.steps` tool calls. Step 2 has static prompt/frontier guidance and
 should be checked with a cheap v2 canary or emulator before spending another
 live `build-cython-ext` speed run.
+
+Pre-speed assertion update: use both replay and dogfood with
+`next_action_contains=compiled/native source frontier` on the latest true-v2
+miss before another live speed item. The dogfood CLI supports this as
+`--terminal-bench-assert-next-action-contains`.
