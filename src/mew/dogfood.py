@@ -15141,21 +15141,35 @@ def _repository_test_tail_summary(verifier_stdout, trial_entry):
     if summary_match:
         failed_count = int(summary_match.group("failed"))
         passed_count = int(summary_match.group("passed"))
-    repository_tail_failed = any("test_pyknotid_repository_tests" in item for item in failed_tests) or (
-        "test_pyknotid_repository_tests" in text
+    repository_tail_failed = any("test_pyknotid_repository_tests" in item for item in failed_tests) or bool(
+        re.search(r"(?:FAILED|ERROR)\s+[^\n]*test_pyknotid_repository_tests\b", text)
     )
-    upstream_tail_failed = any("test_reconstructed_space_curve" in item for item in failed_tests) or (
-        "test_reconstructed_space_curve" in text
+    upstream_tail_failed = any("test_reconstructed_space_curve" in item for item in failed_tests) or bool(
+        re.search(r"(?:FAILED|ERROR)\s+[^\n]*test_reconstructed_space_curve\b", text)
     )
     main_smoke_passed = any("test_example_usage" in item for item in passed_tests) or "test_example_usage" in text
+    external_reward = (trial_entry or {}).get("external_reward")
+    mew_exit_code = (trial_entry or {}).get("mew_exit_code")
+    stop_reason = (trial_entry or {}).get("stop_reason") or ""
+    try:
+        external_reward_value = None if external_reward is None else float(external_reward)
+    except (TypeError, ValueError):
+        external_reward_value = None
+    finish_false_positive = (
+        stop_reason == "finish"
+        and mew_exit_code == 0
+        and external_reward_value == 0.0
+        and bool(failed_tests or failed_count)
+    )
     return {
         "trial_name": (trial_entry or {}).get("trial_name") or "",
-        "external_reward": (trial_entry or {}).get("external_reward"),
-        "mew_exit_code": (trial_entry or {}).get("mew_exit_code"),
-        "stop_reason": (trial_entry or {}).get("stop_reason") or "",
+        "external_reward": external_reward,
+        "mew_exit_code": mew_exit_code,
+        "stop_reason": stop_reason,
         "wall_timeout": bool((trial_entry or {}).get("wall_timeout")),
         "repository_tail_failed": repository_tail_failed,
         "upstream_tail_failed": upstream_tail_failed,
+        "finish_false_positive": finish_false_positive,
         "main_smoke_passed": main_smoke_passed,
         "failed_count": failed_count,
         "passed_count": passed_count,
@@ -15589,7 +15603,7 @@ def run_m6_24_repository_test_tail_emulator_scenario(
     replay = replay_terminal_bench_job(
         source,
         task=task_filter,
-        assertions={"mew_exit_code": 1, "external_reward": 0.0},
+        assertions={"external_reward": 0.0},
     )
     first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
     verifier_path = Path(first_trial.get("verifier_stdout_path") or "")
@@ -15622,14 +15636,28 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         summary,
         "main smoke/example usage passed before repository tail failed",
     )
-    _scenario_check(
-        checks,
-        "m6_24_repository_test_tail_emulator_detects_repository_tail",
-        bool(summary.get("repository_tail_failed")),
-        summary,
-        "repository test wrapper failure detected; upstream failing test is optional if verifier output clipped it",
-    )
-    if summary.get("stop_reason") == "tool_failed":
+    finish_false_positive = bool(summary.get("finish_false_positive"))
+    if finish_false_positive:
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_finish_false_positive",
+            finish_false_positive and bool(summary.get("failed_tests")),
+            summary,
+            "mew finished successfully but external verifier reward stayed zero with failed tests",
+        )
+    else:
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_repository_tail",
+            bool(summary.get("repository_tail_failed")),
+            summary,
+            "repository test wrapper failure detected; upstream failing test is optional if verifier output clipped it",
+        )
+    # The replay assertion is intentionally external-reward only because this
+    # emulator covers both nonzero mew exits and finish false-positives.
+    if finish_false_positive:
+        pass
+    elif summary.get("stop_reason") == "tool_failed":
         _scenario_check(
             checks,
             "m6_24_repository_test_tail_emulator_detects_tool_failed_frontier_stop",
@@ -15676,7 +15704,8 @@ def run_m6_24_repository_test_tail_emulator_scenario(
     _scenario_check(
         checks,
         "m6_24_repository_test_tail_emulator_writes_fixture",
-        fixture_path.is_file() and (fixture.get("summary") or {}).get("repository_tail_failed") is True,
+        fixture_path.is_file()
+        and bool((fixture.get("summary") or {}).get("failed_tests") or (fixture.get("summary") or {}).get("repository_tail_failed")),
         {"fixture_path": str(fixture_path), "summary": fixture.get("summary")},
         "repository-test-tail fixture file",
     )

@@ -14,6 +14,8 @@ Mew:
 
 - best observed: `1/5`
 - latest current-head recheck: `0/1`
+- latest post-lifecycle retry: `0/1` with `stop_reason=finish` and one
+  external verifier failure
 - latest Harbor errors: `0`
 
 Primary artifacts:
@@ -25,6 +27,7 @@ Primary artifacts:
 - `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-sibling-search-20260428-0818/result.json`
 - `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-build-cython-ext-5attempts-same-file-batch-wait-20260428-0841/result.json`
 - `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936/result.json`
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-lifecycle-narrow-build-cython-ext-1attempt-20260505-0935/result.json`
 
 ## Chronology
 
@@ -41,6 +44,7 @@ Primary artifacts:
 | Verifier sibling searches | 1/5 | One trial reached full success; failed attempts found concrete sibling anchors | Duplicate same-file write batch normalized to `wait`; short budget near solution remained. |
 | Same-file batch blocker repair | 0/5 | Duplicate same-file batch wait did not recur | All trials wall-timed near solution; verifier tails still concentrated on source compatibility siblings and repository tests. |
 | Current-head architecture recheck | 0/1 | Execution-contract and prompt-section architecture moved the failure deeper: extension build/import, neutral README smoke, and 10/11 external verifier tests passed. | `work_report.stop_reason=wall_timeout`; remaining failure is repository-test tail, specifically upstream `tests/test_spacecurve.py::test_reconstructed_space_curve`, after mew found but did not finish the next narrow source repair before wall budget expired. |
+| Lifecycle identity repair retry | 0/1 | Runtime plumbing moved again: managed lifecycle identity was clean, mew reached `finish`, and 10/11 external verifier tests passed. | `finish` was false-positive. mew treated load/path proof as "ccomplexity works"; external verifier failed `test_ccomplexity` when invoking `cython_higher_order_writhe`, exposing `np.int` in the Cython path. |
 
 ## Repaired Or Rejected Duplicate Fixes
 
@@ -95,6 +99,11 @@ Signals from artifacts:
   failed`. The remaining failure is no longer broad source acquisition or Cython
   build setup; it is a repository-test-tail repair frontier that did not get a
   final edit/proof before wall timeout.
+- Post-lifecycle trial `build-cython-ext__wPScYFt` removed the wall-time/tool
+  plumbing blocker and reached finish. The remaining miss is a finish-evidence
+  gap: runtime component load/path evidence was accepted as "works", but the
+  hidden verifier required behavior-level invocation in the original Python
+  context.
 
 Why this is generic:
 
@@ -125,6 +134,9 @@ Candidate behavior:
   evidence. A run that has passed the main smoke path and has one remaining
   repository test should not spend repeated turns rediscovering packaging or
   Cython build facts.
+- for runtime component tasks, block load/import/path-only finish evidence and
+  require a completed command that invokes exported behavior or
+  component-specific tests in the original runtime context.
 
 Rollback condition:
 
@@ -163,6 +175,10 @@ Current pre-speed status:
   same artifact. It detects that main smoke/example usage passed, the external
   verifier failed on the repository-test wrapper, and mew stopped by
   `wall_timeout` before closing that frontier.
+- The same emulator now also passes on
+  `mew-m6-24-lifecycle-narrow-build-cython-ext-1attempt-20260505-0935`, detecting
+  `finish_false_positive=true`, clean lifecycle projection, and the failed
+  external `test_ccomplexity` behavior proof.
 
 Only after all four pass, spend exactly one `build-cython-ext` `speed_1`.
 

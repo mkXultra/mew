@@ -152,6 +152,43 @@ _RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS = (
     "similarity",
     "ssim",
 )
+_RUNTIME_COMPONENT_TASK_MARKERS = (
+    "compiled extension",
+    "compiled extensions",
+    "cython extension",
+    "cython extensions",
+    "native extension",
+    "native extensions",
+    "c extension",
+    "c extensions",
+    "dynamic library",
+    "dynamic libraries",
+    "extension module",
+    "extension modules",
+    "native module",
+    "native modules",
+    "runtime module",
+    "runtime modules",
+    "shared library",
+    "shared libraries",
+)
+_RUNTIME_COMPONENT_BEHAVIOR_MARKERS = (
+    "behavior",
+    "behavioral",
+    "component-specific",
+    "callable",
+    "extension-specific",
+    "exported function",
+    "function-level",
+    "invokable",
+    "invoked",
+    "non-import",
+    "specific test",
+    "works in original context",
+)
+_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE = re.compile(
+    r"\b(?:work|works|working|compatib\w*|functional(?:ity)?|behavior(?:al)?)\b"
+)
 
 _LONG_DEPENDENCY_BUILD_ACTION_MARKERS = (
     "build",
@@ -1351,6 +1388,85 @@ def _long_dependency_build_artifact_blocker(
         "installation, configure, dependency generation, or partial build progress is "
         "not completion; cite a completed tool proving "
         f"{', '.join(missing[:3])} exists and is executable/invokable"
+    )
+
+
+def is_runtime_component_behavior_task(text: object) -> bool:
+    lowered = str(text or "").casefold()
+    if not any(marker in lowered for marker in _RUNTIME_COMPONENT_TASK_MARKERS):
+        return False
+    return bool(_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE.search(lowered))
+
+
+def _runtime_component_evidence_texts(check: object, session: object) -> list[str]:
+    texts = []
+    if isinstance(check, dict):
+        texts.append(str(check.get("constraint") or ""))
+        texts.append(str(check.get("evidence") or ""))
+    for call in _evidence_command_calls(check, session):
+        texts.append(_tool_call_text(call))
+    return [text for text in texts if str(text or "").strip()]
+
+
+def _command_evidence_text(evidence: object) -> str:
+    if not isinstance(evidence, dict):
+        return ""
+    return _tool_call_text(command_evidence_to_tool_call(evidence))
+
+
+def _runtime_component_has_behavior_evidence(check: object, session: object) -> bool:
+    claim_text = "\n".join(_runtime_component_evidence_texts(check, None)).casefold()
+    if not claim_text:
+        return False
+    if not any(marker in claim_text for marker in _RUNTIME_COMPONENT_TASK_MARKERS):
+        return False
+    for ref in _check_evidence_refs(check):
+        ref_id = ref.get("id")
+        if ref_id is None:
+            continue
+        kind = str(ref.get("kind") or "tool_call")
+        if kind == "command_evidence":
+            evidence = _command_evidence_by_id(session, ref_id)
+            if not evidence or not evidence.get("terminal_success"):
+                continue
+            evidence_text = _command_evidence_text(evidence).casefold()
+            if any(marker in evidence_text for marker in _RUNTIME_COMPONENT_BEHAVIOR_MARKERS):
+                return True
+            continue
+        if kind != "tool_call":
+            continue
+        call = _tool_call_by_id(session, ref_id)
+        if not call:
+            continue
+        if call.get("tool") not in {"run_command", "run_tests"}:
+            continue
+        if not tool_call_terminal_success(call):
+            continue
+        tool_text = _tool_call_text(call).casefold()
+        if any(marker in tool_text for marker in _RUNTIME_COMPONENT_BEHAVIOR_MARKERS):
+            return True
+    return False
+
+
+def _runtime_component_behavior_blocker(
+    task_description: object,
+    checks: list[dict[str, str]],
+    session: object,
+) -> str:
+    if not is_runtime_component_behavior_task(task_description):
+        return ""
+    verified_checks = [
+        check
+        for check in checks
+        if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
+    ]
+    if any(_runtime_component_has_behavior_evidence(check, session) for check in verified_checks):
+        return ""
+    return (
+        "runtime component behavior evidence import-only: for loadable runtime "
+        "components that must work, successful build, import, load, or path proof is "
+        "not enough; cite a completed command that invokes component behavior or "
+        "component-specific tests in the original runtime context"
     )
 
 
@@ -2656,6 +2772,9 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker
+    runtime_component_blocker = _runtime_component_behavior_blocker(task_description, checks, session)
+    if runtime_component_blocker:
+        return runtime_component_blocker
     long_dependency_blocker = _long_dependency_build_artifact_blocker(task_description, checks, session)
     if long_dependency_blocker:
         return long_dependency_blocker
@@ -2714,6 +2833,8 @@ def finish_blocker_code(blocker: object) -> str:
         return "runtime_artifact_freshness_unchecked"
     if "runtime visual artifact quality evidence" in text:
         return "runtime_visual_artifact_quality_evidence"
+    if "runtime component behavior evidence" in text:
+        return "runtime_component_behavior_evidence"
     if "numeric artifact quality evidence" in text:
         return "numeric_artifact_quality_evidence"
     if "edit-scope acceptance evidence" in text:

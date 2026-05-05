@@ -13,6 +13,7 @@ from mew.config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     DOGFOOD_SCENARIOS,
     _evaluate_managed_action_projection,
+    _repository_test_tail_summary,
     _write_terminal_bench_replay_fixture,
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
@@ -1439,6 +1440,49 @@ class DogfoodTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_m6_24_repository_summary_detects_finish_false_positive(self):
+        stdout = """
+PASSED ../tests/test_outputs.py::test_example_usage
+FAILED ../tests/test_outputs.py::test_ccomplexity - AttributeError: module 'numpy' has no attribute 'int'
+========================= 1 failed, 10 passed in 3.92s =========================
+"""
+        summary = _repository_test_tail_summary(
+            stdout,
+            {
+                "trial_name": "build-cython-ext__wPScYFt",
+                "external_reward": 0.0,
+                "mew_exit_code": 0,
+                "stop_reason": "finish",
+                "wall_timeout": False,
+            },
+        )
+
+        self.assertTrue(summary["finish_false_positive"])
+        self.assertFalse(summary["repository_tail_failed"])
+        self.assertEqual(summary["failed_count"], 1)
+        self.assertIn("../tests/test_outputs.py::test_ccomplexity", summary["failed_tests"])
+
+    def test_m6_24_repository_summary_does_not_treat_passed_repository_test_as_tail_failure(self):
+        stdout = """
+PASSED ../tests/test_outputs.py::test_pyknotid_repository_tests
+FAILED ../tests/test_outputs.py::test_ccomplexity - AttributeError: module 'numpy' has no attribute 'int'
+========================= 1 failed, 10 passed in 3.92s =========================
+"""
+        summary = _repository_test_tail_summary(
+            stdout,
+            {
+                "trial_name": "build-cython-ext__wPScYFt",
+                "external_reward": 0.0,
+                "mew_exit_code": 0,
+                "stop_reason": "finish",
+                "wall_timeout": False,
+            },
+        )
+
+        self.assertTrue(summary["finish_false_positive"])
+        self.assertFalse(summary["repository_tail_failed"])
+        self.assertFalse(summary["upstream_tail_failed"])
 
     def test_run_dogfood_m6_11_draft_timeout_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

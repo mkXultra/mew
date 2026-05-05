@@ -82,6 +82,176 @@ def test_acceptance_finish_blocker_rejects_stateful_output_relabel_only():
     assert "stateful output semantic contrast evidence missing" in blocker
 
 
+def test_acceptance_finish_blocker_rejects_runtime_component_import_only_proof():
+    text = (
+        "The compiled extensions (chelpers, ccomplexity, and cinvariants) "
+        "should work in their original context from Python side."
+    )
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Compiled extensions chelpers, ccomplexity, and cinvariants should work",
+                "status": "verified",
+                "evidence": (
+                    "Command evidence #13 imported chelpers, ccomplexity, and cinvariants "
+                    "and printed their installed .so module paths."
+                ),
+                "evidence_refs": [{"kind": "command_evidence", "id": 13}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 13,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": (
+                    "from pyknotid.spacecurves import chelpers, ccomplexity; "
+                    "from pyknotid import cinvariants; print(chelpers.__file__, ccomplexity.__file__)"
+                ),
+                "output_tail": "pyknotid.spacecurves.ccomplexity /usr/local/lib/.../ccomplexity.so\n",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, action, session=session)
+
+    assert "runtime component behavior evidence import-only" in blocker
+
+
+def test_acceptance_finish_blocker_accepts_runtime_component_behavior_proof():
+    text = "The compiled extensions should work in their original context from Python side."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Compiled extensions should work",
+                "status": "verified",
+                "evidence": "Command evidence #13 invoked exported function behavior.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 13}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 13,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python - <<'PY'\nimport native_ext; print(native_ext.exported_function())\nPY",
+                "output_tail": "compiled extension exported function returned 0.0\n",
+            }
+        ]
+    }
+
+    assert acceptance_finish_blocker(text, action, session=session) == ""
+
+
+def test_acceptance_finish_blocker_rejects_runtime_component_behavior_claim_without_tool_proof():
+    text = "The native module should work from Python side."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "The native module should work",
+                "status": "verified",
+                "evidence": "Command evidence #8 invoked exported function behavior.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 8}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 8,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "wget https://example.invalid/archive.tar.gz",
+                "output_tail": "wget returned 0\n",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, action, session=session)
+
+    assert "runtime component behavior evidence import-only" in blocker
+
+
+def test_acceptance_finish_blocker_allows_runtime_component_import_only_task():
+    text = "Ensure the native extension imports without errors."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Ensure the native extension imports without errors.",
+                "status": "verified",
+                "evidence": "Command evidence #4 imported the native extension successfully.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 4}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 4,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module'",
+                "output_tail": "",
+            }
+        ]
+    }
+
+    assert acceptance_finish_blocker(text, action, session=session) == ""
+
+
+def test_acceptance_finish_blocker_rejects_shared_library_load_only_proof():
+    text = "The native module and shared library should work from the Python side."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "The native module and shared library should work",
+                "status": "verified",
+                "evidence": "Command evidence #3 loaded the native module and printed the shared library path.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 3}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 3,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.__file__)'",
+                "output_tail": "/usr/local/lib/native_module.so\n",
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, action, session=session)
+
+    assert "runtime component behavior evidence import-only" in blocker
+
+
 def test_acceptance_finish_blocker_rejects_stateful_output_without_checks():
     text = "Connect the speech bubble copy to live current state."
 
