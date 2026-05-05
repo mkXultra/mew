@@ -1357,16 +1357,25 @@ Target:
 - preserve M6.24 evidence quality by making any future Terminal-Bench proof
   explicitly identify which lane produced the artifact
 
+Phases:
+
+1. Phase 1: lane isolation substrate.
+2. Phase 2: `implement_v2` native tool loop v0.
+3. Phase 3: v2 read/search spike.
+4. Phase 4: managed exec.
+5. Phase 5: write/edit/apply_patch.
+6. Phase 6: M6.24 reentry A/B gate.
+
 Done when:
 
 - v1 remains the default and focused regression shows no intended behavior
   change
 - v1 and v2 lane artifacts are namespaced and cannot collide
 - a placeholder lane can be registered without editing v1 runtime internals
-- the v2 implementation plan covers provider-native tool calls, tool results,
-  managed command execution, approval-gated writes, prompt sections, metrics,
-  and replay
-- M6.24 can resume with an explicit lane selection decision
+- the v2 implementation covers provider-native read/search tools, managed
+  command execution, approval-gated writes, prompt sections, metrics, and replay
+- Phase 6 proves M6.24 can resume with an explicit lane selection decision and
+  a clean A/B gate between `implement_v1` and `implement_v2`
 
 Why it matters:
 
