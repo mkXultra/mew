@@ -14731,6 +14731,7 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
         "cd /app/pyknotid\n"
         "python -m pytest -q tests --ignore=tests/test_random_curves.py --ignore=tests/test_catalogue.py"
     )
+    test_command_run_id = "work_session:1:command_run:1"
     next_action = "patch the remaining repository test failure, reinstall, and rerun the repository test tail"
     report = {
         "summary": "mew work --oneshot completed generic work-session attempt",
@@ -14772,10 +14773,15 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
                         "id": 1,
                         "tool": "run_tests",
                         "status": "completed",
-                        "parameters": {"cwd": "/app/pyknotid", "command": test_command},
+                        "parameters": {
+                            "cwd": "/app/pyknotid",
+                            "command": test_command,
+                            "command_run_id": test_command_run_id,
+                        },
                         "result": {
                             "cwd": "/app/pyknotid",
                             "command": test_command,
+                            "command_run_id": test_command_run_id,
                             "exit_code": 1,
                             "stdout": verifier_stdout,
                             "stderr": "",
@@ -15181,6 +15187,8 @@ def _evaluate_managed_action_projection(contexts):
     managed_required_types = {"run_command", "run_tests"}
     lifecycle_cases = []
     managed_cases = []
+    runtime_identity_cases = []
+    seen_runtime_calls = set()
     for context in contexts or []:
         fixture = (context or {}).get("fixture") if isinstance((context or {}).get("fixture"), dict) else {}
         raw_action = dict(fixture.get("raw_action") or {})
@@ -15237,6 +15245,29 @@ def _evaluate_managed_action_projection(contexts):
                         ),
                     }
                 )
+        session = (context or {}).get("session") if isinstance((context or {}).get("session"), dict) else {}
+        for call in session.get("tool_calls") or []:
+            if not isinstance(call, dict) or call.get("tool") not in managed_required_types:
+                continue
+            call_key = (context.get("report_path") or "", call.get("id"))
+            if call_key in seen_runtime_calls:
+                continue
+            seen_runtime_calls.add(call_key)
+            parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+            result = call.get("result") if isinstance(call.get("result"), dict) else {}
+            managed = result.get("managed_long_command") if isinstance(result.get("managed_long_command"), dict) else {}
+            parameter_run_id = str(parameters.get("command_run_id") or call.get("command_run_id") or "")
+            result_run_id = str(result.get("command_run_id") or managed.get("command_run_id") or "")
+            if parameter_run_id or result_run_id:
+                runtime_identity_cases.append(
+                    {
+                        "tool_call_id": call.get("id"),
+                        "tool": call.get("tool") or "",
+                        "parameter_command_run_id": parameter_run_id,
+                        "result_command_run_id": result_run_id,
+                        "matches": bool(parameter_run_id and result_run_id and parameter_run_id == result_run_id),
+                    }
+                )
     lifecycle_lost = [
         item
         for item in lifecycle_cases
@@ -15247,11 +15278,18 @@ def _evaluate_managed_action_projection(contexts):
         for item in managed_cases
         if set(item["raw_managed_keys"]) - set(item["current_managed_keys"])
     ]
+    runtime_identity_mismatches = [
+        item
+        for item in runtime_identity_cases
+        if item.get("parameter_command_run_id") and item.get("result_command_run_id") and not item.get("matches")
+    ]
     return {
         "lifecycle_cases": lifecycle_cases,
         "managed_cases": managed_cases,
+        "runtime_identity_cases": runtime_identity_cases,
         "lifecycle_lost": lifecycle_lost,
         "managed_lost": managed_lost,
+        "runtime_identity_mismatches": runtime_identity_mismatches,
         "historical_lifecycle_loss_count": sum(
             1
             for item in lifecycle_cases
@@ -15582,6 +15620,13 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         not projection.get("managed_lost"),
         projection,
         "current normalize_work_model_action preserves foreground_budget_seconds/execution_contract for managed run actions",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_preserves_runtime_command_identity",
+        not projection.get("runtime_identity_mismatches"),
+        projection,
+        "managed executor receives the same command_run_id recorded in the work session",
     )
     _scenario_check(
         checks,

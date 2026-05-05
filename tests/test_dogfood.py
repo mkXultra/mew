@@ -1362,6 +1362,7 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["summary"]["stop_reason"], "wall_timeout")
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_lost"])
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["managed_lost"])
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["runtime_identity_mismatches"])
             self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
             self.assertIn("m6_24-repository-test-tail-emulator: pass", text)
 

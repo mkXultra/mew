@@ -4326,6 +4326,8 @@ def run_work_batch_action(
                         reason=f"executing batch work tool {action_type}",
                     )
             tool_call_id = tool_call.get("id") if tool_call else None
+            if tool_call and not broad_read_guard and not repeat_guard:
+                parameters = dict(tool_call.get("parameters") or parameters)
             save_state(state)
         emit_state_update(
             batch_progress_step(
@@ -8090,6 +8092,8 @@ def cmd_work_ai(args):
                     )
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id") if tool_call else None
+            if tool_call and not broad_read_guard and not repeat_guard:
+                parameters = dict(tool_call.get("parameters") or parameters)
             save_state(state)
         guard_error = ""
         if broad_read_guard:
@@ -9063,6 +9067,7 @@ def _apply_work_approval(args, approve_tool_id):
         source_call["approved_at"] = now_iso()
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
+        parameters = dict(tool_call.get("parameters") or parameters)
         save_state(state)
     if progress:
         progress(f"approval #{approve_tool_id} -> tool #{tool_call_id} start")
@@ -12013,6 +12018,7 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         tool_call = start_work_tool_call(state, session, recovery_tool, parameters)
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
+        parameters = dict(tool_call.get("parameters") or parameters)
         save_state(state)
 
     recovery_action = (
@@ -12371,6 +12377,7 @@ def cmd_work_tool(args):
             tool_call["review_probe"] = True
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
+        parameters = dict(tool_call.get("parameters") or parameters)
         save_state(state)
     if progress:
         progress(f"tool #{tool_call_id} {args.tool} start")

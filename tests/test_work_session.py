@@ -10790,6 +10790,7 @@ class WorkSessionTests(unittest.TestCase):
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(payload["work_exit_code"], 0)
                 self.assertIn("wall_timeout_ceiling", observed_parameters)
+                self.assertEqual(observed_parameters["command_run_id"], "work_session:1:command_run:1")
                 self.assertEqual(observed_parameters["wall_timeout_ceiling"]["requested_timeout_seconds"], 1800.0)
                 self.assertLess(observed_parameters["timeout"], 20.0)
                 self.assertGreaterEqual(observed_parameters["timeout"], 1.0)
