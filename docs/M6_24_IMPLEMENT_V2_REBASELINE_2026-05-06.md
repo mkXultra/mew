@@ -48,15 +48,16 @@ harbor run -d terminal-bench/terminal-bench-2 \
   --ak command_template='mew work --oneshot ... --work-guidance selected_lane=implement_v2 ...'
 ```
 
-Do not count a run as v2 evidence unless the mew report records
-`selected_lane=implement_v2` and `runtime_id=implement_v2_model_json_tool_loop`.
+Do not count a run as v2 evidence unless the mew report/replay metadata records
+`lane=implement_v2` (or the equivalent selected-lane action) and
+`runtime_id=implement_v2_model_json_tool_loop`.
 
 ## Current V2 Rebaseline Table
 
 | Task | Codex target | v2 speed_1 status | Evidence | Next |
 |---|---:|---|---|---|
 | `build-cython-ext` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout` | proof_5 deferred until controller selects close proof |
-| `circuit-fibsqrt` | 5/5 | pending | none | run v2 speed_1 |
+| `circuit-fibsqrt` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-circuit-fibsqrt-speed1-20260506-0335` | proof_5 deferred until controller selects close proof |
 | `cobol-modernization` | 5/5 | pending | none | run v2 speed_1 |
 | `distribution-search` | 5/5 | pending | none | run v2 speed_1 |
 | `feal-differential-cryptanalysis` | 5/5 | pending | none | run v2 speed_1 |

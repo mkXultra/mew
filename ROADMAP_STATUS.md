@@ -133,6 +133,14 @@ Scope:
   `11/11` passing. Exact replay and dogfood on the passing artifact also pass.
   This counts as v2 rebaseline `speed_1` evidence, not as the whole M6.24 close
   proof. Do not rerun the same speed_1 shape blindly.
+- `circuit-fibsqrt` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-circuit-fibsqrt-speed1-20260506-0335/mew-m6-24-v2-rebaseline-circuit-fibsqrt-speed1-20260506-0335/result.json`
+  scored `1.0` with runner errors `0`, runtime `5m59s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `3/3` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded
@@ -156,10 +164,11 @@ M6.24 reentry decision:
 selected_lane=implement_v2 is now the active M6.24 measurement lane; remeasure scoped software/coding tasks with v2 speed_1; if a run misses or exposes a structural lane gap, reproduce through replay/dogfood/emulator and repair before unrelated measurement continues
 ```
 
-Latest update: that selected `build-cython-ext` speed/debug proof passed after
-the active-command closeout repair. The current decision is no longer
-"build-cython proof_5 now"; it is "continue the implement_v2 scoped rebaseline,
-while preserving immediate repair on any miss or structural lane gap."
+Latest update: selected `build-cython-ext` and `circuit-fibsqrt` v2 speed_1
+runs both passed with exact replay and terminal-bench replay dogfood. The
+current decision is no longer "build-cython proof_5 now"; it is "continue the
+implement_v2 scoped rebaseline, while preserving immediate repair on any miss
+or structural lane gap."
 
 ## Active M6.24 Context
 
@@ -194,7 +203,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> implement_v2 scoped rebaseline -> selected_lane=implement_v2 speed_1 per scoped software/coding task -> if pass, record v2 evidence and continue queue -> if miss/harness-invalid/missing-replay/structural-gap, stop unrelated measurement, reproduce through replay/dogfood/emulator, repair, then rerun same shape
+M6.24 -> implement_v2 scoped rebaseline -> next pending task is cobol-modernization -> selected_lane=implement_v2 speed_1 per scoped software/coding task -> if pass, record v2 evidence and continue queue -> if miss/harness-invalid/missing-replay/structural-gap, stop unrelated measurement, reproduce through replay/dogfood/emulator, repair, then rerun same shape
 ```
 
 The 2026-05-05 Codex/Claude Code reference traces both pass
