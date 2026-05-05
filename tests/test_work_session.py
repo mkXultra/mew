@@ -1917,6 +1917,116 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(session["command_runs"][0]["status"], "completed")
         self.assertEqual(session["command_runs"][0]["terminal_command_evidence_ref"], {"kind": "command_evidence", "id": 1})
 
+    def test_lifecycle_tool_parameters_do_not_inherit_shell_policy_defaults(self):
+        from mew.work_loop import work_tool_parameters_from_action
+
+        poll_parameters = work_tool_parameters_from_action(
+            {
+                "type": "poll_command",
+                "command_run_id": "work_session:1:command_run:3",
+                "wait_seconds": 5,
+                "reason": "poll running command",
+                "summary": "poll",
+            },
+            allowed_write_roots=[".", "/tmp"],
+            allow_shell=True,
+            allow_verify=True,
+            verify_command="pytest",
+            verify_timeout=300,
+            default_cwd="/app",
+        )
+        cancel_parameters = work_tool_parameters_from_action(
+            {
+                "type": "cancel_command",
+                "command_run_id": "work_session:1:command_run:3",
+                "reason": "cancel running command",
+                "summary": "cancel",
+            },
+            allowed_write_roots=[".", "/tmp"],
+            allow_shell=True,
+            allow_verify=True,
+            verify_command="pytest",
+            verify_timeout=300,
+            default_cwd="/app",
+        )
+        read_parameters = work_tool_parameters_from_action(
+            {
+                "type": "read_command_output",
+                "command_run_id": "work_session:1:command_run:3",
+                "output_ref": "work-session/1/command/3/output.log",
+                "max_chars": 1234,
+                "offset": 100,
+                "tail": True,
+                "reason": "read tail",
+                "summary": "read",
+            },
+            allowed_write_roots=[".", "/tmp"],
+            allow_shell=True,
+            allow_verify=True,
+            verify_command="pytest",
+            verify_timeout=300,
+            default_cwd="/app",
+        )
+
+        self.assertEqual(
+            poll_parameters,
+            {
+                "command_run_id": "work_session:1:command_run:3",
+                "wait_seconds": 5,
+                "reason": "poll running command",
+                "summary": "poll",
+            },
+        )
+        self.assertEqual(
+            cancel_parameters,
+            {
+                "command_run_id": "work_session:1:command_run:3",
+                "reason": "cancel running command",
+                "summary": "cancel",
+            },
+        )
+        self.assertEqual(
+            read_parameters,
+            {
+                "command_run_id": "work_session:1:command_run:3",
+                "output_ref": "work-session/1/command/3/output.log",
+                "max_chars": 1234,
+                "offset": 100,
+                "tail": True,
+                "reason": "read tail",
+                "summary": "read",
+            },
+        )
+
+    def test_poll_command_rejects_shell_policy_parameter_pollution(self):
+        with self.assertRaisesRegex(ValueError, "allowed_write_roots"):
+            execute_work_tool(
+                "poll_command",
+                {
+                    "command_run_id": "work_session:1:command_run:3",
+                    "allowed_write_roots": ["."],
+                },
+                ["."],
+            )
+        with self.assertRaisesRegex(ValueError, "allow_shell"):
+            execute_work_tool(
+                "cancel_command",
+                {
+                    "command_run_id": "work_session:1:command_run:3",
+                    "allow_shell": True,
+                },
+                ["."],
+            )
+        with self.assertRaisesRegex(ValueError, "cwd"):
+            execute_work_tool(
+                "read_command_output",
+                {
+                    "command_run_id": "work_session:1:command_run:3",
+                    "cwd": "/app",
+                },
+                ["."],
+            )
+
     def test_run_command_records_timed_out_command_run_status(self):
         state = {"next_ids": {"work_tool_call": 1}, "work_sessions": []}
         session = {"id": 1, "task_id": 1, "tool_calls": []}

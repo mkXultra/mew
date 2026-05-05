@@ -7407,6 +7407,25 @@ def _coerce_work_tool_timeout(value):
     return timeout
 
 
+LIFECYCLE_WORK_TOOLS = {"poll_command", "cancel_command", "read_command_output"}
+
+
+def _lifecycle_work_tool_parameters_from_action(action, action_type):
+    parameters = {}
+    for key in ("command_run_id", "reason", "summary"):
+        if action.get(key) is not None:
+            parameters[key] = action.get(key)
+    if action_type == "poll_command" and action.get("wait_seconds") is not None:
+        parameters["wait_seconds"] = action.get("wait_seconds")
+    if action_type == "read_command_output":
+        for key in ("output_ref", "output_path", "max_chars", "offset"):
+            if action.get(key) is not None:
+                parameters[key] = action.get(key)
+        if action.get("tail") is not None:
+            parameters["tail"] = bool(action.get("tail"))
+    return parameters
+
+
 def work_tool_parameters_from_action(
     action,
     allowed_write_roots=None,
@@ -7419,6 +7438,8 @@ def work_tool_parameters_from_action(
     parameters = dict(action or {})
     action_type = action.get("type") or action.get("tool")
     parameters.pop("type", None)
+    if action_type in LIFECYCLE_WORK_TOOLS:
+        return _lifecycle_work_tool_parameters_from_action(action, action_type)
     if default_cwd and parameters.get("cwd") in (None, "", "."):
         parameters["cwd"] = default_cwd
     parameters["allowed_write_roots"] = allowed_write_roots or []

@@ -2788,23 +2788,28 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
-    if tool in {"poll_command", "cancel_command"}:
+    if tool in {"poll_command", "cancel_command", "read_command_output"}:
+        allowed_lifecycle_parameters = {
+            "poll_command": {"command_run_id", "wait_seconds", "reason", "summary"},
+            "cancel_command": {"command_run_id", "reason", "summary"},
+            "read_command_output": {
+                "command_run_id",
+                "output_ref",
+                "output_path",
+                "max_chars",
+                "offset",
+                "tail",
+                "reason",
+                "summary",
+            },
+        }[tool]
         disallowed = sorted(
             key
-            for key in (
-                "command",
-                "cwd",
-                "timeout",
-                "foreground_budget_seconds",
-                "execution_contract",
-                "allow_shell",
-                "allow_verify",
-                "long_command_budget",
-            )
-            if key in parameters and parameters.get(key) not in (None, "")
+            for key in parameters
+            if key not in allowed_lifecycle_parameters and parameters.get(key) not in (None, "")
         )
         if disallowed:
-            raise ValueError(f"{tool} accepts command_run_id only for command identity; disallowed: {', '.join(disallowed)}")
+            raise ValueError(f"{tool} accepts lifecycle identity parameters only; disallowed: {', '.join(disallowed)}")
     requested_cwd = str(parameters.get("cwd") or "").strip()
     default_cwd_requested = requested_cwd in ("", ".")
     parameters, allowed_read_roots = _workspace_relative_work_parameters(

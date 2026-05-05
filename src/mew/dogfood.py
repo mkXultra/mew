@@ -15188,7 +15188,23 @@ def _evaluate_managed_action_projection(contexts):
     lifecycle_cases = []
     managed_cases = []
     runtime_identity_cases = []
+    lifecycle_parameter_pollution = []
     seen_runtime_calls = set()
+    seen_lifecycle_calls = set()
+    lifecycle_disallowed_parameters = {
+        "command",
+        "cwd",
+        "timeout",
+        "foreground_budget_seconds",
+        "execution_contract",
+        "allow_shell",
+        "allow_verify",
+        "allowed_write_roots",
+        "verify_command",
+        "verify_cwd",
+        "verify_timeout",
+        "long_command_budget",
+    }
     for context in contexts or []:
         fixture = (context or {}).get("fixture") if isinstance((context or {}).get("fixture"), dict) else {}
         raw_action = dict(fixture.get("raw_action") or {})
@@ -15247,7 +15263,28 @@ def _evaluate_managed_action_projection(contexts):
                 )
         session = (context or {}).get("session") if isinstance((context or {}).get("session"), dict) else {}
         for call in session.get("tool_calls") or []:
-            if not isinstance(call, dict) or call.get("tool") not in managed_required_types:
+            if not isinstance(call, dict):
+                continue
+            if call.get("tool") in lifecycle_required_types:
+                lifecycle_call_key = (context.get("report_path") or "", call.get("id"))
+                if lifecycle_call_key in seen_lifecycle_calls:
+                    continue
+                seen_lifecycle_calls.add(lifecycle_call_key)
+                parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+                polluted_keys = sorted(
+                    key
+                    for key in lifecycle_disallowed_parameters
+                    if key in parameters and parameters.get(key) not in (None, "")
+                )
+                if polluted_keys:
+                    lifecycle_parameter_pollution.append(
+                        {
+                            "tool_call_id": call.get("id"),
+                            "tool": call.get("tool") or "",
+                            "polluted_keys": polluted_keys,
+                        }
+                    )
+            if call.get("tool") not in managed_required_types:
                 continue
             call_key = (context.get("report_path") or "", call.get("id"))
             if call_key in seen_runtime_calls:
@@ -15290,6 +15327,7 @@ def _evaluate_managed_action_projection(contexts):
         "lifecycle_lost": lifecycle_lost,
         "managed_lost": managed_lost,
         "runtime_identity_mismatches": runtime_identity_mismatches,
+        "lifecycle_parameter_pollution": lifecycle_parameter_pollution,
         "historical_lifecycle_loss_count": sum(
             1
             for item in lifecycle_cases
@@ -15627,6 +15665,13 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         not projection.get("runtime_identity_mismatches"),
         projection,
         "managed executor receives the same command_run_id recorded in the work session",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_rejects_lifecycle_parameter_pollution",
+        not projection.get("lifecycle_parameter_pollution"),
+        projection,
+        "poll/cancel/read-output lifecycle tools keep command identity separate from shell/write/verify policy",
     )
     _scenario_check(
         checks,

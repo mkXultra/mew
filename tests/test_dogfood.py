@@ -12,6 +12,7 @@ from mew.cli import build_parser
 from mew.config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     DOGFOOD_SCENARIOS,
+    _evaluate_managed_action_projection,
     _write_terminal_bench_replay_fixture,
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
@@ -1363,8 +1364,81 @@ class DogfoodTests(unittest.TestCase):
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_lost"])
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["managed_lost"])
             self.assertFalse(scenario["artifacts"]["managed_action_projection"]["runtime_identity_mismatches"])
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_parameter_pollution"])
             self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
             self.assertIn("m6_24-repository-test-tail-emulator: pass", text)
+
+    def test_m6_24_projection_detects_lifecycle_parameter_pollution(self):
+        projection = _evaluate_managed_action_projection(
+            [
+                {
+                    "report_path": "report.json",
+                    "fixture": {
+                        "raw_action": {
+                            "type": "poll_command",
+                            "command_run_id": "work_session:1:command_run:1",
+                        },
+                        "post_policy_action": {
+                            "type": "poll_command",
+                            "command_run_id": "work_session:1:command_run:1",
+                        },
+                    },
+                    "session": {
+                        "tool_calls": [
+                            {
+                                "id": 1,
+                                "tool": "poll_command",
+                                "parameters": {
+                                    "command_run_id": "work_session:1:command_run:1",
+                                    "cwd": "/app",
+                                    "allow_shell": True,
+                                    "allow_verify": True,
+                                },
+                            },
+                            {
+                                "id": 2,
+                                "tool": "read_command_output",
+                                "parameters": {
+                                    "command_run_id": "work_session:1:command_run:1",
+                                    "output_ref": "work-session/1/command/1/output.log",
+                                    "allowed_write_roots": [],
+                                    "cwd": "/app",
+                                },
+                            },
+                            {
+                                "id": 3,
+                                "tool": "cancel_command",
+                                "parameters": {
+                                    "command_run_id": "work_session:1:command_run:1",
+                                    "verify_cwd": "/app",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(
+            projection["lifecycle_parameter_pollution"],
+            [
+                {
+                    "tool_call_id": 1,
+                    "tool": "poll_command",
+                    "polluted_keys": ["allow_shell", "allow_verify", "cwd"],
+                },
+                {
+                    "tool_call_id": 2,
+                    "tool": "read_command_output",
+                    "polluted_keys": ["allowed_write_roots", "cwd"],
+                },
+                {
+                    "tool_call_id": 3,
+                    "tool": "cancel_command",
+                    "polluted_keys": ["verify_cwd"],
+                }
+            ],
+        )
 
     def test_run_dogfood_m6_11_draft_timeout_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
