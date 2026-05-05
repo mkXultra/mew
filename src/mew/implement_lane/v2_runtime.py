@@ -1159,7 +1159,7 @@ def _live_json_prompt(
         "Return exactly one JSON object. Use tool_calls for observations, edits, and commands. "
         "Use finish only when the task is completed, blocked, or failed. If more work is needed, "
         "set finish.outcome to continue or omit finish. For edits, prefer exact edit_file old/new "
-        "or apply_patch. If the CLI grants accept-edits, you may request apply=true; mew supplies "
+        "(old_string/new_string aliases are accepted) or apply_patch. If the CLI grants accept-edits, you may request apply=true; mew supplies "
         "independent approval outside the model output. If tests or an external verifier matter, "
         "run a concrete run_command or run_tests before claiming completed.\n"
         f"lane_attempt_id: {lane_attempt_id}\n"

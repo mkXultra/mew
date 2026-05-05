@@ -101,6 +101,20 @@ Scope:
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
   product evidence: Docker failed before `mew` launched because the harness
   used missing cwd `/workspace`. This task should be rerun with `/app`.
+- The first task-correct `/app` true-v2 `build-cython-ext` run
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd` completed
+  in `4m43s` with runner errors `0`, but scored `0.0`. It is valid divergence
+  evidence, not a pass: v2 spent turns on tool-surface mismatches (`cmd`,
+  `argv`, compound shell strings, and edit aliases), then fixed Python files
+  but missed the sibling Cython `*.pyx`/`*.pxd` NumPy-alias frontier. Stop live
+  speed spending until that generic v2 I/F/frontier gap is repaired and
+  covered by focused UT plus replay/dogfood/emulator checks.
+- Current repair status: v2 tool-surface mismatch is repaired, true-v2
+  artifacts replay through `implement_v2/history.json` and
+  `proof-manifest.json`, and generic compiled/native Python compatibility
+  frontier guidance is present. Before the next live speed run, exercise the
+  compiled-source frontier with a cheap canary/emulator or exact same-shape
+  pre-speed check; do not treat old v1 replay-only gates as enough for v2.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded

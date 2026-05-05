@@ -15,6 +15,79 @@ from mew.terminal_bench_replay import (
 
 
 class TerminalBenchReplayTests(unittest.TestCase):
+    def _write_implement_v2_replay_fixture(self, root):
+        trial_dir = Path(root) / "job" / "build-cython-ext__v2fixture"
+        agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+        v2_dir = agent_dir / "implement_v2"
+        verifier_dir = trial_dir / "verifier"
+        v2_dir.mkdir(parents=True)
+        verifier_dir.mkdir(parents=True)
+        (trial_dir / "result.json").write_text(
+            json.dumps({"trial_name": "build-cython-ext__v2fixture", "verifier_result": {"reward": 0.0}}),
+            encoding="utf-8",
+        )
+        (verifier_dir / "test-stdout.txt").write_text("FAILED test_ccomplexity - np.int\n", encoding="utf-8")
+        (agent_dir / "command-transcript.json").write_text(
+            json.dumps({"exit_code": 1, "timed_out": False}),
+            encoding="utf-8",
+        )
+        (agent_dir / "mew-report.json").write_text(
+            json.dumps(
+                {
+                    "work_exit_code": 1,
+                    "resume": {},
+                    "work_report": {
+                        "stop_reason": "implement_v2_blocked",
+                        "selected_lane": "implement_v2",
+                        "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+                        "implement_lane_result": {
+                            "lane": "implement_v2",
+                            "status": "blocked",
+                            "metrics": {
+                                "runtime_id": "implement_v2_model_json_tool_loop",
+                                "replay_valid": True,
+                                "terminal_evidence_count": 2,
+                                "write_evidence_count": 1,
+                            },
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (v2_dir / "history.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "turn": 1,
+                        "tool_calls": [
+                            {
+                                "tool_name": "run_command",
+                                "arguments": {"command": "python - <<'PY'\nPath('/repo').rglob('*.py')\nPY"},
+                            }
+                        ],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (v2_dir / "proof-manifest.json").write_text(
+            json.dumps(
+                {
+                    "tool_results": [
+                        {
+                            "provider_call_id": "patch-numpy-aliases",
+                            "tool_name": "run_command",
+                            "status": "failed",
+                            "content": [{"exit_code": 1, "stderr": "No module named pytest"}],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return trial_dir.parent
+
     def test_replay_terminal_bench_job_recomputes_current_resume_from_fixture(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = _write_terminal_bench_replay_fixture(tmp)
@@ -72,6 +145,26 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(payload["status"], "pass")
             self.assertEqual(payload["trial_count"], 1)
+
+    def test_replay_terminal_bench_job_accepts_implement_v2_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            text = format_terminal_bench_replay(report)
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(trial["current"]["recomputed"])
+            self.assertEqual(current_v2["runtime_id"], "implement_v2_model_json_tool_loop")
+            self.assertFalse(current_v2["compiled_source_frontier_observed"])
+            self.assertIn("compiled/native source frontier", trial["current"]["next_action"])
+            self.assertIn("implement_v2:", text)
 
     def test_terminal_bench_llm_action_fixture_contexts_extract_model_actions(self):
         with tempfile.TemporaryDirectory() as tmp:

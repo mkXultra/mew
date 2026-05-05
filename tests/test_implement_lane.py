@@ -532,10 +532,12 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     assert "implement_v2_lane_base" in by_id
     assert "implement_v2_tool_contract" in by_id
     assert "implement_v2_tool_surface" in by_id
+    assert "implement_v2_compatibility_frontier" in by_id
     assert "implement_v2_task_contract" in by_id
     assert "implement_v2_lane_state" in by_id
     assert "implement_v2_memory_summary" not in by_id
     assert by_id["implement_v2_lane_base"]["cache_hint"] == "cacheable_prefix"
+    assert by_id["implement_v2_compatibility_frontier"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_lane_state"]["cache_hint"] == "dynamic"
 
 
@@ -872,6 +874,98 @@ def test_implement_v2_exec_short_command_finalizes_with_terminal_evidence(tmp_pa
     assert tool_result["status"] == "completed"
     assert tool_result["evidence_refs"]
     assert "ok" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_exec_accepts_cmd_alias(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('cmd-ok')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"cmd": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 2},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "command evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["command_source"] == "cmd"
+    assert "cmd-ok" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_exec_accepts_argv_argument(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "argv": [sys.executable, "-c", "print('argv-ok')"],
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 2,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "argv evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["command_source"] == "argv"
+    assert tool_result["content"][0]["execution_mode"] == "argv"
+    assert "argv-ok" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_exec_compound_command_auto_uses_shell(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "echo first && echo second > marker.txt",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 2,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "shell evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["execution_mode"] == "shell"
+    assert "first" in tool_result["content"][0]["stdout"]
+    assert (tmp_path / "marker.txt").read_text(encoding="utf-8").strip() == "second"
 
 
 def test_implement_v2_exec_nonzero_command_blocks_with_paired_failure(tmp_path) -> None:
@@ -1593,6 +1687,34 @@ def test_implement_v2_edit_file_exact_old_dry_run_and_no_match_failure(tmp_path)
     assert manifest["tool_results"][0]["status"] == "completed"
     assert manifest["tool_results"][0]["content"][0]["dry_run"] is True
     assert manifest["tool_results"][1]["status"] == "failed"
+    assert target.read_text(encoding="utf-8") == "alpha\n"
+
+
+def test_implement_v2_edit_file_accepts_common_string_aliases(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("alpha\n", encoding="utf-8")
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "edit_file",
+                "arguments": {
+                    "path": "README.md",
+                    "old_string": "alpha\n",
+                    "new_string": "beta\n",
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "edit preview"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["dry_run"] is True
+    assert "beta" in tool_result["content"][0]["diff"]
     assert target.read_text(encoding="utf-8") == "alpha\n"
 
 

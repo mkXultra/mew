@@ -64,7 +64,10 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
         name="run_command",
         access="execute",
-        description="Run a command through managed exec with nonterminal state.",
+        description=(
+            "Run a command through managed exec with nonterminal state. Accepts command/cmd strings or argv arrays; "
+            "compound shell strings are run as shell scripts."
+        ),
         approval_required=True,
     ),
     ImplementLaneToolSpec(
@@ -98,7 +101,7 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
         name="edit_file",
         access="write",
-        description="Edit a file through the existing edit substrate.",
+        description="Edit a file through the existing edit substrate. Accepts old/new or old_string/new_string.",
         approval_required=True,
         dry_run_supported=True,
     ),

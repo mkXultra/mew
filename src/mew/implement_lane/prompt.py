@@ -66,6 +66,23 @@ def build_implement_v2_prompt_sections(
             profile="implement_v2",
         ),
         PromptSection(
+            id="implement_v2_compatibility_frontier",
+            version="v0",
+            title="Implement V2 Compatibility Frontier",
+            content=(
+                "When a runtime/build failure points to dependency, language-version, or ABI compatibility, "
+                "broaden the edit frontier before finishing. Search sibling source surfaces that can carry the "
+                "same compatibility bug instead of patching only the first traceback file. For Python native, "
+                "compiled, or Cython extension tasks, include Python and compiled-source surfaces such as "
+                "`*.py`, `*.pyx`, `*.pxd`, `setup.py`, `pyproject.toml`, extension modules, and focused tests. "
+                "An import-only smoke proves loadability, not behavior; run a small behavior smoke or focused "
+                "test that exercises the repaired extension path before claiming completion."
+            ),
+            stability=STABILITY_STATIC,
+            cache_policy=CACHE_POLICY_CACHEABLE,
+            profile="implement_v2",
+        ),
+        PromptSection(
             id="implement_v2_task_contract",
             version="v0",
             title="Implement V2 Task Contract",

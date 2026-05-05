@@ -66,12 +66,13 @@ class ImplementV2ManagedExecRuntime:
 
     def _run_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
-        command = str(args.get("command") or "").strip()
+        command, command_source = _normalize_command_argument(args)
         if not command:
             raise ValueError(f"{call.tool_name} command is empty")
         _reject_resident_mew_loop_command(command, tool_name=call.tool_name)
+        use_shell = _use_shell_for_call(call.tool_name, command, args=args, command_source=command_source)
         if call.tool_name == "run_tests":
-            _reject_run_tests_shell_surface(command, use_shell=bool(args.get("use_shell")))
+            _reject_run_tests_shell_surface(command, use_shell=use_shell)
         cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
         cwd = resolve_allowed_path(cwd, self.allowed_roots)
         if not cwd.is_dir():
@@ -90,7 +91,7 @@ class ImplementV2ManagedExecRuntime:
             command,
             cwd=str(cwd),
             timeout=timeout,
-            use_shell=bool(args.get("use_shell")),
+            use_shell=use_shell,
             kill_process_group=True,
             command_run_id=command_run_id,
             output_ref=output_ref,
@@ -104,6 +105,7 @@ class ImplementV2ManagedExecRuntime:
         payload["output_ref"] = output_ref
         payload["output_path"] = str(output_path)
         payload["tool_name"] = call.tool_name
+        payload["command_source"] = command_source
         return payload
 
     def _poll_command(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -190,6 +192,46 @@ def _tool_result_status(payload: dict[str, object]) -> str:
     return "failed"
 
 
+def _normalize_command_argument(args: dict[str, object]) -> tuple[str, str]:
+    """Return a managed-command string plus the provider argument source.
+
+    v2 is provider-neutral, so the runtime accepts the common shapes emitted by
+    coding agents instead of spending model turns on schema spelling repairs.
+    The shell/argv safety policy is still enforced after normalization.
+    """
+
+    raw_argv = args.get("argv")
+    if raw_argv not in (None, ""):
+        if isinstance(raw_argv, (str, bytes)) or not isinstance(raw_argv, (list, tuple)):
+            raise ValueError("argv must be a JSON array of command arguments")
+        argv = [str(part) for part in raw_argv if str(part) != ""]
+        if not argv:
+            return "", "argv"
+        return shlex.join(argv), "argv"
+    command = args.get("command")
+    command_source = "command"
+    if command in (None, "") and args.get("cmd") not in (None, ""):
+        command = args.get("cmd")
+        command_source = "cmd"
+    return str(command or "").strip(), command_source
+
+
+def _use_shell_for_call(
+    tool_name: str,
+    command: object,
+    *,
+    args: dict[str, object],
+    command_source: str,
+) -> bool:
+    if tool_name != "run_command":
+        return bool(args.get("use_shell"))
+    if command_source == "argv":
+        return False
+    if bool(args.get("use_shell")):
+        return True
+    return _has_unquoted_shell_surface(command)
+
+
 def _workspace_path(path: object, workspace: Path) -> str:
     requested = Path(str(path or ".")).expanduser()
     if requested.is_absolute():
@@ -214,6 +256,10 @@ def _reject_resident_mew_loop_command(command: object, *, tool_name: str) -> Non
 def _reject_run_tests_shell_surface(command: object, *, use_shell: bool) -> None:
     if use_shell or _has_unquoted_run_tests_shell_surface(command) or _has_explicit_shell_interpreter(command):
         raise ValueError("run_tests executes one argv command without a shell; use run_command for shell orchestration")
+
+
+def _has_unquoted_shell_surface(command: object) -> bool:
+    return _has_unquoted_run_tests_shell_surface(command)
 
 
 def _has_unquoted_run_tests_shell_surface(command: object) -> bool:

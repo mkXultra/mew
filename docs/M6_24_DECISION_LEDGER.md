@@ -555,3 +555,41 @@ when the recursively validated branch command is itself read-only. Side-effectin
 branch payloads still keep the long repair floor. If another parser false
 negative appears after this normalization, stop local budget-gate work and open
 a separate diagnostic-contract redesign milestone.
+
+Implement-v2 build-cython divergence update 2026-05-06 JST:
+
+The task-correct `/app` true-v2 `build-cython-ext` run
+`mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd` completed in
+`4m43s` with runner errors `0`, `runtime_id=implement_v2_model_json_tool_loop`,
+and reward `0.0`. This is valid divergence evidence. v2 reached a near
+solution but failed the hidden verifier because Cython `*.pyx` source still
+contained removed NumPy aliases (`np.int` in `ccomplexity.pyx`). Step comparison
+against the Codex/Claude Code reference traces shows two generic gaps:
+
+- `v2_tool_surface_mismatch`: v2 spent turns repairing schema/shell friction
+  (`cmd` vs `command`, missing `argv`, compound shell strings running as argv,
+  and common `edit_file` alias names).
+- `compiled_source_frontier_missing`: v2 patched only Python files after a
+  NumPy-alias failure, while the reference agents broadened the frontier across
+  `*.py`, `*.pyx`, and `*.pxd` before final verification.
+
+Stop live speed spending until the v2 I/F mismatch is fixed and the compiled
+source frontier has focused local coverage. The first repair accepts common
+provider-neutral command/edit shapes without weakening the `run_tests`
+no-shell safety boundary.
+
+Repair update: v2 tool-surface mismatch is repaired and covered locally.
+`run_command` now accepts `cmd`, `argv`, and compound shell strings while
+`run_tests` remains argv/no-shell; `edit_file` accepts common
+`old_string`/`new_string` aliases. A generic static compatibility-frontier
+section now tells v2 to broaden dependency/runtime compatibility repairs across
+compiled Python extension surfaces, including `*.py`, `*.pyx`, and `*.pxd`,
+before finish. Replay/dogfood also learned to read true `implement_v2`
+artifacts from `implement_v2/history.json` and `proof-manifest.json`, so the
+latest v2 Harbor miss is now replayable even though it has no v1-style
+work-report tool calls. Validation: `tests/test_implement_lane.py` full scoped
+suite, `tests/test_terminal_bench_replay.py`, focused
+`tests/test_dogfood.py -k terminal_bench_replay`, scoped ruff, exact
+`mew replay terminal-bench` on
+`mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd`, and exact
+`mew dogfood --scenario m6_24-terminal-bench-replay` all pass.

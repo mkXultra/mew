@@ -638,3 +638,25 @@ check pass. codex-ultra review session
 `resume_budget_exhausted` policy test was added and passed. The next action is
 the pre-speed operation on current head, then exactly one same-shape
 `compile-compcert` speed_1.
+
+Update 2026-05-06 JST: after the M6.23.2 true-v2 gate, the scoped M6.24 task is
+`build-cython-ext` through `selected_lane=implement_v2`. The `/app` true-v2
+run `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd` scored
+`0.0` in `4m43s` with no runner errors. The gap is not another broad
+measurement request. It is a repair-now v2 loop gap:
+
+1. Repair `v2_tool_surface_mismatch` first: accept `cmd`, `argv`, compound
+   shell commands for `run_command`, and common `edit_file` aliases while
+   preserving `run_tests` as the stricter argv/no-shell verifier tool.
+2. Then repair `compiled_source_frontier_missing`: NumPy/runtime compatibility
+   failures in compiled Python extension tasks must search and patch sibling
+   `*.py`, `*.pyx`, and `*.pxd` surfaces before finish.
+3. Only after focused UT plus replay/dogfood/emulator checks pass should another
+   same-shape v2 speed run be spent.
+
+Repair status: step 1 is implemented; v2 artifact replay/dogfood support is
+also implemented because true-v2 runs store evidence under
+`implement_v2/history.json` and `implement_v2/proof-manifest.json`, not v1
+`work_report.steps` tool calls. Step 2 has static prompt/frontier guidance and
+should be checked with a cheap v2 canary or emulator before spending another
+live `build-cython-ext` speed run.

@@ -80,10 +80,12 @@ class ImplementV2WriteRuntime:
         denied = _denied_payload(call, approval=approval) if apply and not _approval_granted(approval) else None
         if denied is not None:
             return denied
+        old_text = _first_present(args, "old", "old_string", "old_text")
+        new_text = _first_present(args, "new", "new_string", "new_text")
         result = edit_file(
             path,
-            args.get("old") or "",
-            args.get("new") or "",
+            old_text,
+            new_text,
             self.allowed_write_roots,
             replace_all=bool(args.get("replace_all")),
             dry_run=not apply,
@@ -181,6 +183,13 @@ def _workspace_path(path: object, workspace: Path) -> Path:
 
 def _apply_requested(args: dict[str, object]) -> bool:
     return bool(args.get("apply")) or args.get("dry_run") is False
+
+
+def _first_present(args: dict[str, object], *keys: str) -> object:
+    for key in keys:
+        if key in args and args.get(key) is not None:
+            return args.get(key)
+    return ""
 
 
 def _normalize_approval_record(raw_approval: object) -> dict[str, object]:

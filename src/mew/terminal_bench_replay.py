@@ -155,6 +155,105 @@ def _llm_action_fixtures_from_work_report(report):
     return fixtures
 
 
+def _implement_v2_artifact_dir(report_path):
+    direct = Path(report_path).parent / "implement_v2"
+    if direct.is_dir():
+        return direct
+    return None
+
+
+def _implement_v2_replay_summary(report_path, report):
+    work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
+    result = work_report.get("implement_lane_result") if isinstance(work_report.get("implement_lane_result"), dict) else {}
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    runtime_id = str(metrics.get("runtime_id") or result.get("runtime_id") or "")
+    selected_lane = str(work_report.get("selected_lane") or result.get("lane") or "")
+    if runtime_id != "implement_v2_model_json_tool_loop" and selected_lane != "implement_v2":
+        return {}
+    artifact_dir = _implement_v2_artifact_dir(report_path)
+    manifest = _read_json(artifact_dir / "proof-manifest.json") if artifact_dir else {}
+    history = _read_json(artifact_dir / "history.json", default=[]) if artifact_dir else []
+    if not isinstance(history, list):
+        history = []
+    tool_results = manifest.get("tool_results") if isinstance(manifest.get("tool_results"), list) else []
+    if not history and not tool_results:
+        return {}
+    failed_results = [
+        result for result in tool_results
+        if isinstance(result, dict) and str(result.get("status") or "") in {"failed", "interrupted", "invalid", "denied"}
+    ]
+    terminal_results = [
+        result for result in tool_results
+        if isinstance(result, dict) and str(result.get("tool_name") or "") in {"run_command", "run_tests", "poll_command"}
+    ]
+    return {
+        "runtime_id": runtime_id or "implement_v2_model_json_tool_loop",
+        "lane": selected_lane or "implement_v2",
+        "lane_status": str(result.get("status") or ""),
+        "replay_valid": bool(metrics.get("replay_valid", True)),
+        "history_turn_count": len(history),
+        "tool_call_count": sum(len(turn.get("tool_calls") or []) for turn in history if isinstance(turn, dict)),
+        "tool_result_count": len(tool_results),
+        "failed_tool_result_count": len(failed_results),
+        "terminal_result_count": len(terminal_results),
+        "terminal_evidence_count": int(metrics.get("terminal_evidence_count") or 0),
+        "write_evidence_count": int(metrics.get("write_evidence_count") or 0),
+        "latest_failure": _implement_v2_latest_failure(failed_results),
+        "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
+        "artifact_dir": str(artifact_dir) if artifact_dir else "",
+    }
+
+
+def _implement_v2_latest_failure(failed_results):
+    if not failed_results:
+        return {}
+    result = failed_results[-1]
+    content = result.get("content")
+    first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+    return {
+        "provider_call_id": str(result.get("provider_call_id") or ""),
+        "tool_name": str(result.get("tool_name") or ""),
+        "status": str(result.get("status") or ""),
+        "reason": str(first_content.get("reason") or ""),
+        "exit_code": first_content.get("exit_code"),
+        "timed_out": bool(first_content.get("timed_out")),
+        "stderr_tail": _clip_text(first_content.get("stderr_tail") or first_content.get("stderr") or ""),
+        "stdout_tail": _clip_text(first_content.get("stdout_tail") or first_content.get("stdout") or ""),
+    }
+
+
+def _clip_text(text, limit=500):
+    text = str(text or "")
+    return text[-limit:] if len(text) > limit else text
+
+
+def _implement_v2_history_mentions_compiled_source_frontier(history):
+    needles = ("*.pyx", "*.pxd", ".pyx", ".pxd", "rglob('*.pyx')", 'rglob("*.pyx")')
+    for turn in history:
+        if not isinstance(turn, dict):
+            continue
+        for call in turn.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+            text = json.dumps(args, ensure_ascii=True, sort_keys=True)
+            if any(needle in text for needle in needles):
+                return True
+    return False
+
+
+def _implement_v2_next_action(summary):
+    if not summary:
+        return ""
+    latest = summary.get("latest_failure") if isinstance(summary.get("latest_failure"), dict) else {}
+    if not summary.get("compiled_source_frontier_observed"):
+        return "debug implement_v2 divergence: broaden compiled/native source frontier before another live speed run"
+    if latest:
+        tool = latest.get("tool_name") or "tool"
+        return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
+    return "debug implement_v2 divergence before another live speed run"
+
+
 def _task_from_report(report, resume):
     task_id = report.get("task_id") or resume.get("task_id") or 1
     return {
@@ -274,6 +373,7 @@ def _trial_entry_from_report(report_path):
     stored_resume = _primary_resume(report)
     session = _session_from_report(report)
     task = _task_from_report(report, stored_resume)
+    implement_v2_replay = _implement_v2_replay_summary(report_path, report)
     recomputed_resume = {}
     replay_error = ""
     if session.get("tool_calls"):
@@ -284,6 +384,16 @@ def _trial_entry_from_report(report_path):
                 recomputed_resume["active_compatibility_frontier"] = dict(stored_frontier)
         except Exception as exc:  # pragma: no cover - defensive replay should report, not crash.
             replay_error = str(exc)
+    elif implement_v2_replay:
+        replay_valid = bool(implement_v2_replay.get("replay_valid"))
+        if replay_valid:
+            recomputed_resume = {
+                "phase": "implement_v2_replay",
+                "next_action": _implement_v2_next_action(implement_v2_replay),
+                "implement_v2": dict(implement_v2_replay),
+            }
+        else:
+            replay_error = "implement_v2 proof manifest reported replay_valid=false"
     else:
         replay_error = "work_report steps did not contain replayable tool calls"
     reward = _reward_from_trial(trial_dir, trial_result)
@@ -323,6 +433,7 @@ def _trial_entry_from_report(report_path):
             "next_action": recomputed_resume.get("next_action") or "",
             "long_build_state": current_long,
             "active_compatibility_frontier": current_frontier,
+            "implement_v2": recomputed_resume.get("implement_v2") or {},
         },
         "verifier_stdout_excerpt": "\n".join((verifier_stdout or "").splitlines()[-12:]),
     }
@@ -521,6 +632,7 @@ def format_terminal_bench_replay(report):
     ]
     for entry in report.get("trials") or []:
         current_long = ((entry.get("current") or {}).get("long_build_state") or {})
+        current_v2 = ((entry.get("current") or {}).get("implement_v2") or {})
         lines.append("")
         lines.append(
             f"- {entry.get('trial_name')} reward={entry.get('external_reward')} "
@@ -535,6 +647,14 @@ def format_terminal_bench_replay(report):
         blockers = current_long.get("strategy_blockers") or []
         if blockers:
             lines.append(f"  blockers: {', '.join(str(item) for item in blockers)}")
+        if current_v2:
+            lines.append(
+                "  implement_v2: "
+                f"status={current_v2.get('lane_status') or '-'} "
+                f"turns={current_v2.get('history_turn_count') or 0} "
+                f"tool_results={current_v2.get('tool_result_count') or 0} "
+                f"compiled_frontier={current_v2.get('compiled_source_frontier_observed')}"
+            )
     failed = [check for check in report.get("checks") or [] if not check.get("passed")]
     if failed:
         lines.append("")
