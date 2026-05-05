@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.23.2 Lane Isolation Substrate**.
 
-Current controller mode: `implement_v2_phase_3_reviewed_next_v1_regression`.
+Current controller mode: `implement_v2_phase_3_proved_next_resume_decision`.
 
 Scope:
 
@@ -90,8 +90,9 @@ Scope:
   pair every result, emit replay-valid proof manifests, and finish as
   `analysis_ready` without completion credit. `codex-ultra` review session
   `019df861-1878-7963-96ef-bfb5433c6e4d` returned `STATUS: PASS`.
-  Next slice is focused v1 regression plus read-only v2 replay proof before
-  any M6.24 resume decision.
+  Focused v1 regression and read-only v2 replay proof are recorded in
+  `docs/M6_23_2_PHASE3_READ_ONLY_PROOF_2026-05-05.md`. Next slice is an
+  explicit M6.24 resume decision that names the production lane.
 
 Controller docs:
 
@@ -189,9 +190,9 @@ Useful historical files:
    design before any new M6.24 live proof.
 2. Preserve `implement_v1` as the default and keep v1 behavior/regression
    evidence separate from v2 design and scaffold work.
-3. Run focused v1 regression and read-only v2 replay proof after the Phase 3
-   spike: verify v1 remains default, `analysis_ready` has no completion credit,
-   and proof artifacts can name the producing lane.
+3. Record the M6.24 resume decision after the Phase 3 proof: M6.24 should use
+   `implement_v1` as the production lane, keep `implement_v2` shadow/read-only,
+   and require the next proof artifact to name its producing lane.
 4. Resume the paused M6.24 `build-cython-ext` repair path only after M6.23.2
    records a clean resume decision with explicit lane selection, focused v1
    regression, no accepted lane-isolation must-fix findings, and proof artifacts
