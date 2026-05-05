@@ -2,6 +2,7 @@ import json
 import unittest
 
 from mew.compatibility_frontier import (
+    active_compatibility_frontier_action_guard,
     build_failure_signature,
     category_overlap,
     family_transition,
@@ -358,6 +359,269 @@ class CompatibilityFrontierTests(unittest.TestCase):
         self.assertIn("active_compatibility_frontier:", text)
         self.assertIn("compatibility_frontier_next: read_file", text)
         self.assertNotIn("module 'runtime' has no attribute", json.dumps(resume_frontier))
+
+    def _guard_frontier(self, *, guard_mode="block_finish", state="read_needed", evidence_strength="blocking"):
+        return {
+            "id": "compat-frontier-test-1",
+            "status": "open",
+            "failure_signature": {
+                "kind": "runtime_failure",
+                "fingerprint": "sha256:test",
+                "family_key": "family:test",
+                "failing_tests": ["tests/test_runtime.py::test_behavior"],
+                "runtime_component_kind": "unknown",
+            },
+            "evidence_refs": [{"kind": "tool_call", "id": 7}],
+            "anchors": [
+                {
+                    "id": "anchor-1",
+                    "kind": "source_location",
+                    "path": "src/runtime_adapter.py",
+                    "line": 42,
+                    "read_status": "unread",
+                }
+            ],
+            "open_candidates": [
+                {
+                    "id": "candidate-1",
+                    "kind": "path",
+                    "path": "src/runtime_adapter.py",
+                    "status": "unexplored",
+                }
+            ],
+            "closure_state": {
+                "state": state,
+                "evidence_strength": evidence_strength,
+                "guard_mode": guard_mode,
+                "blocked_action_kinds": ["broad_verifier", "finish", "repeat_search"],
+                "broad_verifier_allowed": False,
+                "finish_allowed": False,
+                "next_action": "read_file src/runtime_adapter.py:42",
+            },
+        }
+
+    def test_action_guard_redirects_broad_verifier_to_unread_anchor(self):
+        action, decision = active_compatibility_frontier_action_guard(
+            self._guard_frontier(),
+            {"type": "run_tests", "command": "pytest -q"},
+            resume={"phase": "idle"},
+        )
+
+        self.assertTrue(decision["applied"])
+        self.assertEqual(decision["blocked_action_kind"], "broad_verifier")
+        self.assertEqual(action["type"], "read_file")
+        self.assertEqual(action["path"], "src/runtime_adapter.py")
+        self.assertEqual(action["line_start"], 22)
+        self.assertIn("active compatibility frontier requires", action["reason"])
+
+    def test_action_guard_blocks_finish_like_action_when_obligations_remain(self):
+        action, decision = active_compatibility_frontier_action_guard(
+            self._guard_frontier(),
+            {"type": "finish", "task_done": True, "reason": "done"},
+            resume={"phase": "idle"},
+        )
+
+        self.assertTrue(decision["applied"])
+        self.assertEqual(decision["blocked_action_kind"], "finish")
+        self.assertEqual(action["type"], "read_file")
+        self.assertEqual(action["path"], "src/runtime_adapter.py")
+
+    def test_action_guard_does_not_block_prompt_nudge_runtime_finish(self):
+        frontier = self._guard_frontier(guard_mode="prompt_nudge", evidence_strength="actionable")
+        frontier["failure_signature"]["runtime_component_kind"] = "native_module"
+        frontier["closure_state"]["verifier_obligations"] = [
+            "invoke behavior through original runtime context"
+        ]
+        original = {"type": "finish", "task_done": True, "reason": "done"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_does_not_block_weak_runtime_finish(self):
+        frontier = self._guard_frontier(guard_mode="block_finish", evidence_strength="weak")
+        frontier["failure_signature"]["runtime_component_kind"] = "native_module"
+        frontier["closure_state"]["verifier_obligations"] = [
+            "invoke behavior through original runtime context"
+        ]
+        original = {"type": "finish", "task_done": True, "reason": "done"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_does_not_block_finish_false_positive_without_evidence_refs(self):
+        frontier = self._guard_frontier()
+        frontier["failure_signature"]["kind"] = "finish_false_positive"
+        frontier["evidence_refs"] = []
+        original = {"type": "finish", "task_done": True, "reason": "done"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_does_not_block_verifier_obligation_without_evidence_refs(self):
+        frontier = self._guard_frontier()
+        frontier["failure_signature"]["runtime_component_kind"] = "native_module"
+        frontier["closure_state"]["verifier_obligations"] = [
+            "invoke behavior through original runtime context"
+        ]
+        frontier["evidence_refs"] = []
+        original = {"type": "finish", "task_done": True, "reason": "done"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_does_not_block_finish_without_stable_fingerprint(self):
+        frontier = self._guard_frontier()
+        frontier["failure_signature"].pop("fingerprint")
+        original = {"type": "finish", "task_done": True, "reason": "done"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_does_not_block_finish_with_non_durable_evidence_ref(self):
+        frontier = self._guard_frontier()
+        frontier["evidence_refs"] = [{"kind": "command_evidence"}]
+        original = {"type": "finish", "task_done": True, "reason": "done"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_allows_targeted_frontier_verifier(self):
+        original = {
+            "type": "run_tests",
+            "command": "pytest tests/test_runtime.py::test_behavior",
+        }
+        action, decision = active_compatibility_frontier_action_guard(
+            self._guard_frontier(),
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_redirects_repeated_search_to_existing_anchor(self):
+        frontier = self._guard_frontier()
+        frontier["anchors"].append(
+            {
+                "id": "anchor-search",
+                "kind": "search_match",
+                "query": "missing_feature",
+                "path": "src/runtime_adapter.py",
+                "line": 42,
+                "read_status": "unread",
+            }
+        )
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            {"type": "search_text", "path": "src/runtime_adapter.py", "query": "missing_feature"},
+            resume={"phase": "idle"},
+        )
+
+        self.assertTrue(decision["applied"])
+        self.assertEqual(decision["blocked_action_kind"], "repeat_search")
+        self.assertEqual(action["type"], "read_file")
+        self.assertEqual(action["path"], "src/runtime_adapter.py")
+
+    def test_action_guard_does_not_repeat_pending_search_query_as_replacement(self):
+        frontier = self._guard_frontier(state="search_needed")
+        frontier["anchors"] = [
+            {
+                "id": "anchor-search-query",
+                "kind": "search_query",
+                "query": "missing_feature",
+                "path": "src",
+            }
+        ]
+        original = {"type": "search_text", "path": "src", "query": "missing_feature"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_does_not_block_prompt_nudge_frontier(self):
+        original = {"type": "run_tests", "command": "pytest -q"}
+        action, decision = active_compatibility_frontier_action_guard(
+            self._guard_frontier(guard_mode="prompt_nudge", evidence_strength="actionable"),
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_allows_broad_verifier_after_closure_criteria(self):
+        frontier = self._guard_frontier(guard_mode="block_finish", state="broad_verify_ready")
+        frontier["closure_state"]["blocked_action_kinds"] = ["finish"]
+        frontier["closure_state"]["broad_verifier_allowed"] = True
+        original = {"type": "run_tests", "command": "pytest -q"}
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            original,
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action, original)
+
+    def test_action_guard_preserves_higher_priority_resume_states(self):
+        original = {"type": "run_tests", "command": "pytest -q"}
+        for resume in (
+            {"phase": "idle", "pending_approvals": [{"id": 1}]},
+            {"phase": "idle", "running_commands": [{"command_run_id": "work:1"}]},
+            {"phase": "stop_requested", "stop_request": {"reason": "pause"}},
+        ):
+            with self.subTest(resume=resume):
+                action, decision = active_compatibility_frontier_action_guard(
+                    self._guard_frontier(),
+                    original,
+                    resume=resume,
+                )
+
+                self.assertFalse(decision["applied"])
+                self.assertEqual(action, original)
 
 
 if __name__ == "__main__":
