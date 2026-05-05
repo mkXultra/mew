@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import shlex
@@ -5,6 +7,8 @@ import signal
 import subprocess
 import sys
 import threading
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .tasks import clip_output
@@ -12,6 +16,8 @@ from .timeutil import now_iso
 
 
 _SHELL_WRAPPER_RE = re.compile(r"^(?P<env>(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)?(?P<shell>\S+)\s+(?P<flag>-[lc]{1,2})\s+(?P<script>.*)\Z", re.DOTALL)
+COMMAND_OUTPUT_SPOOL_MAX_BYTES = 1_000_000
+COMMAND_OUTPUT_TAIL_MAX_CHARS = 65_536
 
 
 def resolve_tool_cwd(cwd=None):
@@ -426,6 +432,7 @@ def run_command_record_streaming(
 
     resolved_cwd = resolve_tool_cwd(cwd)
     started_at = now_iso()
+    started_monotonic = time.monotonic()
     execution_mode = "shell" if use_shell else "argv"
     shell_guard_env = {"MEW_WORK_COMMAND_GUARD": "1"} if use_shell else {}
     env = _subprocess_env({**env_overrides, **shell_guard_env, **(extra_env or {})})
@@ -491,6 +498,8 @@ def run_command_record_streaming(
 
     stdout = "".join(chunks["stdout"])
     stderr = "".join(chunks["stderr"])
+    finished_at = now_iso()
+    duration_seconds = max(0.0, time.monotonic() - started_monotonic)
     stdout_tail = _tail_output(stdout) if timed_out else ""
     stderr_tail = _tail_output(stderr) if timed_out else ""
     if timed_out:
@@ -507,7 +516,8 @@ def run_command_record_streaming(
         "execution_mode": execution_mode,
         "cwd": str(resolved_cwd),
         "started_at": started_at,
-        "finished_at": now_iso(),
+        "finished_at": finished_at,
+        "duration_seconds": round(duration_seconds, 3),
         "exit_code": exit_code,
         "timed_out": timed_out,
         "stdout": clip_output(stdout),
@@ -517,6 +527,322 @@ def run_command_record_streaming(
         "stderr_tail": stderr_tail,
         "timeout_seconds": timeout if timed_out else None,
     }
+
+
+@dataclass
+class ManagedCommandHandle:
+    command: str
+    argv: list[str]
+    execution_mode: str
+    cwd: str
+    command_run_id: str
+    output_ref: str
+    output_path: str
+    started_at: str
+    started_monotonic: float
+    timeout: float
+    process: subprocess.Popen
+    kill_process_group: bool = False
+    chunks: dict[str, list[str]] = field(default_factory=lambda: {"stdout": [], "stderr": []})
+    threads: list[threading.Thread] = field(default_factory=list)
+    finalized: bool = False
+    final_result: dict | None = None
+    output_bytes: int = 0
+    output_truncated: bool = False
+    output_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @property
+    def pid(self):
+        return self.process.pid
+
+    @property
+    def process_group_id(self):
+        return self.process.pid if self.kill_process_group else None
+
+    def snapshot(self, *, status="running"):
+        stdout = "".join(self.chunks["stdout"])
+        stderr = "".join(self.chunks["stderr"])
+        duration_seconds = max(0.0, time.monotonic() - self.started_monotonic)
+        return {
+            "command": self.command,
+            "argv": self.argv,
+            "execution_mode": self.execution_mode,
+            "cwd": self.cwd,
+            "command_run_id": self.command_run_id,
+            "output_ref": self.output_ref,
+            "output_path": self.output_path,
+            "started_at": self.started_at,
+            "finished_at": None,
+            "duration_seconds": round(duration_seconds, 3),
+            "status": status,
+            "pid": self.pid,
+            "process_group_id": self.process_group_id,
+            "exit_code": None,
+            "timed_out": False,
+            "stdout": clip_output(stdout),
+            "stderr": clip_output(stderr),
+            "stdout_tail": _tail_output(stdout),
+            "stderr_tail": _tail_output(stderr),
+            "output_bytes": self.output_bytes,
+            "output_truncated": self.output_truncated,
+        }
+
+    def is_running(self):
+        return self.process.poll() is None
+
+    def poll(self, wait_seconds=0):
+        if self.finalized and self.final_result is not None:
+            return dict(self.final_result)
+        wait = max(0.0, float(wait_seconds or 0))
+        remaining_timeout = self.timeout - max(0.0, time.monotonic() - self.started_monotonic)
+        if remaining_timeout <= 0:
+            return self.finalize(timeout=0)
+        wait = min(wait, remaining_timeout)
+        if wait:
+            try:
+                self.process.wait(timeout=wait)
+            except subprocess.TimeoutExpired:
+                pass
+        if time.monotonic() - self.started_monotonic >= self.timeout and self.process.poll() is None:
+            return self.finalize(timeout=0)
+        if self.process.poll() is None:
+            return self.snapshot(status="running")
+        return self.finalize(timeout=0)
+
+    def finalize(self, timeout=None):
+        if self.finalized and self.final_result is not None:
+            return dict(self.final_result)
+        timed_out = False
+        kill_status = ""
+        try:
+            exit_code = self.process.wait(timeout=self.timeout if timeout is None else timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            kill_status = _terminate_process(self.process, kill_process_group=self.kill_process_group)
+            exit_code = None
+        for thread in self.threads:
+            thread.join(timeout=1)
+        stdout = "".join(self.chunks["stdout"])
+        stderr = "".join(self.chunks["stderr"])
+        finished_at = now_iso()
+        duration_seconds = max(0.0, time.monotonic() - self.started_monotonic)
+        if timed_out:
+            timeout_seconds = self.timeout if timeout is None else timeout
+            timeout_message = f"command timed out after {timeout_seconds} second(s)"
+            if stderr and not stderr.endswith("\n"):
+                stderr += "\n"
+            stderr += timeout_message
+        result = {
+            "command": self.command,
+            "argv": self.argv,
+            "execution_mode": self.execution_mode,
+            "cwd": self.cwd,
+            "command_run_id": self.command_run_id,
+            "output_ref": self.output_ref,
+            "output_path": self.output_path,
+            "started_at": self.started_at,
+            "finished_at": finished_at,
+            "duration_seconds": round(duration_seconds, 3),
+            "status": "timed_out" if timed_out else ("completed" if exit_code == 0 else "failed"),
+            "exit_code": exit_code,
+            "timed_out": timed_out,
+            "stdout": clip_output(stdout),
+            "stderr": clip_output(stderr),
+            "kill_status": kill_status,
+            "stdout_tail": _tail_output(stdout) if timed_out else "",
+            "stderr_tail": _tail_output(stderr) if timed_out else "",
+            "timeout_seconds": (self.timeout if timeout is None else timeout) if timed_out else None,
+            "output_bytes": self.output_bytes,
+            "output_truncated": self.output_truncated,
+        }
+        self.finalized = True
+        self.final_result = result
+        return dict(result)
+
+    def append_output(self, stream_name, chunk):
+        if not chunk:
+            return
+        self.chunks[stream_name].append(chunk)
+        current = "".join(self.chunks[stream_name])
+        if len(current) > COMMAND_OUTPUT_TAIL_MAX_CHARS:
+            self.chunks[stream_name] = [current[-COMMAND_OUTPUT_TAIL_MAX_CHARS:]]
+        if not self.output_path:
+            return
+        encoded = chunk.encode("utf-8", errors="replace")
+        with self.output_lock:
+            if self.output_bytes + len(encoded) > COMMAND_OUTPUT_SPOOL_MAX_BYTES:
+                self.output_truncated = True
+                remaining = max(0, COMMAND_OUTPUT_SPOOL_MAX_BYTES - self.output_bytes)
+                if remaining <= 0:
+                    self.output_bytes += len(encoded)
+                    return
+                chunk_to_write = encoded[:remaining].decode("utf-8", errors="replace")
+                self.output_truncated = True
+            else:
+                chunk_to_write = chunk
+            try:
+                path = Path(self.output_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8", errors="replace") as handle:
+                    handle.write(chunk_to_write)
+            except OSError:
+                self.output_truncated = True
+            finally:
+                self.output_bytes += len(encoded)
+
+
+class ManagedCommandRunner:
+    """Bounded managed command registry used by the work loop."""
+
+    def __init__(self, *, max_active=1):
+        self.max_active = max(1, int(max_active or 1))
+        self.active: ManagedCommandHandle | None = None
+        self.handles: dict[str, ManagedCommandHandle] = {}
+
+    def _running_handles(self):
+        return [handle for handle in self.handles.values() if handle.is_running()]
+
+    def _handle_key(self, command_run_id=""):
+        key = str(command_run_id or "").strip()
+        if key:
+            return key
+        if self.active is not None:
+            return self.active.command_run_id
+        if len(self.handles) == 1:
+            return next(iter(self.handles))
+        return ""
+
+    def _get_handle(self, command_run_id=""):
+        key = self._handle_key(command_run_id)
+        if not key or key not in self.handles:
+            raise RuntimeError("no managed command is active")
+        return key, self.handles[key]
+
+    def _drop_finalized(self, key, handle):
+        if handle.finalized:
+            self.handles.pop(key, None)
+            if self.active is handle:
+                self.active = next(iter(self.handles.values()), None)
+
+    def start(
+        self,
+        command,
+        cwd=None,
+        timeout=300,
+        extra_env=None,
+        on_output=None,
+        use_shell=False,
+        kill_process_group=False,
+        command_run_id="",
+        output_ref="",
+        output_path="",
+    ):
+        if len(self._running_handles()) >= self.max_active:
+            raise RuntimeError("a managed command is already running")
+        if use_shell:
+            argv = _default_shell_argv(command or "")
+            env_overrides = {}
+        else:
+            argv, env_overrides = split_command_env(command)
+        if not argv or (use_shell and not str(command or "").strip()):
+            raise ValueError("command is empty")
+
+        resolved_cwd = resolve_tool_cwd(cwd)
+        started_at = now_iso()
+        execution_mode = "shell" if use_shell else "argv"
+        shell_guard_env = {"MEW_WORK_COMMAND_GUARD": "1"} if use_shell else {}
+        env = _subprocess_env({**env_overrides, **shell_guard_env, **(extra_env or {})})
+        process = subprocess.Popen(
+            argv,
+            cwd=str(resolved_cwd),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            bufsize=1,
+            shell=False,
+            env=env,
+            **_popen_process_group_kwargs(kill_process_group=kill_process_group),
+        )
+        handle = ManagedCommandHandle(
+            command=command,
+            argv=argv,
+            execution_mode=execution_mode,
+            cwd=str(resolved_cwd),
+            command_run_id=str(command_run_id or ""),
+            output_ref=str(output_ref or ""),
+            output_path=str(output_path or ""),
+            started_at=started_at,
+            started_monotonic=time.monotonic(),
+            timeout=float(timeout),
+            process=process,
+            kill_process_group=kill_process_group,
+        )
+        if not handle.command_run_id:
+            handle.command_run_id = f"pid:{process.pid}"
+
+        def read_stream(name, stream):
+            if stream is None:
+                return
+            for chunk in iter(stream.readline, ""):
+                handle.append_output(name, chunk)
+                if on_output:
+                    on_output(name, chunk)
+            stream.close()
+
+        handle.threads = [
+            threading.Thread(target=read_stream, args=("stdout", process.stdout), daemon=True),
+            threading.Thread(target=read_stream, args=("stderr", process.stderr), daemon=True),
+        ]
+        for thread in handle.threads:
+            thread.start()
+        self.active = handle
+        self.handles[handle.command_run_id] = handle
+        return handle
+
+    def poll(self, wait_seconds=0, command_run_id=""):
+        key, handle = self._get_handle(command_run_id)
+        result = handle.poll(wait_seconds=wait_seconds)
+        self._drop_finalized(key, handle)
+        return result
+
+    def finalize(self, timeout=None, command_run_id=""):
+        key, handle = self._get_handle(command_run_id)
+        result = handle.finalize(timeout=timeout)
+        self.handles.pop(key, None)
+        if self.active is handle:
+            self.active = next(iter(self.handles.values()), None)
+        return result
+
+    def cancel(self, reason="cancelled", command_run_id=""):
+        try:
+            key, handle = self._get_handle(command_run_id)
+        except RuntimeError:
+            return {
+                "status": "orphaned",
+                "kill_status": "",
+                "exit_code": None,
+                "reason": str(reason or "cancelled"),
+            }
+        kill_status = _terminate_process(handle.process, kill_process_group=handle.kill_process_group)
+        for thread in handle.threads:
+            thread.join(timeout=1)
+        result = {
+            **handle.snapshot(status="killed"),
+            "finished_at": now_iso(),
+            "timed_out": False,
+            "exit_code": None,
+            "kill_status": kill_status,
+            "reason": str(reason or "cancelled"),
+        }
+        handle.finalized = True
+        handle.final_result = result
+        self.handles.pop(key, None)
+        if self.active is handle:
+            self.active = next(iter(self.handles.values()), None)
+        return result
 
 
 def validate_git_ref(ref):

@@ -12,6 +12,7 @@ import tokenize
 
 from .acceptance import extract_acceptance_constraints
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
+from .compatibility_frontier import project_active_compatibility_frontier
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .deliberation import (
     DELIBERATION_RESULT_SCHEMA_CONTRACT,
@@ -82,16 +83,23 @@ WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT = 20
 WORK_COMPACT_CONTEXT_BUDGET = 25000
 WORK_COMPACT_CONTEXT_WINDOW_CANDIDATES = ((6, 4), (4, 2), (2, 2), (1, 1))
 WORK_RECOVERY_CONTEXT_WINDOW_CANDIDATES = ((4, 2), (2, 1), (1, 1))
+WORK_RECOVERY_RESULT_TEXT_LIMIT = 500
+WORK_RECOVERY_READ_FILE_CONTEXT_TEXT_LIMIT = 400
+WORK_RECOVERY_LIST_ITEM_CONTEXT_TEXT_LIMIT = 120
+WORK_RECOVERY_LIST_CONTEXT_ITEM_LIMIT = 6
+WORK_RECOVERY_RECENT_READ_FILE_WINDOW_LIMIT = 1
+WORK_RECOVERY_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 400
 WORK_COMPACT_TASK_TEXT_LIMIT = 1200
 WORK_COMPACT_RESUME_TEXT_LIMIT = 600
 WORK_COMPACT_RESUME_ITEM_LIMIT = 6
 WORK_COMPACT_ACTIVE_MEMORY_ITEM_LIMIT = 3
 WORK_COMPACT_ACTIVE_MEMORY_TERMS_LIMIT = 12
-WORK_RECOVERY_RESUME_TEXT_LIMIT = 320
-WORK_RECOVERY_RESUME_ITEM_LIMIT = 4
+WORK_RECOVERY_RESUME_TEXT_LIMIT = 120
+WORK_RECOVERY_RESUME_ITEM_LIMIT = 2
 WORK_RECOVERY_DECISION_ITEM_LIMIT = 2
 WORK_RECOVERY_DECISION_TEXT_LIMIT = 160
 WORK_RECOVERY_DECISION_GUIDANCE_LIMIT = 120
+WORK_RECOVERY_FOCUSED_OMITTED_KEYS_LIMIT = 30
 WORK_RECENT_READ_FILE_WINDOW_LIMIT = 5
 WORK_RECENT_READ_FILE_WINDOW_TEXT_LIMIT = 6000
 WORK_WRITE_READY_FAST_PATH_MODEL_TIMEOUT_SECONDS = 90.0
@@ -341,7 +349,7 @@ def _compact_tool_result(
             "path": result.get("path"),
             "offset": offset,
             "next_offset": next_offset,
-            "text": clip_output(text, WORK_READ_FILE_CONTEXT_TEXT_LIMIT),
+            "text": clip_output(text, read_file_text_limit),
             "visible_chars": visible_chars,
             "source_text_chars": len(text),
             "context_truncated": context_truncated,
@@ -503,12 +511,19 @@ def compact_turn_reasoning(turn):
 def work_tool_call_for_model(call, *, prompt_context_mode="full"):
     tool = call.get("tool") or ""
     compact_prompt = prompt_context_mode != "full"
-    result_text_limit = WORK_COMPACT_RESULT_TEXT_LIMIT if compact_prompt else WORK_RESULT_TEXT_LIMIT
-    read_file_text_limit = _read_file_context_text_limit_for_call(call, compact_prompt=compact_prompt)
-    list_item_text_limit = (
-        WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT
-    )
-    list_item_limit = WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT if compact_prompt else WORK_LIST_CONTEXT_ITEM_LIMIT
+    recovery_prompt = prompt_context_mode == "compact_recovery"
+    if recovery_prompt:
+        result_text_limit = WORK_RECOVERY_RESULT_TEXT_LIMIT
+        read_file_text_limit = WORK_RECOVERY_READ_FILE_CONTEXT_TEXT_LIMIT
+        list_item_text_limit = WORK_RECOVERY_LIST_ITEM_CONTEXT_TEXT_LIMIT
+        list_item_limit = WORK_RECOVERY_LIST_CONTEXT_ITEM_LIMIT
+    else:
+        result_text_limit = WORK_COMPACT_RESULT_TEXT_LIMIT if compact_prompt else WORK_RESULT_TEXT_LIMIT
+        read_file_text_limit = _read_file_context_text_limit_for_call(call, compact_prompt=compact_prompt)
+        list_item_text_limit = (
+            WORK_COMPACT_LIST_ITEM_CONTEXT_TEXT_LIMIT if compact_prompt else WORK_LIST_ITEM_CONTEXT_TEXT_LIMIT
+        )
+        list_item_limit = WORK_COMPACT_LIST_CONTEXT_ITEM_LIMIT if compact_prompt else WORK_LIST_CONTEXT_ITEM_LIMIT
     omit_write_body = _write_call_body_should_be_omitted(call)
     result_for_prompt = call.get("result") or {}
     if omit_write_body:
@@ -547,6 +562,10 @@ def work_tool_call_for_model(call, *, prompt_context_mode="full"):
         item["resolved_write_body_omitted"] = True
     if compact_prompt:
         item["prompt_context_compacted"] = True
+    if recovery_prompt:
+        item["prompt_context_recovery_compacted"] = True
+    if call.get("command_evidence_ref"):
+        item["command_evidence_ref"] = call.get("command_evidence_ref")
     if call.get("repeat_guard"):
         item["repeat_guard"] = _compact_context_value(
             call.get("repeat_guard"),
@@ -568,7 +587,11 @@ def work_model_turn_for_model(turn, *, prompt_context_mode="full"):
     decision_plan = turn.get("decision_plan") or {}
     working_memory = decision_plan.get("working_memory") if isinstance(decision_plan.get("working_memory"), dict) else {}
     compact_prompt = prompt_context_mode != "full"
-    text_limit = 1000 if compact_prompt else WORK_RESULT_TEXT_LIMIT
+    text_limit = (
+        WORK_RECOVERY_RESULT_TEXT_LIMIT // 2
+        if prompt_context_mode == "compact_recovery"
+        else (1000 if compact_prompt else WORK_RESULT_TEXT_LIMIT)
+    )
     item = {
         "id": turn.get("id"),
         "status": turn.get("status"),
@@ -1605,6 +1628,195 @@ def compact_recovery_plan_for_prompt(recovery_plan, *, item_limit=3, text_limit=
     return compact
 
 
+def compact_long_build_state_for_prompt(long_build_state, *, mode="compact_memory"):
+    state = long_build_state if isinstance(long_build_state, dict) else {}
+    if not state:
+        return {}
+    recovery_mode = mode == "compact_recovery"
+    current_failure = state.get("current_failure") if isinstance(state.get("current_failure"), dict) else {}
+    recovery_decision = state.get("recovery_decision") if isinstance(state.get("recovery_decision"), dict) else {}
+    failure_class = str(
+        (current_failure or {}).get("failure_class")
+        or (recovery_decision or {}).get("failure_class")
+        or ""
+    )
+    runtime_recovery_mode = recovery_mode and failure_class in {
+        "runtime_link_failed",
+        "runtime_default_path_unproven",
+        "runtime_install_before_build",
+        "build_system_target_surface_invalid",
+    }
+    text_limit = 220 if runtime_recovery_mode else (360 if recovery_mode else 700)
+    item_limit = 1 if runtime_recovery_mode else (3 if recovery_mode else 6)
+    compact = {
+        "schema_version": state.get("schema_version"),
+        "kind": state.get("kind"),
+        "contract_id": state.get("contract_id"),
+        "status": state.get("status"),
+        "latest_attempt_id": state.get("latest_attempt_id"),
+        "recovery_decision_id": state.get("recovery_decision_id"),
+        "current_failure": _compact_context_value(
+            state.get("current_failure"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "recovery_decision": _compact_context_value(
+            state.get("recovery_decision"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "stages": _compact_context_value(state.get("stages"), text_limit=text_limit, item_limit=item_limit),
+        "artifacts": _compact_context_value(state.get("artifacts"), text_limit=text_limit, item_limit=item_limit),
+        "missing_artifacts": _compact_context_value(
+            state.get("missing_artifacts"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "progress": _compact_context_value(state.get("progress"), text_limit=text_limit, item_limit=item_limit),
+        "strategy_blockers": _compact_context_value(
+            state.get("strategy_blockers"),
+            text_limit=text_limit,
+            item_limit=item_limit,
+        ),
+        "incomplete_reason": state.get("incomplete_reason"),
+        "latest_build_status": state.get("latest_build_status"),
+        "latest_build_tool_call_id": state.get("latest_build_tool_call_id"),
+        "latest_build_evidence_id": state.get("latest_build_evidence_id"),
+        "latest_build_command": clip_output(str(state.get("latest_build_command") or ""), text_limit),
+        "latest_long_command_run_id": state.get("latest_long_command_run_id"),
+        "latest_live_command_evidence_id": state.get("latest_live_command_evidence_id"),
+        "latest_build_stage": state.get("latest_build_stage"),
+        "latest_long_command_status": state.get("latest_long_command_status"),
+        "latest_build_output_ref": state.get("latest_build_output_ref"),
+        "latest_nonterminal_reason": state.get("latest_nonterminal_reason"),
+        "continuation_required": bool(state.get("continuation_required")),
+        "compacted_for_prompt": True,
+        "prompt_context_mode": mode,
+    }
+    if runtime_recovery_mode:
+        compact["runtime_recovery_focus"] = True
+    if not state.get("recovery_decision"):
+        compact["suggested_next"] = clip_output(str(state.get("suggested_next") or ""), text_limit)
+    allowed_next = (
+        recovery_decision.get("allowed_next_action")
+        if isinstance(recovery_decision.get("allowed_next_action"), dict)
+        else {}
+    )
+    if allowed_next.get("kind") in {"poll_long_command", "resume_idempotent_long_command"}:
+        budget = recovery_decision.get("budget") if isinstance(recovery_decision.get("budget"), dict) else {}
+        compact["continuation_action"] = {
+            "kind": allowed_next.get("kind"),
+            "long_command_run_id": allowed_next.get("long_command_run_id") or state.get("latest_long_command_run_id"),
+            "stage": allowed_next.get("stage") or state.get("latest_build_stage"),
+            "required_evidence": allowed_next.get("required_evidence"),
+            "remaining_seconds": budget.get("remaining_seconds"),
+            "reserve_seconds": budget.get("reserve_seconds"),
+            "continuation_count": budget.get("continuation_count"),
+            "max_continuations": budget.get("max_continuations"),
+        }
+    attempts = state.get("attempts") if isinstance(state.get("attempts"), list) else []
+    compact["attempts"] = [
+        {
+            "id": attempt.get("id"),
+            "stage": attempt.get("stage"),
+            "selected_target": attempt.get("selected_target"),
+            "result": attempt.get("result"),
+            "command_evidence_ref": attempt.get("command_evidence_ref"),
+            "diagnostics": _compact_context_value(
+                attempt.get("diagnostics"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+            "wall_budget_before_seconds": attempt.get("wall_budget_before_seconds"),
+            "wall_budget_after_seconds": attempt.get("wall_budget_after_seconds"),
+        }
+        for attempt in attempts[-item_limit:]
+        if isinstance(attempt, dict)
+    ]
+    contract = state.get("contract") if isinstance(state.get("contract"), dict) else {}
+    if contract:
+        compact["contract"] = {
+            "id": contract.get("id"),
+            "required_artifacts": _compact_context_value(
+                contract.get("required_artifacts"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+            "runtime_proof": _compact_context_value(
+                contract.get("runtime_proof"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+            "source_policy": _compact_context_value(
+                contract.get("source_policy"),
+                text_limit=text_limit,
+                item_limit=item_limit,
+            ),
+        }
+    return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+
+_COMPACT_RECOVERY_LONG_BUILD_RESUME_KEEP_KEYS = {
+    "active_compatibility_frontier",
+    "active_memory",
+    "active_work_todo",
+    "context",
+    "effort",
+    "goal",
+    "long_build_state",
+    "next_action",
+    "notes",
+    "pending_steer",
+    "plan_item_observations",
+    "prompt_context",
+    "recent_decisions",
+    "recovery_plan",
+    "retry_context",
+    "session_id",
+    "status",
+    "suggested_verify_command",
+    "task_id",
+    "title",
+    "updated_at",
+    "working_memory",
+}
+
+
+def _resume_has_long_build_recovery_decision(compacted):
+    if not isinstance(compacted, dict):
+        return False
+    long_build_state = compacted.get("long_build_state")
+    if not isinstance(long_build_state, dict):
+        return False
+    decision = long_build_state.get("recovery_decision")
+    return isinstance(decision, dict) and bool(decision)
+
+
+def _focus_compact_recovery_resume(compacted):
+    if not _resume_has_long_build_recovery_decision(compacted):
+        return compacted
+    focused = {
+        key: value
+        for key, value in (compacted or {}).items()
+        if key in _COMPACT_RECOVERY_LONG_BUILD_RESUME_KEEP_KEYS
+        and value not in (None, "", [], {})
+    }
+    omitted = [
+        key
+        for key, value in (compacted or {}).items()
+        if key not in focused
+        and key not in _COMPACT_RECOVERY_LONG_BUILD_RESUME_KEEP_KEYS
+        and value not in (None, "", [], {})
+    ]
+    prompt_context = focused.get("prompt_context") if isinstance(focused.get("prompt_context"), dict) else {}
+    prompt_context = dict(prompt_context)
+    prompt_context["long_build_recovery_focus"] = True
+    if omitted:
+        prompt_context["omitted_resume_keys"] = sorted(omitted)[:WORK_RECOVERY_FOCUSED_OMITTED_KEYS_LIMIT]
+    focused["prompt_context"] = prompt_context
+    return focused
+
+
 def compact_resume_for_prompt(resume, *, mode="compact_memory"):
     compacted = dict(resume or {})
     if mode == "compact_recovery":
@@ -1634,23 +1846,39 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         guidance_limit=decision_guidance_limit,
     )
     compacted["recovery_plan"] = compact_recovery_plan_for_prompt(compacted.get("recovery_plan"))
+    compacted["long_build_state"] = compact_long_build_state_for_prompt(
+        compacted.get("long_build_state"),
+        mode=mode,
+    )
+    compacted["active_compatibility_frontier"] = project_active_compatibility_frontier(
+        compacted.get("active_compatibility_frontier"),
+        anchor_limit=4 if mode == "compact_recovery" else 8,
+        candidate_limit=4 if mode == "compact_recovery" else 8,
+        history_limit=2 if mode == "compact_recovery" else 4,
+    )
     for key in (
+        "active_compatibility_frontier",
         "goal",
         "working_memory",
         "compressed_prior_think",
         "same_surface_audit",
         "continuity",
         "effort",
+        "commands",
         "low_yield_observations",
         "search_anchor_observations",
         "recent_read_images_observations",
         "failures",
         "unresolved_failure",
         "recurring_failures",
+        "verifier_failure_repair_agenda",
         "repair_anchor_observations",
+        "plan_item_observations",
         "suggested_safe_reobserve",
         "retry_context",
         "world_state",
+        "context",
+        "user_preferences",
         "files_touched",
         "queued_followups",
         "pending_steer",
@@ -1668,6 +1896,8 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         "resume_text_limit": resume_text_limit,
         "resume_item_limit": resume_item_limit,
     }
+    if mode == "compact_recovery":
+        compacted = _focus_compact_recovery_resume(compacted)
     return compacted
 
 
@@ -1722,7 +1952,11 @@ def build_work_session_context(
         "effort": (resume or {}).get("effort") or {},
         "resume": resume,
         "world_state": world_state,
-        "session_knowledge": build_session_knowledge(tool_calls, recent_count=recent_tool_count),
+        "session_knowledge": (
+            []
+            if prompt_context_mode == "compact_recovery"
+            else build_session_knowledge(tool_calls, recent_count=recent_tool_count)
+        ),
         "tool_calls": [
             work_tool_call_for_model(call, prompt_context_mode=prompt_context_mode)
             for call in tool_calls[-recent_tool_count:]
@@ -1748,7 +1982,14 @@ def build_work_session_context(
         and str(((call or {}).get("parameters") or {}).get("reason") or "")
         == "refresh structurally incomplete write-ready cached window"
     ][-10:]
-    work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
+    if prompt_context_mode == "compact_recovery":
+        work_context["recent_read_file_windows"] = build_recent_read_file_windows(
+            tool_calls,
+            limit=WORK_RECOVERY_RECENT_READ_FILE_WINDOW_LIMIT,
+            text_limit=WORK_RECOVERY_RECENT_READ_FILE_WINDOW_TEXT_LIMIT,
+        )
+    else:
+        work_context["recent_read_file_windows"] = build_recent_read_file_windows(tool_calls)
     if compacted or prompt_compacted:
         note = "Recent work context was compacted due to session size; use remember for durable observations."
         if work_context.get("recent_read_file_windows"):
@@ -6075,9 +6316,9 @@ def _work_action_schema_text():
     return (
         "{\n"
         '  "summary": "short reason",\n'
-        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state", "implementation_contract": {"objective": "hard task contract", "source_inventory": [{"path": "provided source/binary/artifact", "status": "needs_grounding|grounded", "reason": "why it matters"}], "prohibited_surrogates": ["stubs/dummy outputs/nearby tools that would not satisfy the task"], "open_contract_gaps": ["remaining source/verifier/artifact/behavior proof gap"]}, "acceptance_constraints": ["explicit stated constraints still relevant"], "acceptance_checks": [{"constraint": "constraint text", "status": "unknown|verified|blocked", "evidence": "tool output, diff, or file inspection used as proof", "evidence_refs": [{"kind": "tool_call", "id": 1}]}]},\n'
+        '  "working_memory": {"hypothesis": "what appears true now", "next_step": "what to do after reentry", "plan_items": ["short remaining steps when more than one concrete step remains (max 3)"], "target_paths": ["narrow files or dirs to revisit first"], "open_questions": ["unknowns"], "last_verified_state": "latest verification state", "implementation_contract": {"objective": "hard task contract", "source_inventory": [{"path": "provided source/binary/artifact", "status": "needs_grounding|grounded", "reason": "why it matters"}], "prohibited_surrogates": ["stubs/dummy outputs/nearby tools that would not satisfy the task"], "open_contract_gaps": ["remaining source/verifier/artifact/behavior proof gap"]}, "acceptance_constraints": ["explicit stated constraints still relevant"], "acceptance_checks": [{"constraint": "constraint text", "status": "unknown|verified|blocked", "evidence": "tool output, diff, or file inspection used as proof", "evidence_refs": [{"kind": "command_evidence", "id": 1}]}]},\n'
         '  "action": {\n'
-        '    "type": "batch|inspect_dir|analyze_table|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
+        '    "type": "batch|inspect_dir|analyze_table|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|run_tests|run_command|poll_command|cancel_command|read_command_output|write_file|edit_file|edit_file_hunks|finish|send_message|ask_user|remember|wait",\n'
         '    "tools": ['
         '{"type": "inspect_dir|analyze_table|read_file|read_image|read_images|search_text|glob|git_status|git_diff|git_log|write_file|edit_file", '
         '"path": "required for analyze_table/read_file/read_image/glob/search_text", '
@@ -6094,7 +6335,8 @@ def _work_action_schema_text():
         '"create": false, '
         '"replace_all": false, '
         '"dry_run": true, '
-        '"timeout": "optional run_tests/run_command timeout seconds"}],\n'
+        '"timeout": "optional run_tests/run_command timeout seconds", '
+        '"foreground_budget_seconds": "optional run_tests/run_command foreground wait budget before yielding"}],\n'
         '    "path": "optional path",\n'
         '    "query": "search_text literal fixed-string query",\n'
         '    "pattern": "glob pattern",\n'
@@ -6109,7 +6351,12 @@ def _work_action_schema_text():
         '    "max_output_chars": "optional read_images output cap",\n'
         '    "stat": "optional git_diff diffstat; set false only when full diff is needed",\n'
         '    "command": "run_tests/run_command command",\n'
+        '    "command_run_id": "required for poll_command/cancel_command/read_command_output",\n'
+        '    "wait_seconds": "optional poll_command foreground wait seconds",\n'
+        '    "output_ref": "optional read_command_output spool ref such as work-session/.../output.log; do not use stdout/stderr stream names",\n'
         '    "timeout": "optional run_tests/run_command timeout seconds; use only for bounded long-running verifier/build commands",\n'
+        '    "foreground_budget_seconds": "optional run_tests/run_command foreground wait budget before yielding; clamped to the managed executor safe range",\n'
+        '    "execution_contract": {"schema_version": 2, "purpose": "source_acquisition|configure|dependency_generation|build|runtime_build|runtime_install|smoke|artifact_proof|verification|diagnostic|generic_command", "stage": "source_acquisition|source_authority|configure|dependency_generation|build|runtime_build|runtime_install|default_smoke|custom_runtime_smoke|artifact_proof|verification|diagnostic|cleanup|command", "proof_role": "none|progress|source_authority|dependency_strategy|target_build|runtime_install|default_smoke|custom_runtime_smoke|final_artifact|verifier|negative_diagnostic", "acceptance_kind": "not_acceptance|progress_only|candidate_source_authority|candidate_artifact_proof|candidate_runtime_smoke|candidate_final_proof|external_verifier", "expected_artifacts": [{"path": "/artifact", "kind": "file|executable|library", "proof_required": "exists_and_invokable"}], "declared_target_refs": [{"kind": "artifact|source_tree", "path": "/path", "ref": "source-tree:primary"}], "continuation_policy": {"mode": "blocking|managed", "yield_after_seconds": 30, "resume_policy": "none|same_resume_identity", "terminal_required_for_acceptance": true}, "background_policy": {"mode": "foreground_blocking|foreground_yieldable", "allow_background": false}, "source_authority_requirement": {"mode": "inherits_task_contract|produces_authority|consumes_authority|not_applicable", "required": true}, "risk_class": "read_only|network_read|build_mutation|source_tree_mutation|runtime_install|system_mutation|destructive|unknown"},\n'
         '    "content": "write_file content",\n'
         '    "old": "edit_file old text",\n'
         '    "new": "edit_file new text",\n'
@@ -6119,7 +6366,7 @@ def _work_action_schema_text():
         '    "question": "ask_user question",\n'
         '    "summary": "optional concrete result, recommendation, or stopping note",\n'
         '    "message_type": "assistant|info|warning",\n'
-        '    "acceptance_checks": [{"constraint": "constraint text", "status": "verified|blocked|unknown", "evidence": "direct evidence from recent tool output or file inspection", "evidence_refs": [{"kind": "tool_call", "id": 1}]}],\n'
+        '    "acceptance_checks": [{"constraint": "constraint text", "status": "verified|blocked|unknown", "evidence": "direct evidence from recent terminal command evidence, tool output, diff, or file inspection", "evidence_refs": [{"kind": "command_evidence", "id": 1}]}],\n'
         '    "task_done": false,\n'
         '    "completion_summary": "optional task completion summary for finish",\n'
         '    "create": false,\n'
@@ -6162,6 +6409,7 @@ def _build_work_think_prompt_legacy(context):
         "If work_session.resume.failed_patch_repair is present, the previous write proposal was on-task but failed on exact old text; repair that same proposal using current anchors, preserve its must_preserve_terms/proposal_snippets, and do not substitute a nearby patch. "
         "If work_session.resume.broad_rollback_slice_repair is present, stop retrying the whole broad patch. Choose one smaller complete slice that includes its source, local tests/docs/report evidence, and verifier; record the remaining scope in working_memory before continuing. If broad_rollback_slice_repair.slice_focus is presentation_readability, split the visible text/wrapping/bubble/row/readability slice first before reconnecting broader live/state behavior. "
         "If work_session.resume.retry_context is present, treat it as the authoritative compact state after a rejected or rolled-back write: use its latest failure/status, target_windows, and pending_constraints, and do not reuse raw patch bodies from rejected or rolled-back tool_calls. "
+        "If work_session.resume.active_compatibility_frontier is present and open, treat its compact_summary, evidence_refs, open_candidates, and closure_state.next_action as the current compatibility reentry pointer before broad rediscovery; this resume object is guidance and does not add a deterministic action guard. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
@@ -6170,6 +6418,7 @@ def _build_work_think_prompt_legacy(context):
         "If you can make a small safe edit, use edit_file, edit_file_hunks, or write_file. For edit_file you must include exact old and new strings; for edit_file_hunks you must give one path plus a non-empty edits list of exact old/new pairs for disjoint hunks in that same file. If you are not sure of the exact old string, use work_session.recent_read_file_windows when available or read the smallest relevant file window first. Once a prior line-window read or recent_read_file_windows entry contains the exact old string, do not reread the full file solely to prepare edit_file or edit_file_hunks. Writes default to dry_run=true; set dry_run=false only when verification is configured. "
         "When editing mew source under src/mew, include a paired tests/ change in the same work session when practical; if the write boundary stops you before the test edit, use any pairing_status.suggested_test_path from the resume/cells as the first test-file candidate and record the intended test in working_memory.next_step. If a targeted test-file search misses, search tests/ or the likely test module before concluding that no paired test surface exists. "
         "Use run_tests for the configured verification command or a narrow test command. "
+        "If work_session.resume.running_commands is non-empty, do not start another mutating build/test by default; either continue read-only investigation that can help the running command, or use poll_command/read_command_output on the listed command_run_id before relying on its result. "
         "If work_session.resume.suggested_verify_command.command is present and no verify_command is configured, prefer that suggested command before inventing a broader verifier. "
         "If verification_confidence.status is narrow after source edits and suggested_verify_command.command exists, prefer run_tests with that broader suggested verifier before finish unless guidance explicitly says the task is narrow-only. "
         "If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user. "
@@ -6177,7 +6426,9 @@ def _build_work_think_prompt_legacy(context):
         "If work_session.resume.stale_runtime_artifact_risk is present, the prior self-check created a /tmp runtime artifact that may short-circuit a fresh external verifier. Preserve the proof in acceptance_checks or working_memory.last_verified_state, then run a small cleanup command to clean stale runtime artifacts before finish unless the task explicitly requires that artifact to pre-exist. "
         "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
         "For runtime frame, screenshot, or image-output tasks, artifact existence, nonzero pixels, valid headers, or self-consistent dimensions are not enough; cite a completed tool that checks expected dimensions/resolution, reference similarity, or exact stdout/boot markers before finish. "
-        "For long dependency/toolchain/source-build tasks, preserve work_session.resume.long_dependency_build_state when present. Prerequisite installation, configure, dependency generation, or partial make/build output is progress, not completion, while a required final executable/artifact is missing. Before installing a distro toolchain for a source project with version constraints, run or inspect the smallest compatibility probe; if configure or package-manager output invalidates a toolchain/package path, record it in working_memory and switch paths instead of retrying it. If configure rejects an installed dependency version but the source tree is otherwise grounded, inspect ./configure --help or equivalent project help and try cheap source-provided compatibility/override flags before building an alternate toolchain from scratch. If a package manager offers prebuilt dependencies and the project exposes or likely supports a source compatibility override, try the prebuilt dependency plus override path before starting a version-pinned source-built dependency/toolchain install; once source help or configure exposes an external/prebuilt compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final artifact build instead of serially probing weaker branches. For release archive/tag source builds, a versioned archive URL, tag/root directory, or tarball identity can ground the patch-level release even when an internal VERSION file only records the major/minor series; do not abort just because internal files omit a patch suffix already grounded by the archive/tag. If a Makefile/CMake/project build reports missing generated dependencies, missing source-path prefixes, or absent dependency files, run the project's dependency-generation/configure target before repeating the final target. When the task names one final executable/artifact, inspect available build targets and prefer the shortest explicit target that produces that artifact (for example the executable name) over full project, proof, doc, test, or all-target builds unless the task explicitly requires the full build. For compiler/toolchain tasks, a trivial return-only smoke binary is not enough if the toolchain has runtime or standard-library link requirements; install or configure the project's runtime/library target and verify a program that exercises the default link path before finish. If a local smoke only passes by adding custom runtime/library flags such as -stdlib, -L, LD_LIBRARY_PATH, or LIBRARY_PATH, treat that as diagnostic only; install/configure the runtime into the default lookup path and rerun the same compile/link smoke without those custom path flags before finish. If runtime install reports a missing library artifact, build the shortest explicit runtime-library target first, then retry install and the default-link smoke. Do not restart package-manager or source-tree setup after a compatible toolchain path is found; allocate remaining wall budget to one shortest idempotent continuation command that produces the missing final artifact. For genuinely long prerequisite or source-build commands, set a bounded run_command timeout sized to the remaining wall budget instead of repeatedly slicing the same build into default-timeout commands. Then prove the final artifact exists and is executable/invokable before finish. "
+        "For external dependency/source acquisition tasks, identify the authoritative source channel before invasive repair: prefer project docs, package-manager metadata, official release/distribution archives, signed checksums, release notes, or upstream download pages when available. Use a non-Python source fetch tool such as curl, wget, gh, or git for authority-producing archive acquisition; if the image lacks one and a package manager exists, install curl or wget before the source fetch. Python download snippets are only last-resort transport and should be paired with non-Python authority evidence before finish. When proving saved source authority from an existing archive and saved authority metadata, use top-level failing readback commands such as `test -f archive; sha256sum archive; tar -tzf archive` rather than wrapping hash/list readbacks in `if`, `while`, `|| true`, pipes, redirection, or other optional control-flow. Place or repeat saved source readbacks after noisy build/install output and close to the final artifact proof, so retained command output still includes metadata, archive hash, and archive root. Treat VCS-generated tag/archive URLs as source-tree fallbacks that may omit release packaging or compatibility shims. If a build from one source artifact hits dependency/API incompatibility, record source provenance in working_memory and evaluate a higher-authority source option before alternate toolchain surgery. "
+        "For long dependency/toolchain/source-build tasks, preserve work_session.resume.long_build_state when present. For every run_command/run_tests that contributes source authority, configure, dependency generation, build, runtime install, default smoke, final artifact proof, or verifier acceptance, include execution_contract with purpose/stage/proof_role/acceptance_kind/expected_artifacts/declared_target_refs. run_command and run_tests use managed execution by default; if a command yields, continue useful read-only investigation or targeted planning and use poll_command/read_command_output to return to that command before relying on its result. Prerequisite installation, configure, dependency generation, or partial make/build output is progress, not completion, while a required final executable/artifact is missing. Before installing a distro toolchain for a source project with version constraints, run or inspect the smallest compatibility probe; if configure or package-manager output invalidates a toolchain/package path, record it in working_memory and switch paths instead of retrying it. If configure rejects an installed dependency version but the source tree is otherwise grounded, inspect ./configure --help or equivalent project help and try cheap source-provided compatibility/override flags before building an alternate toolchain from scratch. When probing configure/project help through grep, rg, awk, sed, or another filter, include external/use-external/prebuilt/system/library terms or inspect unfiltered help before concluding no source-provided external/prebuilt branch exists. If configure or source-script inspection shows compatibility-hook variables such as 'LIBRARY_* = local # external', treat that as source-provided external/prebuilt branch evidence and try the branch before starting a version-pinned source toolchain. If a package manager offers prebuilt dependencies and the project exposes or likely supports a source compatibility override, try the prebuilt dependency plus override path before starting a version-pinned source-built dependency/toolchain install; once source help or configure exposes an external/prebuilt compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final artifact build instead of serially probing weaker branches. A plain ignore-version or allow-unsupported configure retry is not the same as trying an exposed external/prebuilt/system dependency branch; if that plain override fails with a dependency API or library-location mismatch, install the missing prebuilt/dev package when available and retry the external/prebuilt branch before starting version-pinned source toolchain work. If compatibility repair turns into edits under a vendored/third-party dependency or proof library while the final artifact is still missing, stop local dependency patch surgery and switch to a supported dependency version or source-provided external/prebuilt dependency branch before another long rebuild. For release archive/tag source builds, a versioned archive URL, tag/root directory, or tarball identity can ground the patch-level release even when an internal VERSION file only records the major/minor series; do not abort just because internal files omit a patch suffix already grounded by the archive/tag. If a Makefile/CMake/project build reports missing generated dependencies, missing source-path prefixes, or absent dependency files, run the project's dependency-generation/configure target before repeating the final target. When the task names one final executable/artifact, inspect available build targets and prefer the shortest explicit target that produces that artifact (for example the executable name) over full project, proof, doc, test, or all-target builds unless the task explicitly requires the full build. For compiler/toolchain tasks, a trivial return-only smoke binary is not enough if the toolchain has runtime or standard-library link requirements; install or configure the project's runtime/library target and verify a program that exercises the default link path before finish. If a default compile/link smoke fails with a missing runtime library such as 'cannot find -lfoo', do not restart source acquisition, configure, or clean rebuild; build/install the shortest runtime/library target into the default lookup path and rerun the same default smoke. If a local smoke only passes by adding custom runtime/library flags such as -stdlib, -L, LD_LIBRARY_PATH, or LIBRARY_PATH, treat that as diagnostic only; install/configure the runtime into the default lookup path and rerun the same compile/link smoke without those custom path flags before finish. If runtime install reports a missing library artifact, build the shortest explicit runtime-library target first, then retry install and the default-link smoke. If parent make reports no rule for a runtime/lib*.a or similar subdir library target, switch to the runtime subdirectory's own Makefile with make -C <runtime-dir> all/install instead of retrying the invalid parent target path. Do not restart package-manager or source-tree setup after a compatible toolchain path is found; allocate remaining wall budget to one shortest idempotent continuation command that produces the missing final artifact. For genuinely long prerequisite or source-build commands, set a bounded run_command timeout sized to the remaining wall budget instead of repeatedly slicing the same build into default-timeout commands. Then prove the final artifact exists and is executable/invokable before finish. "
+        "For loadable runtime components such as native modules, extensions, shared libraries, plugins, or generated executables, import/load/path evidence only proves loadability or existence. If the task says the component should work, run a component-specific behavioral smoke in the original runtime context: invoke exported behavior, run the advertised command path, or run tests that explicitly exercise that component before finish. "
         "For black-box or query-only model extraction tasks, do not read or copy visible fixture internals such as hidden weights from the provided source; local checks against exposed fixture weights are not enough to finish. Before task_done=true, cite synthetic, randomized, or holdout validation that demonstrates the method generalizes beyond the visible fixture. "
         "For model/checkpoint/tokenizer inference, sampling, or continuation tasks, compile success, byte size, the advertised CLI shape, and 'printed N tokens' are not enough. Before finish, cite completed tool output that proves model-output equivalence with a reference/golden/oracle continuation, argmax/top-1 token match, logits check, token-id match, or expected continuation. A reference/oracle built by copying, slicing, lightly modifying the current candidate implementation, or generating a new /tmp oracle source in this same work session is not independent evidence; if finish is blocked for model inference evidence/provenance, do not repeat finish with the same tool id or same oracle source. Run a new grounding/repair command or keep the exact model-output contract gap open. "
         "For numeric analysis, fitting, optimization, ranking, or scientific scripting tasks, prefer analyze_table on CSV/TSV/whitespace numeric source files before choosing fit windows, scales, extrema, or output values. A schema-only, finite-number, or single-fit residual check is not enough; before finish, cite a completed grounding tool whose output contains an independent cross-check such as an alternative method, recomputation, holdout, bootstrap, or sensitivity/stability validation against the input data, plus residual/error checks, expected peak/location windows, sign/range constraints, or a direct recomputation of the requested metric. "
@@ -6187,12 +6438,12 @@ def _build_work_think_prompt_legacy(context):
         "When you have multiple related frames, pages, screenshots, or contact sheets, prefer one read_images call with a narrow task-specific prompt over repeated read_image calls; use bash/Python to transform video or documents into a small ordered image set, then read_images to summarize or transcribe the sequence. read_images can accept up to 16 images when the total payload is within limits; for long ordered sequences, use the largest chronological chunks that fit instead of many small chunks. If the ordered set is too large for one read_images call, split it into chronological chunks and summarize each chunk compactly before continuing. "
         "If work_session.resume.recent_read_images_observations contains a transcript or visual summary for a needed ordered chunk, reuse that observation instead of re-reading the same images; after a long read_images chunk, carry forward a compact transcript in working_memory before reading another chunk. "
         "read_image/read_images support image files only; if they report an unsupported document type, continue with read_file or other document/text observations instead of repeating the same visual read. "
-        "If a task names an exact external ground-truth command, tool, binary, or required flags, run that exact command shape or a verifier that invokes it before finish; surrogate libraries, approximations, or nearby tools are not enough unless the task explicitly allows them. If a task says the user can run an exact backticked command example, verify that advertised command shape from the task cwd; do not insert a cd wrapper, change cwd, or verify only a nearby invocation whose compiler/output defaults differ. If prior command output says the exact command is NOT_FOUND, command not found, executable not found, or otherwise unavailable, do not install or use a surrogate package/library/API as a substitute; either run/install the exact command within current capabilities or return wait/remember with that exact blocker. Cite the completed run_command or run_tests tool id in acceptance_checks evidence. "
+        "If a task names an exact external ground-truth command, tool, binary, or required flags, run that exact command shape or a verifier that invokes it before finish; surrogate libraries, approximations, or nearby tools are not enough unless the task explicitly allows them. If a task says the user can run an exact backticked command example, verify that advertised command shape from the task cwd; do not insert a cd wrapper, change cwd, or verify only a nearby invocation whose compiler/output defaults differ. If prior command output says the exact command is NOT_FOUND, command not found, executable not found, or otherwise unavailable, do not install or use a surrogate package/library/API as a substitute; either run/install the exact command within current capabilities or return wait/remember with that exact blocker. Cite the completed run_command or run_tests command_evidence id in acceptance_checks evidence_refs when available. "
         "For hard implementation tasks with provided source, binaries, fixtures, or artifacts, keep working_memory.implementation_contract current: objective, source_inventory, prohibited_surrogates, and open_contract_gaps. Before finish with task_done=true, cite completed read/search/command evidence that grounds each provided source or binary, and cite verifier/artifact/behavior evidence separately. "
         "For hard runtime or VM tasks, command exit code alone is not final verifier state transfer. If the task says a fresh runtime command writes a /tmp artifact such as a frame, screenshot, log, socket, or pid file, prove the artifact was created by the final verifier-shaped command from the final cwd and cite that tool id before finish; if it cannot be reproduced, keep working_memory.final_verifier_state_transfer or last_verified_state focused on that blocker instead of finishing. "
         "If runtime evidence shows the verifier-read artifact path is /tmp/foo but your proof only checks frames/foo, output/foo, or a root copy, do not finish; prove the exact /tmp verifier path or explicitly copy/link the verified output there and verify that path before cleanup/handoff. "
         "For stateful user-facing output tasks where copy, labels, messages, speech, or status text must reflect live/current state, label-only assertions are not enough. Before finish, cite semantic contrast proof: one positive injected/current-state assertion and one negative fixture, demo, static, or fallback assertion that does not claim live state. "
-        "Treat task.acceptance_constraints as a first-class checklist. Keep working_memory.acceptance_constraints and working_memory.acceptance_checks current. Before finish with task_done=true, action.acceptance_checks must cover every stated constraint with status=verified and direct evidence from recent terminal-success tool output, diff, or file inspection. Include evidence_refs such as {\"kind\":\"tool_call\",\"id\":N} or cite tool #N in evidence; finish is only a candidate until the deterministic done gate resolves those refs. If one constraint is an edit-scope rule such as only allowed edits, specified replacements, or do-not-edit paths, verify that constraint explicitly with a post-edit validator, diff, or final inspection tool call after the latest write, and cite that tool id in the evidence; a successful compile, smoke command, output file, or write history alone does not prove it. "
+        "Treat task.acceptance_constraints as a first-class checklist. Keep working_memory.acceptance_constraints and working_memory.acceptance_checks current. Before finish with task_done=true, action.acceptance_checks must cover every stated constraint with status=verified and direct evidence from recent terminal-success command evidence, tool output, diff, or file inspection. For run_command/run_tests evidence, prefer evidence_refs such as {\"kind\":\"command_evidence\",\"id\":N}; legacy {\"kind\":\"tool_call\",\"id\":N} refs are still accepted for older observations. Finish is only a candidate until the deterministic done gate resolves those refs. If one constraint is an edit-scope rule such as only allowed edits, specified replacements, or do-not-edit paths, verify that constraint explicitly with a post-edit validator, diff, or final inspection tool call after the latest write, and cite that tool id in the evidence; a successful compile, smoke command, output file, or write history alone does not prove it. "
         "When a rollback verifier failure has one small clear localized cause and the worktree is clean, keep that compact repair in-session and center it on the failed assertion/output and target path before switching to remember, checkpoint, or stop due pressure. "
         "For API, schema, protocol, config, or CLI contract tasks, preserve exact literal contract names from the task text for messages, methods, fields, keys, flags, endpoints, ports, and filenames. Do not substitute synonyms or nearby response-field names, such as using val when the task says value. Internal smoke tests and verifier commands must instantiate and assert the exact names from the task text, not the names you accidentally implemented. "
         "Do not invent test-only assertions for behavior you have not observed in source, command output, or current tests; inspect the producer first or make the paired source change in the same plan. For tests and verifier commands, prefer behavior, contract, output, state, or docs-visible assertions over exact source text phrase assertions unless the task explicitly requires a literal public string or security-sensitive marker. For contract/docs-heavy slices, compare documented headings/surfaces against actual renderer or CLI output instead of treating file creation as proof. For tasks involving watch, continuous, polling, listen, or other repeated modes, verifier planning must require bounded-loop or repeated-observation proof of external behavior; where relevant, include interval/interrupt handling or output-rewrite evidence, and do not accept internal mode flags alone. If a task mentions KeyboardInterrupt, Ctrl-C, SIGINT, cancellation, canceling, or cleanup, verify process-level cancellation/interrupt behavior when practical instead of only checking in-process coroutine cancellation. For Python async task orchestration where cancellation cleanup matters, prefer structured concurrency such as asyncio.TaskGroup, or explicitly prove that gather/semaphore code cancels and awaits only the started work. When verifying concurrency limits with cancellation, cover below-limit, exactly-at-limit, and above-limit cases when practical; one happy-path concurrency check is not enough. "
@@ -6221,10 +6472,14 @@ def _build_work_think_prompt_legacy(context):
 
 _LONG_DEPENDENCY_PROFILE_START = "For long dependency/toolchain/source-build tasks,"
 _LONG_DEPENDENCY_PROFILE_END = "Then prove the final artifact exists and is executable/invokable before finish. "
+_SOURCE_ACQUISITION_PROFILE_START = "For external dependency/source acquisition tasks,"
+_SOURCE_ACQUISITION_PROFILE_END = "before alternate toolchain surgery. "
 _RUNTIME_LINK_PROOF_START = "For compiler/toolchain tasks,"
 _RUNTIME_LINK_PROOF_END = (
     "If runtime install reports a missing library artifact, build the shortest explicit runtime-library "
-    "target first, then retry install and the default-link smoke. "
+    "target first, then retry install and the default-link smoke. If parent make reports no rule for "
+    "a runtime/lib*.a or similar subdir library target, switch to the runtime subdirectory's own Makefile "
+    "with make -C <runtime-dir> all/install instead of retrying the invalid parent target path. "
 )
 _RECOVERY_BUDGET_START = "Do not restart package-manager or source-tree setup after a compatible toolchain path is found;"
 _RECOVERY_BUDGET_END = (
@@ -6261,7 +6516,7 @@ def _work_think_dynamic_failure_evidence_section(context):
         "has_failed_patch_repair": bool(resume.get("failed_patch_repair")),
         "has_retry_context": bool(resume.get("retry_context")),
         "has_verifier_failure_repair_agenda": bool(resume.get("verifier_failure_repair_agenda")),
-        "has_long_dependency_build_state": bool(resume.get("long_dependency_build_state")),
+        "has_long_build_state": bool(resume.get("long_build_state")),
         "has_stale_runtime_artifact_risk": bool(resume.get("stale_runtime_artifact_risk")),
         "has_continuity": bool(resume.get("continuity")),
     }
@@ -6274,6 +6529,37 @@ def _work_think_dynamic_failure_evidence_section(context):
         "would preserve the same lesson across tasks.\n"
         f"Evidence index JSON:\n{json.dumps(evidence, ensure_ascii=False, sort_keys=True)}"
     )
+
+
+def _work_long_build_failure_class(context):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    work_session = work_session if isinstance(work_session, dict) else {}
+    resume = work_session.get("resume") if isinstance(work_session.get("resume"), dict) else {}
+    long_build_state = resume.get("long_build_state") if isinstance(resume.get("long_build_state"), dict) else {}
+    current_failure = (
+        long_build_state.get("current_failure")
+        if isinstance(long_build_state.get("current_failure"), dict)
+        else {}
+    )
+    recovery_decision = (
+        long_build_state.get("recovery_decision")
+        if isinstance(long_build_state.get("recovery_decision"), dict)
+        else {}
+    )
+    return str(
+        current_failure.get("failure_class")
+        or recovery_decision.get("failure_class")
+        or ""
+    )
+
+
+def _work_runtime_recovery_only(context):
+    return _work_long_build_failure_class(context) in {
+        "runtime_link_failed",
+        "runtime_default_path_unproven",
+        "runtime_install_before_build",
+        "build_system_target_surface_invalid",
+    }
 
 
 def _work_think_compact_recovery_section(context):
@@ -6292,8 +6578,25 @@ def _work_think_compact_recovery_section(context):
     )
 
 
+def _work_think_compact_recovery_base_section(context):
+    return (
+        "CompactRecoveryLaneBase\n"
+        "You are the THINK phase for mew work mode. Return only JSON matching the schema. "
+        "The prior turn is under recovery pressure: use the compact context as a reentry contract, "
+        "prefer one narrow action, and avoid broad rediscovery. If work_session.resume.long_build_state "
+        "contains current_failure or recovery_decision, follow that specific repair route before adding "
+        "new task-specific guidance. Preserve exact task acceptance terms and do not finish until the "
+        "required artifact or verifier proof is present."
+    )
+
+
 def build_work_think_prompt_sections(context):
     legacy_prompt = _build_work_think_prompt_legacy(context)
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    work_session = work_session if isinstance(work_session, dict) else {}
+    compaction = work_session.get("context_compaction") if isinstance(work_session.get("context_compaction"), dict) else {}
+    compact_recovery_mode = compaction.get("prompt_context_mode") == "compact_recovery"
+    runtime_recovery_only = compact_recovery_mode and _work_runtime_recovery_only(context)
     context_marker = "\n\nContext JSON:\n"
     if context_marker in legacy_prompt:
         prompt_before_context, context_json = legacy_prompt.split(context_marker, 1)
@@ -6307,14 +6610,23 @@ def build_work_think_prompt_sections(context):
         implementation_prompt = prompt_before_context
         schema_text = _work_action_schema_text()
 
-    before_long_dependency, long_dependency_profile, after_long_dependency = _extract_prompt_span(
+    before_source_acquisition, source_acquisition_profile, after_source_acquisition = _extract_prompt_span(
         implementation_prompt,
+        _SOURCE_ACQUISITION_PROFILE_START,
+        _SOURCE_ACQUISITION_PROFILE_END,
+    )
+    profile_source = after_source_acquisition if source_acquisition_profile else implementation_prompt
+
+    before_long_dependency, long_dependency_profile, after_long_dependency = _extract_prompt_span(
+        profile_source,
         _LONG_DEPENDENCY_PROFILE_START,
         _LONG_DEPENDENCY_PROFILE_END,
     )
     if not long_dependency_profile:
-        before_long_dependency = implementation_prompt
+        before_long_dependency = profile_source
         after_long_dependency = ""
+    if source_acquisition_profile:
+        before_long_dependency = f"{before_source_acquisition.rstrip()} {before_long_dependency.lstrip()}".strip()
 
     long_dependency_profile, runtime_link_proof = _remove_prompt_span(
         long_dependency_profile,
@@ -6327,18 +6639,43 @@ def build_work_think_prompt_sections(context):
         _RECOVERY_BUDGET_END,
     )
 
-    sections = [
-        PromptSection(
-            id="implementation_lane_base",
-            version="v1",
-            title="ImplementationLaneBase",
-            content=before_long_dependency.strip(),
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement",
+    if compact_recovery_mode:
+        sections = [
+            PromptSection(
+                id="compact_recovery_lane_base",
+                version="v1",
+                title="CompactRecoveryLaneBase",
+                content=_work_think_compact_recovery_base_section(context),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement",
+            )
+        ]
+    else:
+        sections = [
+            PromptSection(
+                id="implementation_lane_base",
+                version="v1",
+                title="ImplementationLaneBase",
+                content=before_long_dependency.strip(),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement",
+            )
+        ]
+    if source_acquisition_profile and not runtime_recovery_only:
+        sections.append(
+            PromptSection(
+                id="source_acquisition_profile",
+                version="v1",
+                title="SourceAcquisitionProfile",
+                content=source_acquisition_profile.strip(),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="source_acquisition",
+            )
         )
-    ]
-    if long_dependency_profile:
+    if long_dependency_profile and not runtime_recovery_only:
         sections.append(
             PromptSection(
                 id="long_dependency_profile",
@@ -6374,7 +6711,7 @@ def build_work_think_prompt_sections(context):
                 profile="long_dependency",
             )
         )
-    if after_long_dependency.strip():
+    if after_long_dependency.strip() and not compact_recovery_mode:
         sections.append(
             PromptSection(
                 id="implementation_lane_base_continuation",
@@ -6645,6 +6982,8 @@ def normalize_work_model_action(
         "pattern",
         "max_chars",
         "max_output_chars",
+        "max_rows",
+        "max_extrema",
         "timeout",
         "detail",
         "prompt",
@@ -6670,9 +7009,24 @@ def normalize_work_model_action(
     ):
         if action.get(key) is not None:
             normalized[key] = action.get(key)
+    if action_type in {"run_command", "run_tests"}:
+        for key in ("foreground_budget_seconds", "execution_contract"):
+            if action.get(key) is not None:
+                normalized[key] = action.get(key)
+    if action_type in {"poll_command", "cancel_command", "read_command_output"}:
+        if action.get("command_run_id") is not None:
+            normalized["command_run_id"] = action.get("command_run_id")
+    if action_type == "poll_command" and action.get("wait_seconds") is not None:
+        normalized["wait_seconds"] = action.get("wait_seconds")
+    if action_type == "read_command_output":
+        for key in ("output_ref", "output_path"):
+            if action.get(key) is not None:
+                normalized[key] = action.get(key)
     for key in ("create", "replace_all", "staged", "stat", "task_done"):
         if action.get(key) is not None:
             normalized[key] = bool(action.get(key))
+    if action_type == "read_command_output" and action.get("tail") is not None:
+        normalized["tail"] = bool(action.get("tail"))
     if action_type == "read_file" and normalized.get("line_start") is None:
         for alias in ("start_line", "line"):
             if action.get(alias) is not None:
@@ -7064,6 +7418,25 @@ def _coerce_work_tool_timeout(value):
     return timeout
 
 
+LIFECYCLE_WORK_TOOLS = {"poll_command", "cancel_command", "read_command_output"}
+
+
+def _lifecycle_work_tool_parameters_from_action(action, action_type):
+    parameters = {}
+    for key in ("command_run_id", "reason", "summary"):
+        if action.get(key) is not None:
+            parameters[key] = action.get(key)
+    if action_type == "poll_command" and action.get("wait_seconds") is not None:
+        parameters["wait_seconds"] = action.get("wait_seconds")
+    if action_type == "read_command_output":
+        for key in ("output_ref", "output_path", "max_chars", "offset"):
+            if action.get(key) is not None:
+                parameters[key] = action.get(key)
+        if action.get("tail") is not None:
+            parameters["tail"] = bool(action.get("tail"))
+    return parameters
+
+
 def work_tool_parameters_from_action(
     action,
     allowed_write_roots=None,
@@ -7076,6 +7449,8 @@ def work_tool_parameters_from_action(
     parameters = dict(action or {})
     action_type = action.get("type") or action.get("tool")
     parameters.pop("type", None)
+    if action_type in LIFECYCLE_WORK_TOOLS:
+        return _lifecycle_work_tool_parameters_from_action(action, action_type)
     if default_cwd and parameters.get("cwd") in (None, "", "."):
         parameters["cwd"] = default_cwd
     parameters["allowed_write_roots"] = allowed_write_roots or []

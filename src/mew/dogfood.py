@@ -22,6 +22,7 @@ from .model_backends import (
     model_backend_default_model,
     normalize_model_backend,
 )
+from .long_build_substrate import build_long_build_contract, build_long_command_run
 from .patch_draft import (
     PATCH_BLOCKER_RECOVERY_ACTIONS,
     PATCH_DRAFT_VALIDATOR_VERSION,
@@ -31,6 +32,7 @@ from .programmer import create_task_plan
 from .project_snapshot import format_project_snapshot, refresh_project_snapshot
 from .read_tools import is_sensitive_path
 from .state import add_question, default_state, migrate_state, next_id, reconcile_next_ids
+from .terminal_bench_replay import replay_terminal_bench_job, terminal_bench_llm_action_fixture_contexts
 from .tasks import find_task
 from .thoughts import dropped_thread_warning_for_context
 from .timeutil import now_iso, parse_time
@@ -105,6 +107,9 @@ DOGFOOD_SCENARIOS = (
     "m6_9-drift-canary",
     "m6_9-alignment-decay-rehearsal",
     "m6_13-deliberation-internalization",
+    "m6_24-terminal-bench-replay",
+    "m6_24-compile-compcert-emulator",
+    "m6_24-repository-test-tail-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -14524,6 +14529,1202 @@ def run_m6_9_alignment_decay_rehearsal_scenario(workspace, env=None):
     return report
 
 
+def _write_terminal_bench_replay_fixture(workspace, *, task="compile-compcert"):
+    job_dir = Path(workspace) / "terminal-bench-replay-fixture"
+    trial_name = f"{task}__fixture"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    verifier_dir = trial_dir / "verifier"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "fixture-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text("missing /tmp/CompCert/ccomp\n", encoding="utf-8")
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": 1,
+        "session_id": 1,
+        "work_exit_code": 1,
+        "resume": {
+            "session_id": 1,
+            "task_id": 1,
+            "title": "Compile CompCert from source",
+            "goal": (
+                "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+                "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+            ),
+            "phase": "failed",
+            "next_action": "verify the world and review side-effecting work before retry",
+            "long_build_state": {},
+        },
+        "work_report": {
+            "session_id": 1,
+            "task_id": 1,
+            "stop_reason": "wall_timeout",
+            "wall_timeout": True,
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {"type": "run_command"},
+                    "model_turn": {"id": 1, "status": "completed", "action": {"type": "run_command"}},
+                    "tool_call": {
+                        "id": 1,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "./configure x86_64-linux && apt-cache policy coq",
+                        },
+                        "result": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "./configure x86_64-linux && apt-cache policy coq",
+                            "exit_code": 2,
+                            "stdout": (
+                                "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                                "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                            ),
+                            "stderr": "",
+                        },
+                    },
+                },
+                {
+                    "index": 2,
+                    "status": "completed",
+                    "action": {"type": "run_command"},
+                    "model_turn": {"id": 2, "status": "completed", "action": {"type": "run_command"}},
+                    "tool_call": {
+                        "id": 2,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "opam install -y coq.8.16.1",
+                        },
+                        "result": {
+                            "cwd": "/tmp/CompCert",
+                            "command": "opam install -y coq.8.16.1",
+                            "exit_code": 124,
+                            "timed_out": True,
+                            "stdout": "-> retrieved coq.8.16.1\n",
+                            "stderr": "",
+                        },
+                    },
+                },
+            ],
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps(
+            {
+                "command": "mew work --oneshot --instruction fixture",
+                "exit_code": 1,
+                "timed_out": False,
+                "timeout_seconds": 1800,
+                "mew_max_wall_seconds": 1740,
+                "stdout": "",
+                "stderr": "",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def _write_repository_test_tail_emulator_fixture(workspace, *, task="build-cython-ext"):
+    job_dir = Path(workspace) / "repository-test-tail-emulator-fixture"
+    trial_name = f"{task}__repository-tail"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    verifier_dir = trial_dir / "verifier"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "repository-test-tail-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    verifier_stdout = """\
+PASSED ../tests/test_outputs.py::test_numpy_version
+PASSED ../tests/test_outputs.py::test_repo_cloned
+PASSED ../tests/test_outputs.py::test_pyknotid_core_import
+PASSED ../tests/test_outputs.py::test_chelpers_cython_extension
+PASSED ../tests/test_outputs.py::test_ccomplexity_cython_extension
+PASSED ../tests/test_outputs.py::test_cinvariants_cython_extension
+PASSED ../tests/test_outputs.py::test_chelpers
+PASSED ../tests/test_outputs.py::test_ccomplexity
+PASSED ../tests/test_outputs.py::test_cinvariants_python_vs_cython
+PASSED ../tests/test_outputs.py::test_example_usage
+FAILED tests/test_spacecurve.py::test_reconstructed_space_curve - AttributeError: module 'numpy' has no attribute 'int'
+FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError: Repository tests failed with return code 1
+========================= 1 failed, 10 passed in 3.70s =========================
+"""
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(verifier_stdout, encoding="utf-8")
+    test_command = (
+        "set -euo pipefail\n"
+        "cd /app/pyknotid\n"
+        "python -m pytest -q tests --ignore=tests/test_random_curves.py --ignore=tests/test_catalogue.py"
+    )
+    test_command_run_id = "work_session:1:command_run:1"
+    next_action = "patch the remaining repository test failure, reinstall, and rerun the repository test tail"
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": 1,
+        "session_id": 1,
+        "work_exit_code": 1,
+        "resume": {
+            "session_id": 1,
+            "task_id": 1,
+            "title": "Build Cython extensions and pass repository tests",
+            "goal": (
+                "Build a Python package from source, repair compatibility issues, "
+                "and pass the package repository tests after the main smoke passes."
+            ),
+            "phase": "failed",
+            "next_action": next_action,
+            "long_build_state": {},
+        },
+        "work_report": {
+            "session_id": 1,
+            "task_id": 1,
+            "stop_reason": "wall_timeout",
+            "wall_timeout": True,
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {"type": "run_tests", "command": test_command},
+                    "model_turn": {
+                        "id": 1,
+                        "status": "completed",
+                        "action_plan": {
+                            "summary": "Run the remaining repository tests after main smoke passes.",
+                            "action": {"type": "run_tests", "cwd": "/app/pyknotid", "command": test_command},
+                        },
+                        "action": {"type": "run_tests", "command": test_command},
+                    },
+                    "tool_call": {
+                        "id": 1,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {
+                            "cwd": "/app/pyknotid",
+                            "command": test_command,
+                            "command_run_id": test_command_run_id,
+                        },
+                        "result": {
+                            "cwd": "/app/pyknotid",
+                            "command": test_command,
+                            "command_run_id": test_command_run_id,
+                            "exit_code": 1,
+                            "stdout": verifier_stdout,
+                            "stderr": "",
+                        },
+                    },
+                },
+                {
+                    "index": 2,
+                    "status": "failed",
+                    "action": {"type": "wait", "reason": "request timed out"},
+                    "model_turn": {
+                        "id": 2,
+                        "status": "failed",
+                        "error": "request timed out",
+                        "action": {"type": "wait", "reason": "request timed out"},
+                    },
+                    "error": "request timed out",
+                },
+            ],
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps(
+            {
+                "command": "mew work --oneshot --instruction repository-test-tail-emulator",
+                "exit_code": 1,
+                "timed_out": False,
+                "timeout_seconds": 1800,
+                "mew_max_wall_seconds": 1740,
+                "stdout": "",
+                "stderr": "",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def _compile_compcert_task_description():
+    return (
+        "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
+        "Ensure that CompCert can be invoked through /tmp/CompCert/ccomp."
+    )
+
+
+def _compile_compcert_long_build_execution_contract(*, stage="build", purpose="build", acceptance_kind="terminal"):
+    return {
+        "schema_version": 2,
+        "purpose": purpose,
+        "stage": stage,
+        "proof_role": "dependency_strategy" if purpose == "diagnostic" else "final_artifact",
+        "acceptance_kind": acceptance_kind,
+        "expected_artifacts": [] if purpose == "diagnostic" else [{"path": "/tmp/CompCert/ccomp", "kind": "executable"}],
+        "declared_target_refs": [
+            {"kind": "artifact", "path": "/tmp/CompCert/ccomp", "ref": "required-final-artifact"},
+            {"kind": "source_tree", "path": "/tmp/CompCert", "ref": "source-tree:CompCert-v3.13.1"},
+        ],
+        "continuation_policy": {
+            "mode": "blocking" if purpose == "diagnostic" else "managed",
+            "yield_after_seconds": 30,
+            "resume_policy": "none" if purpose == "diagnostic" else "idempotent_resume",
+            "terminal_required_for_acceptance": purpose != "diagnostic",
+            "final_proof_reserve_seconds": 60,
+        },
+        "background_policy": {"mode": "foreground_blocking", "allow_background": False},
+        "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+        "risk_class": "read_only" if purpose == "diagnostic" else "write",
+    }
+
+
+def _compile_compcert_diagnostic_action():
+    return {
+        "type": "run_command",
+        "cwd": "/app",
+        "timeout": 90,
+        "command": (
+            "set -euxo pipefail\n"
+            "cd /tmp/CompCert\n"
+            "printf '=== configure --help ===\\n'\n"
+            "./configure --help\n"
+            "printf '\\n=== relevant configure/make references ===\\n'\n"
+            "grep -nE 'Coq|coq|COQ|Rocq|rocq|Menhir|menhir|MENHIR|menhirLib|MenhirLib|external|system|prebuilt|library|LIBRARY|ignore|unsupported|VERSION' configure Makefile Makefile.menhir 2>/dev/null | head -250\n"
+            "printf '\\n=== installed and candidate package versions ===\\n'\n"
+            "apt-cache policy coq libcoq-stdlib libcoq-core-ocaml libcoq-flocq menhir libmenhir-ocaml-dev opam || true\n"
+            "printf '\\n=== installed menhir library files ===\\n'\n"
+            "dpkg -L menhir 2>/dev/null | grep -Ei 'menhirLib|MenhirLib|META|\\.cmxa$|\\.cma$|\\.cmi$' | head -100 || true\n"
+            "printf '\\n=== ocamlfind menhir packages ===\\n'\n"
+            "ocamlfind list 2>/dev/null | grep -i menhir || true"
+        ),
+        "execution_contract": _compile_compcert_long_build_execution_contract(
+            stage="diagnostic",
+            purpose="diagnostic",
+            acceptance_kind="progress_only",
+        ),
+        "reason": (
+            "The latest failed configure identified Coq version and Menhir API issues; inspect the "
+            "source-provided configure surface and installed package state before installing/building "
+            "alternate toolchains or retrying."
+        ),
+        "summary": "Diagnose the configure failure before retrying the build.",
+        "task_done": False,
+    }
+
+
+def _write_compile_compcert_emulator_fixture(workspace):
+    job_dir = Path(workspace) / "compile-compcert-emulator-fixture"
+    trial_dir = job_dir / "compile-compcert__emulator"
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    verifier_dir = trial_dir / "verifier"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "compile-compcert-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": "compile-compcert__emulator",
+                "task_name": "terminal-bench/compile-compcert",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text("missing /tmp/CompCert/ccomp\n", encoding="utf-8")
+    build_command = (
+        "set -euxo pipefail\n"
+        "mkdir -p /tmp/CompCert-source\n"
+        "wget -O /tmp/CompCert-source/compcert-3.13.1.tar.gz https://github.com/AbsInt/CompCert/archive/refs/tags/v3.13.1.tar.gz\n"
+        "tar -xzf /tmp/CompCert-source/compcert-3.13.1.tar.gz -C /tmp/CompCert-source\n"
+        "mv /tmp/CompCert-source/CompCert-3.13.1 /tmp/CompCert\n"
+        "cd /tmp/CompCert\n"
+        "./configure x86_64-linux\n"
+        "make -j\"$(nproc)\" ccomp\n"
+        "test -x /tmp/CompCert/ccomp"
+    )
+    diagnostic_action = _compile_compcert_diagnostic_action()
+    contract = build_long_build_contract(
+        _compile_compcert_task_description(),
+        ["/tmp/CompCert/ccomp"],
+        contract_id="work_session:1:long_build:1",
+    )
+    failed_run = build_long_command_run(
+        session_id=1,
+        ordinal=1,
+        task_id=1,
+        contract_id="work_session:1:long_build:1",
+        attempt_id="attempt-1",
+        tool_call_id=1,
+        stage="build",
+        selected_target="/tmp/CompCert/ccomp",
+        command=build_command,
+        cwd="/app",
+        status="failed",
+        requested_timeout_seconds=1296,
+        effective_timeout_seconds=1296,
+        work_wall_remaining_seconds=1354,
+        stdout=(
+            "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+            "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+            "Error: cannot determine the location of the Menhir API library.\n"
+        ),
+        stderr="make: *** [Makefile:200: ccomp] Error 2\n",
+    )
+    failed_run["terminal"]["exit_code"] = 2
+    report = {
+        "summary": "mew work --oneshot completed generic work-session attempt",
+        "task_id": 1,
+        "session_id": 1,
+        "work_exit_code": 1,
+        "resume": {
+            "session_id": 1,
+            "task_id": 1,
+            "title": "Compile CompCert from source",
+            "goal": _compile_compcert_task_description(),
+            "phase": "failed",
+            "next_action": "diagnose the terminal configure failure before retrying",
+            "long_build_state": {
+                "kind": "long_build_state",
+                "contract": contract,
+                "long_command_runs": [failed_run],
+                "latest_long_command_run_id": failed_run["id"],
+                "latest_long_command_status": "failed",
+            },
+        },
+        "work_report": {
+            "session_id": 1,
+            "task_id": 1,
+            "stop_reason": "long_command_budget_blocked",
+            "wall_timeout": False,
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "completed",
+                    "action": {"type": "run_command", "command": build_command, "timeout": 1296},
+                    "model_turn": {
+                        "id": 1,
+                        "status": "completed",
+                        "action_plan": {
+                            "summary": "Fetch, configure, and build the required ccomp artifact.",
+                            "action": {
+                                "type": "run_command",
+                                "cwd": "/app",
+                                "timeout": 1296,
+                                "command": build_command,
+                                "execution_contract": _compile_compcert_long_build_execution_contract(),
+                            },
+                        },
+                        "decision_plan": {
+                            "summary": "Ground source and run the shortest build for /tmp/CompCert/ccomp.",
+                            "action": {
+                                "type": "run_command",
+                                "cwd": "/app",
+                                "timeout": 1296,
+                                "command": build_command,
+                                "execution_contract": _compile_compcert_long_build_execution_contract(),
+                            },
+                        },
+                        "action": {"type": "run_command", "command": build_command, "timeout": 1296},
+                    },
+                    "tool_call": {
+                        "id": 1,
+                        "tool": "run_command",
+                        "status": "completed",
+                        "parameters": {
+                            "cwd": "/app",
+                            "command": build_command,
+                            "timeout": 1296,
+                            "execution_contract": _compile_compcert_long_build_execution_contract(),
+                            "long_command_budget": {
+                                "action_kind": "start_long_command",
+                                "stage": "build",
+                                "effective_timeout_seconds": 1296.0,
+                                "requested_timeout_seconds": 1296.0,
+                                "minimum_timeout_seconds": 31.0,
+                                "yield_after_seconds": 30,
+                                "yield_eligible": True,
+                            },
+                        },
+                        "result": {
+                            "cwd": "/app",
+                            "command": build_command,
+                            "exit_code": 2,
+                            "stdout": (
+                                "Testing Coq... version 8.18.0 -- UNSUPPORTED\n"
+                                "Error: CompCert requires a version of Coq between 8.12.0 and 8.16.1\n"
+                                "Error: cannot determine the location of the Menhir API library.\n"
+                            ),
+                            "stderr": "make: *** [Makefile:200: ccomp] Error 2\n",
+                        },
+                    },
+                },
+                {
+                    "index": 2,
+                    "status": "planned",
+                    "action": dict(diagnostic_action),
+                    "model_turn": {
+                        "id": 2,
+                        "status": "planned",
+                        "decision_plan": {
+                            "summary": diagnostic_action["summary"],
+                            "action": dict(diagnostic_action),
+                        },
+                        "action_plan": {
+                            "summary": diagnostic_action["summary"],
+                            "action": dict(diagnostic_action),
+                        },
+                        "action": dict(diagnostic_action),
+                    },
+                },
+            ],
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps(
+            {
+                "command": "mew work --oneshot --instruction compile-compcert-emulator",
+                "exit_code": 1,
+                "timed_out": False,
+                "timeout_seconds": 1800,
+                "mew_max_wall_seconds": 1740,
+                "stdout": "",
+                "stderr": "",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def _public_llm_action_fixture(context):
+    fixture = dict((context or {}).get("fixture") or {})
+    raw_action = dict(fixture.get("raw_action") or {})
+    contract = raw_action.get("execution_contract") if isinstance(raw_action.get("execution_contract"), dict) else {}
+    return {
+        "trial_name": (context or {}).get("trial_name") or "",
+        "report_path": (context or {}).get("report_path") or "",
+        "step_index": fixture.get("step_index"),
+        "step_status": fixture.get("step_status") or "",
+        "model_turn_id": fixture.get("model_turn_id"),
+        "raw_action_type": raw_action.get("type") or raw_action.get("tool") or "",
+        "raw_action_timeout": raw_action.get("timeout"),
+        "raw_action_command": raw_action.get("command") or "",
+        "execution_contract": {
+            "purpose": contract.get("purpose") or "",
+            "stage": contract.get("stage") or "",
+            "proof_role": contract.get("proof_role") or "",
+            "acceptance_kind": contract.get("acceptance_kind") or "",
+            "risk_class": contract.get("risk_class") or "",
+        },
+    }
+
+
+def _write_llm_action_fixtures_jsonl(path, contexts):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for context in contexts:
+            fh.write(json.dumps(_public_llm_action_fixture(context), ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _repository_test_tail_summary(verifier_stdout, trial_entry):
+    text = verifier_stdout or ""
+    failed_tests = sorted(set(re.findall(r"FAILED\s+([^\s]+)", text)))
+    passed_tests = sorted(set(re.findall(r"PASSED\s+([^\s]+)", text)))
+    failed_count = None
+    passed_count = None
+    summary_match = re.search(r"(?P<failed>\d+)\s+failed,\s+(?P<passed>\d+)\s+passed", text)
+    if summary_match:
+        failed_count = int(summary_match.group("failed"))
+        passed_count = int(summary_match.group("passed"))
+    repository_tail_failed = any("test_pyknotid_repository_tests" in item for item in failed_tests) or bool(
+        re.search(r"(?:FAILED|ERROR)\s+[^\n]*test_pyknotid_repository_tests\b", text)
+    )
+    upstream_tail_failed = any("test_reconstructed_space_curve" in item for item in failed_tests) or bool(
+        re.search(r"(?:FAILED|ERROR)\s+[^\n]*test_reconstructed_space_curve\b", text)
+    )
+    main_smoke_passed = any("test_example_usage" in item for item in passed_tests) or "test_example_usage" in text
+    external_reward = (trial_entry or {}).get("external_reward")
+    mew_exit_code = (trial_entry or {}).get("mew_exit_code")
+    stop_reason = (trial_entry or {}).get("stop_reason") or ""
+    try:
+        external_reward_value = None if external_reward is None else float(external_reward)
+    except (TypeError, ValueError):
+        external_reward_value = None
+    finish_false_positive = (
+        stop_reason == "finish"
+        and mew_exit_code == 0
+        and external_reward_value == 0.0
+        and bool(failed_tests or failed_count)
+    )
+    return {
+        "trial_name": (trial_entry or {}).get("trial_name") or "",
+        "external_reward": external_reward,
+        "mew_exit_code": mew_exit_code,
+        "stop_reason": stop_reason,
+        "wall_timeout": bool((trial_entry or {}).get("wall_timeout")),
+        "repository_tail_failed": repository_tail_failed,
+        "upstream_tail_failed": upstream_tail_failed,
+        "finish_false_positive": finish_false_positive,
+        "main_smoke_passed": main_smoke_passed,
+        "failed_count": failed_count,
+        "passed_count": passed_count,
+        "failed_tests": failed_tests[:8],
+        "passed_tests": passed_tests[:12],
+    }
+
+
+def _write_repository_test_tail_fixture_json(path, *, replay, summary, contexts):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "kind": "repository_test_tail_frontier_emulator",
+        "generated_at": now_iso(),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "summary": summary,
+        "latest_llm_action_fixture": _public_llm_action_fixture(contexts[-1]) if contexts else {},
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
+def _evaluate_managed_action_projection(contexts):
+    from .work_loop import normalize_work_model_action
+
+    lifecycle_required_types = {"poll_command", "cancel_command", "read_command_output"}
+    managed_required_types = {"run_command", "run_tests"}
+    lifecycle_cases = []
+    managed_cases = []
+    runtime_identity_cases = []
+    lifecycle_parameter_pollution = []
+    seen_runtime_calls = set()
+    seen_lifecycle_calls = set()
+    lifecycle_disallowed_parameters = {
+        "command",
+        "cwd",
+        "timeout",
+        "foreground_budget_seconds",
+        "execution_contract",
+        "allow_shell",
+        "allow_verify",
+        "allowed_write_roots",
+        "verify_command",
+        "verify_cwd",
+        "verify_timeout",
+        "long_command_budget",
+    }
+    for context in contexts or []:
+        fixture = (context or {}).get("fixture") if isinstance((context or {}).get("fixture"), dict) else {}
+        raw_action = dict(fixture.get("raw_action") or {})
+        action_type = str(raw_action.get("type") or raw_action.get("tool") or "")
+        if not action_type:
+            continue
+        current = normalize_work_model_action({"action": raw_action})
+        historical = fixture.get("post_policy_action") if isinstance(fixture.get("post_policy_action"), dict) else {}
+        if action_type in lifecycle_required_types:
+            raw_identity = {
+                key: raw_action.get(key)
+                for key in ("command_run_id", "output_ref", "output_path")
+                if raw_action.get(key) not in (None, "")
+            }
+            if raw_identity:
+                lifecycle_cases.append(
+                    {
+                        "step_index": fixture.get("step_index"),
+                        "action_type": action_type,
+                        "raw_identity_keys": sorted(raw_identity),
+                        "current_identity_keys": sorted(
+                            key
+                            for key in ("command_run_id", "output_ref", "output_path")
+                            if current.get(key) not in (None, "")
+                        ),
+                        "historical_identity_keys": sorted(
+                            key
+                            for key in ("command_run_id", "output_ref", "output_path")
+                            if historical.get(key) not in (None, "")
+                        ),
+                    }
+                )
+        if action_type in managed_required_types:
+            raw_keys = [
+                key
+                for key in ("foreground_budget_seconds", "execution_contract")
+                if raw_action.get(key) not in (None, "")
+            ]
+            if raw_keys:
+                managed_cases.append(
+                    {
+                        "step_index": fixture.get("step_index"),
+                        "action_type": action_type,
+                        "raw_managed_keys": sorted(raw_keys),
+                        "current_managed_keys": sorted(
+                            key
+                            for key in ("foreground_budget_seconds", "execution_contract")
+                            if current.get(key) not in (None, "")
+                        ),
+                        "historical_managed_keys": sorted(
+                            key
+                            for key in ("foreground_budget_seconds", "execution_contract")
+                            if historical.get(key) not in (None, "")
+                        ),
+                    }
+                )
+        session = (context or {}).get("session") if isinstance((context or {}).get("session"), dict) else {}
+        for call in session.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            if call.get("tool") in lifecycle_required_types:
+                lifecycle_call_key = (context.get("report_path") or "", call.get("id"))
+                if lifecycle_call_key in seen_lifecycle_calls:
+                    continue
+                seen_lifecycle_calls.add(lifecycle_call_key)
+                parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+                polluted_keys = sorted(
+                    key
+                    for key in lifecycle_disallowed_parameters
+                    if key in parameters and parameters.get(key) not in (None, "")
+                )
+                if polluted_keys:
+                    lifecycle_parameter_pollution.append(
+                        {
+                            "tool_call_id": call.get("id"),
+                            "tool": call.get("tool") or "",
+                            "polluted_keys": polluted_keys,
+                        }
+                    )
+            if call.get("tool") not in managed_required_types:
+                continue
+            call_key = (context.get("report_path") or "", call.get("id"))
+            if call_key in seen_runtime_calls:
+                continue
+            seen_runtime_calls.add(call_key)
+            parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+            result = call.get("result") if isinstance(call.get("result"), dict) else {}
+            managed = result.get("managed_long_command") if isinstance(result.get("managed_long_command"), dict) else {}
+            parameter_run_id = str(parameters.get("command_run_id") or call.get("command_run_id") or "")
+            result_run_id = str(result.get("command_run_id") or managed.get("command_run_id") or "")
+            if parameter_run_id or result_run_id:
+                runtime_identity_cases.append(
+                    {
+                        "tool_call_id": call.get("id"),
+                        "tool": call.get("tool") or "",
+                        "parameter_command_run_id": parameter_run_id,
+                        "result_command_run_id": result_run_id,
+                        "matches": bool(parameter_run_id and result_run_id and parameter_run_id == result_run_id),
+                    }
+                )
+    lifecycle_lost = [
+        item
+        for item in lifecycle_cases
+        if set(item["raw_identity_keys"]) - set(item["current_identity_keys"])
+    ]
+    managed_lost = [
+        item
+        for item in managed_cases
+        if set(item["raw_managed_keys"]) - set(item["current_managed_keys"])
+    ]
+    runtime_identity_mismatches = [
+        item
+        for item in runtime_identity_cases
+        if item.get("parameter_command_run_id") and item.get("result_command_run_id") and not item.get("matches")
+    ]
+    return {
+        "lifecycle_cases": lifecycle_cases,
+        "managed_cases": managed_cases,
+        "runtime_identity_cases": runtime_identity_cases,
+        "lifecycle_lost": lifecycle_lost,
+        "managed_lost": managed_lost,
+        "runtime_identity_mismatches": runtime_identity_mismatches,
+        "lifecycle_parameter_pollution": lifecycle_parameter_pollution,
+        "historical_lifecycle_loss_count": sum(
+            1
+            for item in lifecycle_cases
+            if set(item["raw_identity_keys"]) - set(item["historical_identity_keys"])
+        ),
+        "historical_managed_loss_count": sum(
+            1
+            for item in managed_cases
+            if set(item["raw_managed_keys"]) - set(item["historical_managed_keys"])
+        ),
+    }
+
+
+def _select_compile_compcert_emulator_context(contexts):
+    for context in reversed(contexts or []):
+        raw_action = (((context or {}).get("fixture") or {}).get("raw_action") or {})
+        contract = raw_action.get("execution_contract") if isinstance(raw_action.get("execution_contract"), dict) else {}
+        if (
+            str(raw_action.get("type") or raw_action.get("tool") or "") == "run_command"
+            and str(contract.get("purpose") or "") == "diagnostic"
+        ):
+            return context
+    for context in reversed(contexts or []):
+        raw_action = (((context or {}).get("fixture") or {}).get("raw_action") or {})
+        if str(raw_action.get("type") or raw_action.get("tool") or "") == "run_command":
+            return context
+    return {}
+
+
+def _evaluate_compile_compcert_emulator_action(context):
+    from .commands import apply_work_tool_wall_timeout_ceiling, work_tool_long_command_budget_policy
+
+    fixture = ((context or {}).get("fixture") or {})
+    raw_action = dict(fixture.get("raw_action") or {})
+    action_type = str(raw_action.pop("type", "") or raw_action.pop("tool", "") or "")
+    parameters = dict(raw_action)
+    if not action_type:
+        return {"policy": {}, "ceiling": {"blocked": True, "reason": "no raw action type"}, "parameters": parameters}
+    policy = work_tool_long_command_budget_policy(
+        action_type,
+        parameters,
+        task=(context or {}).get("task") or {},
+        session=(context or {}).get("session") or {},
+    )
+    ceiling_parameters = dict(parameters)
+    ceiling = apply_work_tool_wall_timeout_ceiling(
+        action_type,
+        ceiling_parameters,
+        max_wall_seconds=1800,
+        run_started_at=time.monotonic() - 450,
+        recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+        long_command_budget_policy=policy,
+    )
+    return {"policy": policy, "ceiling": ceiling, "parameters": ceiling_parameters}
+
+
+def _m6_24_terminal_bench_replay_assertions(
+    *,
+    job_dir=None,
+    long_build_status=None,
+    current_failure=None,
+    recovery_action=None,
+    blockers=None,
+    mew_exit_code=None,
+    external_reward=None,
+):
+    if job_dir:
+        assertions = {}
+    else:
+        assertions = {
+            "long_build_status": "blocked",
+            "blockers": ["compatibility_override_probe_missing"],
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+        }
+    if long_build_status:
+        assertions["long_build_status"] = long_build_status
+    if current_failure:
+        assertions["current_failure"] = current_failure
+    if recovery_action:
+        assertions["recovery_action"] = recovery_action
+    if blockers:
+        assertions["blockers"] = list(blockers)
+    if mew_exit_code is not None:
+        assertions["mew_exit_code"] = mew_exit_code
+    if external_reward is not None:
+        assertions["external_reward"] = external_reward
+    return assertions
+
+
+def run_m6_24_terminal_bench_replay_scenario(
+    workspace,
+    *,
+    job_dir=None,
+    task=None,
+    long_build_status=None,
+    current_failure=None,
+    recovery_action=None,
+    blockers=None,
+    mew_exit_code=None,
+    external_reward=None,
+):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_terminal_bench_replay_fixture(workspace)
+    assertions = _m6_24_terminal_bench_replay_assertions(
+        job_dir=job_dir,
+        long_build_status=long_build_status,
+        current_failure=current_failure,
+        recovery_action=recovery_action,
+        blockers=blockers,
+        mew_exit_code=mew_exit_code,
+        external_reward=external_reward,
+    )
+    replay = replay_terminal_bench_job(
+        source,
+        task=task,
+        assertions=assertions,
+    )
+    _scenario_check(
+        checks,
+        "m6_24_terminal_bench_replay_finds_artifact",
+        replay.get("trial_count", 0) >= 1,
+        replay.get("trial_count"),
+        ">=1",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_terminal_bench_replay_recomputes_resume",
+        replay.get("status") == "pass",
+        replay,
+        "pass",
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_long = ((first_trial.get("current") or {}).get("long_build_state") or {})
+    _scenario_check(
+        checks,
+        "m6_24_terminal_bench_replay_satisfies_requested_assertions",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "pass",
+    )
+    report = _scenario_report("m6_24-terminal-bench-replay", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "task": task or "",
+        "trial_count": replay.get("trial_count"),
+        "replay_status": replay.get("status"),
+        "first_trial": first_trial.get("trial_name") or "",
+        "current_long_build": current_long,
+    }
+    return report
+
+
+def run_m6_24_compile_compcert_emulator_scenario(
+    workspace,
+    *,
+    job_dir=None,
+):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_compile_compcert_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="compile-compcert",
+        assertions={
+            "long_build_status": "blocked",
+            "current_failure": "long_command_failed",
+            "recovery_action": "repair_failed_long_command",
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+        },
+    )
+    contexts = terminal_bench_llm_action_fixture_contexts(source, task="compile-compcert")
+    fixture_path = Path(workspace) / "compile-compcert-llm-action-fixtures.jsonl"
+    _write_llm_action_fixtures_jsonl(fixture_path, contexts)
+    selected = _select_compile_compcert_emulator_context(contexts)
+    evaluation = _evaluate_compile_compcert_emulator_action(selected)
+    policy = evaluation.get("policy") if isinstance(evaluation.get("policy"), dict) else {}
+    ceiling = evaluation.get("ceiling") if isinstance(evaluation.get("ceiling"), dict) else {}
+    parameters = evaluation.get("parameters") if isinstance(evaluation.get("parameters"), dict) else {}
+    long_command_budget = (
+        parameters.get("long_command_budget") if isinstance(parameters.get("long_command_budget"), dict) else {}
+    )
+
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_extracts_llm_actions",
+        bool(contexts),
+        {"count": len(contexts), "fixture_path": str(fixture_path)},
+        ">=1 model action fixture",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_selects_diagnostic_run_command",
+        bool(selected)
+        and str((((selected.get("fixture") or {}).get("raw_action") or {}).get("type") or "")) == "run_command",
+        _public_llm_action_fixture(selected) if selected else {},
+        "run_command raw action fixture",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_uses_diagnostic_budget",
+        bool(policy.get("applies"))
+        and bool(policy.get("diagnostic_budget"))
+        and float(policy.get("minimum_timeout_seconds") or 0.0) <= 90.0,
+        {
+            "applies": policy.get("applies"),
+            "diagnostic_budget": policy.get("diagnostic_budget"),
+            "minimum_timeout_seconds": policy.get("minimum_timeout_seconds"),
+            "budget_blocked_reason": policy.get("budget_blocked_reason"),
+            "long_command_budget": long_command_budget,
+        },
+        "diagnostic raw action keeps short diagnostic repair budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_compile_compcert_emulator_does_not_block_raw_diagnostic_action",
+        not bool(ceiling.get("blocked")),
+        {"ceiling": ceiling, "long_command_budget": long_command_budget},
+        "no wall-time/budget block for read-only diagnostic action",
+    )
+
+    report = _scenario_report("m6_24-compile-compcert-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "fixture_path": str(fixture_path),
+        "llm_action_fixture_count": len(contexts),
+        "selected_llm_action_fixture": _public_llm_action_fixture(selected) if selected else {},
+        "replay_status": replay.get("status"),
+        "budget_policy": policy,
+        "ceiling": ceiling,
+        "post_policy_parameters": parameters,
+    }
+    return report
+
+
+def run_m6_24_repository_test_tail_emulator_scenario(
+    workspace,
+    *,
+    job_dir=None,
+    task=None,
+):
+    checks = []
+    commands = []
+    task_filter = task or "build-cython-ext"
+    source = (
+        Path(job_dir).expanduser()
+        if job_dir
+        else _write_repository_test_tail_emulator_fixture(workspace, task=task_filter)
+    )
+    replay = replay_terminal_bench_job(
+        source,
+        task=task_filter,
+        assertions={"external_reward": 0.0},
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    verifier_path = Path(first_trial.get("verifier_stdout_path") or "")
+    try:
+        verifier_stdout = verifier_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        verifier_stdout = first_trial.get("verifier_stdout_excerpt") or ""
+    summary = _repository_test_tail_summary(verifier_stdout, first_trial)
+    contexts = terminal_bench_llm_action_fixture_contexts(source, task=task_filter)
+    projection = _evaluate_managed_action_projection(contexts)
+    fixture_path = Path(workspace) / "repository-test-tail-frontier-fixture.json"
+    fixture = _write_repository_test_tail_fixture_json(
+        fixture_path,
+        replay=replay,
+        summary=summary,
+        contexts=contexts,
+    )
+
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_detects_main_smoke_passed",
+        bool(summary.get("main_smoke_passed")),
+        summary,
+        "main smoke/example usage passed before repository tail failed",
+    )
+    finish_false_positive = bool(summary.get("finish_false_positive"))
+    if finish_false_positive:
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_finish_false_positive",
+            finish_false_positive and bool(summary.get("failed_tests")),
+            summary,
+            "mew finished successfully but external verifier reward stayed zero with failed tests",
+        )
+    else:
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_repository_tail",
+            bool(summary.get("repository_tail_failed")),
+            summary,
+            "repository test wrapper failure detected; upstream failing test is optional if verifier output clipped it",
+        )
+    # The replay assertion is intentionally external-reward only because this
+    # emulator covers both nonzero mew exits and finish false-positives.
+    if finish_false_positive:
+        pass
+    elif summary.get("stop_reason") == "tool_failed":
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_tool_failed_frontier_stop",
+            summary.get("stop_reason") == "tool_failed" and summary.get("mew_exit_code") not in (0, None),
+            summary,
+            "mew stopped by tool_failed before closing the repository-test frontier",
+        )
+    else:
+        _scenario_check(
+            checks,
+            "m6_24_repository_test_tail_emulator_detects_wall_timeout",
+            bool(summary.get("wall_timeout")) and summary.get("stop_reason") == "wall_timeout",
+            summary,
+            "mew stopped by wall_timeout before closing the repository-test frontier",
+        )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_preserves_lifecycle_identity_projection",
+        not projection.get("lifecycle_lost"),
+        projection,
+        "current normalize_work_model_action preserves command_run_id/output_ref/output_path for lifecycle actions",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_preserves_managed_contract_projection",
+        not projection.get("managed_lost"),
+        projection,
+        "current normalize_work_model_action preserves foreground_budget_seconds/execution_contract for managed run actions",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_preserves_runtime_command_identity",
+        not projection.get("runtime_identity_mismatches"),
+        projection,
+        "managed executor receives the same command_run_id recorded in the work session",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_rejects_lifecycle_parameter_pollution",
+        not projection.get("lifecycle_parameter_pollution"),
+        projection,
+        "poll/cancel/read-output lifecycle tools keep command identity separate from shell/write/verify policy",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_writes_fixture",
+        fixture_path.is_file()
+        and bool((fixture.get("summary") or {}).get("failed_tests") or (fixture.get("summary") or {}).get("repository_tail_failed")),
+        {"fixture_path": str(fixture_path), "summary": fixture.get("summary")},
+        "repository-test-tail fixture file",
+    )
+
+    report = _scenario_report("m6_24-repository-test-tail-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "task": task_filter,
+        "fixture_path": str(fixture_path),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "first_trial": first_trial.get("trial_name") or "",
+        "summary": summary,
+        "llm_action_fixture_count": len(contexts),
+        "managed_action_projection": projection,
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -14616,6 +15817,35 @@ def run_dogfood_scenario(args):
                     base_url=base_url,
                     model_backend=model_backend,
                     timeout=getattr(args, "model_timeout", 60),
+                )
+            )
+        elif name == "m6_24-terminal-bench-replay":
+            reports.append(
+                run_m6_24_terminal_bench_replay_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                    task=getattr(args, "terminal_bench_task", None),
+                    long_build_status=getattr(args, "terminal_bench_assert_long_build_status", None),
+                    current_failure=getattr(args, "terminal_bench_assert_current_failure", None),
+                    recovery_action=getattr(args, "terminal_bench_assert_recovery_action", None),
+                    blockers=getattr(args, "terminal_bench_assert_blocker", None),
+                    mew_exit_code=getattr(args, "terminal_bench_assert_mew_exit_code", None),
+                    external_reward=getattr(args, "terminal_bench_assert_external_reward", None),
+                )
+            )
+        elif name == "m6_24-compile-compcert-emulator":
+            reports.append(
+                run_m6_24_compile_compcert_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-repository-test-tail-emulator":
+            reports.append(
+                run_m6_24_repository_test_tail_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                    task=getattr(args, "terminal_bench_task", None),
                 )
             )
         elif name == "m6_9-active-memory-recall":
@@ -14734,6 +15964,61 @@ def compact_command_result(result, limit=4):
     return summary
 
 
+def _compact_observed_work_session(value):
+    tool_calls = value.get("tool_calls") if isinstance(value.get("tool_calls"), list) else []
+    command_evidence = value.get("command_evidence") if isinstance(value.get("command_evidence"), list) else []
+    command_runs = value.get("command_runs") if isinstance(value.get("command_runs"), list) else []
+    managed_events = value.get("managed_exec_events") if isinstance(value.get("managed_exec_events"), list) else []
+    return {
+        "id": value.get("id"),
+        "task_id": value.get("task_id"),
+        "status": value.get("status"),
+        "stop_reason": value.get("stop_reason"),
+        "last_tool_call_id": value.get("last_tool_call_id"),
+        "last_model_turn_id": value.get("last_model_turn_id"),
+        "tool_call_count": len(tool_calls),
+        "command_evidence_count": len(command_evidence),
+        "command_run_count": len(command_runs),
+        "managed_exec_event_count": len(managed_events),
+        "latest_tool_calls": [
+            {
+                "id": item.get("id"),
+                "tool": item.get("tool"),
+                "status": item.get("status"),
+                "error": item.get("error") or "",
+                "command_run_id": item.get("command_run_id") or "",
+            }
+            for item in tool_calls[-3:]
+            if isinstance(item, dict)
+        ],
+        "latest_command_runs": [
+            {
+                "id": item.get("id"),
+                "tool": item.get("tool"),
+                "status": item.get("status"),
+                "exit_code": (item.get("terminal") or {}).get("exit_code") if isinstance(item.get("terminal"), dict) else None,
+                "timed_out": (item.get("terminal") or {}).get("timed_out") if isinstance(item.get("terminal"), dict) else None,
+                "output_ref": item.get("output_ref") or "",
+            }
+            for item in command_runs[-3:]
+            if isinstance(item, dict)
+        ],
+        "latest_managed_exec_events": [
+            {
+                "id": item.get("id"),
+                "type": item.get("type"),
+                "command_run_id": item.get("command_run_id") or "",
+                "status": item.get("status") or "",
+                "exit_code": item.get("exit_code"),
+            }
+            for item in managed_events[-3:]
+            if isinstance(item, dict)
+        ],
+        "default_options": compact_dogfood_value(value.get("default_options") or {}, depth=1),
+        "active_work_todo": compact_dogfood_value(value.get("active_work_todo") or {}, depth=1),
+    }
+
+
 def compact_dogfood_value(value, *, depth=0):
     if value is None or isinstance(value, (bool, int, float)):
         return value
@@ -14750,6 +16035,8 @@ def compact_dogfood_value(value, *, depth=0):
             items.append({"omitted_items": len(value) - DOGFOOD_OBSERVED_LIST_LIMIT})
         return items
     if isinstance(value, dict):
+        if {"id", "task_id", "tool_calls"}.issubset(value.keys()):
+            return _compact_observed_work_session(value)
         if {"status", "score", "axes"}.issubset(value.keys()):
             return {
                 "status": value.get("status"),

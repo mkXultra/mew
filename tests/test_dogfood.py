@@ -12,6 +12,9 @@ from mew.cli import build_parser
 from mew.config import LOG_FILE, MODEL_TRACE_FILE, STATE_DIR, STATE_FILE
 from mew.dogfood import (
     DOGFOOD_SCENARIOS,
+    _evaluate_managed_action_projection,
+    _repository_test_tail_summary,
+    _write_terminal_bench_replay_fixture,
     active_agent_run_ids,
     agent_reflex_sweep_timeout,
     build_dogfood_report,
@@ -98,6 +101,43 @@ class DogfoodTests(unittest.TestCase):
         args = parser.parse_args(["dogfood", "--scenario", "resident-loop", "--time-dilation", "168", "--json"])
 
         self.assertEqual(args.time_dilation, 168.0)
+
+    def test_cli_dogfood_terminal_bench_replay_assertions_parse(self):
+        parser = build_parser()
+
+        args = parser.parse_args(
+            [
+                "dogfood",
+                "--scenario",
+                "m6_24-terminal-bench-replay",
+                "--terminal-bench-job-dir",
+                "/tmp/job",
+                "--terminal-bench-task",
+                "build-cython-ext",
+                "--terminal-bench-assert-long-build-status",
+                "blocked",
+                "--terminal-bench-assert-current-failure",
+                "long_command_failed",
+                "--terminal-bench-assert-recovery-action",
+                "repair_failed_long_command",
+                "--terminal-bench-assert-blocker",
+                "runtime_link_failed",
+                "--terminal-bench-assert-mew-exit-code",
+                "1",
+                "--terminal-bench-assert-external-reward",
+                "0",
+                "--json",
+            ]
+        )
+
+        self.assertEqual(args.terminal_bench_job_dir, "/tmp/job")
+        self.assertEqual(args.terminal_bench_task, "build-cython-ext")
+        self.assertEqual(args.terminal_bench_assert_long_build_status, "blocked")
+        self.assertEqual(args.terminal_bench_assert_current_failure, "long_command_failed")
+        self.assertEqual(args.terminal_bench_assert_recovery_action, "repair_failed_long_command")
+        self.assertEqual(args.terminal_bench_assert_blocker, ["runtime_link_failed"])
+        self.assertEqual(args.terminal_bench_assert_mew_exit_code, 1)
+        self.assertEqual(args.terminal_bench_assert_external_reward, 0.0)
 
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()
@@ -1200,6 +1240,249 @@ class DogfoodTests(unittest.TestCase):
                 "m6_11_compiler_replay_stale_cached_window_text_recovery_action",
                 {item["name"] for item in scenario["checks"]},
             )
+
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-terminal-bench-replay")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertEqual(scenario["command_count"], 0)
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(scenario["artifacts"]["trial_count"], 1)
+            self.assertIn("compatibility_override_probe_missing", scenario["artifacts"]["current_long_build"]["strategy_blockers"])
+            self.assertIn("m6_24-terminal-bench-replay: pass", text)
+
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_external_assertions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _write_terminal_bench_replay_fixture(Path(tmp) / "fixture")
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=str(fixture),
+                terminal_bench_assert_long_build_status="blocked",
+                terminal_bench_assert_current_failure="dependency_strategy_unresolved",
+                terminal_bench_assert_blocker=["compatibility_override_probe_missing"],
+                terminal_bench_assert_mew_exit_code=1,
+                terminal_bench_assert_external_reward=0.0,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(
+                scenario["artifacts"]["current_long_build"]["current_failure_class"],
+                "dependency_strategy_unresolved",
+            )
+
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_non_compile_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _write_terminal_bench_replay_fixture(Path(tmp) / "fixture", task="build-cython-ext")
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=str(fixture),
+                terminal_bench_task="build-cython-ext",
+                terminal_bench_assert_mew_exit_code=1,
+                terminal_bench_assert_external_reward=0.0,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["task"], "build-cython-ext")
+            self.assertEqual(scenario["artifacts"]["first_trial"], "build-cython-ext__fixture")
+
+    def test_run_dogfood_m6_24_compile_compcert_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-compile-compcert-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-compile-compcert-emulator")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertGreaterEqual(scenario["artifacts"]["llm_action_fixture_count"], 1)
+            self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
+            self.assertTrue(scenario["artifacts"]["budget_policy"]["diagnostic_budget"])
+            self.assertEqual(scenario["artifacts"]["budget_policy"]["minimum_timeout_seconds"], 30.0)
+            self.assertEqual(scenario["artifacts"]["ceiling"], {})
+            self.assertIn("m6_24-compile-compcert-emulator: pass", text)
+
+    def test_run_dogfood_m6_24_repository_test_tail_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-repository-test-tail-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+                terminal_bench_task=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-repository-test-tail-emulator")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(scenario["artifacts"]["task"], "build-cython-ext")
+            self.assertTrue(scenario["artifacts"]["summary"]["repository_tail_failed"])
+            self.assertTrue(scenario["artifacts"]["summary"]["upstream_tail_failed"])
+            self.assertTrue(scenario["artifacts"]["summary"]["main_smoke_passed"])
+            self.assertEqual(scenario["artifacts"]["summary"]["stop_reason"], "wall_timeout")
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_lost"])
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["managed_lost"])
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["runtime_identity_mismatches"])
+            self.assertFalse(scenario["artifacts"]["managed_action_projection"]["lifecycle_parameter_pollution"])
+            self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
+            self.assertIn("m6_24-repository-test-tail-emulator: pass", text)
+
+    def test_m6_24_projection_detects_lifecycle_parameter_pollution(self):
+        projection = _evaluate_managed_action_projection(
+            [
+                {
+                    "report_path": "report.json",
+                    "fixture": {
+                        "raw_action": {
+                            "type": "poll_command",
+                            "command_run_id": "work_session:1:command_run:1",
+                        },
+                        "post_policy_action": {
+                            "type": "poll_command",
+                            "command_run_id": "work_session:1:command_run:1",
+                        },
+                    },
+                    "session": {
+                        "tool_calls": [
+                            {
+                                "id": 1,
+                                "tool": "poll_command",
+                                "parameters": {
+                                    "command_run_id": "work_session:1:command_run:1",
+                                    "cwd": "/app",
+                                    "allow_shell": True,
+                                    "allow_verify": True,
+                                },
+                            },
+                            {
+                                "id": 2,
+                                "tool": "read_command_output",
+                                "parameters": {
+                                    "command_run_id": "work_session:1:command_run:1",
+                                    "output_ref": "work-session/1/command/1/output.log",
+                                    "allowed_write_roots": [],
+                                    "cwd": "/app",
+                                },
+                            },
+                            {
+                                "id": 3,
+                                "tool": "cancel_command",
+                                "parameters": {
+                                    "command_run_id": "work_session:1:command_run:1",
+                                    "verify_cwd": "/app",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ]
+        )
+
+        self.assertEqual(
+            projection["lifecycle_parameter_pollution"],
+            [
+                {
+                    "tool_call_id": 1,
+                    "tool": "poll_command",
+                    "polluted_keys": ["allow_shell", "allow_verify", "cwd"],
+                },
+                {
+                    "tool_call_id": 2,
+                    "tool": "read_command_output",
+                    "polluted_keys": ["allowed_write_roots", "cwd"],
+                },
+                {
+                    "tool_call_id": 3,
+                    "tool": "cancel_command",
+                    "polluted_keys": ["verify_cwd"],
+                }
+            ],
+        )
+
+    def test_m6_24_repository_summary_detects_finish_false_positive(self):
+        stdout = """
+PASSED ../tests/test_outputs.py::test_example_usage
+FAILED ../tests/test_outputs.py::test_ccomplexity - AttributeError: module 'numpy' has no attribute 'int'
+========================= 1 failed, 10 passed in 3.92s =========================
+"""
+        summary = _repository_test_tail_summary(
+            stdout,
+            {
+                "trial_name": "build-cython-ext__wPScYFt",
+                "external_reward": 0.0,
+                "mew_exit_code": 0,
+                "stop_reason": "finish",
+                "wall_timeout": False,
+            },
+        )
+
+        self.assertTrue(summary["finish_false_positive"])
+        self.assertFalse(summary["repository_tail_failed"])
+        self.assertEqual(summary["failed_count"], 1)
+        self.assertIn("../tests/test_outputs.py::test_ccomplexity", summary["failed_tests"])
+
+    def test_m6_24_repository_summary_does_not_treat_passed_repository_test_as_tail_failure(self):
+        stdout = """
+PASSED ../tests/test_outputs.py::test_pyknotid_repository_tests
+FAILED ../tests/test_outputs.py::test_ccomplexity - AttributeError: module 'numpy' has no attribute 'int'
+========================= 1 failed, 10 passed in 3.92s =========================
+"""
+        summary = _repository_test_tail_summary(
+            stdout,
+            {
+                "trial_name": "build-cython-ext__wPScYFt",
+                "external_reward": 0.0,
+                "mew_exit_code": 0,
+                "stop_reason": "finish",
+                "wall_timeout": False,
+            },
+        )
+
+        self.assertTrue(summary["finish_false_positive"])
+        self.assertFalse(summary["repository_tail_failed"])
+        self.assertFalse(summary["upstream_tail_failed"])
 
     def test_run_dogfood_m6_11_draft_timeout_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

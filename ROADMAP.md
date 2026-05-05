@@ -1339,17 +1339,19 @@ Why it matters:
   to see which failures share a shape, repair the shared mechanism, and prove
   the repair with benchmark deltas.
 
-## Milestone 6.24: Broad Terminal-Bench Parity Campaign
+## Milestone 6.24: Software/Coding Terminal-Bench Parity Campaign
 
 Run a measurement / improvement loop against the frozen Terminal-Bench 2.0
-target registry until mew closes the gap to Codex. M6.24 is not a pure
-"measure everything first" milestone: if a measured batch shows a large Codex
-gap, pause broad measurement, improve the generic work-session substrate, rerun
-the same failed shape, and only then continue measuring new batches.
+`software-engineering,coding` cohort until mew closes the gap to Codex on the
+developer-task slice. M6.24 is not a pure "measure everything first" milestone:
+if a measured batch shows a large Codex gap, pause scoped measurement, improve
+the generic work-session substrate, rerun the same failed shape, and only then
+continue measuring new in-scope tasks.
 
 Target:
 
-- run mew against all tasks in the frozen Codex target registry
+- run mew against the 25 scoped tasks listed in
+  `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
 - keep the trial count aligned with the registry, currently 5 trials per task
 - compare task-level and aggregate resolution against Codex `0.121.0` /
   `gpt-5.5@openai`
@@ -1362,17 +1364,21 @@ Target:
 - preserve the generic arbitrary-workspace contract throughout the campaign;
   the same work-session path should be usable for normal repositories and
   Terminal-Bench task directories
+- treat out-of-scope Terminal-Bench work, including `compile-compcert`, as
+  historical repair evidence for build-orchestration substrate unless a later
+  milestone explicitly promotes a BuildOrchestrationLane benchmark gate
 - when reference audits show that a scoring head already changed and finish
   semantics are the likely weak substrate, prefer a generic acceptance/done
   gate repair over preserving stale proof comparability: finish is a candidate,
   deterministic evidence gates own completion, and blocked finishes continue
   the same lane with structured repair guidance
 - use a batch-level controller:
-  - batch gap `<= 10 percentage points`: classify gaps and continue measurement
+  - batch gap `<= 10 percentage points`: classify gaps and continue scoped
+    measurement
   - batch gap `> 10` and `<= 20 percentage points`: record gap classes; continue
     unless the same class repeats or an accepted structural signal appears
   - batch gap `> 20 percentage points`: enter improvement phase before spending
-    more broad-measurement budget
+    more scoped-measurement budget
   - any accepted structural blocker: pause M6.24, repair through M6.14, rerun
     the same failed shape, then resume M6.24
   - aggregate gap `> 20 percentage points` across three consecutive measured
@@ -1380,17 +1386,18 @@ Target:
 
 Done when:
 
-- all 89 registry tasks have mew results with complete artifacts and no
-  unexplained Harbor runner errors
-- mew aggregate successes match or exceed the Codex target of 366 successes out
-  of 445 trials, 82.2% resolution rate, or an explicit staged close gate is
-  written after the aggregate gap drops below the agreed near-parity threshold
+- all 25 scoped `software-engineering,coding` tasks have mew results with
+  complete artifacts and no unexplained Harbor runner errors
+- mew aggregate successes on the scoped 25-task cohort match or exceed the
+  frozen Codex target for the same tasks and trials, or an explicit staged close
+  gate is written after the scoped aggregate gap drops below the agreed
+  near-parity threshold
 - every task where mew is below Codex has a recorded classification and either
   a selected repair route or a written decision to defer it
 - every improvement-phase process change is recorded with current pain,
   expected benefit, one-run trial boundary, rollback condition, and an
   adopted/rejected decision
-- no accepted structural blocker remains unaddressed while broad measurement
+- no accepted structural blocker remains unaddressed while scoped measurement
   continues; M6.24 may continue measurement only for a named disambiguation
   probe, then must pause behind M6.14 if the blocker is confirmed
 - every improvement phase has a before/after rerun against the same failed

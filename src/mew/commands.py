@@ -23,7 +23,10 @@ from .acceptance import (
     finish_blocker_code,
     finish_continuation_prompt,
     is_model_inference_output_task,
+    is_long_dependency_toolchain_build_task,
+    long_dependency_final_artifacts,
 )
+from .acceptance_evidence import split_unquoted_shell_command_segments
 from .agent_runs import (
     build_ai_cli_run_command,
     create_agent_run,
@@ -35,6 +38,7 @@ from .agent_runs import (
 )
 from .archive import archive_state_records, format_archive_result
 from .cli_command import mew_command, mew_executable
+from .compatibility_frontier import project_active_compatibility_frontier
 from .brief import (
     build_activity_data,
     build_brief,
@@ -83,6 +87,15 @@ from .journal import (
 from .implementation_lane_baseline import (
     format_implementation_lane_baseline_report,
     summarize_implementation_lane_baseline,
+)
+from .long_build_substrate import (
+    build_long_build_contract,
+    execution_contract_continuation_policy,
+    execution_contract_is_valid,
+    normalize_execution_contract,
+    long_command_idempotence_key,
+    long_command_yield_after_seconds,
+    planned_long_build_command_budget_stage,
 )
 from .memory import add_deep_memory, compact_memory, recall_memory
 from .metrics import DEFAULT_SAMPLE_LIMIT, build_observation_metrics, format_observation_metrics
@@ -211,6 +224,7 @@ from .state import (
 from .snapshot import load_snapshot, save_snapshot, snapshot_path, take_snapshot
 from .sweep import format_sweep_report, sweep_agent_runs, sweep_report_json
 from .step_loop import format_step_loop_report, run_step_loop
+from .terminal_bench_replay import format_terminal_bench_replay, replay_terminal_bench_job
 from .read_tools import (
     glob_paths,
     inspect_dir,
@@ -345,6 +359,7 @@ WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS = 60.0
 WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS = 600.0
 WORK_WALL_MIN_TOOL_TIMEOUT_SECONDS = 1.0
 WORK_DEFAULT_TOOL_TIMEOUT_SECONDS = 300.0
+WORK_ONESHOT_LONG_COMMAND_POLL_SECONDS = 60.0
 APPROVAL_MODE_ACCEPT_EDITS = "accept-edits"
 APPROVAL_MODES = ("default", APPROVAL_MODE_ACCEPT_EDITS)
 
@@ -4312,6 +4327,8 @@ def run_work_batch_action(
                         reason=f"executing batch work tool {action_type}",
                     )
             tool_call_id = tool_call.get("id") if tool_call else None
+            if tool_call and not broad_read_guard and not repeat_guard:
+                parameters = dict(tool_call.get("parameters") or parameters)
             save_state(state)
         emit_state_update(
             batch_progress_step(
@@ -4838,6 +4855,7 @@ def cmd_work_oneshot(args):
     work_args.live = False
     work_args.follow = False
     work_args.oneshot = False
+    work_args.oneshot_mode = True
     work_args.json = True
     work_args.continue_after_remember = True
     if getattr(work_args, "max_steps", None) is None:
@@ -6123,82 +6141,546 @@ def _work_text_for_timeout_policy(task=None, session=None):
     )
 
 
-def _work_session_has_recent_long_dependency_recovery_blocker(session=None):
-    if not isinstance(session, dict):
-        return False
-    calls = session.get("tool_calls") or []
-    if not isinstance(calls, list):
-        return False
+_LONG_BUILD_RESERVE_PRESERVING_STAGES = {
+    "artifact_proof",
+    "build",
+    "custom_runtime_smoke",
+    "default_smoke",
+    "dependency_generation",
+    "runtime_build",
+    "runtime_install",
+}
+
+_FAILED_LONG_COMMAND_REPAIR_MINIMUM_TIMEOUT_BY_STAGE = {
+    "diagnostic": 30.0,
+    "source_acquisition": 60.0,
+    "source_authority": 60.0,
+    "configure": 120.0,
+}
+
+_READ_ONLY_DIAGNOSTIC_COMMANDS = {
+    "apt-cache",
+    "cat",
+    "command",
+    "dpkg",
+    "echo",
+    "grep",
+    "head",
+    "ls",
+    "ocamlfind",
+    "printf",
+    "pwd",
+    "sha256sum",
+    "test",
+    "uname",
+    "wc",
+}
+_WRITE_REDIRECT_RE = re.compile(r"(?:^|[\s])(?:\d*)?(?:>>?|>\||&>>|&>)(?!&\d)")
+_HEREDOC_RE = re.compile(r"(?:^|[\s])(?:<<|<<<)")
+_FD_DUP_REDIRECT_RE = re.compile(r"^\d*>&\d+$")
+_DEV_NULL_REDIRECT_RE = re.compile(r"(?:^|[\s])(?:\d*)?>\s*/dev/null(?=$|[\s|&;])")
+_DEV_NULL_REDIRECT_TOKEN_RE = re.compile(r"^\d*>/dev/null$")
+
+_LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES = {
+    "build_system_target_surface_probe": {"artifact_proof", "build", "default_smoke", "runtime_build", "runtime_install"},
+    "budget_preserving_recovery": set(),
+    "continue_or_resume_build": {"artifact_proof", "build", "default_smoke", "runtime_build", "runtime_install"},
+    "default_runtime_smoke": {"default_smoke"},
+    "runtime_build_or_install": {"build", "default_smoke", "runtime_build", "runtime_install"},
+    "runtime_build_then_install": {"build", "default_smoke", "runtime_build", "runtime_install"},
+    "target_build_or_artifact_proof": {"artifact_proof", "build", "default_smoke"},
+}
+
+
+def _failed_long_command_repair_minimum_timeout_seconds(stage, budget):
+    budget = budget if isinstance(budget, dict) else {}
+    base = _positive_float_or_none(budget.get("minimum_repair_seconds")) or WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
+    stage = str(stage or "")
+    by_stage = budget.get("minimum_repair_seconds_by_stage")
+    by_stage = by_stage if isinstance(by_stage, dict) else {}
+    stage_minimum = _positive_float_or_none(by_stage.get(stage))
+    if stage_minimum is None:
+        stage_minimum = _FAILED_LONG_COMMAND_REPAIR_MINIMUM_TIMEOUT_BY_STAGE.get(stage)
+    if stage_minimum is None:
+        return base
+    return min(base, stage_minimum)
+
+
+def _shell_segment_tokens_for_read_only_diagnostic(segment):
     try:
-        recent_text = json.dumps(calls[-8:], sort_keys=True, default=str).casefold()
-    except (TypeError, ValueError):
-        recent_text = str(calls[-8:]).casefold()
-    if any(
-        marker in recent_text
-        for marker in (
-            "runtime_link_library_missing",
-            "runtime_install_before_runtime_library_build",
-            "default_runtime_link_path_unproven",
-            "cannot find -l",
-            "linker command failed",
-        )
-    ):
+        return shlex.split(str(segment or ""), comments=True, posix=True)
+    except ValueError:
+        return []
+
+
+def _diagnostic_executable_name(token):
+    raw = str(token or "").strip()
+    if raw.startswith("$("):
+        return raw.lower()
+    raw = raw.lstrip("({").rstrip(")}")
+    name = os.path.basename(raw)
+    return name.lower()
+
+
+def _diagnostic_segment_has_write_redirect(segment):
+    text = _DEV_NULL_REDIRECT_RE.sub(" ", str(segment or ""))
+    if _HEREDOC_RE.search(text) or _WRITE_REDIRECT_RE.search(text):
         return True
-    return (
-        "install" in recent_text
-        and any(marker in recent_text for marker in ("cannot stat", "no such file", "not found", "missing"))
-        and any(marker in recent_text for marker in ("libcompcert", "runtime"))
+    for token in _shell_segment_tokens_for_read_only_diagnostic(segment):
+        if _DEV_NULL_REDIRECT_TOKEN_RE.match(token):
+            continue
+        if ">" in token and not _FD_DUP_REDIRECT_RE.match(token):
+            return True
+        if token in {">", ">>", ">|", "&>", "&>>", "<>", "<<<"}:
+            return True
+        if re.match(r"^\d*(?:>>?|>\|).+", token) and not re.match(r"^\d*>&\d+$", token):
+            return True
+    return False
+
+
+def _make_tokens_are_dry_run(tokens):
+    for token in tokens[1:]:
+        if token in {"-n", "--dry-run", "--just-print", "--print-only"}:
+            return True
+        if token.startswith("--"):
+            continue
+        if token.startswith("-") and "n" in token[1:]:
+            return True
+    return False
+
+
+def _tar_tokens_are_read_only_list(tokens):
+    for token in tokens[1:]:
+        if token in {"--extract", "-x"}:
+            return False
+        if token.startswith("--"):
+            if token == "--list":
+                return True
+            continue
+        if token.startswith("-") and "x" in token:
+            return False
+    return any(token == "--list" or (token.startswith("-") and "t" in token) for token in tokens[1:])
+
+
+def _find_tokens_are_read_only(tokens):
+    if any(token in {"-delete", "-exec", "-execdir", "-ok", "-okdir"} for token in tokens[1:]):
+        return False
+    return True
+
+
+def _sed_tokens_are_read_only(tokens):
+    return not any(token == "--in-place" or token.startswith("--in-place=") or token.startswith("-i") for token in tokens[1:])
+
+
+def _tokens_are_help_only(tokens):
+    if not tokens:
+        return False
+    return any(token in {"--help", "-help", "-h", "help"} for token in tokens[1:])
+
+
+def _typed_contract_claims_read_only_diagnostic(typed_contract):
+    if not isinstance(typed_contract, dict):
+        return False
+    return str(typed_contract.get("purpose") or "") == "diagnostic" and str(typed_contract.get("risk_class") or "") == "read_only"
+
+
+def _shell_segment_is_read_only_diagnostic(segment, *, typed_contract=None):
+    if _diagnostic_segment_has_write_redirect(segment):
+        return False
+    tokens = _shell_segment_tokens_for_read_only_diagnostic(segment)
+    if not tokens:
+        return False
+    command = _diagnostic_executable_name(tokens[0])
+    if command in {"fi", "done", "esac"}:
+        return _typed_contract_claims_read_only_diagnostic(typed_contract)
+    if command in {"do", "then", "else", "elif", "if", "while", "until"} and len(tokens) > 1:
+        return _shell_segment_is_read_only_diagnostic(
+            " ".join(shlex.quote(token) for token in tokens[1:]),
+            typed_contract=typed_contract,
+        )
+    if command == "for":
+        return _typed_contract_claims_read_only_diagnostic(typed_contract) and "in" in tokens[1:]
+    if command in {"cd", "set", "true", ":"}:
+        return True
+    if command in _READ_ONLY_DIAGNOSTIC_COMMANDS:
+        return True
+    if _tokens_are_help_only(tokens) and _typed_contract_claims_read_only_diagnostic(typed_contract):
+        return True
+    if command == "find":
+        return _find_tokens_are_read_only(tokens)
+    if command == "sed":
+        return _sed_tokens_are_read_only(tokens)
+    if command == "tar":
+        return _tar_tokens_are_read_only_list(tokens)
+    if command == "make":
+        return _make_tokens_are_dry_run(tokens)
+    return False
+
+
+def _failed_long_command_repair_is_read_only_diagnostic(command, typed_contract=None):
+    command = str(command or "")
+    saw_diagnostic = False
+    for segment in split_unquoted_shell_command_segments(command):
+        if not _shell_segment_is_read_only_diagnostic(segment, typed_contract=typed_contract):
+            return False
+        tokens = _shell_segment_tokens_for_read_only_diagnostic(segment)
+        command_name = _diagnostic_executable_name(tokens[0]) if tokens else ""
+        if command_name not in {"cd", "set", "true", ":"}:
+            saw_diagnostic = True
+    return saw_diagnostic
+
+
+def _failed_long_command_repair_effective_stage_for_minimum(stage, command, typed_contract=None):
+    if _failed_long_command_repair_is_read_only_diagnostic(command, typed_contract=typed_contract):
+        return "diagnostic"
+    if str(stage or "") == "diagnostic":
+        return ""
+    return str(stage or "")
+
+
+def _work_session_long_build_state_for_timeout_policy(task=None, session=None):
+    if not isinstance(session, dict):
+        return {}
+    resume = build_work_session_resume(session, task=task)
+    state = resume.get("long_build_state") if isinstance(resume, dict) else {}
+    return state if isinstance(state, dict) else {}
+
+
+def _long_build_contract_for_timeout_policy(task=None, session=None, long_build_state=None):
+    long_build_state = long_build_state if isinstance(long_build_state, dict) else {}
+    contract = long_build_state.get("contract")
+    if isinstance(contract, dict) and contract.get("required_artifacts"):
+        return contract
+    text = _work_text_for_timeout_policy(task=task, session=session)
+    if not is_long_dependency_toolchain_build_task(text):
+        return {}
+    artifacts = long_dependency_final_artifacts(text)
+    if not artifacts:
+        return {}
+    session = session if isinstance(session, dict) else {}
+    acceptance_constraints = [
+        item.get("constraint") if isinstance(item, dict) else item
+        for item in (session.get("acceptance_constraints") or [])
+    ]
+    return build_long_build_contract(
+        text,
+        artifacts,
+        contract_id=f"work_session:{session.get('id') or 'unknown'}:long_build:1",
+        acceptance_constraints=acceptance_constraints,
     )
+
+
+def _long_build_recovery_decision_for_timeout_policy(long_build_state):
+    if not isinstance(long_build_state, dict):
+        return {}
+    decision = long_build_state.get("recovery_decision")
+    return decision if isinstance(decision, dict) else {}
+
+
+def _latest_long_command_run_for_timeout_policy(long_build_state):
+    if not isinstance(long_build_state, dict):
+        return {}
+    runs = long_build_state.get("long_command_runs")
+    if not isinstance(runs, list):
+        return {}
+    latest_id = str(long_build_state.get("latest_long_command_run_id") or "")
+    latest = {}
+    for item in runs:
+        if not isinstance(item, dict):
+            continue
+        latest = item
+        if latest_id and str(item.get("id") or "") == latest_id:
+            return item
+    return latest if isinstance(latest, dict) else {}
+
+
+def _long_build_recovery_may_spend_reserve(recovery_decision):
+    if not isinstance(recovery_decision, dict):
+        return False
+    if recovery_decision.get("decision") == "block_for_budget":
+        return False
+    budget = recovery_decision.get("budget")
+    return bool(isinstance(budget, dict) and budget.get("may_spend_reserve"))
+
+
+def _long_build_recovery_action_allows_stage(recovery_decision, stage):
+    if not isinstance(recovery_decision, dict):
+        return False
+    allowed_next = recovery_decision.get("allowed_next_action")
+    if not isinstance(allowed_next, dict):
+        return False
+    allowed_stage = str(allowed_next.get("stage") or "")
+    if not allowed_stage:
+        return False
+    allowed_stages = _LONG_BUILD_RECOVERY_ACTION_STAGE_ALIASES.get(allowed_stage)
+    if allowed_stages is None:
+        allowed_stages = {allowed_stage}
+    return str(stage or "") in allowed_stages
+
+
+def _long_build_reserve_seconds(contract, recovery_decision):
+    if isinstance(recovery_decision, dict):
+        budget = recovery_decision.get("budget")
+        if isinstance(budget, dict):
+            reserve = _positive_float_or_none(budget.get("reserve_seconds"))
+            if reserve is not None:
+                return reserve
+    if isinstance(contract, dict):
+        budget = contract.get("budget")
+        if isinstance(budget, dict):
+            reserve = _positive_float_or_none(budget.get("final_proof_reserve_seconds"))
+            if reserve is not None:
+                return reserve
+    return WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS
 
 
 def work_tool_recovery_reserve_seconds(action_type, parameters, *, task=None, session=None):
+    policy = work_tool_long_command_budget_policy(
+        action_type,
+        parameters,
+        task=task,
+        session=session,
+    )
+    if policy.get("applies"):
+        return float(policy.get("reserve_seconds") or 0.0)
+    return 0.0
+
+
+def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, session=None):
+    policy = {
+        "applies": False,
+        "action_kind": "",
+        "reserve_seconds": 0.0,
+        "stage": "",
+        "recovery_decision_kind": "",
+    }
     if action_type not in {"run_command", "run_tests"}:
-        return 0.0
+        return policy
     parameters = parameters if isinstance(parameters, dict) else {}
     requested_timeout = _positive_float_or_none(parameters.get("timeout"))
     effective_timeout = requested_timeout or WORK_DEFAULT_TOOL_TIMEOUT_SECONDS
-    if effective_timeout < WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS:
-        return 0.0
     command = str(parameters.get("command") or "")
     if not command:
-        return 0.0
-    if _work_session_has_recent_long_dependency_recovery_blocker(session):
-        return 0.0
-    context = f"{_work_text_for_timeout_policy(task=task, session=session)}\n{command}".casefold()
-    long_dependency_markers = (
-        "build",
-        "from source",
-        "configure",
-        "compiler",
-        "toolchain",
-        "dependency",
-        "runtime",
+        return policy
+    long_build_state = _work_session_long_build_state_for_timeout_policy(task=task, session=session)
+    contract = _long_build_contract_for_timeout_policy(
+        task=task,
+        session=session,
+        long_build_state=long_build_state,
     )
-    build_command_markers = (
-        "make ",
-        "cmake",
-        "cargo build",
-        "npm run build",
-        "pip install",
-        "opam ",
+    typed_contract = {}
+    if isinstance(parameters.get("execution_contract"), dict):
+        candidate_contract = normalize_execution_contract(
+            parameters.get("execution_contract"),
+            tool=action_type,
+            command=command,
+            cwd=parameters.get("cwd") or "",
+            task_contract=contract,
+        )
+        if execution_contract_is_valid(candidate_contract):
+            typed_contract = candidate_contract
+            parameters["execution_contract"] = typed_contract
+    typed_continuation = execution_contract_continuation_policy(typed_contract)
+    typed_managed = str(typed_continuation.get("mode") or "") == "managed"
+    if not contract and not typed_managed:
+        return policy
+    if not contract:
+        contract = {
+            "id": (typed_contract.get("contract_id") or "work_session:unknown:execution_contract:1"),
+            "required_artifacts": typed_contract.get("expected_artifacts") or [],
+            "budget": {
+                "final_proof_reserve_seconds": typed_continuation.get("final_proof_reserve_seconds") or 60,
+            },
+        }
+    recovery_decision = _long_build_recovery_decision_for_timeout_policy(long_build_state)
+    latest_run = _latest_long_command_run_for_timeout_policy(long_build_state)
+    latest_run_budget = latest_run.get("budget") if isinstance(latest_run, dict) else {}
+    latest_run_budget = latest_run_budget if isinstance(latest_run_budget, dict) else {}
+    latest_effective_timeout = _positive_float_or_none(latest_run_budget.get("effective_timeout_seconds"))
+    stage = planned_long_build_command_budget_stage(action_type, parameters, contract)
+    reserve = 0.0
+    action_kind = "start_long_command"
+    recovery_decision_kind = ""
+    budget_blocked_reason = ""
+    minimum_timeout_seconds = WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
+    diagnostic_budget = False
+    poll_spends_final_proof_reserve = False
+    if recovery_decision:
+        allowed_next = recovery_decision.get("allowed_next_action")
+        allowed_next = allowed_next if isinstance(allowed_next, dict) else {}
+        recovery_decision_kind = str(allowed_next.get("kind") or "")
+        budget = recovery_decision.get("budget")
+        budget = budget if isinstance(budget, dict) else {}
+        if recovery_decision_kind in {"poll_long_command", "resume_idempotent_long_command"}:
+            action_kind = recovery_decision_kind
+        elif recovery_decision_kind == "resume_budget_exhausted":
+            action_kind = recovery_decision_kind
+            budget_blocked_reason = "resume budget exhausted for long-command continuation"
+        else:
+            action_kind = "recover_long_command"
+        if recovery_decision_kind == "poll_long_command":
+            minimum_timeout_seconds = _positive_float_or_none(budget.get("minimum_poll_seconds")) or 5.0
+            # Polling an already-running managed command is the only path that
+            # can finalize its evidence. Holding the final-proof reserve for the
+            # poll itself can strand the active process even though no new build
+            # work is being started.
+            reserve = 0.0
+            poll_spends_final_proof_reserve = True
+            if effective_timeout < minimum_timeout_seconds:
+                budget_blocked_reason = "poll timeout is below minimum_poll_seconds"
+        elif recovery_decision_kind == "resume_idempotent_long_command":
+            minimum_timeout_seconds = (
+                _positive_float_or_none(budget.get("minimum_resume_seconds"))
+                or WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
+            )
+            diagnostic_budget = bool(
+                parameters.get("long_command_diagnostic_budget")
+                or parameters.get("diagnostic_budget")
+                or parameters.get("diagnostic_timeout_shape")
+            )
+            if effective_timeout < minimum_timeout_seconds:
+                budget_blocked_reason = "resume timeout is below minimum_resume_seconds"
+            elif latest_effective_timeout is not None and effective_timeout <= latest_effective_timeout and not diagnostic_budget:
+                budget_blocked_reason = "repeat_same_timeout_without_budget_change"
+            reserve = _long_build_reserve_seconds(contract, recovery_decision)
+        elif recovery_decision_kind == "repair_failed_long_command":
+            effective_repair_stage = _failed_long_command_repair_effective_stage_for_minimum(
+                stage,
+                command,
+                typed_contract=typed_contract,
+            )
+            diagnostic_budget = effective_repair_stage == "diagnostic"
+            minimum_timeout_seconds = _failed_long_command_repair_minimum_timeout_seconds(
+                effective_repair_stage,
+                budget,
+            )
+            failed_idempotence_key = str(allowed_next.get("failed_idempotence_key") or "")
+            resume_identity = typed_contract.get("resume_identity") if isinstance(typed_contract.get("resume_identity"), dict) else {}
+            planned_key = str(resume_identity.get("idempotence_key") or "") or long_command_idempotence_key(
+                cwd=parameters.get("cwd") or "",
+                command=command,
+                contract_id=contract.get("id") or "",
+                stage=stage,
+                selected_targets=[
+                    str((artifact or {}).get("path") or "")
+                    for artifact in contract.get("required_artifacts") or []
+                    if isinstance(artifact, dict) and (artifact or {}).get("path")
+                ],
+            )
+            if effective_timeout < minimum_timeout_seconds:
+                budget_blocked_reason = "repair timeout is below minimum_repair_seconds"
+            elif failed_idempotence_key and planned_key == failed_idempotence_key:
+                budget_blocked_reason = "repeat_identical_failed_command_without_new_evidence"
+            reserve = _long_build_reserve_seconds(contract, recovery_decision)
+        elif effective_timeout < WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS:
+            return policy
+        if (
+            _long_build_recovery_may_spend_reserve(recovery_decision)
+            and _long_build_recovery_action_allows_stage(recovery_decision, stage)
+        ):
+            reserve = 0.0
+        elif not reserve and not poll_spends_final_proof_reserve:
+            reserve = _long_build_reserve_seconds(contract, recovery_decision)
+    elif typed_managed:
+        reserve = _positive_float_or_none(typed_continuation.get("final_proof_reserve_seconds")) or _long_build_reserve_seconds(
+            contract, recovery_decision
+        )
+        requested_yield = _positive_float_or_none(typed_continuation.get("yield_after_seconds"))
+        minimum_timeout_seconds = requested_yield + 1.0 if requested_yield is not None else minimum_timeout_seconds
+        if effective_timeout < minimum_timeout_seconds:
+            budget_blocked_reason = "managed execution_contract timeout is below minimum continuation duration"
+    elif stage in _LONG_BUILD_RESERVE_PRESERVING_STAGES:
+        if effective_timeout < WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS:
+            return policy
+        reserve = _long_build_reserve_seconds(contract, recovery_decision)
+    else:
+        return policy
+    policy.update(
+        {
+            "applies": True,
+            "action_kind": action_kind,
+            "reserve_seconds": float(reserve or 0.0),
+            "stage": stage,
+            "recovery_decision_kind": recovery_decision_kind,
+            "latest_long_command_run_id": long_build_state.get("latest_long_command_run_id"),
+            "latest_long_command_status": long_build_state.get("latest_long_command_status"),
+            "latest_effective_timeout_seconds": latest_effective_timeout,
+            "minimum_timeout_seconds": float(minimum_timeout_seconds or 0.0),
+            "yield_after_seconds": _positive_float_or_none(typed_continuation.get("yield_after_seconds")),
+            "budget_blocked_reason": budget_blocked_reason,
+            "diagnostic_budget": diagnostic_budget,
+            "execution_contract_managed": typed_managed,
+            "poll_spends_final_proof_reserve": poll_spends_final_proof_reserve,
+        }
     )
-    final_validation_markers = (
-        "smoke",
-        "-version",
-        "--version",
-        "test -x",
-        "compile",
-        "link",
-        "verif",
+    return policy
+
+
+def _work_oneshot_long_command_poll_action(action, args, *, session=None, task=None, state=None):
+    if not isinstance(action, dict):
+        return {}
+    if str(action.get("type") or action.get("tool") or "") != "wait":
+        return {}
+    if getattr(args, "follow", False):
+        return {}
+    if not (getattr(args, "oneshot_mode", False) or getattr(args, "oneshot_report_path", "")):
+        return {}
+    if not isinstance(session, dict) or not session:
+        return {}
+    try:
+        resume = build_work_session_resume(session, task=task, state=state)
+    except Exception:
+        return {}
+    long_build_state = resume.get("long_build_state") if isinstance(resume, dict) else {}
+    if not isinstance(long_build_state, dict):
+        return {}
+    latest_status = str(long_build_state.get("latest_long_command_status") or "").casefold()
+    if latest_status not in {"running", "yielded"}:
+        return {}
+    continuation = long_build_state.get("continuation_action")
+    continuation = continuation if isinstance(continuation, dict) else {}
+    recovery_decision = long_build_state.get("recovery_decision")
+    recovery_decision = recovery_decision if isinstance(recovery_decision, dict) else {}
+    allowed_next = recovery_decision.get("allowed_next_action")
+    allowed_next = allowed_next if isinstance(allowed_next, dict) else {}
+    next_action = continuation or allowed_next
+    if str(next_action.get("kind") or "") != "poll_long_command":
+        return {}
+
+    budget = recovery_decision.get("budget")
+    budget = budget if isinstance(budget, dict) else {}
+    minimum_poll = _positive_float_or_none(budget.get("minimum_poll_seconds")) or 5.0
+    poll_seconds = max(minimum_poll, WORK_ONESHOT_LONG_COMMAND_POLL_SECONDS)
+    remaining = _positive_float_or_none(budget.get("remaining_seconds"))
+    reserve = _positive_float_or_none(budget.get("reserve_seconds")) or 0.0
+    if remaining is not None:
+        available = remaining - reserve - WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS
+        if available > 0:
+            poll_seconds = min(poll_seconds, max(minimum_poll, available))
+    cwd = (
+        work_session_default_cwd(session, task=task)
+        or getattr(args, "cwd", "")
+        or (task or {}).get("cwd")
+        or "."
     )
-    if not any(marker in context for marker in long_dependency_markers):
-        return 0.0
-    command_lower = command.casefold()
-    if not any(marker in command_lower for marker in build_command_markers):
-        return 0.0
-    if not any(marker in command_lower for marker in final_validation_markers):
-        return 0.0
-    return WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS
+    run_id = (
+        next_action.get("long_command_run_id")
+        or long_build_state.get("latest_long_command_run_id")
+        or ""
+    )
+    return {
+        "type": "run_command",
+        "command": f"sleep {int(max(1.0, min(poll_seconds, 60.0)))}",
+        "cwd": cwd,
+        "timeout": round(float(poll_seconds), 3),
+        "reason": (
+            "oneshot converted wait into a managed long-command poll because "
+            "a nonterminal long command is still active"
+        ),
+        "synthetic_long_command_poll": True,
+        "origin_action": "wait",
+        "latest_long_command_run_id": run_id,
+    }
 
 
 def apply_work_tool_wall_timeout_ceiling(
@@ -6208,9 +6690,15 @@ def apply_work_tool_wall_timeout_ceiling(
     max_wall_seconds,
     run_started_at,
     recovery_reserve_seconds=0.0,
+    long_command_budget_policy=None,
 ):
     if action_type not in {"run_command", "run_tests"} or max_wall_seconds is None:
         return {}
+    long_command_budget_policy = (
+        dict(long_command_budget_policy)
+        if isinstance(long_command_budget_policy, dict) and long_command_budget_policy.get("applies")
+        else {}
+    )
     elapsed = time.monotonic() - run_started_at
     remaining = max_wall_seconds - elapsed
     reserve_seconds = max(
@@ -6224,6 +6712,43 @@ def apply_work_tool_wall_timeout_ceiling(
         "available_tool_timeout_seconds": round(max(0.0, available), 3),
         "reserve_seconds": reserve_seconds,
     }
+    requested_timeout = _positive_float_or_none(parameters.get("timeout"))
+    effective_timeout = requested_timeout or WORK_DEFAULT_TOOL_TIMEOUT_SECONDS
+    if long_command_budget_policy:
+        requested_yield_after = long_command_budget_policy.get("yield_after_seconds")
+        yield_after = (
+            long_command_yield_after_seconds(effective_timeout, requested_yield_after_seconds=int(requested_yield_after))
+            if requested_yield_after is not None
+            else long_command_yield_after_seconds(effective_timeout)
+        )
+        long_command_budget = {
+            "action_kind": long_command_budget_policy.get("action_kind") or "start_long_command",
+            "stage": long_command_budget_policy.get("stage") or "",
+            "requested_timeout_seconds": requested_timeout,
+            "effective_timeout_seconds": effective_timeout,
+            "yield_after_seconds": yield_after,
+            "yield_eligible": yield_after is not None,
+            "latest_long_command_run_id": long_command_budget_policy.get("latest_long_command_run_id"),
+            "latest_long_command_status": long_command_budget_policy.get("latest_long_command_status"),
+            "latest_effective_timeout_seconds": long_command_budget_policy.get("latest_effective_timeout_seconds"),
+            "minimum_timeout_seconds": long_command_budget_policy.get("minimum_timeout_seconds"),
+            "diagnostic_budget": bool(long_command_budget_policy.get("diagnostic_budget")),
+        }
+        parameters["long_command_budget"] = {
+            key: value for key, value in long_command_budget.items() if value not in (None, "")
+        }
+        ceiling["long_command_budget"] = parameters["long_command_budget"]
+        budget_blocked_reason = str(long_command_budget_policy.get("budget_blocked_reason") or "")
+        if budget_blocked_reason:
+            ceiling.update(
+                {
+                    "blocked": True,
+                    "reason": budget_blocked_reason,
+                    "stop_reason": "long_command_budget_blocked",
+                }
+            )
+            parameters["wall_timeout_ceiling"] = ceiling
+            return ceiling
     if available < WORK_WALL_MIN_TOOL_TIMEOUT_SECONDS:
         ceiling.update(
             {
@@ -6231,10 +6756,12 @@ def apply_work_tool_wall_timeout_ceiling(
                 "reason": "not enough wall-clock budget remains for a bounded tool call",
             }
         )
+        if long_command_budget_policy:
+            ceiling["reason"] = "not enough wall-clock budget remains for a long-command continuation action"
+            ceiling["stop_reason"] = "long_command_budget_blocked"
+        parameters["wall_timeout_ceiling"] = ceiling
         return ceiling
 
-    requested_timeout = _positive_float_or_none(parameters.get("timeout"))
-    effective_timeout = requested_timeout or WORK_DEFAULT_TOOL_TIMEOUT_SECONDS
     if effective_timeout <= available:
         return {}
 
@@ -6249,6 +6776,78 @@ def apply_work_tool_wall_timeout_ceiling(
             "reason": "tool timeout capped to fit remaining wall-clock budget",
         }
     )
+    if long_command_budget_policy:
+        requested_yield_after = long_command_budget_policy.get("yield_after_seconds")
+        adjusted_yield_after = (
+            long_command_yield_after_seconds(parameters["timeout"], requested_yield_after_seconds=int(requested_yield_after))
+            if requested_yield_after is not None
+            else long_command_yield_after_seconds(parameters["timeout"])
+        )
+        parameters["long_command_budget"]["effective_timeout_seconds"] = parameters["timeout"]
+        parameters["long_command_budget"]["yield_after_seconds"] = adjusted_yield_after
+        parameters["long_command_budget"]["yield_eligible"] = adjusted_yield_after is not None
+        ceiling["long_command_budget"] = dict(parameters["long_command_budget"])
+        action_kind = str(parameters["long_command_budget"].get("action_kind") or "")
+        minimum_timeout = _positive_float_or_none(parameters["long_command_budget"].get("minimum_timeout_seconds"))
+        latest_effective_timeout = _positive_float_or_none(
+            parameters["long_command_budget"].get("latest_effective_timeout_seconds")
+        )
+        diagnostic_budget = bool(parameters["long_command_budget"].get("diagnostic_budget"))
+        if action_kind == "poll_long_command" and minimum_timeout is not None and parameters["timeout"] < minimum_timeout:
+            ceiling.update(
+                {
+                    "blocked": True,
+                    "reason": "poll timeout is below minimum_poll_seconds",
+                    "stop_reason": "long_command_budget_blocked",
+                }
+            )
+            parameters["wall_timeout_ceiling"] = ceiling
+            return ceiling
+        if action_kind == "recover_long_command" and minimum_timeout is not None and parameters["timeout"] < minimum_timeout:
+            ceiling.update(
+                {
+                    "blocked": True,
+                    "reason": "repair timeout is below minimum_repair_seconds",
+                    "stop_reason": "long_command_budget_blocked",
+                }
+            )
+            parameters["wall_timeout_ceiling"] = ceiling
+            return ceiling
+        if action_kind == "resume_idempotent_long_command" and (
+            (minimum_timeout is not None and parameters["timeout"] < minimum_timeout)
+            or (
+                latest_effective_timeout is not None
+                and parameters["timeout"] <= latest_effective_timeout
+                and not diagnostic_budget
+            )
+        ):
+            reason = (
+                "resume timeout is below minimum_resume_seconds"
+                if minimum_timeout is not None and parameters["timeout"] < minimum_timeout
+                else "repeat_same_timeout_without_budget_change"
+            )
+            ceiling.update(
+                {
+                    "blocked": True,
+                    "reason": reason,
+                    "stop_reason": "long_command_budget_blocked",
+                }
+            )
+            parameters["wall_timeout_ceiling"] = ceiling
+            return ceiling
+        if (
+            action_kind in {"start_long_command", "resume_idempotent_long_command"}
+            and adjusted_yield_after is None
+        ):
+            ceiling.update(
+                {
+                    "blocked": True,
+                    "reason": "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
+                    "stop_reason": "long_command_budget_blocked",
+                }
+            )
+            parameters["wall_timeout_ceiling"] = ceiling
+            return ceiling
     parameters["wall_timeout_ceiling"] = ceiling
     return ceiling
 
@@ -6832,6 +7431,26 @@ def cmd_work_ai(args):
                     include_stream_preview=not (getattr(effective_args, "compact_live", False) and live_model_delta_seen),
                 )
             )
+        if action_type == "wait":
+            with state_lock():
+                state = load_state()
+                session = find_work_session(state, session_id)
+                task = work_session_task(state, session) or find_task(state, task_id)
+                poll_action = _work_oneshot_long_command_poll_action(
+                    action,
+                    effective_args,
+                    session=session,
+                    task=task,
+                    state=state,
+                )
+            if poll_action:
+                action = poll_action
+                action_type = "run_command"
+                if progress:
+                    progress(
+                        f"step #{index}: converted wait to long-command poll "
+                        f"{poll_action.get('latest_long_command_run_id') or ''}".strip()
+                    )
         if action_type == "batch":
             if getattr(args, "live", False) and not getattr(args, "follow", False):
                 print("")
@@ -7323,17 +7942,19 @@ def cmd_work_ai(args):
                 continue
             report["stop_reason"] = "paired_test_steer"
             break
+        long_command_budget_policy = work_tool_long_command_budget_policy(
+            action_type,
+            parameters,
+            task=task,
+            session=session,
+        )
         wall_tool_timeout = apply_work_tool_wall_timeout_ceiling(
             action_type,
             parameters,
             max_wall_seconds=max_wall_seconds,
             run_started_at=run_started_at,
-            recovery_reserve_seconds=work_tool_recovery_reserve_seconds(
-                action_type,
-                parameters,
-                task=task,
-                session=session,
-            ),
+            recovery_reserve_seconds=long_command_budget_policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=long_command_budget_policy,
         )
         if wall_tool_timeout.get("blocked"):
             reason = wall_tool_timeout.get("reason") or "not enough wall-clock budget remains for a tool call"
@@ -7370,7 +7991,7 @@ def cmd_work_ai(args):
                 "wall_timeout": wall_tool_timeout,
             }
             report["steps"].append(step)
-            report["stop_reason"] = "wall_timeout"
+            report["stop_reason"] = wall_tool_timeout.get("stop_reason") or "wall_timeout"
             if getattr(args, "live", False):
                 with state_lock():
                     state = load_state()
@@ -7472,6 +8093,8 @@ def cmd_work_ai(args):
                     )
             turn_id = turn.get("id")
             tool_call_id = tool_call.get("id") if tool_call else None
+            if tool_call and not broad_read_guard and not repeat_guard:
+                parameters = dict(tool_call.get("parameters") or parameters)
             save_state(state)
         guard_error = ""
         if broad_read_guard:
@@ -7832,6 +8455,32 @@ def cmd_work_ai(args):
             report["stop_reason"] = "tool_failed"
             break
 
+    if report.get("stop_reason") == "max_steps" and (
+        getattr(effective_args, "oneshot_mode", False) or getattr(effective_args, "oneshot_report_path", "")
+    ):
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            task = work_session_task(state, session) or find_task(state, task_id)
+            poll_action = _work_oneshot_long_command_poll_action(
+                {"type": "wait", "reason": "max steps reached while checking long-command state"},
+                effective_args,
+                session=session,
+                task=task,
+                state=state,
+            )
+        if poll_action:
+            report["stop_reason"] = "long_command_incomplete"
+            report["long_command_incomplete"] = {
+                "reason": "max_steps reached while a managed long command was still nonterminal",
+                "latest_long_command_run_id": poll_action.get("latest_long_command_run_id") or "",
+                "suggested_next_action": {
+                    key: value
+                    for key, value in poll_action.items()
+                    if key in {"type", "command", "cwd", "timeout", "latest_long_command_run_id"}
+                },
+            }
+
     should_note_max_steps = (
         report.get("stop_reason") == "max_steps"
         and getattr(args, "live", False)
@@ -7863,6 +8512,8 @@ def cmd_work_ai(args):
         "tool_failed",
         "no_active_session",
         "work_already_running",
+        "long_command_incomplete",
+        "long_command_budget_blocked",
         "wall_timeout",
     ) else 1
 
@@ -8417,6 +9068,7 @@ def _apply_work_approval(args, approve_tool_id):
         source_call["approved_at"] = now_iso()
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
+        parameters = dict(tool_call.get("parameters") or parameters)
         save_state(state)
     if progress:
         progress(f"approval #{approve_tool_id} -> tool #{tool_call_id} start")
@@ -10054,6 +10706,44 @@ def _work_follow_status_latest_model_failure(snapshot_turns, session_turns, pref
     return chosen
 
 
+def _work_follow_status_compact_compatibility_frontier(resume):
+    resume = resume if isinstance(resume, dict) else {}
+    frontier = project_active_compatibility_frontier(
+        resume.get("active_compatibility_frontier"),
+        anchor_limit=0,
+        candidate_limit=4,
+        history_limit=0,
+    )
+    if not frontier:
+        return {}
+    closure = frontier.get("closure_state") if isinstance(frontier.get("closure_state"), dict) else {}
+    summary = frontier.get("compact_summary") if isinstance(frontier.get("compact_summary"), dict) else {}
+    open_candidates = []
+    for candidate in list(frontier.get("open_candidates") or [])[:4]:
+        if not isinstance(candidate, dict):
+            continue
+        open_candidates.append(
+            {
+                key: clip_inline_text(str(candidate.get(key) or ""), 120)
+                for key in ("id", "kind", "subject", "path", "status")
+                if candidate.get(key) not in (None, "", [], {})
+            }
+        )
+    compact = {
+        "id": frontier.get("id"),
+        "status": frontier.get("status"),
+        "compact_summary": summary,
+        "evidence_refs": list(frontier.get("evidence_refs") or [])[:6],
+        "open_candidates": open_candidates,
+        "closure_state": {
+            key: closure.get(key)
+            for key in ("state", "evidence_strength", "guard_mode", "open_candidate_count", "next_action")
+            if closure.get(key) not in (None, "", [], {})
+        },
+    }
+    return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+
 def _work_follow_status_from_snapshot(path, task_id=None, session=None, state=None):
     overdue_grace_seconds = 10.0
     checkpoint = compact_context_checkpoint(latest_context_checkpoint())
@@ -10151,6 +10841,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None, state=No
     if use_session_overlay and not active_work_todo:
         active_work_todo = (session or {}).get("active_work_todo") or {}
     recovery_plan = (effective_resume or {}).get("recovery_plan") or {}
+    active_compatibility_frontier = _work_follow_status_compact_compatibility_frontier(effective_resume)
     pending_approvals = (effective_resume or {}).get("pending_approvals") or []
     blocker_code = str((active_work_todo.get("blocker") or {}).get("code") or "")
     next_recovery_action = _work_follow_status_next_recovery_action(active_work_todo, recovery_plan)
@@ -10198,6 +10889,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None, state=No
         "verification_confidence": effective_resume.get("verification_confidence") or {},
         "continuity": effective_resume.get("continuity") or resume.get("continuity") or data.get("continuity") or {},
         "active_work_todo": active_work_todo,
+        "active_compatibility_frontier": active_compatibility_frontier,
         "blocker_code": blocker_code,
         "next_recovery_action": next_recovery_action,
         "stop_reason": data.get("stop_reason"),
@@ -10328,6 +11020,21 @@ def format_work_follow_status(data):
         lines.append(
             f"active_work_todo: id={todo.get('id') or '-'} status={todo.get('status') or '-'}{attempts_text}"
         )
+    if data.get("active_compatibility_frontier"):
+        frontier = data.get("active_compatibility_frontier") or {}
+        closure = frontier.get("closure_state") or {}
+        summary = frontier.get("compact_summary") or {}
+        lines.append(
+            "active_compatibility_frontier: "
+            f"id={frontier.get('id') or '-'} "
+            f"status={frontier.get('status') or '-'} "
+            f"state={closure.get('state') or '-'} "
+            f"open_candidates={closure.get('open_candidate_count', len(frontier.get('open_candidates') or []))}"
+        )
+        if summary.get("one_line"):
+            lines.append(f"compatibility_frontier_summary: {summary.get('one_line')}")
+        if closure.get("next_action") or summary.get("next_action"):
+            lines.append(f"compatibility_frontier_next: {closure.get('next_action') or summary.get('next_action')}")
     if data.get("next_recovery_action"):
         lines.append(f"next_recovery_action: {data.get('next_recovery_action')}")
     _append_work_follow_status_checkpoint_lines(lines, data)
@@ -11367,6 +12074,7 @@ def _work_recover_session_once(args, progress=None, safe_only=False):
         tool_call = start_work_tool_call(state, session, recovery_tool, parameters)
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
+        parameters = dict(tool_call.get("parameters") or parameters)
         save_state(state)
 
     recovery_action = (
@@ -11725,6 +12433,7 @@ def cmd_work_tool(args):
             tool_call["review_probe"] = True
         session_id = session.get("id")
         tool_call_id = tool_call.get("id")
+        parameters = dict(tool_call.get("parameters") or parameters)
         save_state(state)
     if progress:
         progress(f"tool #{tool_call_id} {args.tool} start")
@@ -14140,6 +14849,36 @@ def cmd_dogfood(args):
     if report_path:
         print(f"report_path: {report_path}")
     return 0
+
+
+def cmd_replay(args):
+    replay_action = getattr(args, "replay_action", None)
+    if replay_action != "terminal-bench":
+        print(f"mew: unknown replay action: {replay_action}", file=sys.stderr)
+        return 1
+    assertions = {
+        "long_build_status": getattr(args, "assert_long_build_status", None) or "",
+        "current_failure": getattr(args, "assert_current_failure", None) or "",
+        "recovery_action": getattr(args, "assert_recovery_action", None) or "",
+        "blockers": list(getattr(args, "assert_blocker", None) or []),
+        "next_action_contains": getattr(args, "assert_next_action_contains", None) or "",
+    }
+    if getattr(args, "assert_mew_exit_code", None) is not None:
+        assertions["mew_exit_code"] = args.assert_mew_exit_code
+    if getattr(args, "assert_external_reward", None) is not None:
+        assertions["external_reward"] = args.assert_external_reward
+    report = replay_terminal_bench_job(
+        args.job_dir,
+        task=getattr(args, "task", None),
+        trial=getattr(args, "trial", None),
+        assertions=assertions,
+    )
+    if getattr(args, "json", False):
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_terminal_bench_replay(report))
+    return 0 if report.get("status") == "pass" else 1
+
 
 def cmd_proof_summary(args):
     if getattr(args, "m6_12_report", False) and getattr(args, "m6_11_phase2_calibration", False):

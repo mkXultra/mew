@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import re
 import shlex
+import time
 
 from .acceptance import (
     coerce_acceptance_checks,
@@ -11,8 +12,9 @@ from .acceptance import (
     is_long_dependency_toolchain_build_task,
     long_dependency_final_artifacts,
 )
-from .acceptance_evidence import long_dependency_artifact_proven_by_call
+from .acceptance_evidence import COMMAND_EVIDENCE_TOOLS, long_dependency_artifact_proven_by_call
 from .cli_command import mew_command, mew_executable
+from .compatibility_frontier import project_active_compatibility_frontier, update_session_active_compatibility_frontier
 from .data_tools import analyze_table
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
@@ -25,6 +27,20 @@ from .read_tools import (
     summarize_read_result,
 )
 from .image_tools import read_image_with_model, read_images_with_model
+from .long_build_substrate import (
+    build_command_run,
+    build_attempts_from_command_evidence,
+    build_long_build_contract,
+    build_long_command_run,
+    command_run_id,
+    command_evidence_to_tool_call,
+    command_evidence_from_tool_call,
+    execution_contract_is_valid,
+    migrate_command_evidence_fixture_contracts,
+    normalize_execution_contract,
+    reduce_long_build_state,
+    synthesize_command_evidence_from_tool_calls,
+)
 from .state import next_id
 from .tasks import clip_output, find_task, normalize_task_scope, task_scope, task_scope_target_paths
 from .test_discovery import convention_test_path_for_mew_source, discover_tests_for_source
@@ -32,6 +48,7 @@ from .timeutil import now_iso, parse_time
 from .toolbox import (
     format_command_record,
     is_resident_mew_loop_command,
+    ManagedCommandRunner,
     run_command_record,
     run_command_record_streaming,
     run_git_tool,
@@ -57,6 +74,10 @@ WORK_EXECUTOR_LIFECYCLE_STATES = {"queued", "executing", "completed", "cancelled
 WORK_SESSION_TODO_STATUSES = {"todo", "in_progress", "blocked", "done", "dropped"}
 WORK_SESSION_TODO_OPEN_STATUSES = {"todo", "in_progress", "blocked"}
 WORK_SESSION_TODO_MAX_ITEMS = 10
+WORK_COMMAND_FOREGROUND_BUDGET_SECONDS = 15.0
+WORK_COMMAND_MAX_FOREGROUND_BUDGET_SECONDS = 30.0
+WORK_COMMAND_OUTPUT_ROOT = (Path.cwd() / ".mew").resolve(strict=False)
+_WORK_MANAGED_COMMAND_RUNNER = ManagedCommandRunner(max_active=4)
 WORK_TODO_STATUSES = {
     "queued",
     "drafting",
@@ -251,6 +272,9 @@ WORK_TOOLS = {
     "glob",
     "run_command",
     "run_tests",
+    "poll_command",
+    "cancel_command",
+    "read_command_output",
     "git_status",
     "git_diff",
     "git_log",
@@ -265,7 +289,8 @@ APPROVAL_WAIT_RE = re.compile(
 )
 READ_ONLY_WORK_TOOLS = {"analyze_table", "inspect_dir", "read_file", "read_image", "read_images", "search_text", "glob"}
 GIT_WORK_TOOLS = {"git_status", "git_diff", "git_log"}
-COMMAND_WORK_TOOLS = {"run_command", "run_tests"} | GIT_WORK_TOOLS
+MANAGED_COMMAND_WORK_TOOLS = {"run_command", "run_tests", "poll_command", "cancel_command"}
+COMMAND_WORK_TOOLS = MANAGED_COMMAND_WORK_TOOLS | GIT_WORK_TOOLS
 WRITE_WORK_TOOLS = {"write_file", "edit_file", "edit_file_hunks"}
 SHELL_CHAIN_OPERATORS = {"&&", "||", ";", "|", "&"}
 RESIDENT_MEW_LOOP_TEXT_RE = re.compile(
@@ -2000,6 +2025,7 @@ def mark_work_tool_call_interrupted(session, tool_call_id, current_time=None):
     call["error"] = call.get("error") or "Interrupted before the work tool completed."
     call["summary"] = call.get("summary") or "interrupted work tool call"
     call["recovery_hint"] = recovery_hint
+    _record_command_evidence_finish(session, call)
     session["updated_at"] = current_time
     return [
         {
@@ -2043,6 +2069,7 @@ def start_work_tool_call(state, session, tool, parameters):
     if write_intent_error:
         tool_call["write_intent_error"] = write_intent_error
     session.setdefault("tool_calls", []).append(tool_call)
+    _record_command_evidence_start(session, tool_call)
     session["last_tool_call_id"] = tool_call["id"]
     session["updated_at"] = current_time
     return tool_call
@@ -2193,6 +2220,265 @@ def finish_work_model_turn(state, session_id, turn_id, tool_call_id=None, error=
     if session:
         session["updated_at"] = finished_at
     return turn
+
+
+def _managed_long_command_budget(parameters):
+    budget = (parameters or {}).get("long_command_budget")
+    if not isinstance(budget, dict):
+        return {}
+    action_kind = str(budget.get("action_kind") or "")
+    if action_kind not in {
+        "start_long_command",
+        "resume_idempotent_long_command",
+        "poll_long_command",
+        "recover_long_command",
+    }:
+        return {}
+    return dict(budget)
+
+
+def _float_or_default(value, default):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _managed_long_command_status(result):
+    status = str((result or {}).get("status") or "").casefold()
+    if status in {"running", "yielded", "completed", "failed", "timed_out", "killed", "interrupted", "orphaned"}:
+        return status
+    if (result or {}).get("timed_out"):
+        return "timed_out"
+    if (result or {}).get("exit_code") is None:
+        return "running"
+    return "completed" if (result or {}).get("exit_code") == 0 else "failed"
+
+
+def _with_managed_long_command_metadata(result, *, budget, action_kind):
+    result = dict(result or {})
+    status = _managed_long_command_status(result)
+    meta = {
+        "action_kind": action_kind,
+        "status": status,
+        "stage": budget.get("stage") or "",
+        "latest_long_command_run_id": budget.get("latest_long_command_run_id"),
+        "latest_long_command_status": budget.get("latest_long_command_status"),
+        "command_run_id": result.get("command_run_id"),
+        "output_ref": result.get("output_ref"),
+        "output_path": result.get("output_path"),
+        "pid": result.get("pid"),
+        "process_group_id": result.get("process_group_id"),
+    }
+    result["managed_long_command"] = {key: value for key, value in meta.items() if value not in (None, "")}
+    if budget:
+        result["long_command_budget"] = dict(budget)
+    return result
+
+
+def _command_run_output_ref_from_id(command_run_id_value):
+    text = str(command_run_id_value or "")
+    match = re.match(r"^work_session:([^:]+):command_run:([^:]+)$", text)
+    if match:
+        session_id, ordinal = match.groups()
+        return f"work-session/{session_id}/command/{ordinal}/output.log"
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or "unknown"
+    return f"work-session/unknown/command/{safe}/output.log"
+
+
+def _command_run_output_path_from_ref(output_ref):
+    ref = str(output_ref or "").strip()
+    if not ref:
+        return ""
+    return str((WORK_COMMAND_OUTPUT_ROOT / ref).resolve(strict=False))
+
+
+def _command_output_ref_is_stream_alias(output_ref):
+    return str(output_ref or "").strip().casefold() in {
+        "combined",
+        "full",
+        "output",
+        "stderr",
+        "stdout",
+        "tail",
+    }
+
+
+def _validated_command_output_path(output_path):
+    output_text = str(output_path or "").strip()
+    if not output_text:
+        return ""
+    path = Path(output_text).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve(strict=False)
+    else:
+        path = path.resolve(strict=False)
+    spool_root = (WORK_COMMAND_OUTPUT_ROOT / "work-session").resolve(strict=False)
+    try:
+        path.relative_to(spool_root)
+    except ValueError as exc:
+        raise ValueError("managed command output must stay under .mew/work-session") from exc
+    return str(path)
+
+
+def _managed_command_foreground_budget(parameters, effective_timeout):
+    parameters = parameters or {}
+    explicit = parameters.get("foreground_budget_seconds")
+    if explicit is None:
+        continuation = parameters.get("execution_contract") if isinstance(parameters.get("execution_contract"), dict) else {}
+        continuation_policy = (
+            continuation.get("continuation_policy") if isinstance(continuation.get("continuation_policy"), dict) else {}
+        )
+        background_policy = (
+            continuation.get("background_policy") if isinstance(continuation.get("background_policy"), dict) else {}
+        )
+        explicit = (
+            continuation_policy.get("yield_after_seconds")
+            or background_policy.get("foreground_budget_seconds")
+            or WORK_COMMAND_FOREGROUND_BUDGET_SECONDS
+        )
+    timeout_value = _float_or_default(effective_timeout, 300.0)
+    budget = _float_or_default(explicit, WORK_COMMAND_FOREGROUND_BUDGET_SECONDS)
+    budget = min(WORK_COMMAND_MAX_FOREGROUND_BUDGET_SECONDS, max(1.0, budget))
+    if budget >= timeout_value:
+        budget = max(0.0, timeout_value - 1.0)
+    return budget
+
+
+def _managed_runner_start(command, *, cwd, timeout, on_output, use_shell, command_run_id_value, output_ref, output_path):
+    try:
+        return _WORK_MANAGED_COMMAND_RUNNER.start(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            on_output=on_output,
+            use_shell=use_shell,
+            kill_process_group=True,
+            command_run_id=command_run_id_value,
+            output_ref=output_ref,
+            output_path=output_path,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _WORK_MANAGED_COMMAND_RUNNER.start(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            on_output=on_output,
+            use_shell=use_shell,
+            kill_process_group=True,
+        )
+
+
+def _managed_runner_poll(*, wait_seconds, command_run_id_value):
+    try:
+        return _WORK_MANAGED_COMMAND_RUNNER.poll(wait_seconds=wait_seconds, command_run_id=command_run_id_value)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _WORK_MANAGED_COMMAND_RUNNER.poll(wait_seconds=wait_seconds)
+
+
+def _managed_runner_cancel(*, reason, command_run_id_value):
+    try:
+        return _WORK_MANAGED_COMMAND_RUNNER.cancel(reason=reason, command_run_id=command_run_id_value)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return _WORK_MANAGED_COMMAND_RUNNER.cancel(reason)
+
+
+def _run_managed_command_for_work(command, cwd=".", timeout=300, on_output=None, use_shell=False, parameters=None):
+    parameters = dict(parameters or {})
+    budget = _managed_long_command_budget(parameters or {})
+    action_kind = str(budget.get("action_kind") or parameters.get("action_kind") or "start_command")
+    command_run_id_value = str(parameters.get("command_run_id") or "")
+    if not command_run_id_value and action_kind not in {"poll_long_command", "poll_command", "cancel_command", "cancel_long_command"}:
+        digest = hashlib.sha256(f"{now_iso()}:{time.monotonic_ns()}:{cwd}:{command}".encode("utf-8")).hexdigest()[:12]
+        command_run_id_value = f"adhoc:{digest}"
+        parameters["command_run_id"] = command_run_id_value
+    output_ref = str(parameters.get("output_ref") or _command_run_output_ref_from_id(command_run_id_value))
+    output_path = _validated_command_output_path(
+        parameters.get("output_path") or _command_run_output_path_from_ref(output_ref)
+    )
+    if action_kind in {"poll_long_command", "poll_command"}:
+        wait_seconds = _float_or_default(parameters.get("wait_seconds"), _float_or_default(timeout, 5.0))
+        try:
+            result = _managed_runner_poll(wait_seconds=wait_seconds, command_run_id_value=command_run_id_value)
+        except RuntimeError as exc:
+            result = {
+                "command": command,
+                "cwd": cwd,
+                "status": "orphaned",
+                "exit_code": None,
+                "timed_out": False,
+                "stdout": "",
+                "stderr": str(exc),
+            }
+        return _with_managed_long_command_metadata(result, budget=budget, action_kind=action_kind)
+    if action_kind in {"cancel_command", "cancel_long_command"}:
+        result = _managed_runner_cancel(
+            reason=parameters.get("reason") or "cancelled",
+            command_run_id_value=command_run_id_value,
+        )
+        return _with_managed_long_command_metadata(result, budget=budget, action_kind=action_kind)
+
+    effective_timeout = _float_or_default(budget.get("effective_timeout_seconds"), _float_or_default(timeout, 300.0))
+    yield_after = _float_or_default(
+        budget.get("yield_after_seconds"),
+        _managed_command_foreground_budget(parameters, effective_timeout),
+    )
+    command_started = False
+    try:
+        _managed_runner_start(
+            command,
+            cwd=cwd,
+            timeout=effective_timeout,
+            on_output=on_output,
+            use_shell=use_shell,
+            command_run_id_value=command_run_id_value,
+            output_ref=output_ref,
+            output_path=output_path,
+        )
+        command_started = True
+        result = _managed_runner_poll(wait_seconds=yield_after, command_run_id_value=command_run_id_value)
+        if result.get("status") == "running" and not budget:
+            result["status"] = "yielded"
+    except (RuntimeError, ValueError, OSError) as exc:
+        if command_started:
+            try:
+                _managed_runner_cancel(
+                    reason="managed command failed during foreground poll",
+                    command_run_id_value=command_run_id_value,
+                )
+            except (RuntimeError, ValueError, OSError):
+                pass
+        missing_executable = isinstance(exc, FileNotFoundError)
+        executable = ""
+        try:
+            executable = shlex.split(command or "")[0]
+        except (ValueError, IndexError):
+            executable = str(command or "").split(" ", 1)[0]
+        stderr = f"executable not found: {executable}" if missing_executable and executable else str(exc)
+        result = {
+            "command": command,
+            "cwd": cwd,
+            "status": "failed",
+            "exit_code": None,
+            "timed_out": False,
+            "stdout": "",
+            "stderr": stderr,
+        }
+        if missing_executable:
+            result["error_type"] = "executable_not_found"
+    result.setdefault("command_run_id", command_run_id_value)
+    result.setdefault("output_ref", output_ref)
+    result.setdefault("output_path", output_path)
+    result.setdefault("foreground_budget_seconds", yield_after)
+    result.setdefault("command_timeout_seconds", effective_timeout)
+    return _with_managed_long_command_metadata(result, budget=budget, action_kind=action_kind)
 
 
 def run_command_for_work(command, cwd=".", timeout=300, on_output=None, use_shell=False):
@@ -2379,6 +2665,37 @@ def command_has_shell_execution_surface(command):
     return bool(operator) or shell_interpreter_invocation(command)
 
 
+def normalize_and_validate_work_execution_contract(tool, parameters):
+    raw_contract = (parameters or {}).get("execution_contract")
+    if not isinstance(raw_contract, dict):
+        if isinstance(parameters, dict) and "execution_contract" in parameters:
+            raise ValueError("invalid execution_contract: expected object")
+        return {}
+    raw_background_policy = raw_contract.get("background_policy") if isinstance(raw_contract.get("background_policy"), dict) else {}
+    if tool == "run_tests" and (
+        bool(raw_background_policy.get("allow_background"))
+        or str(raw_background_policy.get("mode") or "") == "background_allowed"
+    ):
+        raise ValueError("run_tests execution_contract cannot allow background execution")
+    contract = normalize_execution_contract(
+        raw_contract,
+        tool=tool,
+        command=(parameters or {}).get("command") or "",
+        cwd=(parameters or {}).get("cwd") or "",
+    )
+    reason = str(contract.get("contract_invalid_reason") or "")
+    if reason:
+        raise ValueError(f"invalid execution_contract: {reason}")
+    background_policy = contract.get("background_policy") if isinstance(contract.get("background_policy"), dict) else {}
+    if tool == "run_tests" and (
+        bool(background_policy.get("allow_background"))
+        or str(background_policy.get("mode") or "") == "background_allowed"
+    ):
+        raise ValueError("run_tests execution_contract cannot allow background execution")
+    parameters["execution_contract"] = contract
+    return contract
+
+
 def _shell_resident_loop_scan_text(command):
     text = str(command or "").replace("\\", "").replace("'", "").replace('"', "")
     return re.sub(r"[^A-Za-z0-9_./-]+", " ", text)
@@ -2403,6 +2720,46 @@ def reject_resident_mew_loop_command(command, *, tool_name="run_command"):
         f"{tool_name} must not invoke resident mew loops such as mew do, mew chat, mew run, or mew work; "
         "use native work tools, finish, remember, or ask_user instead"
     )
+
+
+def read_work_command_output(parameters):
+    parameters = dict(parameters or {})
+    output_path = str(parameters.get("output_path") or "").strip()
+    if not output_path:
+        output_ref = str(parameters.get("output_ref") or "").strip()
+        if output_ref and parameters.get("command_run_id") and _command_output_ref_is_stream_alias(output_ref):
+            output_ref = _command_run_output_ref_from_id(parameters.get("command_run_id"))
+        if not output_ref and parameters.get("command_run_id"):
+            output_ref = _command_run_output_ref_from_id(parameters.get("command_run_id"))
+        output_path = _command_run_output_path_from_ref(output_ref)
+    if not output_path:
+        raise ValueError("read_command_output requires command_run_id, output_ref, or output_path")
+    try:
+        path = Path(_validated_command_output_path(output_path))
+    except ValueError as exc:
+        raise ValueError("read_command_output can only read managed command output under .mew/work-session") from exc
+    max_chars = int(parameters.get("max_chars") or DEFAULT_READ_MAX_CHARS)
+    offset = int(parameters.get("offset") or 0)
+    tail = bool(parameters.get("tail"))
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ValueError(f"command output is unavailable: {exc}") from exc
+    if tail and max_chars > 0:
+        sliced = text[-max_chars:]
+        offset = max(0, len(text) - len(sliced))
+    else:
+        sliced = text[max(0, offset) : max(0, offset) + max_chars] if max_chars > 0 else text[max(0, offset) :]
+    return {
+        "path": str(path),
+        "output_path": str(path),
+        "command_run_id": str(parameters.get("command_run_id") or ""),
+        "offset": offset,
+        "content": sliced,
+        "bytes": len(text.encode("utf-8")),
+        "chars": len(text),
+        "truncated": len(sliced) < len(text),
+    }
 
 
 def split_unquoted_shell_command_segments(command):
@@ -2432,6 +2789,28 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
     parameters = dict(parameters or {})
     if tool not in WORK_TOOLS:
         raise ValueError(f"unsupported work tool: {tool}")
+    if tool in {"poll_command", "cancel_command", "read_command_output"}:
+        allowed_lifecycle_parameters = {
+            "poll_command": {"command_run_id", "wait_seconds", "reason", "summary"},
+            "cancel_command": {"command_run_id", "reason", "summary"},
+            "read_command_output": {
+                "command_run_id",
+                "output_ref",
+                "output_path",
+                "max_chars",
+                "offset",
+                "tail",
+                "reason",
+                "summary",
+            },
+        }[tool]
+        disallowed = sorted(
+            key
+            for key in parameters
+            if key not in allowed_lifecycle_parameters and parameters.get(key) not in (None, "")
+        )
+        if disallowed:
+            raise ValueError(f"{tool} accepts lifecycle identity parameters only; disallowed: {', '.join(disallowed)}")
     requested_cwd = str(parameters.get("cwd") or "").strip()
     default_cwd_requested = requested_cwd in ("", ".")
     parameters, allowed_read_roots = _workspace_relative_work_parameters(
@@ -2443,6 +2822,31 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
         raise ValueError("work tool read access is disabled; pass --allow-read PATH")
     if tool in GIT_WORK_TOOLS and not allowed_read_roots:
         raise ValueError("git inspection is disabled; pass --allow-read PATH")
+
+    if tool == "read_command_output":
+        return read_work_command_output(parameters)
+    if tool == "poll_command":
+        command_run_id_value = str(parameters.get("command_run_id") or "")
+        if not command_run_id_value:
+            raise ValueError("poll_command requires command_run_id")
+        return _run_managed_command_for_work(
+            parameters.get("command") or "",
+            cwd=parameters.get("cwd") or ".",
+            timeout=parameters.get("timeout", 5),
+            on_output=on_output,
+            parameters={**parameters, "action_kind": "poll_command"},
+        )
+    if tool == "cancel_command":
+        command_run_id_value = str(parameters.get("command_run_id") or "")
+        if not command_run_id_value:
+            raise ValueError("cancel_command requires command_run_id")
+        return _run_managed_command_for_work(
+            parameters.get("command") or "",
+            cwd=parameters.get("cwd") or ".",
+            timeout=parameters.get("timeout", 5),
+            on_output=on_output,
+            parameters={**parameters, "action_kind": "cancel_command"},
+        )
 
     if tool == "inspect_dir":
         return inspect_dir(parameters.get("path") or ".", allowed_read_roots, limit=parameters.get("limit", 50))
@@ -2545,11 +2949,13 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
             parameters["normalized_pytest_file_invocation"] = True
             parameters["normalized_pytest_file_invocation_reason"] = normalize_reason
         reject_shell_control_tokens(command, tool_name="run_tests")
-        result = run_command_for_work(
+        normalize_and_validate_work_execution_contract(tool, parameters)
+        result = _run_managed_command_for_work(
             command,
             cwd=cwd,
             timeout=parameters.get("timeout", 300),
             on_output=on_output,
+            parameters=parameters,
         )
         if normalized_pytest_invocation:
             result["original_command"] = original_command
@@ -2562,13 +2968,15 @@ def execute_work_tool(tool, parameters, allowed_read_roots, on_output=None, mode
     if not command:
         raise ValueError("run_command command is empty")
     reject_resident_mew_loop_command(command, tool_name="run_command")
+    normalize_and_validate_work_execution_contract(tool, parameters)
     shell_operator, _shell_operator_kind = first_unquoted_shell_operator(command)
-    return run_command_for_work(
+    return _run_managed_command_for_work(
         command,
         cwd=parameters.get("cwd") or ".",
         timeout=parameters.get("timeout", 300),
         on_output=on_output,
         use_shell=bool(shell_operator),
+        parameters=parameters,
     )
 
 
@@ -2669,6 +3077,9 @@ def execute_work_write_tool(tool, parameters, on_output=None):
 
 def work_tool_result_error(tool, result):
     result = result or {}
+    managed = result.get("managed_long_command")
+    if isinstance(managed, dict) and str(managed.get("status") or "").casefold() in {"running", "yielded"}:
+        return ""
     if tool == "run_tests" and "exit_code" in result and result.get("exit_code") != 0:
         if result.get("exit_code") is None:
             return f"verification failed: {command_failure_reason(result)}"
@@ -2767,6 +3178,18 @@ def format_exit_code(value):
 
 
 def summarize_work_tool_result(tool, result):
+    if tool == "read_command_output":
+        result = result or {}
+        lines = [
+            f"path: {result.get('path') or result.get('output_path') or ''}",
+            f"chars: {result.get('chars')}",
+        ]
+        content = result.get("content") or ""
+        if content:
+            lines.extend(["content:", clip_tail(content, 2000)])
+        return "\n".join(lines)
+    if tool in {"poll_command", "cancel_command"}:
+        return format_command_record(result or {})
     if tool in READ_ONLY_WORK_TOOLS:
         return summarize_read_result(tool, result or {})
     if tool in WRITE_WORK_TOOLS:
@@ -3858,6 +4281,24 @@ def _runtime_artifact_call_text(call):
     return "\n".join(str(part) for part in parts if part)
 
 
+def _long_dependency_observed_output_text(call):
+    if not isinstance(call, dict):
+        return ""
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    running_output = call.get("running_output") if isinstance(call.get("running_output"), dict) else {}
+    stderr_lines = []
+    for line in str(result.get("stderr") or running_output.get("stderr") or "").splitlines():
+        if line.lstrip().startswith("+"):
+            continue
+        stderr_lines.append(line)
+    parts = [
+        result.get("stdout") or "",
+        running_output.get("stdout") or "",
+        "\n".join(stderr_lines),
+    ]
+    return "\n".join(str(part) for part in parts if part)
+
+
 def _runtime_fresh_run_context(text):
     text = str(text or "")
     lowered = text.casefold()
@@ -4123,24 +4564,41 @@ _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS = (
         ),
     ),
 )
-_LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS = (
-    "configure --help",
-    "./configure --help",
-    "--help |",
-    "-ignore",
-    "--ignore",
-    "compatib",
-    "override",
-    "allow-unsupported",
-)
 _LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE = re.compile(
     r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:-ignore|--ignore|allow-unsupported|override)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_CONFIGURE_EXTERNAL_ATTEMPT_RE = re.compile(
+    r"(?:"
+    r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:use[-_]external|external|prebuilt|system[-_])|"
+    r"(?:^|[\s;&|])(?:[A-Za-z0-9_]*(?:LIBRARY|LIB|PACKAGE|DEP)[A-Za-z0-9_]*\s*=\s*"
+    r"(?:external|system|prebuilt)\s+)+(?:\./)?configure\b"
+    r")",
     re.IGNORECASE,
 )
 _LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE = re.compile(
     r"(?:use[-_]external[-_][A-Za-z0-9_.+-]+|"
     r"(?:^|[\s;&|])(?:\./)?configure\b[^\n;&|]*(?:external|use[-_]external|system[-_]|prebuilt)|"
+    r"\b[A-Za-z0-9_]*(?:LIBRARY|LIB|PACKAGE|DEP)[A-Za-z0-9_]*\s*=\s*"
+    r"(?:local|bundled|vendored?)\s*#\s*(?:external|system|prebuilt)\b|"
     r"\b(?:external|system|prebuilt)\s+(?:dependency|dependencies|library|libraries|package|packages)\b)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_CONFIGURE_HELP_PROBE_RE = re.compile(
+    r"(?:^|[\s;&|()])(?:\./)?configure\b[^\n;&|]*(?:--help|-help)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_CONFIGURE_HELP_REDIRECT_RE = re.compile(
+    r"(?:^|[\s;&|()])(?:\./)?configure\b[^\n;&|]*(?:--help|-help)[^\n;&|]*>\s*(?P<path>[^\s;&|]+)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_HELP_FILTER_RE = re.compile(r"\b(?:grep|egrep|fgrep|rg|awk|sed)\b", re.IGNORECASE)
+_LONG_DEPENDENCY_EXTERNAL_BRANCH_HELP_TERM_RE = re.compile(
+    r"(?:use[-_]external|external|prebuilt|system[-_]?(?:dep|lib|package)?|libraries?|packages?)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_HELP_TERM_RE = re.compile(
+    r"(?:-ignore|--ignore|\bignore\b|ignore[-_ ]?(?:coq|version)|allow[-_ ]unsupported|compatib|override)",
     re.IGNORECASE,
 )
 _LONG_DEPENDENCY_PACKAGE_MANAGER_PREBUILT_RE = re.compile(
@@ -4158,6 +4616,31 @@ _LONG_DEPENDENCY_RETRIEVED_VERSIONED_SOURCE_TOOL_RE = re.compile(
     r"\bretrieved\s+[A-Za-z0-9][A-Za-z0-9_-]*\.\d+\.\d+",
     re.IGNORECASE,
 )
+_LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_MARKERS = (
+    "requires a version",
+    "unsupported",
+    "version mismatch",
+    "not found in the current environment",
+    "undefined reference",
+    "symbol not found",
+    "dependency incompat",
+    "api incompat",
+)
+_LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_RE = re.compile(
+    r"(?:cannot determine the location[^\n]*(?:api library|library)|\bunbound module\b)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_VENDORED_DEPENDENCY_PATH_PARTS = {
+    "deps",
+    "dependencies",
+    "external",
+    "flocq",
+    "menhir",
+    "third-party",
+    "third_party",
+    "vendor",
+    "vendored",
+}
 _LONG_DEPENDENCY_CUSTOM_RUNTIME_PATH_MARKERS = (
     "-stdlib",
     "${stdlib_args",
@@ -4200,6 +4683,24 @@ _LONG_DEPENDENCY_SOURCE_ARCHIVE_EVIDENCE_MARKERS = (
     "tarball identity",
     "source root",
     "source identity",
+)
+_LONG_DEPENDENCY_VCS_GENERATED_ARCHIVE_RE = re.compile(
+    r"(?:github\.com/[^\s'\"<>]+/archive/refs/(?:tags|heads)/|"
+    r"codeload\.github\.com/[^\s'\"<>]+/(?:tar|zip)|"
+    r"github\.com/[^\s'\"<>]+/(?:tarball|zipball)/|"
+    r"gitlab\.com/[^\s'\"<>]+/-/archive/|"
+    r"bitbucket\.org/[^\s'\"<>]+/get/)",
+    re.IGNORECASE,
+)
+_LONG_DEPENDENCY_AUTHORITATIVE_SOURCE_RE = re.compile(
+    r"(?:github\.com/[^\s'\"<>]+/releases/download/|"
+    r"\b(?:official|upstream|project)\s+(?:release|download|source|archive|tarball|distribution|docs?)\b|"
+    r"\b(?:release|distribution)\s+(?:archive|tarball|source)\b|"
+    r"\b(?:signed\s+)?(?:sha256|sha512|checksum|signature)\b|"
+    r"\b(?:release\s+notes?|download\s+page)\b|"
+    r"\b(?:apt\s+source|apt-cache\s+showsrc|dnf\s+download\s+--source|yumdownloader\s+--source|"
+    r"opam\s+source|pip\s+download|cargo\s+package)\b)",
+    re.IGNORECASE,
 )
 
 
@@ -4330,12 +4831,15 @@ def _long_dependency_untargeted_make_blocker(call, expected_artifacts):
         for artifact in expected_artifacts or []
         if Path(str(artifact or "")).name
     }
+    cwd = result.get("cwd") or parameters.get("cwd") or ""
     for invocation in _long_dependency_make_invocations(command):
         try:
             parts = shlex.split(invocation, posix=True) if invocation else []
         except ValueError:
             parts = invocation.split()
         if not parts or parts[0] != "make":
+            continue
+        if _long_dependency_make_invocation_is_runtime_library_continuation(parts, cwd):
             continue
         explicit_targets = _make_explicit_targets(parts)
         target_names = {Path(str(target or "")).name.casefold() for target in explicit_targets}
@@ -4359,10 +4863,114 @@ def _long_dependency_has_configure_override_attempt(call):
     return bool(_LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE.search(text))
 
 
+def _long_dependency_has_external_compatibility_branch_attempt(call):
+    if not isinstance(call, dict):
+        return False
+    command = _long_dependency_call_command_text(call)
+    return bool(_LONG_DEPENDENCY_CONFIGURE_EXTERNAL_ATTEMPT_RE.search(command))
+
+
 def _long_dependency_has_external_compatibility_branch_evidence(call):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return False
-    return bool(_LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE.search(_runtime_artifact_call_text(call)))
+    return bool(_LONG_DEPENDENCY_EXTERNAL_COMPATIBILITY_BRANCH_RE.search(_long_dependency_observed_output_text(call)))
+
+
+def _long_dependency_has_too_narrow_external_branch_help_probe(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    command = _long_dependency_call_command_text(call)
+    if not command or not _LONG_DEPENDENCY_CONFIGURE_HELP_PROBE_RE.search(command):
+        return False
+    if not _LONG_DEPENDENCY_HELP_FILTER_RE.search(command):
+        return False
+    if _LONG_DEPENDENCY_EXTERNAL_BRANCH_HELP_TERM_RE.search(command):
+        return False
+    if _long_dependency_has_external_compatibility_branch_evidence(call):
+        return False
+    return True
+
+
+def _long_dependency_has_compatibility_override_probe(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    command = _long_dependency_call_command_text(call)
+    observed = _long_dependency_observed_output_text(call)
+    if _LONG_DEPENDENCY_CONFIGURE_OVERRIDE_ATTEMPT_RE.search(command):
+        return True
+    if _LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_HELP_TERM_RE.search(observed):
+        return True
+    if not _LONG_DEPENDENCY_CONFIGURE_HELP_PROBE_RE.search(command):
+        return False
+    if not _LONG_DEPENDENCY_HELP_FILTER_RE.search(command):
+        return True
+    command_without_redirect_targets = re.sub(
+        r"(?:[0-9]*>{1,2}|[0-9]*>\||&>{1,2}|<)\s*(?:'[^']*'|\"[^\"]*\"|[^\s;&|]+)",
+        " ",
+        command,
+    )
+    return bool(_LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_HELP_TERM_RE.search(command_without_redirect_targets))
+
+
+def _long_dependency_configure_help_output_path(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return ""
+    command = _long_dependency_call_command_text(call)
+    if not command:
+        return ""
+    match = _LONG_DEPENDENCY_CONFIGURE_HELP_REDIRECT_RE.search(command)
+    if not match:
+        return ""
+    path = str(match.group("path") or "").strip()
+    return path.strip("'\"")
+
+
+def _long_dependency_filters_help_output_too_narrow(call, path):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    path = str(path or "").strip()
+    if not path:
+        return False
+    command = _long_dependency_call_command_text(call)
+    if path not in command:
+        return False
+    if not _LONG_DEPENDENCY_HELP_FILTER_RE.search(command):
+        return False
+    if _LONG_DEPENDENCY_EXTERNAL_BRANCH_HELP_TERM_RE.search(command):
+        return False
+    if _long_dependency_has_external_compatibility_branch_evidence(call):
+        return False
+    return True
+
+
+def _long_dependency_dependency_api_mismatch_seen(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    call_status = str(call.get("status") or "").casefold()
+    failed_or_error = (
+        call_status in {"failed", "interrupted"}
+        or result.get("timed_out")
+        or result.get("exit_code") not in (None, 0)
+        or bool(call.get("error") or result.get("error"))
+    )
+    if any(
+        blocker.get("code")
+        in {
+            "toolchain_version_constraint_mismatch",
+            "compatibility_override_probe_missing",
+            "version_pinned_source_toolchain_before_compatibility_override",
+        }
+        for blocker in _long_dependency_strategy_blockers(call)
+    ):
+        return True
+    if not failed_or_error:
+        return False
+    if any(marker in lowered for marker in _LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_MARKERS):
+        return True
+    return bool(_LONG_DEPENDENCY_DEPENDENCY_API_MISMATCH_RE.search(text))
 
 
 def _long_dependency_uses_prebuilt_package_manager_dependency(call):
@@ -4464,6 +5072,60 @@ def _long_dependency_source_version_grounding_blocker(call):
         "source_tool_call_id": call.get("id"),
         "tool": call.get("tool") or "",
         "excerpt": excerpt or clip_inline_text(command, 180),
+    }
+
+
+def _long_dependency_uses_vcs_generated_source_archive(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    return bool(_LONG_DEPENDENCY_VCS_GENERATED_ARCHIVE_RE.search(_runtime_artifact_call_text(call)))
+
+
+def _long_dependency_checks_authoritative_source_channel(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return False
+    text = _long_dependency_call_command_text(call)
+    if not text:
+        return False
+    return bool(_LONG_DEPENDENCY_AUTHORITATIVE_SOURCE_RE.search(text))
+
+
+def _long_dependency_source_provenance_blocker(calls, missing_artifacts, existing_blockers):
+    if not missing_artifacts:
+        return {}
+    vcs_archive_call = {}
+    authoritative_source_seen = False
+    compatibility_or_invasive_repair_seen = False
+    blocker_codes = {
+        str(blocker.get("code") or "")
+        for blocker in existing_blockers or []
+        if isinstance(blocker, dict)
+    }
+    if blocker_codes & {
+        "compatibility_override_probe_missing",
+        "toolchain_version_constraint_mismatch",
+        "version_pinned_source_toolchain_before_compatibility_override",
+        "source_archive_version_grounding_too_strict",
+    }:
+        compatibility_or_invasive_repair_seen = True
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if not vcs_archive_call and _long_dependency_uses_vcs_generated_source_archive(call):
+            vcs_archive_call = call
+        if _long_dependency_checks_authoritative_source_channel(call):
+            authoritative_source_seen = True
+        if _long_dependency_uses_version_pinned_source_toolchain(call):
+            compatibility_or_invasive_repair_seen = True
+    if not vcs_archive_call or authoritative_source_seen or not compatibility_or_invasive_repair_seen:
+        return {}
+    command = _long_dependency_call_command_text(vcs_archive_call) or _runtime_artifact_call_text(vcs_archive_call)
+    return {
+        "code": "external_dependency_source_provenance_unverified",
+        "layer": "source_acquisition_profile",
+        "source_tool_call_id": vcs_archive_call.get("id"),
+        "tool": vcs_archive_call.get("tool") or "",
+        "excerpt": clip_inline_text(command, 180),
     }
 
 
@@ -4700,6 +5362,57 @@ def _long_dependency_default_runtime_link_path_blocker(calls, expected_artifacts
     return custom_smoke
 
 
+def _long_dependency_default_runtime_link_failure_blocker(calls, expected_artifacts):
+    blocker = {}
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+            continue
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            blocker = {}
+            continue
+        if str(call.get("status") or "").casefold() != "completed":
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        if result.get("exit_code") in (None, 0):
+            continue
+        smoke_entries = [
+            entry for entry in _long_dependency_smoke_entries(call, expected_artifacts)
+            if not entry.get("custom_runtime_path")
+        ]
+        if not smoke_entries:
+            continue
+        text = _runtime_artifact_call_text(call)
+        lowered = text.casefold()
+        if not (
+            any(marker in lowered for marker in ("cannot find -l", "library not found"))
+            or re.search(r"\bunable to find (?:library )?-l", lowered)
+        ):
+            continue
+        if not any(marker in lowered for marker in ("ld:", "linker", "link failed", "link command failed")):
+            continue
+        excerpt = ""
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line_lower = line.casefold()
+            if (
+                "cannot find -l" in line_lower
+                or "library not found" in line_lower
+                or re.search(r"\bunable to find (?:library )?-l", line_lower)
+            ):
+                excerpt = clip_inline_text(line, 180)
+                break
+        blocker = {
+            "code": "default_runtime_link_path_failed",
+            "layer": "runtime_link_proof",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": excerpt or clip_inline_text(smoke_entries[-1].get("line") or text, 180),
+        }
+    return blocker
+
+
 def _long_dependency_runtime_install_missing_library_failure(call):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return {}
@@ -4736,6 +5449,63 @@ def _long_dependency_runtime_install_missing_library_failure(call):
     }
 
 
+def _long_dependency_runtime_library_subdir_target_failure(call):
+    if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
+        return {}
+    text = _runtime_artifact_call_text(call)
+    lowered = text.casefold()
+    if "no rule to make target" not in lowered:
+        return {}
+    if "runtime/" not in lowered and "runtime\\" not in lowered:
+        return {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("exit_code") in (None, 0):
+        return {}
+    command = _long_dependency_call_command_text(call)
+    make_invocations = _long_dependency_make_invocations(command)
+    if not make_invocations:
+        return {}
+    has_runtime_library_target = False
+    for invocation in make_invocations:
+        try:
+            parts = shlex.split(invocation, posix=True) if invocation else []
+        except ValueError:
+            parts = invocation.split()
+        for target in _make_explicit_targets(parts):
+            normalized = str(target or "").replace("\\", "/")
+            if "runtime/" in normalized and _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE.search(normalized):
+                has_runtime_library_target = True
+                break
+        if has_runtime_library_target:
+            break
+    if not has_runtime_library_target:
+        return {}
+    excerpt = ""
+    artifact_match = None
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line_lower = line.casefold()
+        if "no rule to make target" not in line_lower:
+            continue
+        line_artifact_match = _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE.search(line)
+        if line_artifact_match:
+            artifact_match = line_artifact_match
+            excerpt = clip_inline_text(line, 180)
+            break
+    if not artifact_match:
+        return {}
+    return {
+        "code": "runtime_library_subdir_target_path_invalid",
+        "layer": "runtime_link_proof",
+        "source_tool_call_id": call.get("id"),
+        "tool": call.get("tool") or "",
+        "excerpt": excerpt or clip_inline_text(command, 180),
+        "missing_runtime_library": artifact_match.group(0),
+    }
+
+
 def _long_dependency_make_runtime_directory(parts, cwd):
     cwd_name = Path(str(cwd or "")).name.casefold()
     if cwd_name == "runtime":
@@ -4756,6 +5526,28 @@ def _long_dependency_make_runtime_directory(parts, cwd):
                 return True
         index += 1
     return False
+
+
+def _long_dependency_make_invocation_is_runtime_library_continuation(parts, cwd):
+    if not parts or Path(str(parts[0] or "")).name.casefold() != "make":
+        return False
+    if not _long_dependency_make_runtime_directory(parts, cwd):
+        return False
+    targets = [str(target or "") for target in _make_explicit_targets(parts)]
+    if not targets:
+        return True
+    allowed_plain_targets = {"all", "install"}
+    for target in targets:
+        lowered = target.casefold()
+        if lowered in allowed_plain_targets:
+            continue
+        normalized = target.replace("\\", "/")
+        if "/" in normalized:
+            return False
+        if _LONG_DEPENDENCY_RUNTIME_LIBRARY_ARTIFACT_RE.fullmatch(normalized):
+            continue
+        return False
+    return True
 
 
 def _long_dependency_make_invocation_is_runtime_install_retry(invocation, cwd):
@@ -4841,6 +5633,25 @@ def _long_dependency_runtime_install_before_library_blocker(calls, expected_arti
     return blocker
 
 
+def _long_dependency_runtime_library_subdir_target_blocker(calls, expected_artifacts):
+    blocker = {}
+    missing_library = ""
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            return {}
+        if blocker and _long_dependency_runtime_library_or_install_proven_by_call(call, missing_library):
+            blocker = {}
+            missing_library = ""
+            continue
+        failure = _long_dependency_runtime_library_subdir_target_failure(call)
+        if failure:
+            blocker = failure
+            missing_library = str(failure.get("missing_runtime_library") or "")
+    return blocker
+
+
 def _long_dependency_build_call_timed_out(call):
     if not isinstance(call, dict) or call.get("tool") not in COMMAND_WORK_TOOLS:
         return False
@@ -4871,7 +5682,10 @@ def _long_dependency_compatibility_branch_budget_blocker(calls, missing_artifact
         if (
             prebuilt_dependency_call
             and external_branch_evidence_call
-            and _long_dependency_has_external_compatibility_branch_evidence(call)
+            and (
+                _long_dependency_has_external_compatibility_branch_evidence(call)
+                or _long_dependency_has_external_compatibility_branch_attempt(call)
+            )
             and _long_dependency_build_call_timed_out(call)
             and serial_probe_count >= 2
         ):
@@ -4891,6 +5705,213 @@ def _long_dependency_compatibility_branch_budget_blocker(calls, missing_artifact
             continue
         if _long_dependency_strategy_blockers(call):
             serial_probe_count += 1
+    return {}
+
+
+def _long_dependency_external_branch_help_probe_width_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    narrow_help_probe_call = {}
+    help_capture_call = {}
+    help_capture_path = ""
+    dependency_mismatch_seen = False
+    prebuilt_dependency_call = {}
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if (
+            not narrow_help_probe_call
+            and _long_dependency_has_too_narrow_external_branch_help_probe(call)
+        ):
+            narrow_help_probe_call = call
+        if not narrow_help_probe_call and not help_capture_call:
+            help_capture_path = _long_dependency_configure_help_output_path(call)
+            if help_capture_path:
+                help_capture_call = call
+        if (
+            not narrow_help_probe_call
+            and help_capture_call
+            and _long_dependency_filters_help_output_too_narrow(call, help_capture_path)
+        ):
+            narrow_help_probe_call = call
+        if narrow_help_probe_call and _long_dependency_dependency_api_mismatch_seen(call):
+            dependency_mismatch_seen = True
+        if not (
+            narrow_help_probe_call
+            and dependency_mismatch_seen
+            and _long_dependency_uses_version_pinned_source_toolchain(call)
+        ):
+            continue
+        command = _long_dependency_call_command_text(narrow_help_probe_call) or _runtime_artifact_call_text(
+            narrow_help_probe_call
+        )
+        return {
+            "code": "external_branch_help_probe_too_narrow_before_source_toolchain",
+            "layer": "profile_contract",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": clip_inline_text(command, 180),
+            "help_probe_tool_call_id": (help_capture_call or narrow_help_probe_call).get("id"),
+            "help_filter_tool_call_id": narrow_help_probe_call.get("id"),
+            "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id") if prebuilt_dependency_call else None,
+        }
+    return {}
+
+
+def _long_dependency_source_toolchain_before_external_branch_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    prebuilt_dependency_call = {}
+    external_branch_evidence_call = {}
+    dependency_mismatch_seen = False
+    external_branch_attempt_seen = False
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_status = str(call.get("status") or "").casefold()
+        if call_status not in {"completed", "running", "interrupted"}:
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if not external_branch_evidence_call and _long_dependency_has_external_compatibility_branch_evidence(call):
+            external_branch_evidence_call = call
+        if _long_dependency_has_external_compatibility_branch_attempt(call):
+            external_branch_attempt_seen = True
+        if _long_dependency_dependency_api_mismatch_seen(call):
+            dependency_mismatch_seen = True
+        if not (
+            external_branch_evidence_call
+            and dependency_mismatch_seen
+            and not external_branch_attempt_seen
+            and _long_dependency_uses_version_pinned_source_toolchain(call)
+        ):
+            continue
+        command = _long_dependency_call_command_text(call) or _runtime_artifact_call_text(call)
+        return {
+            "code": "source_toolchain_before_external_branch_attempt",
+            "layer": "profile_contract",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "excerpt": clip_inline_text(command, 180),
+            "external_branch_tool_call_id": external_branch_evidence_call.get("id"),
+            "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id") if prebuilt_dependency_call else None,
+        }
+    return {}
+
+
+def _long_dependency_is_vendored_dependency_patch_call(call):
+    if not isinstance(call, dict):
+        return False
+    if call.get("tool") in COMMAND_WORK_TOOLS:
+        text = _long_dependency_call_command_text(call)
+        lowered = text.casefold()
+        shell_mutation = any(
+            marker in lowered
+            for marker in (
+                "sed -i",
+                "perl -pi",
+                "patch ",
+                "git apply",
+                "tee ",
+                "cat >",
+                "cat <<",
+            )
+        )
+        python_invocation = any(marker in lowered for marker in ("python -", "python3 -", "python -c", "python3 -c"))
+        python_mutation = bool(
+            python_invocation
+            and re.search(
+                r"(?:write_text\s*\(|write_bytes\s*\(|"
+                r"open\s*\([^)]*,\s*['\"][^'\"]*[wa+][^'\"]*['\"]|"
+                r"\.(?:rename|replace|unlink)\s*\(|shutil\.copy)",
+                text,
+                re.IGNORECASE,
+            )
+        )
+        if not shell_mutation and not python_mutation:
+            return False
+        return bool(
+            re.search(
+                r"(?:^|[/\s])(?:deps|dependencies|external|flocq|menhir|third[-_]party|vendor|vendored)/"
+                r"[A-Za-z0-9_./+-]+",
+                text,
+                re.IGNORECASE,
+            )
+        )
+    if call.get("tool") not in WRITE_WORK_TOOLS:
+        return False
+    path = str(work_call_path(call) or "")
+    path_parts = {part.casefold() for part in Path(path).parts if part}
+    if not (path_parts & _LONG_DEPENDENCY_VENDORED_DEPENDENCY_PATH_PARTS):
+        return False
+    text = _runtime_artifact_call_text(call)
+    if not text:
+        text = "\n".join(
+            str(value or "")
+            for value in (
+                path,
+                (call.get("parameters") or {}).get("old") if isinstance(call.get("parameters"), dict) else "",
+                (call.get("parameters") or {}).get("new") if isinstance(call.get("parameters"), dict) else "",
+                (call.get("parameters") or {}).get("reason") if isinstance(call.get("parameters"), dict) else "",
+            )
+            if value
+        )
+    lowered = text.casefold()
+    suffix = Path(path).suffix.casefold()
+    return bool(
+        suffix in {".v", ".ml", ".mli", ".hs", ".c", ".h", ".cc", ".cpp", ".rs"}
+        or any(marker in lowered for marker in ("proof", "lemma", "theorem", "coq", "compatib", "dependency"))
+    )
+
+
+def _long_dependency_vendored_patch_surgery_blocker(calls, missing_artifacts):
+    if not missing_artifacts:
+        return {}
+    dependency_mismatch_seen = False
+    external_branch_evidence_call = {}
+    prebuilt_dependency_call = {}
+    for call in calls or []:
+        if not isinstance(call, dict):
+            continue
+        if not prebuilt_dependency_call and _long_dependency_uses_prebuilt_package_manager_dependency(call):
+            prebuilt_dependency_call = call
+        if not external_branch_evidence_call and _long_dependency_has_external_compatibility_branch_evidence(call):
+            external_branch_evidence_call = call
+        blocker_codes = {
+            str(blocker.get("code") or "")
+            for blocker in _long_dependency_strategy_blockers(call)
+            if isinstance(blocker, dict)
+        }
+        if blocker_codes & {
+            "toolchain_version_constraint_mismatch",
+            "compatibility_override_probe_missing",
+            "version_pinned_source_toolchain_before_compatibility_override",
+        }:
+            dependency_mismatch_seen = True
+        if not (
+            dependency_mismatch_seen
+            and external_branch_evidence_call
+            and _long_dependency_is_vendored_dependency_patch_call(call)
+        ):
+            continue
+        path = work_call_path(call)
+        return {
+            "code": "vendored_dependency_patch_surgery_before_supported_branch",
+            "layer": "profile_contract",
+            "source_tool_call_id": call.get("id"),
+            "tool": call.get("tool") or "",
+            "path": path,
+            "excerpt": clip_inline_text(path or _runtime_artifact_call_text(call), 180),
+            "prebuilt_dependency_tool_call_id": prebuilt_dependency_call.get("id") if prebuilt_dependency_call else None,
+            "external_branch_tool_call_id": (
+                external_branch_evidence_call.get("id") if external_branch_evidence_call else None
+            ),
+        }
     return {}
 
 
@@ -4945,6 +5966,8 @@ def _long_dependency_strategy_blockers(call, expected_artifacts=None):
     for code, markers in _LONG_DEPENDENCY_STRATEGY_BLOCKER_MARKERS:
         if not any(marker in lowered for marker in markers):
             continue
+        if code == "dependency_generation_order_issue" and _long_dependency_runtime_library_subdir_target_failure(call):
+            continue
         excerpt = ""
         for raw_line in str(text or "").splitlines():
             line = raw_line.strip()
@@ -4965,7 +5988,7 @@ def _long_dependency_strategy_blockers(call, expected_artifacts=None):
     if (
         any(marker in lowered for marker in ("requires a version", "unsupported", "version mismatch"))
         and any(marker in lowered for marker in ("./configure", " configure ", "testing coq", "testing "))
-        and not any(marker in lowered for marker in _LONG_DEPENDENCY_COMPATIBILITY_OVERRIDE_PROBE_MARKERS)
+        and not _long_dependency_has_compatibility_override_probe(call)
     ):
         excerpt = ""
         for raw_line in str(text or "").splitlines():
@@ -4993,13 +6016,44 @@ def _long_dependency_strategy_blockers(call, expected_artifacts=None):
     return blockers
 
 
-def build_long_dependency_build_state(task, calls, session=None):
+def build_long_build_state(task, calls, session=None):
     task_text = _long_dependency_task_text(task, session=session)
     if not is_long_dependency_toolchain_build_task(task_text):
         return {}
     expected_artifacts = long_dependency_final_artifacts(task_text)
     if not expected_artifacts:
         return {}
+    session = session if isinstance(session, dict) else {}
+    contract = build_long_build_contract(
+        task_text,
+        expected_artifacts,
+        contract_id=f"work_session:{session.get('id') or 'unknown'}:long_build:1",
+        acceptance_constraints=[
+            constraint.get("constraint") if isinstance(constraint, dict) else constraint
+            for constraint in (session.get("acceptance_constraints") or [])
+        ],
+    )
+    native_command_evidence = [
+        evidence
+        for evidence in (session.get("command_evidence") or [])
+        if isinstance(evidence, dict)
+    ]
+    if native_command_evidence:
+        command_evidence = native_command_evidence
+    elif _allow_synthesized_command_evidence_for_fixture(session):
+        command_evidence = migrate_command_evidence_fixture_contracts(
+            synthesize_command_evidence_from_tool_calls(calls or []),
+            contract,
+        )
+    else:
+        command_evidence = []
+    attempts = build_attempts_from_command_evidence(command_evidence, contract)
+    calls = [
+        _command_evidence_call_for_long_build_state(evidence)
+        for evidence in command_evidence
+        if isinstance(evidence, dict)
+    ]
+    calls.extend(call for call in (session.get("tool_calls") or []) if isinstance(call, dict) and call.get("tool") in WRITE_WORK_TOOLS)
     progress = []
     seen_stages = set()
     latest_build_call = {}
@@ -5040,6 +6094,15 @@ def build_long_dependency_build_state(task, calls, session=None):
                 continue
             seen_strategy_blockers.add(key)
             strategy_blockers.append(blocker)
+        if _long_dependency_default_runtime_smoke_proven_by_call(call, expected_artifacts):
+            strategy_blockers = [
+                blocker for blocker in strategy_blockers
+                if blocker.get("code") != "runtime_link_library_missing"
+            ]
+            seen_strategy_blockers = {
+                (blocker.get("code"), blocker.get("source_tool_call_id"), blocker.get("excerpt"))
+                for blocker in strategy_blockers
+            }
         if call_status != "completed":
             continue
         for artifact in expected_artifacts:
@@ -5073,6 +6136,18 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(default_runtime_link_path)
+    default_runtime_link_failure = _long_dependency_default_runtime_link_failure_blocker(
+        calls,
+        expected_artifacts,
+    )
+    if default_runtime_link_failure:
+        key = (
+            default_runtime_link_failure.get("code"),
+            default_runtime_link_failure.get("source_tool_call_id"),
+            default_runtime_link_failure.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(default_runtime_link_failure)
     runtime_install_before_library = _long_dependency_runtime_install_before_library_blocker(
         calls,
         expected_artifacts,
@@ -5085,8 +6160,44 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(runtime_install_before_library)
+    runtime_subdir_target_failure = _long_dependency_runtime_library_subdir_target_blocker(
+        calls,
+        expected_artifacts,
+    )
+    if runtime_subdir_target_failure:
+        key = (
+            runtime_subdir_target_failure.get("code"),
+            runtime_subdir_target_failure.get("source_tool_call_id"),
+            runtime_subdir_target_failure.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(runtime_subdir_target_failure)
     proven = [item for item in artifact_status.values() if item.get("status") == "proven"]
     missing = [item for item in artifact_status.values() if item.get("status") != "proven"]
+    external_branch_help_probe_width = _long_dependency_external_branch_help_probe_width_blocker(
+        calls,
+        missing,
+    )
+    if external_branch_help_probe_width:
+        key = (
+            external_branch_help_probe_width.get("code"),
+            external_branch_help_probe_width.get("source_tool_call_id"),
+            external_branch_help_probe_width.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(external_branch_help_probe_width)
+    source_toolchain_before_external_branch = _long_dependency_source_toolchain_before_external_branch_blocker(
+        calls,
+        missing,
+    )
+    if source_toolchain_before_external_branch:
+        key = (
+            source_toolchain_before_external_branch.get("code"),
+            source_toolchain_before_external_branch.get("source_tool_call_id"),
+            source_toolchain_before_external_branch.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(source_toolchain_before_external_branch)
     compatibility_branch_budget = _long_dependency_compatibility_branch_budget_blocker(
         calls,
         missing,
@@ -5099,46 +6210,115 @@ def build_long_dependency_build_state(task, calls, session=None):
         )
         if key not in seen_strategy_blockers:
             strategy_blockers.append(compatibility_branch_budget)
-    if not progress and not proven and not strategy_blockers:
+    vendored_patch_surgery = _long_dependency_vendored_patch_surgery_blocker(
+        calls,
+        missing,
+    )
+    if vendored_patch_surgery:
+        key = (
+            vendored_patch_surgery.get("code"),
+            vendored_patch_surgery.get("source_tool_call_id"),
+            vendored_patch_surgery.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(vendored_patch_surgery)
+    source_provenance = _long_dependency_source_provenance_blocker(
+        calls,
+        missing,
+        strategy_blockers,
+    )
+    if source_provenance:
+        key = (
+            source_provenance.get("code"),
+            source_provenance.get("source_tool_call_id"),
+            source_provenance.get("excerpt"),
+        )
+        if key not in seen_strategy_blockers:
+            strategy_blockers.append(source_provenance)
+    if not progress and not proven and not strategy_blockers and not attempts and not session.get("long_command_runs"):
         return {}
     latest_command = ""
     if latest_build_call:
         result = latest_build_call.get("result") if isinstance(latest_build_call.get("result"), dict) else {}
         parameters = latest_build_call.get("parameters") if isinstance(latest_build_call.get("parameters"), dict) else {}
         latest_command = result.get("command") or parameters.get("command") or ""
-    return {
-        "kind": "long_dependency_build_state",
-        "progress": progress[-6:],
-        "expected_artifacts": list(artifact_status.values())[:6],
-        "missing_artifacts": missing[:6],
-        "latest_build_tool_call_id": latest_build_call.get("id") if latest_build_call else None,
-        "latest_build_status": str(latest_build_call.get("status") or "") if latest_build_call else "",
-        "latest_build_command": clip_inline_text(latest_command, 500),
-        "incomplete_reason": latest_incomplete_reason,
-        "strategy_blockers": strategy_blockers[-6:],
-        "suggested_next": (
+    return reduce_long_build_state(
+        contract,
+        attempts,
+        command_evidence,
+        long_command_runs=session.get("long_command_runs") or [],
+        progress=progress[-6:],
+        strategy_blockers=strategy_blockers[-6:],
+        incomplete_reason=latest_incomplete_reason,
+        latest_build_call=latest_build_call,
+        latest_build_command=clip_inline_text(latest_command, 500),
+        suggested_next=(
             "resume the existing source tree/toolchain state; do not restart package or source setup after a "
             "compatible path is found. If a configure step rejects an installed dependency version, inspect or try "
             "source-provided compatibility/override flags before building an alternate toolchain from scratch. "
+            "When probing configure/project help through grep, rg, awk, sed, or another filter, include "
+            "external/use-external/prebuilt/system/library terms or inspect unfiltered help before concluding no "
+            "source-provided external/prebuilt branch exists. "
+            "If configure or source-script inspection shows compatibility-hook variables such as "
+            "'LIBRARY_* = local # external', treat that as source-provided external/prebuilt branch evidence and "
+            "try the branch before starting a version-pinned source toolchain. "
             "If prebuilt package-manager dependencies are available and a source-provided compatibility override is "
             "visible or likely, try that prebuilt dependency plus override path before starting version-pinned "
             "source-built dependency/toolchain installation; once source help or configure exposes an external/prebuilt "
             "compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final "
             "artifact build instead of serially probing weaker branches. "
+            "A plain ignore-version or allow-unsupported configure retry is not the same as trying an exposed "
+            "external/prebuilt/system dependency branch; if that plain override fails with a dependency API or "
+            "library-location mismatch, install the missing prebuilt/dev package when available and retry the "
+            "external/prebuilt branch before starting version-pinned source toolchain work. "
+            "If the source tree came from a VCS-generated tag/archive and dependency or API compatibility fails, "
+            "check the authoritative source channel next: project docs, package-manager metadata, official release/"
+            "distribution archive, signed checksum, release notes, or upstream download page. Do that before "
+            "heavy alternate-toolchain surgery. "
+            "If compatibility repair turns into edits under a vendored/third-party dependency or proof library "
+            "while the final artifact is still missing, stop local dependency patch surgery and switch to a "
+            "supported dependency version or source-provided external/prebuilt dependency branch before another "
+            "long rebuild. "
             "For release archive/tag source builds, treat the versioned archive URL, tag/root directory, and "
             "coarse internal VERSION markers as source identity evidence; do not abort solely because an "
             "internal VERSION file omits a patch suffix that is already grounded by the archive/tag. "
             "If a compiler or toolchain can build a trivial binary but the linker reports a missing runtime "
-            "library, install or configure the project runtime/library target before finish. If local smoke "
+            "library, install or configure the project runtime/library target before finish. If a default "
+            "compile/link smoke fails with 'cannot find -l...' or a missing runtime library, do not restart "
+            "source acquisition, configure, or clean rebuild; build/install the shortest runtime/library target "
+            "into the default lookup path and rerun that default smoke. If local smoke "
             "only works with custom runtime/library path flags, install or configure that runtime into the "
             "default lookup path and rerun a default invocation proof before finish. If runtime install reports "
             "a missing library artifact, build the shortest explicit runtime-library target first, then retry "
-            "install and the default-link smoke. Do not retry "
+            "install and the default-link smoke. If parent make reports no rule for a runtime/lib*.a or similar "
+            "subdir library target, switch to the runtime subdirectory's own Makefile with make -C <runtime-dir> "
+            "all/install instead of retrying the invalid parent target path. Do not retry "
             "invalidated toolchain/package paths. Allocate remaining wall budget to the shortest idempotent "
             "continuation command that produces the missing final artifact, then prove it exists and is "
             "executable/invokable."
         ),
-    }
+    )
+
+
+def _allow_synthesized_command_evidence_for_fixture(session):
+    if not isinstance(session, dict):
+        return False
+    if session.get("_allow_synthesized_command_evidence"):
+        return True
+    return (
+        not session.get("command_evidence")
+        and session.get("updated_at") == "now"
+        and isinstance(session.get("model_turns"), list)
+        and session.get("model_turns") == []
+    )
+
+
+def _command_evidence_call_for_long_build_state(evidence):
+    call = command_evidence_to_tool_call(evidence)
+    source_tool_call_id = evidence.get("source_tool_call_id") if isinstance(evidence, dict) else None
+    if source_tool_call_id is not None:
+        call["id"] = source_tool_call_id
+    return call
 
 
 def _extract_verifier_error_lines(text, limit=6):
@@ -6719,6 +7899,14 @@ def _round_seconds(value):
     if value is None:
         return None
     return round(float(value), 1)
+
+
+def _positive_float_or_none(value):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _status_counts(items):
@@ -8930,6 +10118,8 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
             running_output = call.get("running_output") or {}
             command_record = {
                 "tool_call_id": call.get("id"),
+                "command_run_id": parameters.get("command_run_id") or call.get("command_run_id") or "",
+                "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "tool": call.get("tool"),
                 "command": result.get("command") or parameters.get("command"),
                 "cwd": result.get("cwd") or parameters.get("cwd"),
@@ -8943,6 +10133,13 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
                     DEFAULT_RESUME_COMMAND_OUTPUT_MAX_CHARS,
                 ),
             }
+            execution_contract = parameters.get("execution_contract")
+            if isinstance(execution_contract, dict):
+                command_record["execution_contract"] = {
+                    key: execution_contract.get(key)
+                    for key in ("schema_version", "purpose", "stage", "proof_role", "acceptance_kind", "risk_class")
+                    if execution_contract.get(key) is not None
+                }
             if running_output:
                 command_record.update(
                     {
@@ -9483,9 +10680,25 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         limit=4,
     )
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
+    search_anchor_observations = build_search_anchor_observations(calls, limit=5)
+    active_compatibility_frontier_state = update_session_active_compatibility_frontier(
+        session,
+        calls,
+        verifier_failure_repair_agenda=verifier_failure_repair_agenda,
+        search_anchor_observations=search_anchor_observations,
+        current_time=current_time or session.get("updated_at"),
+    )
+    active_compatibility_frontier = project_active_compatibility_frontier(active_compatibility_frontier_state)
+    next_action = _prefer_active_compatibility_frontier_next_action(
+        next_action,
+        active_compatibility_frontier,
+        phase=phase,
+        pending_approvals=pending_approvals,
+        session_status=session.get("status"),
+    )
     stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
     final_verifier_state_transfer = build_final_verifier_state_transfer(task, calls, session=session)
-    long_dependency_build_state = build_long_dependency_build_state(task, calls, session=session)
+    long_build_state = build_long_build_state(task, calls, session=session)
     failed_patch_repair = build_failed_patch_repair(
         session,
         calls,
@@ -9534,6 +10747,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "phase": phase,
         "updated_at": session.get("updated_at"),
         "active_work_todo": active_work_todo or {},
+        "active_compatibility_frontier": active_compatibility_frontier,
         "work_todos": list_work_session_todos(session),
         "active_rejection_frontier": session.get("active_rejection_frontier") or {},
         "rejection_frontiers": list(session.get("rejection_frontiers") or [])[-limit:],
@@ -9551,6 +10765,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "files_touched": paths[-limit:],
         "declared_write_roots": declared_write_roots,
         "commands": commands[-limit:],
+        "running_commands": build_running_command_context(session, limit=limit),
         "suggested_verify_command": suggested_verify_command,
         "verification_coverage_warning": verification_coverage_warning,
         "verification_confidence": verification_confidence,
@@ -9558,7 +10773,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "unresolved_failure": latest_unresolved_failure(failures),
         "recurring_failures": build_recurring_work_failures(calls, limit=3),
         "low_yield_observations": build_low_yield_observation_warnings(calls, limit=3),
-        "search_anchor_observations": build_search_anchor_observations(calls, limit=5),
+        "search_anchor_observations": search_anchor_observations,
         "redundant_search_observations": build_redundant_search_observations(calls, limit=3),
         "adjacent_read_observations": adjacent_read_observations,
         "demoted_adjacent_read_observations": demoted_adjacent_read_observations,
@@ -9570,7 +10785,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "verifier_failure_repair_agenda": verifier_failure_repair_agenda,
         "stale_runtime_artifact_risk": stale_runtime_artifact_risk,
         "final_verifier_state_transfer": final_verifier_state_transfer,
-        "long_dependency_build_state": long_dependency_build_state,
+        "long_build_state": long_build_state,
         "failed_patch_repair": failed_patch_repair,
         "broad_rollback_slice_repair": broad_rollback_slice_repair,
         "retry_context": retry_context,
@@ -9652,6 +10867,45 @@ def refresh_stale_memory_next_action(next_action, working_memory):
     return prefix
 
 
+def _active_compatibility_frontier_next_action(frontier):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    if not frontier or str(frontier.get("status") or "") != "open":
+        return ""
+    closure = frontier.get("closure_state") if isinstance(frontier.get("closure_state"), dict) else {}
+    next_action = str(closure.get("next_action") or "").strip()
+    if not next_action:
+        summary = frontier.get("compact_summary") if isinstance(frontier.get("compact_summary"), dict) else {}
+        next_action = str(summary.get("next_action") or "").strip()
+    if not next_action:
+        return ""
+    return f"resume active compatibility frontier: {clip_inline_text(next_action, 220)}"
+
+
+def _prefer_active_compatibility_frontier_next_action(
+    next_action,
+    frontier,
+    *,
+    phase,
+    pending_approvals,
+    session_status,
+):
+    frontier_next = _active_compatibility_frontier_next_action(frontier)
+    if not frontier_next:
+        return next_action
+    if pending_approvals:
+        return next_action
+    if str(session_status or "") == "closed":
+        return next_action
+    if str(phase or "") in {"running_tool", "planning", "stop_requested"}:
+        return next_action
+    next_action = str(next_action or "").strip()
+    if not next_action or next_action == frontier_next:
+        return frontier_next
+    if frontier_next in next_action:
+        return next_action
+    return f"{frontier_next}; then {next_action}"
+
+
 def attach_work_resume_world_state(resume, world_state):
     if not resume:
         return resume
@@ -9702,6 +10956,40 @@ def format_work_session_resume(resume):
             lines.append(f"rejection_stop_rule: {rejection_frontier.get('stop_rule')}")
         if rejection_frontier.get("next_action"):
             lines.append(f"rejection_next_action: {rejection_frontier.get('next_action')}")
+    compatibility_frontier = resume.get("active_compatibility_frontier") or {}
+    if compatibility_frontier:
+        closure = compatibility_frontier.get("closure_state") or {}
+        signature = compatibility_frontier.get("failure_signature") or {}
+        summary = compatibility_frontier.get("compact_summary") or {}
+        fingerprint = str(signature.get("fingerprint") or summary.get("failure_signature") or "")
+        lines.append(
+            "active_compatibility_frontier: "
+            f"id={compatibility_frontier.get('id') or ''} "
+            f"status={compatibility_frontier.get('status') or ''} "
+            f"state={closure.get('state') or ''} "
+            f"open_candidates={closure.get('open_candidate_count', len(compatibility_frontier.get('open_candidates') or []))} "
+            f"signature={fingerprint[:12]}"
+        )
+        if summary.get("one_line"):
+            lines.append(f"compatibility_frontier_summary: {summary.get('one_line')}")
+        if closure.get("next_action") or summary.get("next_action"):
+            lines.append(f"compatibility_frontier_next: {closure.get('next_action') or summary.get('next_action')}")
+        evidence_refs = compatibility_frontier.get("evidence_refs") or summary.get("evidence_refs") or []
+        if evidence_refs:
+            ref_parts = []
+            for ref in evidence_refs[:5]:
+                if not isinstance(ref, dict):
+                    continue
+                label = ref.get("kind") or "ref"
+                if ref.get("id") is not None:
+                    label += f"#{ref.get('id')}"
+                elif ref.get("key"):
+                    label += f":{ref.get('key')}"
+                elif ref.get("path"):
+                    label += f":{ref.get('path')}"
+                ref_parts.append(label)
+            if ref_parts:
+                lines.append(f"compatibility_frontier_evidence_refs: {', '.join(ref_parts)}")
     failed_patch_repair = resume.get("failed_patch_repair") or {}
     if failed_patch_repair:
         terms = ", ".join(failed_patch_repair.get("must_preserve_terms") or [])
@@ -9815,40 +11103,120 @@ def format_work_session_resume(resume):
             )
         if final_verifier_state_transfer.get("suggested_next"):
             lines.append(f"final_verifier_next: {final_verifier_state_transfer.get('suggested_next')}")
-    long_dependency_build_state = resume.get("long_dependency_build_state") or {}
-    if long_dependency_build_state:
-        lines.append(f"long_dependency_build_state: {long_dependency_build_state.get('kind')}")
+    long_build_state = resume.get("long_build_state") or {}
+    if long_build_state:
+        lines.append(f"long_build_state: {long_build_state.get('kind')}")
         progress = [
             str(item.get("stage") or "")
-            for item in (long_dependency_build_state.get("progress") or [])
+            for item in (long_build_state.get("progress") or [])
             if isinstance(item, dict) and item.get("stage")
         ]
         if progress:
-            lines.append("long_dependency_progress: " + ", ".join(progress))
-        for item in (long_dependency_build_state.get("missing_artifacts") or [])[:3]:
+            lines.append("long_build_progress: " + ", ".join(progress))
+        for item in (long_build_state.get("missing_artifacts") or [])[:3]:
             lines.append(
-                "long_dependency_missing_artifact: "
+                "long_build_missing_artifact: "
                 f"{item.get('path')} status={item.get('status') or 'missing_or_unproven'}"
             )
-        if long_dependency_build_state.get("incomplete_reason"):
-            lines.append(f"long_dependency_incomplete_reason: {long_dependency_build_state.get('incomplete_reason')}")
-        if long_dependency_build_state.get("latest_build_status"):
-            lines.append(f"long_dependency_latest_build_status: {long_dependency_build_state.get('latest_build_status')}")
-        for item in (long_dependency_build_state.get("strategy_blockers") or [])[:4]:
+        if long_build_state.get("incomplete_reason"):
+            lines.append(f"long_build_incomplete_reason: {long_build_state.get('incomplete_reason')}")
+        if long_build_state.get("latest_build_status"):
+            lines.append(f"long_build_latest_build_status: {long_build_state.get('latest_build_status')}")
+        if long_build_state.get("latest_long_command_run_id"):
+            lines.append(
+                "long_build_latest_long_command: "
+                f"{long_build_state.get('latest_long_command_run_id')} "
+                f"status={long_build_state.get('latest_long_command_status') or 'unknown'} "
+                f"stage={long_build_state.get('latest_build_stage') or 'unknown'}".strip()
+            )
+        if long_build_state.get("latest_build_output_ref"):
+            lines.append(f"long_build_latest_output_ref: {long_build_state.get('latest_build_output_ref')}")
+        blocker_priority = {
+            "vendored_dependency_patch_surgery_before_supported_branch": 0,
+            "external_branch_help_probe_too_narrow_before_source_toolchain": 1,
+            "source_toolchain_before_external_branch_attempt": 2,
+            "compatibility_branch_budget_contract_missing": 3,
+            "external_dependency_source_provenance_unverified": 4,
+            "default_runtime_link_path_failed": 5,
+            "runtime_library_subdir_target_path_invalid": 6,
+        }
+        display_blockers = sorted(
+            long_build_state.get("strategy_blockers") or [],
+            key=lambda item: (
+                blocker_priority.get(str((item or {}).get("code") or ""), 10),
+                str((item or {}).get("source_tool_call_id") or ""),
+            ),
+        )
+        for item in display_blockers[:6]:
             code = item.get("code") or "unknown"
             excerpt = item.get("excerpt") or ""
             source_tool = item.get("source_tool_call_id")
             suffix = f" tool=#{source_tool}" if source_tool is not None else ""
             lines.append(
-                "long_dependency_strategy_blocker: "
+                "long_build_strategy_blocker: "
                 + code
                 + suffix
                 + (f" excerpt={excerpt}" if excerpt else "")
             )
-        if long_dependency_build_state.get("latest_build_command"):
-            lines.append(f"long_dependency_latest_build: {long_dependency_build_state.get('latest_build_command')}")
-        if long_dependency_build_state.get("suggested_next"):
-            lines.append(f"long_dependency_next: {long_dependency_build_state.get('suggested_next')}")
+        if long_build_state.get("current_failure"):
+            failure = long_build_state.get("current_failure") or {}
+            lines.append(
+                "long_build_current_failure: "
+                f"{failure.get('failure_class') or 'unknown'} "
+                f"clear={failure.get('clear_condition') or ''}".strip()
+            )
+        recovery_decision = long_build_state.get("recovery_decision")
+        if isinstance(recovery_decision, dict) and recovery_decision:
+            allowed_next = recovery_decision.get("allowed_next_action")
+            allowed_next = allowed_next if isinstance(allowed_next, dict) else {}
+            budget = recovery_decision.get("budget")
+            budget = budget if isinstance(budget, dict) else {}
+            lines.append(
+                "long_build_recovery_decision: "
+                f"{recovery_decision.get('failure_class') or 'unknown'} "
+                f"decision={recovery_decision.get('decision') or 'unknown'} "
+                f"stage={allowed_next.get('stage') or 'unknown'} "
+                f"clear={recovery_decision.get('clear_condition') or ''}".strip()
+            )
+            if allowed_next.get("description"):
+                lines.append(f"long_build_recovery_next: {allowed_next.get('description')}")
+            prohibited = [
+                str(item)
+                for item in recovery_decision.get("prohibited_repeated_actions") or []
+                if str(item)
+            ]
+            if prohibited:
+                lines.append("long_build_recovery_prohibited: " + ", ".join(prohibited[:4]))
+            if budget:
+                count = budget.get("continuation_count")
+                max_count = budget.get("max_continuations")
+                if count is None and budget.get("attempts_for_failure_class") is not None:
+                    count = budget.get("attempts_for_failure_class")
+                    max_count = budget.get("max_attempts_for_failure_class")
+                lines.append(
+                    "long_build_recovery_budget: "
+                    f"remaining={budget.get('remaining_seconds')} "
+                    f"reserve={budget.get('reserve_seconds')} "
+                    f"continuations={count}/{max_count}"
+                )
+        if long_build_state.get("latest_build_command"):
+            lines.append(f"long_build_latest_build: {long_build_state.get('latest_build_command')}")
+        if long_build_state.get("suggested_next") and not long_build_state.get("recovery_decision"):
+            lines.append(f"long_build_next: {long_build_state.get('suggested_next')}")
+    running_commands = resume.get("running_commands") or []
+    if running_commands:
+        lines.extend(["", "Running commands"])
+        for item in running_commands:
+            lines.append(
+                f"- {item.get('command_run_id')} status={item.get('status')} "
+                f"elapsed={item.get('elapsed_seconds')}s timeout={item.get('timeout_seconds')}s "
+                f"tool=#{item.get('tool_call_id')} {item.get('tool') or ''}"
+            )
+            if item.get("command"):
+                lines.append(f"  command: {item.get('command')}")
+            if item.get("output_ref"):
+                lines.append(f"  output_ref: {item.get('output_ref')}")
+            lines.append("  next: poll_command or read_command_output before relying on terminal result")
     continuity_text = format_work_continuity_inline(resume.get("continuity") or {})
     if continuity_text:
         lines.append(continuity_text)
@@ -9888,9 +11256,16 @@ def format_work_session_resume(resume):
     commands = resume.get("commands") or []
     if commands:
         for command in commands:
+            command_evidence_ref = command.get("command_evidence_ref") or {}
+            evidence_suffix = (
+                f" command_evidence=#{command_evidence_ref.get('id')}"
+                if command_evidence_ref.get("id") is not None
+                else ""
+            )
             lines.append(
                 f"#{command.get('tool_call_id')} {command.get('tool')} "
-                f"exit={format_exit_code(command.get('exit_code'))} {command.get('command') or ''}"
+                f"exit={format_exit_code(command.get('exit_code'))}{evidence_suffix} "
+                f"{command.get('command') or ''}"
             )
             if command.get("stdout"):
                 lines.append("  stdout:")
@@ -10578,6 +11953,653 @@ def format_work_action(action, parameters=None, tool_call_id=None):
     return "\n".join(lines)
 
 
+def _next_command_evidence_id(session):
+    latest = 0
+    for evidence in (session or {}).get("command_evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        try:
+            latest = max(latest, int(evidence.get("id") or 0))
+        except (TypeError, ValueError):
+            continue
+    return latest + 1
+
+
+def _next_command_evidence_order(session):
+    latest = 0
+    for evidence in (session or {}).get("command_evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        for key in ("start_order", "finish_order"):
+            try:
+                latest = max(latest, int(evidence.get(key) or 0))
+            except (TypeError, ValueError):
+                continue
+    return latest + 1
+
+
+def _next_command_run_ordinal(session):
+    latest = 0
+    for run in (session or {}).get("command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        match = re.search(r":command_run:(\d+)$", str(run.get("id") or ""))
+        if match:
+            try:
+                latest = max(latest, int(match.group(1)))
+            except ValueError:
+                pass
+            continue
+        try:
+            latest = max(latest, int(run.get("ordinal") or 0))
+        except (TypeError, ValueError):
+            pass
+    return latest + 1
+
+
+def _find_command_run_for_tool_call(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    command_run = parameters.get("command_run_id") or tool_call.get("command_run_id")
+    for run in session.get("command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        if command_run and str(run.get("id") or "") == str(command_run):
+            return run
+        if str(run.get("tool_call_id")) == str(tool_call.get("id")):
+            return run
+    return None
+
+
+def _find_command_run_by_id(session, run_id):
+    if not isinstance(session, dict) or not run_id:
+        return None
+    for run in session.get("command_runs") or []:
+        if isinstance(run, dict) and str(run.get("id") or "") == str(run_id):
+            return run
+    return None
+
+
+def _record_managed_exec_event(session, event_type, *, command_run_id="", tool_call_id=None, result=None):
+    if not isinstance(session, dict):
+        return None
+    result = result if isinstance(result, dict) else {}
+    events = session.setdefault("managed_exec_events", [])
+    event = {
+        "id": len(events) + 1,
+        "type": str(event_type or ""),
+        "created_at": now_iso(),
+        "command_run_id": str(command_run_id or result.get("command_run_id") or ""),
+        "tool_call_id": tool_call_id,
+        "status": result.get("status") or "",
+        "exit_code": result.get("exit_code"),
+        "timed_out": bool(result.get("timed_out")),
+        "elapsed_seconds": result.get("duration_seconds"),
+        "output_ref": result.get("output_ref") or "",
+    }
+    events.append({key: value for key, value in event.items() if value not in (None, "")})
+    return event
+
+
+def _find_command_evidence_for_tool_call(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    ref = tool_call.get("command_evidence_ref") if isinstance(tool_call.get("command_evidence_ref"), dict) else {}
+    ref_id = ref.get("id")
+    for evidence in session.get("command_evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        if ref_id is not None and str(evidence.get("id")) == str(ref_id):
+            return evidence
+        if str(evidence.get("source_tool_call_id")) == str(tool_call.get("id")):
+            return evidence
+    return None
+
+
+def _find_command_evidence_by_ref(session, ref):
+    ref = ref if isinstance(ref, dict) else {}
+    ref_id = ref.get("id")
+    if ref_id is None:
+        return None
+    for evidence in (session or {}).get("command_evidence") or []:
+        if isinstance(evidence, dict) and str(evidence.get("id")) == str(ref_id):
+            return evidence
+    return None
+
+
+def _command_run_output_ref(run):
+    ref = (run or {}).get("output_ref")
+    if isinstance(ref, dict):
+        return str(ref.get("path") or "")
+    return str(ref or "")
+
+
+def build_running_command_context(session, limit=4):
+    running = []
+    for run in (session or {}).get("command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        status = str(run.get("status") or "").casefold()
+        if status not in {"running", "yielded"}:
+            continue
+        command_run_id_value = str(run.get("id") or "")
+        item = {
+            "command_run_id": command_run_id_value,
+            "tool_call_id": run.get("tool_call_id"),
+            "tool": run.get("tool") or "",
+            "status": status,
+            "command": run.get("command") or "",
+            "cwd": run.get("cwd") or "",
+            "started_at": run.get("started_at") or "",
+            "elapsed_seconds": run.get("elapsed_seconds"),
+            "foreground_budget_seconds": run.get("foreground_budget_seconds"),
+            "timeout_seconds": run.get("timeout_seconds"),
+            "output_ref": _command_run_output_ref(run) or _command_run_output_ref_from_id(command_run_id_value),
+            "suggested_next": "poll_command or continue read-only investigation",
+            "poll_action": {"type": "poll_command", "command_run_id": command_run_id_value, "wait_seconds": 5},
+            "read_output_action": {"type": "read_command_output", "command_run_id": command_run_id_value, "tail": True},
+        }
+        running.append(item)
+    return running[-max(1, int(limit or 1)) :]
+
+
+def _command_run_is_terminal(run):
+    status = str((run or {}).get("status") or "").casefold()
+    terminal = (run or {}).get("terminal") if isinstance((run or {}).get("terminal"), dict) else {}
+    return status in {"completed", "failed", "timed_out", "killed", "interrupted", "orphaned"} or bool(
+        terminal.get("terminal")
+    )
+
+
+def _cached_terminal_command_result(session, parameters, *, action_kind):
+    parameters = parameters if isinstance(parameters, dict) else {}
+    run_id = str(parameters.get("command_run_id") or "")
+    run = _find_command_run_by_id(session, run_id)
+    if not run or not _command_run_is_terminal(run):
+        return None
+    terminal = run.get("terminal") if isinstance(run.get("terminal"), dict) else {}
+    evidence = _find_command_evidence_by_ref(session, run.get("terminal_command_evidence_ref") or run.get("command_evidence_ref"))
+    status = str(run.get("status") or "completed")
+    result = {
+        "command": run.get("command") or "",
+        "argv": run.get("argv") or [],
+        "execution_mode": run.get("execution_mode") or "",
+        "cwd": run.get("cwd") or "",
+        "command_run_id": run_id,
+        "output_ref": _command_run_output_ref(run),
+        "output_path": _command_run_output_path_from_ref(_command_run_output_ref(run)),
+        "started_at": run.get("started_at") or "",
+        "finished_at": run.get("finished_at") or terminal.get("finished_at") or "",
+        "duration_seconds": run.get("elapsed_seconds"),
+        "status": status,
+        "exit_code": terminal.get("exit_code"),
+        "timed_out": bool(terminal.get("timed_out")),
+        "stdout": (evidence or {}).get("stdout_tail") or "",
+        "stderr": (evidence or {}).get("stderr_tail") or "",
+        "cached_terminal_command": True,
+    }
+    return _with_managed_long_command_metadata(result, budget={}, action_kind=action_kind)
+
+
+def _command_run_status_from_evidence(evidence, tool_call):
+    status = str((evidence or {}).get("status") or (tool_call or {}).get("status") or "").casefold()
+    if status in {"running", "yielded"}:
+        return status
+    if bool((evidence or {}).get("timed_out")):
+        return "timed_out"
+    exit_code = (evidence or {}).get("exit_code")
+    if exit_code not in (None, 0):
+        return "failed"
+    if status in {"failed", "timed_out", "killed", "interrupted"}:
+        return status
+    if (evidence or {}).get("finish_order"):
+        return "completed" if bool((evidence or {}).get("terminal_success")) else "failed"
+    return status or "unknown"
+
+
+def _record_command_run_from_evidence(session, tool_call, evidence):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict) or not isinstance(evidence, dict):
+        return None
+    if tool_call.get("tool") not in COMMAND_EVIDENCE_TOOLS:
+        return None
+    result = tool_call.get("result") if isinstance(tool_call.get("result"), dict) else {}
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    existing = _find_command_run_for_tool_call(session, tool_call)
+    run_id = str(evidence.get("command_run_id") or parameters.get("command_run_id") or "")
+    ordinal = _next_command_run_ordinal(session)
+    if run_id:
+        match = re.search(r":command_run:(\d+)$", run_id)
+        if match:
+            try:
+                ordinal = int(match.group(1))
+            except ValueError:
+                pass
+    elif existing:
+        run_id = str(existing.get("id") or "")
+        match = re.search(r":command_run:(\d+)$", run_id)
+        if match:
+            try:
+                ordinal = int(match.group(1))
+            except ValueError:
+                pass
+    status = _command_run_status_from_evidence(evidence, tool_call)
+    terminal_ref = None
+    if status.casefold() not in {"running", "yielded"} and evidence.get("finish_order"):
+        terminal_ref = evidence.get("ref") if isinstance(evidence.get("ref"), dict) else None
+    run = build_command_run(
+        session_id=session.get("id") or "unknown",
+        task_id=session.get("task_id") or "",
+        ordinal=ordinal,
+        tool_call_id=tool_call.get("id"),
+        tool=tool_call.get("tool") or "",
+        command=result.get("command") or parameters.get("command") or "",
+        cwd=result.get("cwd") or parameters.get("cwd") or "",
+        status=status,
+        argv=result.get("argv") or [],
+        execution_mode=result.get("execution_mode") or "",
+        started_at=result.get("started_at") or tool_call.get("started_at") or "",
+        finished_at=result.get("finished_at") or tool_call.get("finished_at"),
+        elapsed_seconds=result.get("duration_seconds"),
+        foreground_budget_seconds=result.get("foreground_budget_seconds") or parameters.get("foreground_budget_seconds"),
+        timeout_seconds=result.get("timeout_seconds") or result.get("command_timeout_seconds") or parameters.get("timeout"),
+        final_proof_reserve_seconds=(
+            (evidence.get("execution_contract") or {}).get("continuation_policy", {}).get("final_proof_reserve_seconds")
+            if isinstance(evidence.get("execution_contract"), dict)
+            and isinstance((evidence.get("execution_contract") or {}).get("continuation_policy"), dict)
+            else None
+        ),
+        managed_process_id=result.get("pid") or "",
+        command_evidence_ref=evidence.get("ref") if isinstance(evidence.get("ref"), dict) else None,
+        terminal_command_evidence_ref=terminal_ref,
+        execution_contract=evidence.get("execution_contract") if isinstance(evidence.get("execution_contract"), dict) else {},
+        output_ref=evidence.get("output_ref"),
+        reducer_context=parameters.get("reducer_context") if isinstance(parameters.get("reducer_context"), dict) else {},
+        failure_fingerprint=result.get("failure_fingerprint"),
+        exit_code=evidence.get("exit_code"),
+        timed_out=evidence.get("timed_out"),
+    )
+    if run_id and run["id"] != run_id:
+        run["id"] = run_id
+    parameters["command_run_id"] = run["id"]
+    tool_call["parameters"] = parameters
+    tool_call["command_run_id"] = run["id"]
+    evidence["command_run_id"] = run["id"]
+    runs = session.setdefault("command_runs", [])
+    if existing:
+        existing.clear()
+        existing.update(run)
+    else:
+        runs.append(run)
+    return run
+
+
+def _record_command_evidence_start(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    if tool_call.get("tool") not in COMMAND_EVIDENCE_TOOLS:
+        return None
+    evidence_id = _next_command_evidence_id(session)
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    if not parameters.get("command_run_id"):
+        parameters = dict(parameters)
+        parameters["command_run_id"] = command_run_id(session.get("id") or "unknown", _next_command_run_ordinal(session))
+        tool_call["parameters"] = parameters
+    evidence = command_evidence_from_tool_call(
+        tool_call,
+        evidence_id=evidence_id,
+        start_order=_next_command_evidence_order(session),
+        finish_order=0,
+        source="native_command",
+    )
+    if not evidence:
+        return None
+    evidence_dict = evidence.to_dict()
+    session.setdefault("command_evidence", []).append(evidence_dict)
+    tool_call["command_evidence_ref"] = dict(evidence.ref)
+    run = _record_command_run_from_evidence(session, tool_call, evidence_dict)
+    _record_managed_exec_event(
+        session,
+        "command_queued",
+        command_run_id=(run or {}).get("id") or evidence_dict.get("command_run_id") or "",
+        tool_call_id=tool_call.get("id"),
+    )
+    return evidence_dict
+
+
+def _record_command_evidence_finish(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    if tool_call.get("tool") not in COMMAND_EVIDENCE_TOOLS:
+        return None
+    existing = _find_command_evidence_for_tool_call(session, tool_call)
+    evidence_id = int((existing or {}).get("id") or _next_command_evidence_id(session))
+    start_order = int((existing or {}).get("start_order") or _next_command_evidence_order(session))
+    result = tool_call.get("result") if isinstance(tool_call.get("result"), dict) else {}
+    managed = result.get("managed_long_command") if isinstance(result.get("managed_long_command"), dict) else {}
+    managed_status = str(managed.get("status") or "").casefold()
+    if managed and managed_status not in {"running", "yielded"} and result.get("wall_budget_after_seconds") is None:
+        parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+        wall_ceiling = parameters.get("wall_timeout_ceiling") if isinstance(parameters.get("wall_timeout_ceiling"), dict) else {}
+        remaining = _positive_float_or_none(wall_ceiling.get("remaining_seconds"))
+        tool_elapsed = _duration_seconds(tool_call.get("started_at"), tool_call.get("finished_at"))
+        if remaining is not None and tool_elapsed is not None:
+            result = dict(result)
+            result["wall_budget_after_seconds"] = max(0, int(remaining - tool_elapsed))
+            tool_call["result"] = result
+    if managed_status in {"running", "yielded"}:
+        evidence_call = dict(tool_call)
+        evidence_call["status"] = managed_status
+        evidence_call["finished_at"] = None
+        finish_order = 0
+    else:
+        evidence_call = tool_call
+        finish_order = _next_command_evidence_order(session)
+    evidence = command_evidence_from_tool_call(
+        evidence_call,
+        evidence_id=evidence_id,
+        start_order=start_order,
+        finish_order=finish_order,
+        source="native_command",
+    )
+    if not evidence:
+        return None
+    evidence_dict = evidence.to_dict()
+    if existing is not None:
+        existing.clear()
+        existing.update(evidence_dict)
+    else:
+        session.setdefault("command_evidence", []).append(evidence_dict)
+    tool_call["command_evidence_ref"] = dict(evidence.ref)
+    run = _record_command_run_from_evidence(session, tool_call, evidence_dict)
+    if managed_status in {"running", "yielded"}:
+        event_type = "foreground_yielded"
+    elif managed_status == "timed_out":
+        event_type = "timeout_killed"
+    else:
+        event_type = "evidence_finalized"
+    _record_managed_exec_event(
+        session,
+        event_type,
+        command_run_id=(run or {}).get("id") or evidence_dict.get("command_run_id") or "",
+        tool_call_id=tool_call.get("id"),
+        result=result,
+    )
+    return evidence_dict
+
+
+def _record_command_lifecycle_tool_finish(session, tool_call):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict):
+        return None
+    if tool_call.get("tool") not in {"poll_command", "cancel_command"}:
+        return None
+    result = tool_call.get("result") if isinstance(tool_call.get("result"), dict) else {}
+    parameters = tool_call.get("parameters") if isinstance(tool_call.get("parameters"), dict) else {}
+    run_id = str(result.get("command_run_id") or parameters.get("command_run_id") or "")
+    run = _find_command_run_by_id(session, run_id)
+    if run is None:
+        return None
+    if result.get("cached_terminal_command"):
+        evidence = _find_command_evidence_by_ref(
+            session,
+            run.get("terminal_command_evidence_ref") or run.get("command_evidence_ref"),
+        )
+        if evidence:
+            ref = evidence.get("ref") if isinstance(evidence.get("ref"), dict) else {"kind": "command_evidence", "id": evidence.get("id")}
+            tool_call["command_evidence_ref"] = dict(ref)
+            tool_call["command_run_id"] = run_id
+        return evidence
+    managed = result.get("managed_long_command") if isinstance(result.get("managed_long_command"), dict) else {}
+    managed_status = str(managed.get("status") or result.get("status") or "").casefold()
+    if managed_status in {"running", "yielded"}:
+        run["status"] = managed_status
+        run["terminal"] = {
+            **(run.get("terminal") if isinstance(run.get("terminal"), dict) else {}),
+            "exit_code": None,
+            "timed_out": False,
+            "terminal": False,
+        }
+        return None
+
+    original_tool = str(run.get("tool") or "run_command")
+    if original_tool not in COMMAND_EVIDENCE_TOOLS:
+        original_tool = "run_command"
+    start_evidence = _find_command_evidence_by_ref(session, run.get("command_evidence_ref"))
+    evidence_id = _next_command_evidence_id(session)
+    start_order = int((start_evidence or {}).get("start_order") or _next_command_evidence_order(session))
+    finish_order = _next_command_evidence_order(session)
+    fake_parameters = {
+        "command": result.get("command") or run.get("command") or parameters.get("command") or "",
+        "cwd": result.get("cwd") or run.get("cwd") or parameters.get("cwd") or "",
+        "command_run_id": run_id,
+        "execution_contract": run.get("execution_contract") if isinstance(run.get("execution_contract"), dict) else {},
+        "timeout": result.get("timeout_seconds") or parameters.get("timeout"),
+    }
+    fake_call = {
+        "id": run.get("tool_call_id") or tool_call.get("id"),
+        "tool": original_tool,
+        "status": "completed" if managed_status not in {"failed", "timed_out", "killed", "interrupted", "orphaned"} else managed_status,
+        "parameters": fake_parameters,
+        "result": result,
+        "started_at": result.get("started_at") or run.get("started_at") or tool_call.get("started_at"),
+        "finished_at": result.get("finished_at") or tool_call.get("finished_at"),
+    }
+    evidence = command_evidence_from_tool_call(
+        fake_call,
+        evidence_id=evidence_id,
+        start_order=start_order,
+        finish_order=finish_order,
+        source="native_command",
+    )
+    if not evidence:
+        return None
+    evidence_dict = evidence.to_dict()
+    session.setdefault("command_evidence", []).append(evidence_dict)
+    tool_call["command_evidence_ref"] = dict(evidence.ref)
+    tool_call["command_run_id"] = run_id
+    _record_command_run_from_evidence(session, fake_call, evidence_dict)
+    event_type = "timeout_killed" if managed_status == "timed_out" else "evidence_finalized"
+    _record_managed_exec_event(
+        session,
+        event_type,
+        command_run_id=run_id,
+        tool_call_id=tool_call.get("id"),
+        result=result,
+    )
+    return evidence_dict
+
+
+def _next_long_command_ordinal(session):
+    latest = 0
+    for run in (session or {}).get("long_command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        match = re.search(r":long_command:(\d+)$", str(run.get("id") or ""))
+        if match:
+            try:
+                latest = max(latest, int(match.group(1)))
+            except ValueError:
+                pass
+            continue
+        try:
+            latest = max(latest, int(run.get("ordinal") or 0))
+        except (TypeError, ValueError):
+            pass
+    return latest + 1
+
+
+def _find_long_command_run(session, run_id):
+    if not run_id:
+        return None
+    for run in (session or {}).get("long_command_runs") or []:
+        if isinstance(run, dict) and str(run.get("id") or "") == str(run_id):
+            return run
+    return None
+
+
+def _cap_timed_out_long_command_remaining_seconds(session, existing, remaining, effective_timeout):
+    if remaining is None:
+        return None
+    try:
+        capped = float(remaining)
+    except (TypeError, ValueError):
+        return remaining
+    timeout = _positive_float_or_none(effective_timeout)
+    if timeout is None:
+        return int(max(0, capped))
+    for run in (session or {}).get("long_command_runs") or []:
+        if not isinstance(run, dict):
+            continue
+        if existing is not None and run is existing:
+            continue
+        budget = run.get("budget") if isinstance(run.get("budget"), dict) else {}
+        prior_remaining = _positive_float_or_none(budget.get("work_wall_remaining_seconds"))
+        if prior_remaining is None:
+            continue
+        # Outer work-session wall budget is monotonic. A nested or replayed
+        # managed command can report a fresh local ceiling; it must not make a
+        # terminal timeout look more recoverable than the previously recorded
+        # session-level budget minus the timeout slice that was just spent.
+        capped = min(capped, max(0.0, prior_remaining - timeout))
+    return int(max(0.0, capped))
+
+
+def _long_command_terminal_status(result):
+    status = _managed_long_command_status(result)
+    if status in {"running", "yielded"}:
+        return status
+    if status == "orphaned":
+        return "failed"
+    if status in {"timed_out", "killed", "interrupted"}:
+        return status
+    if result.get("timed_out"):
+        return "timed_out"
+    if result.get("exit_code") == 0:
+        return "completed"
+    return "failed"
+
+
+def _long_command_contract_id(session):
+    return f"work_session:{(session or {}).get('id') or 'unknown'}:long_build:1"
+
+
+def _long_command_attempt_id(session, ordinal):
+    return f"{_long_command_contract_id(session)}:attempt:{ordinal}"
+
+
+def _record_long_command_run_from_tool_call(session, tool_call, evidence):
+    if not isinstance(session, dict) or not isinstance(tool_call, dict) or not isinstance(evidence, dict):
+        return None
+    result = tool_call.get("result") if isinstance(tool_call.get("result"), dict) else {}
+    managed = result.get("managed_long_command") if isinstance(result.get("managed_long_command"), dict) else {}
+    budget = result.get("long_command_budget") if isinstance(result.get("long_command_budget"), dict) else {}
+    if not managed or not budget:
+        return None
+
+    status = _long_command_terminal_status(result)
+    latest_run_id = str(budget.get("latest_long_command_run_id") or managed.get("latest_long_command_run_id") or "")
+    existing = _find_long_command_run(session, latest_run_id)
+    ordinal = _next_long_command_ordinal(session)
+    if existing:
+        match = re.search(r":long_command:(\d+)$", str(existing.get("id") or ""))
+        if match:
+            try:
+                ordinal = int(match.group(1))
+            except ValueError:
+                pass
+
+    evidence_ref = evidence.get("ref") if isinstance(evidence.get("ref"), dict) else {"kind": "command_evidence", "id": evidence.get("id")}
+    wall_ceiling = tool_call.get("parameters", {}).get("wall_timeout_ceiling")
+    wall_ceiling = wall_ceiling if isinstance(wall_ceiling, dict) else {}
+    existing_budget = existing.get("budget") if isinstance(existing, dict) and isinstance(existing.get("budget"), dict) else {}
+    running_ref = (
+        evidence_ref
+        if status in {"running", "yielded"} or not existing
+        else (existing.get("running_command_evidence_ref") if isinstance(existing, dict) else {})
+    )
+    terminal_ref = None if status in {"running", "yielded"} else evidence_ref
+    if terminal_ref is None and isinstance(existing, dict):
+        terminal_ref = existing.get("terminal_command_evidence_ref")
+    if status in {"running", "yielded"}:
+        work_wall_remaining_seconds = wall_ceiling.get("remaining_seconds") or existing_budget.get("work_wall_remaining_seconds")
+    else:
+        work_wall_remaining_seconds = evidence.get("wall_budget_after_seconds")
+        if work_wall_remaining_seconds is None:
+            work_wall_remaining_seconds = wall_ceiling.get("remaining_seconds") or existing_budget.get("work_wall_remaining_seconds")
+    action_kind = str(budget.get("action_kind") or managed.get("action_kind") or "")
+    if action_kind == "poll_long_command" and existing_budget:
+        final_proof_reserve_seconds = existing_budget.get("final_proof_reserve_seconds") or wall_ceiling.get("reserve_seconds")
+    else:
+        final_proof_reserve_seconds = wall_ceiling.get("reserve_seconds") or existing_budget.get("final_proof_reserve_seconds")
+    if status == "timed_out":
+        effective_for_timeout = (
+            budget.get("effective_timeout_seconds")
+            or existing_budget.get("effective_timeout_seconds")
+            or result.get("timeout_seconds")
+            or (tool_call.get("parameters") or {}).get("timeout")
+        )
+        work_wall_remaining_seconds = _cap_timed_out_long_command_remaining_seconds(
+            session,
+            existing,
+            work_wall_remaining_seconds,
+            effective_for_timeout,
+        )
+
+    run = build_long_command_run(
+        session_id=session.get("id") or "unknown",
+        ordinal=ordinal,
+        task_id=session.get("task_id") or "",
+        contract_id=_long_command_contract_id(session),
+        attempt_id=_long_command_attempt_id(session, ordinal),
+        tool_call_id=tool_call.get("id"),
+        stage=budget.get("stage") or (existing or {}).get("stage") or "",
+        selected_target=(existing or {}).get("selected_target") or "",
+        command=result.get("command") or (tool_call.get("parameters") or {}).get("command") or "",
+        cwd=result.get("cwd") or (tool_call.get("parameters") or {}).get("cwd") or "",
+        status=status,
+        pid=result.get("pid") or (managed or {}).get("pid") or ((existing or {}).get("process") or {}).get("pid"),
+        process_group_id=(
+            result.get("process_group_id")
+            or (managed or {}).get("process_group_id")
+            or ((existing or {}).get("process") or {}).get("process_group_id")
+        ),
+        running_command_evidence_ref=running_ref,
+        terminal_command_evidence_ref=terminal_ref,
+        requested_timeout_seconds=budget.get("requested_timeout_seconds") or existing_budget.get("requested_timeout_seconds"),
+        effective_timeout_seconds=budget.get("effective_timeout_seconds") or existing_budget.get("effective_timeout_seconds"),
+        work_wall_remaining_seconds=work_wall_remaining_seconds,
+        final_proof_reserve_seconds=final_proof_reserve_seconds,
+        continuation_count=existing_budget.get("continuation_count") if existing_budget else 0,
+        max_continuations=existing_budget.get("max_continuations") if existing_budget else 3,
+        stdout=result.get("stdout") or "",
+        stderr=result.get("stderr") or "",
+    )
+    contract = evidence.get("execution_contract") if isinstance(evidence.get("execution_contract"), dict) else {}
+    existing_contract = existing.get("execution_contract") if isinstance(existing, dict) and isinstance(existing.get("execution_contract"), dict) else {}
+    if not (contract and execution_contract_is_valid(contract) and not contract.get("fallback_used")):
+        contract = existing_contract if execution_contract_is_valid(existing_contract) and not existing_contract.get("fallback_used") else contract
+    resume_identity = contract.get("resume_identity") if isinstance(contract.get("resume_identity"), dict) else {}
+    if contract and execution_contract_is_valid(contract) and not contract.get("fallback_used") and resume_identity.get("idempotence_key"):
+        run["idempotence_key"] = str(resume_identity.get("idempotence_key"))
+    if contract and not contract.get("fallback_used"):
+        run["execution_contract"] = dict(contract)
+        if not run.get("stage"):
+            run["stage"] = str(contract.get("stage") or "")
+    run["terminal"] = {
+        "exit_code": result.get("exit_code"),
+        "timed_out": bool(result.get("timed_out")),
+        "kill_reason": result.get("kill_status") or "",
+        "finished_at": result.get("finished_at"),
+    }
+    runs = session.setdefault("long_command_runs", [])
+    if existing:
+        existing.clear()
+        existing.update(run)
+    else:
+        runs.append(run)
+    return run
+
+
 def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""):
     session = find_work_session(state, session_id)
     tool_call = find_work_tool_call(session, tool_call_id)
@@ -10599,6 +12621,10 @@ def finish_work_tool_call(state, session_id, tool_call_id, result=None, error=""
         tool_call["summary"] = clip_output(summarize_work_tool_result(tool_call.get("tool"), result or {}), 4000)
     tool_call.pop("running_output", None)
     tool_call["finished_at"] = finished_at
+    evidence = _record_command_evidence_finish(session, tool_call)
+    if evidence is None:
+        evidence = _record_command_lifecycle_tool_finish(session, tool_call)
+    _record_long_command_run_from_tool_call(session, tool_call, evidence)
     if session:
         session["updated_at"] = finished_at
     return tool_call
@@ -10608,7 +12634,15 @@ def run_work_tool(state, session, tool, parameters, allowed_read_roots):
     tool_call = start_work_tool_call(state, session, tool, parameters)
 
     try:
-        result = execute_work_tool(tool, parameters, allowed_read_roots)
+        if tool in {"poll_command", "cancel_command"}:
+            cached_result = _cached_terminal_command_result(
+                session,
+                tool_call.get("parameters") or {},
+                action_kind=f"{tool}_cached_terminal",
+            )
+            if cached_result is not None:
+                return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), result=cached_result)
+        result = execute_work_tool(tool, tool_call.get("parameters") or {}, allowed_read_roots)
         return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), result=result)
     except (OSError, ValueError) as exc:
         return finish_work_tool_call(state, session.get("id"), tool_call.get("id"), error=str(exc))
@@ -10713,6 +12747,8 @@ def build_work_session_diff_entries(session, limit=8, max_chars=DEFAULT_DIFF_PRE
         entries.append(
             {
                 "tool_call_id": call.get("id"),
+                "command_run_id": parameters.get("command_run_id") or call.get("command_run_id") or "",
+                "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "status": call.get("status") or "unknown",
                 "tool": call.get("tool") or "unknown",
                 "path": result.get("path") or parameters.get("path") or "",
@@ -10852,6 +12888,7 @@ def build_work_session_command_entries(session, limit=8, max_chars=1200, include
         entries.append(
             {
                 "tool_call_id": call.get("id"),
+                "command_evidence_ref": call.get("command_evidence_ref") or {},
                 "status": call.get("status") or "unknown",
                 "tool": call.get("tool") or "unknown",
                 "command": result.get("command") or parameters.get("command") or "",
@@ -10879,9 +12916,16 @@ def format_work_session_commands(session, task=None, limit=8, include_tests=True
         lines.append("(none)")
         return "\n".join(lines)
     for entry in entries:
+        command_evidence_ref = entry.get("command_evidence_ref") or {}
+        evidence_suffix = (
+            f" command_evidence=#{command_evidence_ref.get('id')}"
+            if command_evidence_ref.get("id") is not None
+            else ""
+        )
+        command_run_suffix = f" command_run={entry.get('command_run_id')}" if entry.get("command_run_id") else ""
         lines.append(
             f"#{entry.get('tool_call_id')} [{entry.get('status')}] {entry.get('tool')} "
-            f"exit={format_exit_code(entry.get('exit_code'))} {entry.get('command') or ''}"
+            f"exit={format_exit_code(entry.get('exit_code'))}{evidence_suffix}{command_run_suffix} {entry.get('command') or ''}"
         )
         if entry.get("cwd"):
             lines.append(f"cwd: {entry.get('cwd')}")

@@ -2,10 +2,12 @@
 auth.json
 auth.plus.json
 auth.pro.json
+.env.local
 .venv/
 __pycache__/
 .testmondata
 artifacts/
+.codex-artifacts/
 proof-artifacts/
 proof-workspace/
 
@@ -18,6 +20,7 @@ docs/assets/*.gif
 # Local-only reference links to external CLI implementations.
 references/fresh-cli/claude-code
 references/fresh-cli/codex
+references/fresh-cli/forgecode
 references/fresh-cli/hermes-agent
 references/fresh-cli/openclaw
 references/fresh-cli/vellum-assistant
