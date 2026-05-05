@@ -16,6 +16,7 @@ from mew.implement_lane import (
     build_implement_v2_prompt_sections,
     describe_implement_v1_adapter,
     describe_implement_v2_runtime,
+    evaluate_m6_24_reentry_ab_gate,
     get_implement_lane_runtime_view,
     implement_v2_prompt_section_metrics,
     list_implement_lane_runtime_views,
@@ -1667,6 +1668,125 @@ def test_implement_v2_write_mode_rejects_run_command_hidden_mutation(tmp_path) -
     assert tool_result["status"] == "invalid"
     assert "not available in implement_v2 write mode" in tool_result["content"][0]["reason"]
     assert not (tmp_path / "out.txt").exists()
+
+
+def test_m6_24_reentry_gate_allows_explicit_lane_after_v2_replay_valid_probe(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
+    v2_probe = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "read_file", "arguments": {"path": "README.md"}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "probe ok"},
+    )
+
+    gate = evaluate_m6_24_reentry_ab_gate(
+        work_session_id="ws-1",
+        task_id="task-1",
+        selected_lane=IMPLEMENT_V1_LANE,
+        v2_result=v2_probe,
+        v1_baseline_valid=True,
+    )
+
+    assert gate.status == "ready"
+    assert gate.can_resume_m6_24 is True
+    assert gate.reasons == ()
+    assert gate.lane_decision["selected_lane"] == IMPLEMENT_V1_LANE
+    assert gate.metrics["v2_replay_valid"] is True
+    assert "implement_v1" in gate.v1_artifact_namespace
+    assert "implement_v2" in gate.v2_artifact_namespace
+    assert gate.v1_artifact_namespace != gate.v2_artifact_namespace
+
+
+def test_m6_24_reentry_gate_blocks_missing_explicit_lane(tmp_path) -> None:
+    v2_probe = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(),
+        finish_arguments={"outcome": "analysis_ready", "summary": "no evidence"},
+    )
+
+    gate = evaluate_m6_24_reentry_ab_gate(
+        work_session_id="ws-1",
+        task_id="task-1",
+        selected_lane="",
+        v2_result=v2_probe,
+        v1_baseline_valid=True,
+    )
+
+    assert gate.status == "blocked"
+    assert gate.can_resume_m6_24 is False
+    assert "explicit_supported_lane_selection_required" in gate.reasons
+
+
+def test_m6_24_reentry_gate_blocks_invalid_v2_replay(tmp_path) -> None:
+    v2_probe = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {"provider_call_id": "dup", "tool_name": "inspect_dir", "arguments": {"path": "."}},
+            {"provider_call_id": "dup", "tool_name": "read_file", "arguments": {"path": "README.md"}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "duplicate ids"},
+    )
+
+    gate = evaluate_m6_24_reentry_ab_gate(
+        work_session_id="ws-1",
+        task_id="task-1",
+        selected_lane=IMPLEMENT_V2_LANE,
+        v2_result=v2_probe,
+        v1_baseline_valid=True,
+    )
+
+    assert gate.status == "blocked"
+    assert gate.can_resume_m6_24 is False
+    assert "v2_probe_replay_not_valid" in gate.reasons
+
+
+def test_m6_24_reentry_gate_blocks_artifact_namespace_collision(tmp_path) -> None:
+    v2_probe = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "inspect_dir", "arguments": {"path": "."}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "probe ok"},
+    ).as_dict()
+    v1_namespace = describe_implement_v1_adapter(work_session_id="ws-1", task_id="task-1").artifact_namespace
+    v2_probe["updated_lane_state"]["proof_manifest"]["artifact_namespace"] = v1_namespace
+
+    gate = evaluate_m6_24_reentry_ab_gate(
+        work_session_id="ws-1",
+        task_id="task-1",
+        selected_lane=IMPLEMENT_V2_LANE,
+        v2_result=v2_probe,
+        v1_baseline_valid=True,
+    )
+
+    assert gate.status == "blocked"
+    assert "v1_v2_artifact_namespace_collision" in gate.reasons
+    assert "v2_manifest_namespace_mismatch" in gate.reasons
 
 
 def _expected_command_run_id(*, lane_attempt_id: str, provider_call_id: str) -> str:
