@@ -79,12 +79,17 @@ Scope:
   intended behavior change.
 - v2 is default-off until the lane registry, transcript namespace, tool policy,
   and proof artifact boundary are in place.
+- v2 starts memory-light. Memory is a deferred staged integration:
+  read-only summary prompt section, then read-only `MemoryExploreProvider`,
+  then task/gap repair memory for strategy or lane selection after loop
+  correctness is debuggable.
 - M6.24 live proof work is paused until the next proof can explicitly state
   which lane produced the artifact.
 
 Controller docs:
 
 - `docs/DESIGN_2026-05-05_M6_23_2_LANE_ISOLATION_SUBSTRATE.md`
+- `docs/DESIGN_2026-05-05_M6_23_2_IMPLEMENT_V2_NATIVE_TOOL_LOOP.md`
 - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
 
 Paused M6.24 resume action:
@@ -179,8 +184,8 @@ Useful historical files:
    evidence separate from v2 design and scaffold work.
 3. Close the lane boundary plan: explicit lane selection, lane-scoped
    transcript/proof namespaces, provider-native v2 tool/result pairing design,
-   prompt-section metadata, metrics, rollback, and reviewer-approved phase
-   gates.
+   prompt-section metadata, memory-light v0 boundary with deferred memory
+   sequence, metrics, rollback, and reviewer-approved phase gates.
 4. Resume the paused M6.24 `build-cython-ext` repair path only after M6.23.2
    records a clean resume decision with explicit lane selection, focused v1
    regression, no accepted lane-isolation must-fix findings, and proof artifacts

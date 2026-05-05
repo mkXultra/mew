@@ -1066,8 +1066,9 @@ Session-specific sections:
 
 - `implement_v2_task_contract`: task objective, acceptance constraints, allowed
   roots, explicit non-goals.
-- `implement_v2_active_memory`: scoped memory and reentry hints.
 - `implement_v2_lane_state`: compact lane-local state needed for resume.
+- `implement_v2_memory_summary`: optional read-only memory summary, empty or
+  omitted in v0.
 
 Dynamic sections:
 
@@ -1095,6 +1096,34 @@ Rules:
 The v2 provider adapter may map prompt sections into provider request blocks,
 but it must preserve the registry metrics and artifact hashes. Future cache
 transport work can use those artifacts without changing lane semantics.
+
+### Deferred Memory Integration Sequence
+
+`implement_v2` v0 is intentionally memory-light. The first priority is native
+tool-loop correctness: provider tool/result pairing, managed exec, approval,
+finish/acceptance, replay, and lane-local metrics. Long-term memory is added
+only after those surfaces are testable, because otherwise failures become hard
+to attribute: the loop, memory recall, and strategy can all appear responsible.
+
+Planned sequence:
+
+| Stage | Memory Surface | Scope | Gate |
+|---|---|---|---|
+| `implement_v2_v0` | none beyond lane-local state and reentry hints | Build the native tool loop without long-term memory recall. | v2 read/search/run/write/finish loop is replayable and v1-safe. |
+| `implement_v2_v1` | read-only memory summary prompt section | Inject a bounded, cited memory summary through prompt sections. | A/B evidence shows memory summary changes useful behavior without hiding tool-loop failures. |
+| `implement_v2_v2` | `MemoryExploreProvider` read-only provider/tool | Let the lane ask for typed/durable memory through a read-only contract, not a second planner. | Memory explore calls are replayable, bounded, and cannot mutate durable memory. |
+| `implement_v2_v3` | task/gap repair memory for selection/strategy | Use prior gap repairs and failure clusters when choosing strategy or lane route. | Same-shape repair improves through memory-backed selection without overfitting one benchmark task. |
+
+Rules:
+
+- Memory must not be part of the initial M6.23.2 v2 runtime gate.
+- Memory must not be used to explain away v2 loop failures until the loop has
+  replayable evidence.
+- Memory summaries must be cited and bounded; raw memory dumps are not allowed.
+- `MemoryExploreProvider` is read-only first. Autonomous memory explorer agents
+  are out of scope until the primary work loop is debuggable.
+- M6.24 scoring runs should state whether memory was disabled, summary-only, or
+  provider/tool-backed so score changes remain attributable.
 
 ## Metrics For V1/V2 Comparison And M6.24 Reentry
 

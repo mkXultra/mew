@@ -1457,6 +1457,14 @@ Target:
   reentry, diagnosis, and repair loops
 - show that repeated work benefits from previous classified failures and repair
   history instead of starting cold each time
+- integrate memory into `implement_v2` only after native tool-loop correctness
+  is debuggable:
+  - `implement_v2_v0`: memory-light, lane-local state and reentry hints only
+  - `implement_v2_v1`: bounded read-only memory summary as a prompt section
+  - `implement_v2_v2`: read-only `MemoryExploreProvider` tool/provider, not a
+    second planner
+  - `implement_v2_v3`: task/gap repair memory for strategy or lane selection
+    after same-shape repair evidence exists
 - connect the provider-neutral prompt section registry to provider-specific
   cache transport only after M6.24 scoring repairs settle:
   - keep M6.24 section ids, hashes, stability, cache policy, and cache hints as
