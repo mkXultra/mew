@@ -82,6 +82,8 @@ Scope:
   `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`.
 - The active repeated-gap dossier is
   `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`.
+- Fresh Codex/Claude Code reference traces for the same active gap are recorded
+  in `docs/M6_24_REFERENCE_TRACE_BUILD_CYTHON_EXT_2026-05-05.md`.
 - The current-head remeasurement artifact is
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936/result.json`.
 - Previous all-registry and `compile-compcert` records are historical repair
@@ -93,6 +95,7 @@ Controller docs:
 - `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
 - `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`
 - `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
+- `docs/M6_24_REFERENCE_TRACE_BUILD_CYTHON_EXT_2026-05-05.md`
 - `docs/M6_24_DECISION_LEDGER.md`
 - `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
@@ -103,6 +106,11 @@ Next action:
 ```text
 M6.24 -> verified_sibling_repair_frontier_not_exhausted -> current-head build-cython-ext artifact -> replay/dogfood/emulator pass -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1
 ```
+
+The 2026-05-05 Codex/Claude Code reference traces both pass
+`build-cython-ext` and confirm that the next repair should make same-family
+verifier/runtime failures a compact active repair frontier before another broad
+build/test/finish cycle.
 
 Do not spend new M6.24 live proof budget on out-of-scope tasks. If the next
 action says to run a new `compile-compcert` speed proof, treat that as drift and
@@ -145,7 +153,9 @@ Useful historical files:
 
 1. Implement the selected generic `build-cython-ext` gap repair:
    `verified_sibling_repair_frontier_not_exhausted` /
-   `repository_test_tail_frontier_not_exhausted_before_wall_timeout`.
+   `repository_test_tail_frontier_not_exhausted_before_wall_timeout`, using the
+   2026-05-05 reference traces as evidence for an active compatibility frontier
+   rather than another task-specific prompt patch.
 2. Before any live `speed_1`, run focused UT, replay, dogfood, and a same-shape
    emulator. If no emulator exists, build the smallest emulator fixture first.
 3. If the selected gap is local/polish, fix it and rerun the same scoped shape.

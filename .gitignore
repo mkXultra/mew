@@ -2,6 +2,7 @@
 auth.json
 auth.plus.json
 auth.pro.json
+.env.local
 .venv/
 __pycache__/
 .testmondata
