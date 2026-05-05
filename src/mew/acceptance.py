@@ -169,26 +169,138 @@ _RUNTIME_COMPONENT_TASK_MARKERS = (
     "native modules",
     "runtime module",
     "runtime modules",
+    "loadable runtime component",
+    "runtime component",
+    "runtime components",
     "shared library",
     "shared libraries",
+    "plugin entrypoint",
+    "plugin host",
+    "generated executable",
+    "runtime harness",
+    "custom runtime",
+    "interpreter",
+    "simulator",
 )
 _RUNTIME_COMPONENT_BEHAVIOR_MARKERS = (
     "behavior",
     "behavioral",
     "component-specific",
+    "component-specific test",
+    "component-specific tests",
+    "component test",
+    "component tests",
     "callable",
     "extension-specific",
+    "entry point",
+    "entrypoint",
+    "executed",
+    "execution smoke",
     "exported function",
+    "external verifier",
     "function-level",
     "invokable",
+    "invocation",
+    "invoke",
     "invoked",
     "non-import",
+    "repository test tail",
+    "repository-test-tail",
     "specific test",
+    "targeted component test",
+    "targeted component tests",
     "works in original context",
 )
-_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE = re.compile(
-    r"\b(?:work|works|working|compatib\w*|functional(?:ity)?|behavior(?:al)?)\b"
+_RUNTIME_COMPONENT_BEHAVIOR_CONTRACT_TERMS = {
+    "behavior",
+    "behavioral",
+    "candidate_final_proof",
+    "candidate_runtime_smoke",
+    "component",
+    "custom_runtime_smoke",
+    "external_verifier",
+    "repository_tail",
+    "runtime",
+    "runtime_behavior",
+    "smoke",
+    "test",
+    "tests",
+    "verification",
+    "verifier",
+}
+_RUNTIME_COMPONENT_VERIFIER_COMMAND_RE = re.compile(
+    r"(?:^|\s)(?:python|pytest|unittest|node|npm|pnpm|yarn|cargo|go|java|ruby|perl|php|lua|julia|Rscript|swift|dotnet|mono)\b"
+    r"|(?:^|\s)\./[^\s]+"
+    r"|\b(?:test|tests|verify|verifier|smoke|check)\b"
 )
+_RUNTIME_COMPONENT_CALLABLE_INVOCATION_RE = re.compile(
+    r"\b[A-Za-z_][\w.]*\.[A-Za-z_]\w*\s*\("
+    r"|\b(?:main|run|execute|invoke|entrypoint|entry_point)\s*\("
+)
+_RUNTIME_COMPONENT_LOADER_CALL_RE = re.compile(
+    r"\b(?:ctypes\.)?(?:CDLL|PyDLL|WinDLL|OleDLL)\s*\("
+    r"|\bctypes\.(?:cdll|pydll|windll|oledll)\.LoadLibrary\s*\("
+    r"|\bimportlib\.import_module\s*\("
+    r"|\b[A-Za-z_][\w.]*\.(?:import_module|load_library|LoadLibrary)\s*\("
+    r"|\b(?:import_module|load_library|LoadLibrary)\s*\("
+    r"|\b(?:dlopen|ffi\.load|ffi\.dlopen|cffi\.FFI\s*\(\s*\)\.dlopen)\s*\("
+)
+_RUNTIME_COMPONENT_ENTRYPOINT_EXECUTION_RE = re.compile(
+    r"(?:^|\s)(?:node|python|ruby|perl|php|lua|julia|Rscript|swift|java|dotnet|mono)\s+(?!-c\b)[^\s;]+"
+    r"|(?:^|\s)\./[^\s]+"
+)
+_RUNTIME_COMPONENT_NON_BEHAVIOR_COMMAND_RE = re.compile(
+    r"\b(?:build|building|configure|configured|install|installed|installing|list|listing|noop|no-op|probe|readback|read-back)\b"
+    r"|--help\b|--version\b|(?:^|\s)-h(?:\s|$)|(?:^|\s)-v(?:\s|$)"
+)
+_RUNTIME_COMPONENT_IMPORT_LOAD_PATH_SIGNAL_RE = re.compile(
+    r"\b(?:attribute|exists?|existence|file|hasattr|import(?:ed|s|ing)?|load(?:ed|s|ing)?|metadata|path|which)\b"
+    r"|__file__"
+    r"|\b(?:ldd|ls|nm|otool|readelf)\b"
+    r"|\.(?:so|pyd|dylib|dll|exe)\b"
+)
+_RUNTIME_COMPONENT_TARGETED_BEHAVIOR_TEST_RE = re.compile(
+    r"\b(?:behavior|behaviour|invocation|invoke[sd]?|execution smoke|entrypoint|entry point|callable|function-level)\b"
+)
+_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE = re.compile(
+    r"\b(?:work|works|working|compatib\w*|functional(?:ity)?|behavior(?:al)?|run|runs|running|runnable|execute[sd]?|executable|invokable|invocation|invoke[sd]?)\b"
+)
+_RUNTIME_COMPONENT_DOC_OR_INVESTIGATION_MARKERS = (
+    "analyze",
+    "diagnose",
+    "document",
+    "documentation",
+    "docs",
+    "explain",
+    "investigate",
+    "readme",
+    "report findings",
+)
+_RUNTIME_COMPONENT_REPAIR_OR_VERIFIER_MARKERS = (
+    "exercise",
+    "fix",
+    "implement",
+    "invoke",
+    "repair",
+    "test",
+    "validate",
+    "verify",
+)
+_RUNTIME_COMPONENT_INVOCATION_COMMAND_TOOLS = {
+    "dotnet",
+    "java",
+    "julia",
+    "lua",
+    "mono",
+    "node",
+    "perl",
+    "php",
+    "python",
+    "python3",
+    "ruby",
+    "rscript",
+    "swift",
+}
 
 _LONG_DEPENDENCY_BUILD_ACTION_MARKERS = (
     "build",
@@ -1395,6 +1507,16 @@ def is_runtime_component_behavior_task(text: object) -> bool:
     lowered = str(text or "").casefold()
     if not any(marker in lowered for marker in _RUNTIME_COMPONENT_TASK_MARKERS):
         return False
+    has_doc_or_investigation_marker = any(
+        re.search(rf"\b{re.escape(marker)}\b", lowered)
+        for marker in _RUNTIME_COMPONENT_DOC_OR_INVESTIGATION_MARKERS
+    )
+    has_repair_or_verifier_marker = any(
+        re.search(rf"\b{re.escape(marker)}\b", lowered)
+        for marker in _RUNTIME_COMPONENT_REPAIR_OR_VERIFIER_MARKERS
+    )
+    if has_doc_or_investigation_marker and not has_repair_or_verifier_marker:
+        return False
     return bool(_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE.search(lowered))
 
 
@@ -1408,17 +1530,190 @@ def _runtime_component_evidence_texts(check: object, session: object) -> list[st
     return [text for text in texts if str(text or "").strip()]
 
 
-def _command_evidence_text(evidence: object) -> str:
-    if not isinstance(evidence, dict):
-        return ""
-    return _tool_call_text(command_evidence_to_tool_call(evidence))
+def _runtime_component_call_contract_terms(call: object) -> set[str]:
+    if not isinstance(call, dict):
+        return set()
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    contract = parameters.get("execution_contract") if isinstance(parameters.get("execution_contract"), dict) else {}
+    terms: set[str] = set()
+    for key in ("purpose", "stage", "proof_role", "acceptance_kind", "risk_class"):
+        value = contract.get(key)
+        if isinstance(value, str):
+            terms.update(re.findall(r"[a-zA-Z0-9_]+", value.casefold()))
+        elif isinstance(value, list):
+            for item in value:
+                terms.update(re.findall(r"[a-zA-Z0-9_]+", str(item).casefold()))
+    return terms
+
+
+def _runtime_component_command_kind_allows_behavior(call: object) -> bool:
+    if not isinstance(call, dict):
+        return False
+    tool = call.get("tool")
+    if tool == "run_tests":
+        return True
+    if tool != "run_command":
+        return False
+    if _runtime_component_call_contract_terms(call) & _RUNTIME_COMPONENT_BEHAVIOR_CONTRACT_TERMS:
+        return True
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    return bool(_RUNTIME_COMPONENT_VERIFIER_COMMAND_RE.search(command))
+
+
+def _runtime_component_callable_invocation_seen(call: object) -> bool:
+    if not isinstance(call, dict):
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    if re.search(r"\b(?:getattr|hasattr)\s*\(|(?:^|[.\s])load\s*\(", command):
+        return False
+    if _RUNTIME_COMPONENT_LOADER_CALL_RE.search(command):
+        return False
+    return bool(_RUNTIME_COMPONENT_CALLABLE_INVOCATION_RE.search(command))
+
+
+def _runtime_component_import_load_path_signal_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict):
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    return bool(_RUNTIME_COMPONENT_IMPORT_LOAD_PATH_SIGNAL_RE.search(f"{command}\n{text}".casefold()))
+
+
+def _runtime_component_targeted_behavior_test_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict) or call.get("tool") != "run_tests":
+        return False
+    normalized_text = text.replace("_", " ")
+    if not _RUNTIME_COMPONENT_TARGETED_BEHAVIOR_TEST_RE.search(normalized_text):
+        return False
+    return any(
+        marker in normalized_text
+        for marker in (
+            "component",
+            "component-specific",
+            "runtime",
+            "targeted",
+            "test ",
+            "::test",
+        )
+    )
+
+
+def _runtime_component_repository_tail_behavior_seen(text: str) -> bool:
+    if "repository-test-tail" not in text and "repository test tail" not in text:
+        return False
+    return bool(_RUNTIME_COMPONENT_TARGETED_BEHAVIOR_TEST_RE.search(text.replace("_", " ")))
+
+
+def _runtime_component_external_verifier_behavior_seen(call: object, text: str) -> bool:
+    terms = _runtime_component_call_contract_terms(call)
+    if "external_verifier" not in terms:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "behavior",
+            "behaviour",
+            "callable",
+            "entrypoint",
+            "entry point",
+            "executed",
+            "execution smoke",
+            "function-level",
+            "invocation",
+            "invoked",
+            "runtime behavior",
+        )
+    )
+
+
+def _runtime_component_execution_smoke_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+        return False
+    if _runtime_component_call_contract_terms(call) & {
+        "candidate_runtime_smoke",
+        "custom_runtime_smoke",
+        "runtime_behavior",
+    }:
+        return True
+    return any(marker in text for marker in ("executed", "execution smoke", "entrypoint", "entry point"))
+
+
+def _runtime_component_non_behavior_command_shape_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict):
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    return bool(_RUNTIME_COMPONENT_NON_BEHAVIOR_COMMAND_RE.search(f"{command}\n{text}".casefold()))
+
+
+def _runtime_component_entrypoint_behavior_signal_seen(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "behavior",
+            "behaviour",
+            "executed",
+            "execution smoke",
+            "invocation",
+            "invoked",
+            "ran ",
+            "run ",
+            "runs",
+            "runtime behavior",
+        )
+    )
+
+
+def _runtime_component_entrypoint_execution_seen(call: object) -> bool:
+    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    if re.search(r"\b(?:pytest|unittest|tox|nox)\b", command):
+        return False
+    return bool(_RUNTIME_COMPONENT_ENTRYPOINT_EXECUTION_RE.search(command))
+
+
+def _runtime_component_call_text_proves_behavior(call: object, proof_text: object = "") -> bool:
+    if not isinstance(call, dict):
+        return False
+    text = _tool_call_text(call).casefold()
+    if not text:
+        return False
+    proof_text = str(proof_text or "").casefold()
+    combined_text = f"{text}\n{proof_text}"
+    callable_invocation = _runtime_component_callable_invocation_seen(call)
+    targeted_test = _runtime_component_targeted_behavior_test_seen(call, text)
+    repository_tail = _runtime_component_repository_tail_behavior_seen(text)
+    execution_smoke = _runtime_component_execution_smoke_seen(call, text)
+    non_behavior_entrypoint = _runtime_component_non_behavior_command_shape_seen(call, combined_text)
+    entrypoint_execution = (
+        _runtime_component_entrypoint_execution_seen(call)
+        and not non_behavior_entrypoint
+        and _runtime_component_entrypoint_behavior_signal_seen(text)
+    )
+    import_load_path_signal = _runtime_component_import_load_path_signal_seen(call, text)
+    external_verifier = _runtime_component_external_verifier_behavior_seen(call, text) and not import_load_path_signal
+    import_load_path_only = import_load_path_signal and not (
+        callable_invocation or targeted_test or repository_tail or execution_smoke
+    )
+    if import_load_path_only:
+        return False
+    return bool(
+        callable_invocation
+        or targeted_test
+        or repository_tail
+        or execution_smoke
+        or entrypoint_execution
+        or external_verifier
+    )
 
 
 def _runtime_component_has_behavior_evidence(check: object, session: object) -> bool:
     claim_text = "\n".join(_runtime_component_evidence_texts(check, None)).casefold()
-    if not claim_text:
-        return False
-    if not any(marker in claim_text for marker in _RUNTIME_COMPONENT_TASK_MARKERS):
+    if not claim_text and not _check_evidence_refs(check):
         return False
     for ref in _check_evidence_refs(check):
         ref_id = ref.get("id")
@@ -1429,8 +1724,11 @@ def _runtime_component_has_behavior_evidence(check: object, session: object) -> 
             evidence = _command_evidence_by_id(session, ref_id)
             if not evidence or not evidence.get("terminal_success"):
                 continue
-            evidence_text = _command_evidence_text(evidence).casefold()
-            if any(marker in evidence_text for marker in _RUNTIME_COMPONENT_BEHAVIOR_MARKERS):
+            call = command_evidence_to_tool_call(evidence)
+            if _runtime_component_command_kind_allows_behavior(call) and _runtime_component_call_text_proves_behavior(
+                call,
+                claim_text,
+            ):
                 return True
             continue
         if kind != "tool_call":
@@ -1442,10 +1740,54 @@ def _runtime_component_has_behavior_evidence(check: object, session: object) -> 
             continue
         if not tool_call_terminal_success(call):
             continue
-        tool_text = _tool_call_text(call).casefold()
-        if any(marker in tool_text for marker in _RUNTIME_COMPONENT_BEHAVIOR_MARKERS):
+        if _runtime_component_command_kind_allows_behavior(call) and _runtime_component_call_text_proves_behavior(
+            call,
+            claim_text,
+        ):
             return True
     return False
+
+
+def _runtime_component_invocation_command_requirements(text: object, *, limit: int = 4) -> list[str]:
+    source = str(text or "")
+    requirements: list[str] = []
+    for match in _BACKTICK_TEXT_RE.finditer(source):
+        value = _clean_constraint_text(match.group(1), limit=240)
+        if not value:
+            continue
+        context = source[max(0, match.start() - 80) : min(len(source), match.end() + 80)].casefold()
+        if not re.search(r"\b(?:run|runs|running|execute|executes|invok(?:e|es|ing))\b", context):
+            continue
+        try:
+            tokens = shlex.split(value)
+        except ValueError:
+            tokens = value.split()
+        if len(tokens) < 2:
+            continue
+        if tokens[0].casefold() not in _RUNTIME_COMPONENT_INVOCATION_COMMAND_TOOLS:
+            continue
+        target = tokens[1]
+        if target.startswith("-") or not re.match(r"^(?:[\w.+/-]+|/[\w.+/-]+)$", target):
+            continue
+        if value not in requirements:
+            requirements.append(value)
+        if len(requirements) >= limit:
+            break
+    return requirements
+
+
+def _runtime_component_invocation_command_grounded(
+    task_description: object,
+    verified_checks: list[dict[str, str]],
+    session: object,
+) -> bool:
+    requirements = _runtime_component_invocation_command_requirements(task_description)
+    if not requirements or not verified_checks:
+        return False
+    return all(
+        any(_has_exact_command_example_evidence(check, session, command) for check in verified_checks)
+        for command in requirements
+    )
 
 
 def _runtime_component_behavior_blocker(
@@ -1460,6 +1802,8 @@ def _runtime_component_behavior_blocker(
         for check in checks
         if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
     ]
+    if _runtime_component_invocation_command_grounded(task_description, verified_checks, session):
+        return ""
     if any(_runtime_component_has_behavior_evidence(check, session) for check in verified_checks):
         return ""
     return (
@@ -2746,7 +3090,13 @@ def _numeric_artifact_quality_blocker(
     )
 
 
-def acceptance_finish_blocker(task_description: object, action: object, *, session: object = None) -> str:
+def acceptance_finish_blocker(
+    task_description: object,
+    action: object,
+    *,
+    session: object = None,
+    include_runtime_component_gate: bool = True,
+) -> str:
     action = action if isinstance(action, dict) else {}
     if not action.get("task_done"):
         return ""
@@ -2772,9 +3122,10 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker
-    runtime_component_blocker = _runtime_component_behavior_blocker(task_description, checks, session)
-    if runtime_component_blocker:
-        return runtime_component_blocker
+    if include_runtime_component_gate:
+        runtime_component_blocker = _runtime_component_behavior_blocker(task_description, checks, session)
+        if runtime_component_blocker:
+            return runtime_component_blocker
     long_dependency_blocker = _long_dependency_build_artifact_blocker(task_description, checks, session)
     if long_dependency_blocker:
         return long_dependency_blocker
@@ -2868,6 +3219,46 @@ def finish_continuation_prompt(blockers: list[object]) -> str:
     )
 
 
+def runtime_component_finish_gate_decision(
+    task_description: object,
+    action: object,
+    *,
+    session: object = None,
+) -> dict:
+    action = action if isinstance(action, dict) else {}
+    if not action.get("task_done"):
+        return {
+            "decision": "allow_complete",
+            "reason": "",
+            "blockers": [],
+            "invalid_evidence_refs": [],
+            "continuation_prompt": "",
+        }
+    checks = coerce_acceptance_checks(action.get("acceptance_checks"))
+    blocker = _runtime_component_behavior_blocker(task_description, checks, session)
+    if not blocker:
+        return {
+            "decision": "allow_complete",
+            "reason": "",
+            "blockers": [],
+            "invalid_evidence_refs": [],
+            "continuation_prompt": "",
+        }
+    blockers = [blocker]
+    return {
+        "decision": "block_continue",
+        "reason": blocker,
+        "blockers": [
+            {
+                "code": finish_blocker_code(blocker),
+                "message": blocker,
+            }
+        ],
+        "invalid_evidence_refs": [],
+        "continuation_prompt": finish_continuation_prompt(blockers),
+    }
+
+
 def acceptance_done_gate_decision(
     task_description: object,
     action: object,
@@ -2884,7 +3275,19 @@ def acceptance_done_gate_decision(
             "continuation_prompt": "",
         }
     blockers: list[str] = []
-    acceptance_blocker = acceptance_finish_blocker(task_description, action, session=session)
+    runtime_component_gate = runtime_component_finish_gate_decision(task_description, action, session=session)
+    if runtime_component_gate.get("decision") != "allow_complete":
+        blockers.extend(
+            blocker.get("message")
+            for blocker in runtime_component_gate.get("blockers") or []
+            if isinstance(blocker, dict) and blocker.get("message")
+        )
+    acceptance_blocker = acceptance_finish_blocker(
+        task_description,
+        action,
+        session=session,
+        include_runtime_component_gate=False,
+    )
     if acceptance_blocker:
         blockers.append(acceptance_blocker)
     checks = coerce_acceptance_checks(action.get("acceptance_checks"))

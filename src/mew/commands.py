@@ -38,7 +38,7 @@ from .agent_runs import (
 )
 from .archive import archive_state_records, format_archive_result
 from .cli_command import mew_command, mew_executable
-from .compatibility_frontier import project_active_compatibility_frontier
+from .compatibility_frontier import project_active_compatibility_frontier, record_finish_false_positive_frontier
 from .brief import (
     build_activity_data,
     build_brief,
@@ -3674,6 +3674,13 @@ def apply_work_control_action(state, session, task, action):
                 session=session,
             )
             if acceptance_gate.get("decision") != "allow_complete":
+                record_finish_false_positive_frontier(
+                    session,
+                    task_description=(task or {}).get("description") or session.get("goal") or "",
+                    action=acceptance_action,
+                    acceptance_gate=acceptance_gate,
+                    current_time=current_time,
+                )
                 finish_blockers.extend(
                     blocker.get("message") for blocker in acceptance_gate.get("blockers") or [] if blocker.get("message")
                 )

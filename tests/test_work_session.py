@@ -45635,6 +45635,127 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertIn("deterministic done gate", session["notes"][-1]["text"])
         self.assertIn("Work session finish blocked", task["notes"])
 
+    def test_work_finish_reopens_finish_false_positive_frontier_for_runtime_component_import_only(self):
+        from mew.commands import apply_work_control_action
+
+        description = "The loadable runtime component should work in its original runtime context."
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "command_evidence": [
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "terminal_success": True,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "command": "python -c 'import native_module; print(native_module.__file__)'",
+                    "output_tail": "/tmp/native_module.so\n",
+                }
+            ],
+        }
+        task = {"id": 15, "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Runtime component works.",
+                    "status": "verified",
+                    "evidence": "Command evidence #13 imported the runtime component and printed its path.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": 13}],
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertEqual(result["finish_blockers"][0]["code"], "runtime_component_behavior_evidence")
+        frontier = session["active_compatibility_frontier"]
+        self.assertEqual(frontier["status"], "open")
+        self.assertEqual(frontier["failure_signature"]["kind"], "finish_false_positive")
+        self.assertEqual(frontier["failure_signature"]["runtime_component_kind"], "unknown")
+        self.assertEqual(frontier["evidence_refs"][0]["kind"], "command_evidence")
+        self.assertEqual(frontier["evidence_refs"][0]["id"], 13)
+        self.assertEqual(frontier["closure_state"]["state"], "cheap_verify_needed")
+        self.assertEqual(frontier["closure_state"]["guard_mode"], "block_finish")
+        self.assertIn("finish", frontier["closure_state"]["blocked_action_kinds"])
+        self.assertNotIn("/tmp/native_module.so", json.dumps(frontier))
+
+    def test_work_finish_reuses_finish_false_positive_frontier_for_same_family_different_evidence_ids(self):
+        from mew.commands import apply_work_control_action
+
+        description = "The loadable runtime component should work in its original runtime context."
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "command_evidence": [
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "terminal_success": True,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "command": "python -c 'import runtime_component; print(runtime_component.__file__)'",
+                    "output_tail": "/tmp/runtime_component.so\n",
+                },
+                {
+                    "id": 14,
+                    "tool": "run_command",
+                    "terminal_success": True,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "command": "python -c 'import runtime_component; print(runtime_component.__file__)'",
+                    "output_tail": "/tmp/runtime_component_second.so\n",
+                },
+            ],
+        }
+        task = {"id": 15, "description": description, "status": "ready", "notes": ""}
+
+        def finish_action(evidence_id):
+            return {
+                "type": "finish",
+                "reason": "implemented and verified",
+                "task_done": True,
+                "acceptance_checks": [
+                    {
+                        "constraint": "Runtime component works.",
+                        "status": "verified",
+                        "evidence": f"Command evidence #{evidence_id} imported the runtime component and printed its path.",
+                        "evidence_refs": [{"kind": "command_evidence", "id": evidence_id}],
+                    }
+                ],
+            }
+
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            first = apply_work_control_action(state, session, task, finish_action(13))
+            first_frontier = session["active_compatibility_frontier"]
+            first_id = first_frontier["id"]
+            first_fingerprint = first_frontier["failure_signature"]["fingerprint"]
+            second = apply_work_control_action(state, session, task, finish_action(14))
+
+        close_session.assert_not_called()
+        self.assertFalse(first["task_done"])
+        self.assertFalse(second["task_done"])
+        frontier = session["active_compatibility_frontier"]
+        self.assertEqual(frontier["id"], first_id)
+        self.assertEqual(frontier["failure_signature"]["fingerprint"], first_fingerprint)
+        self.assertEqual(frontier["family_transition"]["from_previous"], "same")
+        self.assertEqual({ref["id"] for ref in frontier["evidence_refs"]}, {13, 14})
+        self.assertEqual(len(frontier["verifier_history"]), 2)
+        self.assertNotIn("/tmp/runtime_component", json.dumps(frontier))
+
     def test_work_finish_blocks_model_inference_handoff_without_task_done_when_equivalence_unknown(self):
         from mew.commands import apply_work_control_action
 

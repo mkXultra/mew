@@ -11,6 +11,7 @@ from mew.acceptance import (
     is_query_only_hidden_model_task,
     is_runtime_visual_artifact_task,
     long_dependency_final_artifacts,
+    runtime_component_finish_gate_decision,
 )
 from mew.acceptance_evidence import long_dependency_artifact_proven_by_call
 
@@ -155,6 +156,476 @@ def test_acceptance_finish_blocker_accepts_runtime_component_behavior_proof():
     assert acceptance_finish_blocker(text, action, session=session) == ""
 
 
+def test_runtime_component_finish_gate_accepts_targeted_component_test_ref():
+    text = "The native module should work in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #21 ran the targeted component test.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 21}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 21,
+                "tool": "run_tests",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "pytest tests/test_runtime_component.py::test_component_behavior",
+                "output_tail": "repository-test-tail targeted component test passed\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_rejects_attribute_access_only():
+    text = "The native module should work in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #22 checked the module has the behavior attribute.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 22}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 22,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(hasattr(native_module, \"behavior\"))'",
+                "output_tail": "True\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_rejects_import_only_run_tests():
+    text = "The native module should run in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #23 ran an import test.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 23}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 23,
+                "tool": "run_tests",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "pytest tests/test_runtime_component.py::test_import_runtime_component",
+                "output_tail": "test_import_runtime_component passed; imported module path /tmp/native_module.so\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_rejects_verifier_labeled_path_probe():
+    text = "The native module should execute in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #24 ran the verifier-labeled command.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 24}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 24,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.__file__)'",
+                "execution_contract": {"acceptance_kind": "external_verifier", "proof_role": "verifier"},
+                "output_tail": "external verifier path proof passed: /tmp/native_module.so\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_rejects_verifier_labeled_hasattr_probe():
+    text = "The native module should execute in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #25 ran the verifier-labeled command.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 25}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 25,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(hasattr(native_module, \"behavior\"))'",
+                "execution_contract": {"acceptance_kind": "external_verifier", "proof_role": "verifier"},
+                "output_tail": "external verifier behavior attribute exists: True\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_blocks_generated_executable_path_until_execution_smoke():
+    text = "The generated executable should run from the repository runtime context."
+    path_only_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #26 proved the executable path exists.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 26}],
+            }
+        ],
+    }
+    smoke_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #27 executed the smoke path.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 27}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 26,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "test -x dist/tool && echo executable path exists",
+                "output_tail": "executable path exists\n",
+            },
+            {
+                "id": 27,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "./dist/tool --smoke",
+                "output_tail": "execution smoke passed\n",
+            },
+        ]
+    }
+
+    blocked = runtime_component_finish_gate_decision(text, path_only_action, session=session)
+    allowed = runtime_component_finish_gate_decision(text, smoke_action, session=session)
+
+    assert blocked["decision"] == "block_continue"
+    assert blocked["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert allowed["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_blocks_non_behavior_entrypoint_shapes():
+    text = "The generated executable should run from the repository runtime context."
+    blocked_commands = [
+        ("python setup.py build", "build completed\n"),
+        ("python -m build", "wheel built\n"),
+        ("python -m pip install .", "installed package\n"),
+        ("node build.js", "build script completed\n"),
+        ("./configure", "configured successfully\n"),
+        ("./dist/tool --help", "usage: tool [OPTIONS]\n"),
+        ("./dist/tool --version", "tool 1.2.3\n"),
+        ("python readback.py", "readback matched expected path\n"),
+        ("node list.js", "listing generated files\n"),
+        ("./dist/noop", "no-op completed\n"),
+    ]
+    session = {"command_evidence": []}
+    for offset, (command, output_tail) in enumerate(blocked_commands, start=40):
+        session["command_evidence"].append(
+            {
+                "id": offset,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": command,
+                "output_tail": output_tail,
+            }
+        )
+
+    for offset, (command, _output_tail) in enumerate(blocked_commands, start=40):
+        action = {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Generated executable runs.",
+                    "status": "verified",
+                    "evidence": f"Command evidence #{offset} ran {command}.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": offset}],
+                }
+            ],
+        }
+        decision = runtime_component_finish_gate_decision(text, action, session=session)
+        assert decision["decision"] == "block_continue", command
+        assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_accepts_explicit_callable_with_neutral_output():
+    text = "The native module should run in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof.",
+                "status": "verified",
+                "evidence": "Command evidence #60 invoked native_module.run().",
+                "evidence_refs": [{"kind": "command_evidence", "id": 60}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 60,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.run())'",
+                "output_tail": "ok\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_rejects_claim_text_only_entrypoint_behavior_signal():
+    text = "The generated executable should run from the repository runtime context."
+    session = {
+        "command_evidence": [
+            {
+                "id": 70,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "./dist/tool",
+                "output_tail": "hello world\n",
+            },
+            {
+                "id": 71,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python script.py",
+                "output_tail": "42\n",
+            },
+            {
+                "id": 72,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "./dist/tool --smoke",
+                "output_tail": "execution smoke passed\n",
+            },
+        ]
+    }
+
+    spoofed_tool_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #70 ran the runtime component to verify behavior.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 70}],
+            }
+        ],
+    }
+    spoofed_script_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #71 ran successfully; behavior executed; runtime smoke passed.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 71}],
+            }
+        ],
+    }
+    objective_smoke_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #72 completed.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 72}],
+            }
+        ],
+    }
+
+    blocked_tool = runtime_component_finish_gate_decision(text, spoofed_tool_action, session=session)
+    blocked_script = runtime_component_finish_gate_decision(text, spoofed_script_action, session=session)
+    allowed_smoke = runtime_component_finish_gate_decision(text, objective_smoke_action, session=session)
+
+    assert blocked_tool["decision"] == "block_continue"
+    assert blocked_tool["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert blocked_script["decision"] == "block_continue"
+    assert blocked_script["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert allowed_smoke["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_rejects_loader_api_calls_as_behavior():
+    text = "The shared library runtime component should run in its original runtime context."
+    blocked_commands = [
+        "python -c 'import ctypes; ctypes.CDLL(\"libx.so\")'",
+        "python -c 'import ctypes; ctypes.cdll.LoadLibrary(\"libx.so\")'",
+        "python -c 'ffi.dlopen(\"libx.so\")'",
+        "python -c 'import importlib; importlib.import_module(\"native_module\")'",
+        "python -c 'loader.load_library(\"libx\", \".\")'",
+    ]
+    session = {"command_evidence": []}
+    for offset, command in enumerate(blocked_commands, start=80):
+        session["command_evidence"].append(
+            {
+                "id": offset,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": command,
+                "output_tail": "loaded\n",
+            }
+        )
+
+    for offset, command in enumerate(blocked_commands, start=80):
+        action = {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Shared library runtime behavior proof.",
+                    "status": "verified",
+                    "evidence": f"Command evidence #{offset} loaded and invoked {command}.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": offset}],
+                }
+            ],
+        }
+        decision = runtime_component_finish_gate_decision(text, action, session=session)
+        assert decision["decision"] == "block_continue", command
+        assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_allows_pure_documentation_task():
+    decision = runtime_component_finish_gate_decision(
+        "Document how the runtime component interpreter works in README.md.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "README explains the interpreter.",
+                    "status": "verified",
+                    "evidence": "Read the updated README.",
+                }
+            ],
+        },
+        session={},
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_allows_no_change_investigation_task():
+    decision = runtime_component_finish_gate_decision(
+        "Investigate why the native module does not work; report findings only and do not modify source.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Investigation findings are reported.",
+                    "status": "verified",
+                    "evidence": "Summarized the observed failure family.",
+                }
+            ],
+        },
+        session={},
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
 def test_acceptance_finish_blocker_rejects_runtime_component_behavior_claim_without_tool_proof():
     text = "The native module should work from Python side."
     action = {
@@ -250,6 +721,27 @@ def test_acceptance_finish_blocker_rejects_shared_library_load_only_proof():
     blocker = acceptance_finish_blocker(text, action, session=session)
 
     assert "runtime component behavior evidence import-only" in blocker
+
+
+def test_acceptance_done_gate_prechecks_runtime_component_before_evidence_ref_validation():
+    text = "The loadable runtime component should work in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Behavior proof",
+                "status": "verified",
+                "evidence": "Checked the import path only.",
+            }
+        ],
+    }
+
+    decision = acceptance_done_gate_decision(text, action, session={"tool_calls": []})
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert decision["blockers"][1]["code"] == "acceptance_evidence_refs_missing"
 
 
 def test_acceptance_finish_blocker_rejects_stateful_output_without_checks():

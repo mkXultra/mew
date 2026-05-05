@@ -727,6 +727,294 @@ def _merge_dicts_by_identity(existing, incoming, *, id_key="id", limit=50):
     return merged[-limit:]
 
 
+def _finish_false_positive_evidence_refs(action, acceptance_gate):
+    refs = []
+    action = action if isinstance(action, dict) else {}
+    for check in action.get("acceptance_checks") or []:
+        if not isinstance(check, dict):
+            continue
+        for ref in check.get("evidence_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            compact = {}
+            for key in ("kind", "id", "key", "path", "command_run_id"):
+                if ref.get(key) not in (None, "", [], {}):
+                    compact[key] = ref.get(key)
+            if ref.get("summary"):
+                compact["summary"] = _clip_text(ref.get("summary"), 120)
+            if compact:
+                compact.setdefault("kind", str(ref.get("kind") or "tool_call"))
+                refs.append(compact)
+    gate = acceptance_gate if isinstance(acceptance_gate, dict) else {}
+    for ref in gate.get("invalid_evidence_refs") or []:
+        if not isinstance(ref, dict):
+            continue
+        compact = {
+            key: ref.get(key)
+            for key in ("kind", "id", "key", "path", "command_run_id", "reason")
+            if ref.get(key) not in (None, "", [], {})
+        }
+        if compact:
+            compact.setdefault("kind", str(ref.get("kind") or "tool_call"))
+            refs.append(compact)
+    return _merge_dicts_by_identity([], refs, limit=12)
+
+
+def _finish_false_positive_blocker_codes(acceptance_gate):
+    gate = acceptance_gate if isinstance(acceptance_gate, dict) else {}
+    codes = []
+    for blocker in gate.get("blockers") or []:
+        if not isinstance(blocker, dict):
+            continue
+        code = _stable_token(blocker.get("code") or "runtime_component_behavior_evidence")
+        if code:
+            codes.append(code)
+    return _dedupe(codes) or ["runtime_component_behavior_evidence"]
+
+
+def _finish_false_positive_command_evidence_by_id(session, ref_id):
+    wanted = str(ref_id or "")
+    if not wanted or not isinstance(session, dict):
+        return {}
+    for evidence in session.get("command_evidence") or []:
+        if isinstance(evidence, dict) and str(evidence.get("id") or "") == wanted:
+            return evidence
+    return {}
+
+
+def _finish_false_positive_tool_call_by_id(session, ref_id):
+    wanted = str(ref_id or "")
+    if not wanted or not isinstance(session, dict):
+        return {}
+    for call in session.get("tool_calls") or []:
+        if isinstance(call, dict) and str(call.get("id") or "") == wanted:
+            return call
+    return {}
+
+
+def _finish_false_positive_execution_contract_shape(contract):
+    contract = contract if isinstance(contract, dict) else {}
+    return {
+        key: _stable_token(contract.get(key))
+        for key in ("purpose", "stage", "proof_role", "acceptance_kind", "risk_class")
+        if str(contract.get(key) or "").strip()
+    }
+
+
+def _finish_false_positive_evidence_shapes(session, evidence_refs):
+    shapes = []
+    for ref in evidence_refs or []:
+        if not isinstance(ref, dict):
+            continue
+        kind = str(ref.get("kind") or "tool_call")
+        if kind == "command_evidence":
+            evidence = _finish_false_positive_command_evidence_by_id(session, ref.get("id"))
+            if evidence:
+                cwd = evidence.get("cwd") or ""
+                shapes.append(
+                    {
+                        "kind": "command_evidence",
+                        "tool": _stable_token(evidence.get("tool") or "run_command"),
+                        "command_shape": _normalize_shape(evidence.get("command") or "", cwd=cwd),
+                        "cwd_shape": _normalize_path(cwd, cwd=cwd),
+                        "execution_contract": _finish_false_positive_execution_contract_shape(
+                            evidence.get("execution_contract")
+                        ),
+                    }
+                )
+                continue
+        if kind == "tool_call":
+            call = _finish_false_positive_tool_call_by_id(session, ref.get("id"))
+            if call:
+                parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+                result = call.get("result") if isinstance(call.get("result"), dict) else {}
+                command = parameters.get("command") or result.get("command") or ""
+                cwd = parameters.get("cwd") or result.get("cwd") or ""
+                shapes.append(
+                    {
+                        "kind": "tool_call",
+                        "tool": _stable_token(call.get("tool") or ""),
+                        "command_shape": _normalize_shape(command, cwd=cwd),
+                        "cwd_shape": _normalize_path(cwd, cwd=cwd),
+                        "execution_contract": _finish_false_positive_execution_contract_shape(
+                            parameters.get("execution_contract")
+                        ),
+                    }
+                )
+                continue
+        compact = {
+            key: _normalize_shape(ref.get(key))
+            for key in ("kind", "key", "path", "reason")
+            if ref.get(key) not in (None, "", [], {})
+        }
+        if compact:
+            shapes.append(compact)
+    return _merge_dicts_by_identity([], shapes, limit=12)
+
+
+def _finish_false_positive_runtime_component_kind(text):
+    lowered = str(text or "").casefold()
+    if any(token in lowered for token in ("dlopen", "ctypes", "cffi", "ffi.load", "shared library", "dynamic library")):
+        return "shared_library"
+    if any(token in lowered for token in ("native module", "native extension", "extension module", "compiled extension")):
+        return "native_module"
+    if any(token in lowered for token in ("plugin entrypoint", "plugin host")):
+        return "plugin"
+    if any(token in lowered for token in ("generated executable", "binary", "executable", "entrypoint", "entry point")):
+        return "executable"
+    if any(token in lowered for token in ("interpreter", "simulator", "runtime harness", "custom runtime")):
+        return "custom_runtime"
+    return "unknown"
+
+
+def _acceptance_gate_has_runtime_component_blocker(acceptance_gate):
+    gate = acceptance_gate if isinstance(acceptance_gate, dict) else {}
+    for blocker in gate.get("blockers") or []:
+        if not isinstance(blocker, dict):
+            continue
+        if blocker.get("code") == "runtime_component_behavior_evidence":
+            return True
+        if "runtime component behavior evidence" in str(blocker.get("message") or "").casefold():
+            return True
+    return False
+
+
+def record_finish_false_positive_frontier(
+    session,
+    *,
+    task_description="",
+    action=None,
+    acceptance_gate=None,
+    current_time=None,
+):
+    if not isinstance(session, dict) or not _acceptance_gate_has_runtime_component_blocker(acceptance_gate):
+        return {}
+    action = action if isinstance(action, dict) else {}
+    gate = acceptance_gate if isinstance(acceptance_gate, dict) else {}
+    task_shape = _normalize_shape(task_description)
+    evidence_refs = _finish_false_positive_evidence_refs(action, gate)
+    evidence_shapes = _finish_false_positive_evidence_shapes(session, evidence_refs)
+    runtime_kind = _finish_false_positive_runtime_component_kind(task_shape)
+    blocker_codes = _finish_false_positive_blocker_codes(gate)
+    strict_core = {
+        "kind": "finish_false_positive",
+        "task_shape": task_shape,
+        "runtime_component_kind": runtime_kind,
+        "blocker_codes": blocker_codes,
+        "evidence_shapes": evidence_shapes,
+        "failure_facts": ["runtime_component_behavior_evidence_missing"],
+    }
+    family_core = {
+        "kind": "finish_false_positive",
+        "task_shape": task_shape,
+        "runtime_component_kind": runtime_kind,
+    }
+    command_ref = next((dict(ref) for ref in evidence_refs if ref.get("kind") == "command_evidence"), {})
+    source_tool_call_id = next(
+        (ref.get("id") for ref in evidence_refs if ref.get("kind") in {"tool_call", "command_evidence"}),
+        None,
+    )
+    signature = {
+        "schema_version": SCHEMA_VERSION,
+        "fingerprint_version": FINGERPRINT_VERSION,
+        "kind": "finish_false_positive",
+        "fingerprint": _canonical_hash(strict_core),
+        "family_key": _canonical_hash(family_core),
+        "source_tool_call_id": source_tool_call_id,
+        "command_evidence_ref": command_ref,
+        "tool": "finish_gate",
+        "command_shape": "finish task_done=true",
+        "cwd_shape": "",
+        "execution_contract": {"proof_role": "runtime_component_finish_gate"},
+        "exit_class": "blocked_finish",
+        "error_fingerprint": "runtime_component_behavior_evidence_missing",
+        "failing_tests": [],
+        "runtime_component_kind": runtime_kind,
+        "platform_facts": [],
+        "token_categories": {
+            "error_tokens": ["runtime_component_behavior_evidence_missing"],
+            "missing_symbol_tokens": [],
+            "failing_test_tokens": [],
+            "stack_anchor_tokens": [],
+            "component_tokens": [] if runtime_kind == "unknown" else [runtime_kind],
+            "platform_tokens": [],
+        },
+    }
+    previous = session.get("active_compatibility_frontier")
+    previous = previous if isinstance(previous, dict) else {}
+    transition, overlap = family_transition(signature, previous)
+    reuse_frontier = bool(previous) and transition in {"same", "narrower"}
+    evidence_strength = "blocking" if evidence_refs else "actionable"
+    guard_mode = "block_finish" if evidence_refs else "prompt_nudge"
+    blocked_actions = ["finish"] if evidence_refs else []
+    closure_state = {
+        "state": "cheap_verify_needed",
+        "reason": "finish was blocked because runtime component behavior proof is missing",
+        "evidence_strength": evidence_strength,
+        "guard_mode": guard_mode,
+        "open_candidate_count": 0,
+        "unread_anchor_count": 0,
+        "unverified_patch_batch_count": 0,
+        "verifier_obligations": ["invoke behavior through original runtime context"],
+        "blocked_action_kinds": blocked_actions,
+        "blocked_action_fingerprints": [],
+        "broad_verifier_allowed": False,
+        "finish_allowed": False,
+        "next_action": "run a behavior invocation or targeted component test for the runtime component",
+    }
+    verifier_history = [
+        {
+            "id": _short_id(
+                "verifier",
+                {
+                    "signature": signature.get("fingerprint"),
+                    "source": "finish_gate",
+                    "evidence_refs": evidence_refs,
+                },
+            ),
+            "kind": "runtime_component_finish_gate",
+            "scope": "targeted",
+            "command_evidence_ref": command_ref,
+            "tool_call_id": source_tool_call_id,
+            "exit_code": None,
+            "signature_fingerprint": signature.get("fingerprint") or "",
+            "family_changed": transition not in {"same", "narrower"},
+            "closed_candidate_ids": [],
+            "opened_candidate_ids": [],
+            "notes": "finish_false_positive observed; behavior proof remains required",
+            "evidence_refs": evidence_refs,
+        }
+    ]
+    existing_candidates = ((previous or {}).get("sibling_candidates") or []) if reuse_frontier else []
+    frontier = {
+        "schema_version": SCHEMA_VERSION,
+        "id": previous.get("id") if reuse_frontier else _next_frontier_id(session),
+        "status": "open",
+        "created_at": previous.get("created_at") if reuse_frontier else current_time,
+        "updated_at": current_time,
+        "failure_signature": signature,
+        "family_transition": {"from_previous": transition, "overlap": overlap},
+        "evidence_refs": _merge_dicts_by_identity(
+            (previous or {}).get("evidence_refs") if reuse_frontier else [],
+            evidence_refs,
+            limit=20,
+        ),
+        "anchors": list((previous or {}).get("anchors") or []) if reuse_frontier else [],
+        "sibling_candidates": list(existing_candidates),
+        "hypotheses": _hypotheses(existing_candidates, closure_state, current_time),
+        "patch_batch": list((previous or {}).get("patch_batch") or []) if reuse_frontier else [],
+        "verifier_history": _merge_dicts_by_identity(
+            (previous or {}).get("verifier_history") if reuse_frontier else [],
+            verifier_history,
+            limit=20,
+        ),
+        "closure_state": closure_state,
+    }
+    frontier["compact_summary"] = _compact_summary(frontier)
+    session["active_compatibility_frontier"] = frontier
+    return frontier
+
+
 def category_overlap(new_signature, previous_signature):
     new_categories = (new_signature or {}).get("token_categories") or {}
     previous_categories = (previous_signature or {}).get("token_categories") or {}
