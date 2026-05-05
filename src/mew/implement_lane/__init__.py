@@ -7,6 +7,7 @@ from .registry import (
     list_implement_lane_runtime_views,
     select_implement_lane_runtime,
 )
+from .exec_runtime import ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall
 from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
@@ -27,7 +28,12 @@ from .types import (
     ToolResultEnvelope,
 )
 from .v1_adapter import ImplementV1AdapterDescriptor, describe_implement_v1_adapter
-from .v2_runtime import describe_implement_v2_runtime, run_fake_read_only_implement_v2, run_unavailable_implement_v2
+from .v2_runtime import (
+    describe_implement_v2_runtime,
+    run_fake_exec_implement_v2,
+    run_fake_read_only_implement_v2,
+    run_unavailable_implement_v2,
+)
 
 __all__ = [
     "IMPLEMENT_LANE_REGISTRY_VERSION",
@@ -40,6 +46,7 @@ __all__ = [
     "ImplementLaneTranscriptEvent",
     "ImplementLaneToolSpec",
     "ImplementV1AdapterDescriptor",
+    "ImplementV2ManagedExecRuntime",
     "PairingValidationResult",
     "ToolCallEnvelope",
     "ToolResultEnvelope",
@@ -56,6 +63,7 @@ __all__ = [
     "list_v2_base_tool_specs",
     "list_v2_tool_specs_for_mode",
     "implement_v2_prompt_section_metrics",
+    "run_fake_exec_implement_v2",
     "run_fake_read_only_implement_v2",
     "run_unavailable_implement_v2",
     "select_implement_lane_runtime",

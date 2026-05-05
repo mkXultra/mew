@@ -1,0 +1,366 @@
+"""Managed exec tool execution for the default-off implement_v2 lane."""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+import re
+import shlex
+
+from ..acceptance_evidence import split_unquoted_shell_command_segments
+from ..read_tools import resolve_allowed_path
+from ..toolbox import ManagedCommandRunner, is_resident_mew_loop_command, split_command_env
+from .read_runtime import DEFAULT_V2_READ_RESULT_MAX_CHARS
+from .replay import build_invalid_tool_result
+from .types import ToolCallEnvelope, ToolResultEnvelope
+
+EXEC_TOOL_NAMES = frozenset({"run_command", "run_tests", "poll_command", "cancel_command", "read_command_output"})
+TERMINAL_SUCCESS_STATUSES = frozenset({"completed"})
+TERMINAL_FAILURE_STATUSES = frozenset({"failed", "timed_out", "killed", "orphaned"})
+NONTERMINAL_STATUSES = frozenset({"running", "yielded"})
+RESIDENT_MEW_LOOP_TEXT_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:\S*/)?mew\s+(?:attach|chat|do|run|session|work)\b"
+    r"|(?<![A-Za-z0-9_])(?:\S*/)?python(?:\d+(?:\.\d+)?)?\s+-m\s+mew\s+"
+    r"(?:attach|chat|do|run|session|work)\b"
+)
+
+
+class ImplementV2ManagedExecRuntime:
+    """Lane-local managed exec runtime for Phase 4 fake-provider tests."""
+
+    def __init__(self, *, workspace: object, allowed_roots: tuple[str, ...] | list[str] | None = None, max_active: int = 1):
+        self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
+        self.allowed_roots = tuple(str(root) for root in (allowed_roots or (str(self.workspace),)))
+        self.runner = ManagedCommandRunner(max_active=max_active)
+        self.output_paths: dict[str, str] = {}
+
+    def execute(self, call: ToolCallEnvelope) -> ToolResultEnvelope:
+        if call.tool_name not in EXEC_TOOL_NAMES:
+            return build_invalid_tool_result(call, reason=f"unknown exec tool: {call.tool_name}")
+        try:
+            if call.tool_name in {"run_command", "run_tests"}:
+                payload = self._run_command(call)
+            elif call.tool_name == "poll_command":
+                payload = self._poll_command(call)
+            elif call.tool_name == "cancel_command":
+                payload = self._cancel_command(call)
+            else:
+                payload = self._read_command_output(call)
+        except (OSError, RuntimeError, ValueError) as exc:
+            return ToolResultEnvelope(
+                lane_attempt_id=call.lane_attempt_id,
+                provider_call_id=call.provider_call_id,
+                mew_tool_call_id=call.mew_tool_call_id,
+                tool_name=call.tool_name,
+                status="failed",
+                is_error=True,
+                content=({"reason": str(exc)},),
+            )
+        return self._result_from_payload(call, payload)
+
+    def cancel_active_commands(self, *, reason: str) -> tuple[dict[str, object], ...]:
+        cancelled = []
+        while self.runner.active is not None:
+            cancelled.append(self.runner.cancel(reason=reason))
+        return tuple(cancelled)
+
+    def _run_command(self, call: ToolCallEnvelope) -> dict[str, object]:
+        args = dict(call.arguments)
+        command = str(args.get("command") or "").strip()
+        if not command:
+            raise ValueError(f"{call.tool_name} command is empty")
+        _reject_resident_mew_loop_command(command, tool_name=call.tool_name)
+        if call.tool_name == "run_tests":
+            _reject_run_tests_shell_surface(command, use_shell=bool(args.get("use_shell")))
+        cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
+        cwd = resolve_allowed_path(cwd, self.allowed_roots)
+        if not cwd.is_dir():
+            raise ValueError(f"{call.tool_name} cwd is not a directory: {cwd}")
+        command_run_id = _command_run_id(call)
+        output_ref = f"{call.lane_attempt_id}/{command_run_id}/output.log"
+        output_path = _output_path(self.workspace, output_ref)
+        timeout = _bounded_float(args.get("timeout"), default=300.0, minimum=1.0, maximum=3600.0)
+        foreground_budget = _bounded_float(
+            args.get("foreground_budget_seconds"),
+            default=min(15.0, max(0.0, timeout - 1.0)),
+            minimum=0.0,
+            maximum=min(30.0, timeout),
+        )
+        self.runner.start(
+            command,
+            cwd=str(cwd),
+            timeout=timeout,
+            use_shell=bool(args.get("use_shell")),
+            kill_process_group=True,
+            command_run_id=command_run_id,
+            output_ref=output_ref,
+            output_path=str(output_path),
+        )
+        self.output_paths[command_run_id] = str(output_path)
+        payload = self.runner.poll(wait_seconds=foreground_budget, command_run_id=command_run_id)
+        if payload.get("status") == "running":
+            payload["status"] = "yielded"
+        payload["command_run_id"] = command_run_id
+        payload["output_ref"] = output_ref
+        payload["output_path"] = str(output_path)
+        payload["tool_name"] = call.tool_name
+        return payload
+
+    def _poll_command(self, call: ToolCallEnvelope) -> dict[str, object]:
+        args = dict(call.arguments)
+        command_run_id = _required_command_run_id(args)
+        payload = self.runner.poll(
+            wait_seconds=_bounded_float(args.get("wait_seconds"), default=0.0, minimum=0.0, maximum=30.0),
+            command_run_id=command_run_id,
+        )
+        if payload.get("status") == "running":
+            payload["status"] = "yielded"
+        payload["command_run_id"] = command_run_id
+        return payload
+
+    def _cancel_command(self, call: ToolCallEnvelope) -> dict[str, object]:
+        args = dict(call.arguments)
+        command_run_id = _required_command_run_id(args)
+        payload = self.runner.cancel(
+            reason=str(args.get("reason") or "cancelled"),
+            command_run_id=command_run_id,
+        )
+        payload["command_run_id"] = command_run_id
+        return payload
+
+    def _read_command_output(self, call: ToolCallEnvelope) -> dict[str, object]:
+        args = dict(call.arguments)
+        command_run_id = _required_command_run_id(args)
+        if command_run_id not in self.output_paths:
+            raise ValueError(f"unknown command_run_id: {command_run_id}")
+        output_path = Path(self.output_paths[command_run_id])
+        text = output_path.read_text(encoding="utf-8", errors="replace") if output_path.exists() else ""
+        max_chars = int(_bounded_float(args.get("max_chars"), default=DEFAULT_V2_READ_RESULT_MAX_CHARS, minimum=1, maximum=50_000))
+        offset = int(_bounded_float(args.get("offset"), default=0, minimum=0, maximum=1_000_000))
+        if bool(args.get("tail")):
+            content = text[-max_chars:]
+            offset = max(0, len(text) - len(content))
+        else:
+            content = text[offset : offset + max_chars]
+        return {
+            "command_run_id": command_run_id,
+            "output_path": str(output_path),
+            "offset": offset,
+            "content": content,
+            "chars": len(text),
+            "truncated": len(content) < len(text),
+            "status": "completed",
+        }
+
+    def _result_from_payload(self, call: ToolCallEnvelope, payload: dict[str, object]) -> ToolResultEnvelope:
+        status = _tool_result_status(payload)
+        is_error = status in {"failed", "interrupted"}
+        command_run_id = str(payload.get("command_run_id") or "")
+        content_refs = ()
+        if payload.get("output_ref"):
+            content_refs = (f"implement-v2-exec://{call.lane_attempt_id}/{command_run_id}/output",)
+        evidence_refs = ()
+        if status == "completed" and call.tool_name in {"run_command", "run_tests", "poll_command"}:
+            evidence_refs = (f"implement-v2-exec://{call.lane_attempt_id}/{command_run_id}/terminal",)
+        return ToolResultEnvelope(
+            lane_attempt_id=call.lane_attempt_id,
+            provider_call_id=call.provider_call_id,
+            mew_tool_call_id=call.mew_tool_call_id,
+            tool_name=call.tool_name,
+            status=status,
+            is_error=is_error,
+            content=(dict(payload),),
+            content_refs=content_refs,
+            evidence_refs=evidence_refs,
+        )
+
+
+def _tool_result_status(payload: dict[str, object]) -> str:
+    status = str(payload.get("status") or "")
+    if status in NONTERMINAL_STATUSES:
+        return "yielded"
+    if status in TERMINAL_FAILURE_STATUSES:
+        return "interrupted" if status == "killed" else "failed"
+    if status in TERMINAL_SUCCESS_STATUSES:
+        return "completed"
+    if payload.get("exit_code") == 0:
+        return "completed"
+    if payload.get("exit_code") is not None or payload.get("timed_out"):
+        return "failed"
+    return "failed"
+
+
+def _workspace_path(path: object, workspace: Path) -> str:
+    requested = Path(str(path or ".")).expanduser()
+    if requested.is_absolute():
+        return str(requested)
+    return str((workspace / requested).resolve(strict=False))
+
+
+def _reject_resident_mew_loop_command(command: object, *, tool_name: str) -> None:
+    command_text = str(command or "")
+    shell_scan_text = re.sub(r"[^A-Za-z0-9_./-]+", " ", command_text.replace("\\", "").replace("'", "").replace('"', ""))
+    if is_resident_mew_loop_command(command_text) or RESIDENT_MEW_LOOP_TEXT_RE.search(shell_scan_text):
+        raise ValueError(
+            f"{tool_name} must not invoke resident mew loops; run bounded repository commands instead"
+        )
+    for segment in split_unquoted_shell_command_segments(command_text):
+        if segment != command_text and is_resident_mew_loop_command(segment):
+            raise ValueError(
+                f"{tool_name} must not invoke resident mew loops; run bounded repository commands instead"
+            )
+
+
+def _reject_run_tests_shell_surface(command: object, *, use_shell: bool) -> None:
+    if use_shell or _has_unquoted_run_tests_shell_surface(command) or _has_explicit_shell_interpreter(command):
+        raise ValueError("run_tests executes one argv command without a shell; use run_command for shell orchestration")
+
+
+def _has_unquoted_run_tests_shell_surface(command: object) -> bool:
+    text = str(command or "")
+    in_single = False
+    in_double = False
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and not in_single:
+            escaped = True
+            index += 1
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if in_single or in_double:
+            index += 1
+            continue
+        two_chars = text[index : index + 2]
+        if char in {"\n", "\r", "|", ";", "&", "<", ">"} or two_chars in {"&&", "||", ">>", "<<"}:
+            return True
+        index += 1
+    return False
+
+
+def _has_explicit_shell_interpreter(command: object) -> bool:
+    try:
+        parts, _env = split_command_env(command or "")
+    except ValueError:
+        return False
+    parts = _unwrap_env_split_string(parts)
+    for index, token in enumerate(parts[:-1]):
+        executable = Path(str(token or "")).name
+        if executable in {"bash", "sh", "zsh"} and parts[index + 1] in {"-c", "-lc", "-cl"}:
+            return True
+    return False
+
+
+def _unwrap_env_split_string(parts: list[str]) -> list[str]:
+    parts = list(parts or [])
+    if not parts or Path(parts[0]).name != "env":
+        return parts
+    index = 1
+    split_string_parts = None
+    while index < len(parts):
+        token = parts[index]
+        if token == "--":
+            index += 1
+            break
+        if token in {"-i", "--ignore-environment", "-0", "--null"}:
+            index += 1
+            continue
+        if token in {"-u", "--unset", "-C", "--chdir"}:
+            index += 2
+            continue
+        if token.startswith("-u") and token != "-u":
+            index += 1
+            continue
+        if token.startswith("-C") and token != "-C":
+            index += 1
+            continue
+        if token.startswith("--unset=") or token.startswith("--chdir="):
+            index += 1
+            continue
+        if token in {"-S", "--split-string"} and index + 1 < len(parts):
+            try:
+                split_string_parts = shlex.split(parts[index + 1] or "")
+            except ValueError:
+                return parts
+            index += 2
+            break
+        if token.startswith("-S") and token != "-S":
+            try:
+                split_string_parts = shlex.split(token[2:] or "")
+            except ValueError:
+                return parts
+            index += 1
+            break
+        if token.startswith("--split-string="):
+            try:
+                split_string_parts = shlex.split(token.split("=", 1)[1] or "")
+            except ValueError:
+                return parts
+            index += 1
+            break
+        if "=" in token and not token.startswith("-"):
+            index += 1
+            continue
+        break
+    if split_string_parts is not None:
+        return split_string_parts + parts[index:]
+    return parts[index:]
+
+
+def _command_run_id(call: ToolCallEnvelope) -> str:
+    stable = _safe_id_part(call.provider_call_id, "call")
+    digest = hashlib.sha256(f"{call.lane_attempt_id}:{call.provider_call_id}".encode()).hexdigest()
+    return f"{call.lane_attempt_id}:command:{stable}-{digest[:8]}"
+
+
+def _output_path(workspace: Path, output_ref: str) -> Path:
+    root = (workspace / ".mew" / "implement-v2").resolve(strict=False)
+    path = (root / output_ref).resolve(strict=False)
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("managed exec output path escaped implement-v2 spool root") from exc
+    return path
+
+
+def _required_command_run_id(args: dict[str, object]) -> str:
+    command_run_id = str(args.get("command_run_id") or "").strip()
+    if not command_run_id:
+        raise ValueError("command_run_id is required")
+    return command_run_id
+
+
+def _bounded_float(value: object, *, default: float, minimum: float, maximum: float) -> float:
+    if value in (None, ""):
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(number, maximum))
+
+
+def _safe_id_part(value: object, default: str) -> str:
+    text = str(value or "").strip() or default
+    safe = []
+    for char in text:
+        if char.isalnum() or char in {"-", "_", "."}:
+            safe.append(char)
+        else:
+            safe.append("-")
+    return "".join(safe).strip("-") or default
+
+
+__all__ = ["EXEC_TOOL_NAMES", "ImplementV2ManagedExecRuntime"]

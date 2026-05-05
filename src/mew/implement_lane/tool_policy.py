@@ -68,6 +68,27 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         approval_required=True,
     ),
     ImplementLaneToolSpec(
+        name="run_tests",
+        access="execute",
+        description="Run a verifier command through managed exec with nonterminal state.",
+        approval_required=True,
+    ),
+    ImplementLaneToolSpec(
+        name="poll_command",
+        access="execute",
+        description="Poll a yielded managed command by command_run_id.",
+    ),
+    ImplementLaneToolSpec(
+        name="cancel_command",
+        access="execute",
+        description="Cancel a yielded managed command by command_run_id.",
+    ),
+    ImplementLaneToolSpec(
+        name="read_command_output",
+        access="execute",
+        description="Read a bounded slice of managed command spool output.",
+    ),
+    ImplementLaneToolSpec(
         name="write_file",
         access="write",
         description="Write a file through the existing write substrate.",

@@ -1,4 +1,7 @@
+import hashlib
+import shlex
 import subprocess
+import sys
 
 import mew.implement_lane.read_runtime as read_runtime
 from mew.implement_lane import (
@@ -18,6 +21,7 @@ from mew.implement_lane import (
     list_implement_lane_runtime_views,
     list_v2_base_tool_specs,
     list_v2_tool_specs_for_mode,
+    run_fake_exec_implement_v2,
     run_fake_read_only_implement_v2,
     run_unavailable_implement_v2,
     select_implement_lane_runtime,
@@ -117,6 +121,10 @@ def test_implement_v2_scaffold_exposes_tools_but_returns_unavailable() -> None:
         "git_status",
         "git_diff",
         "run_command",
+        "run_tests",
+        "poll_command",
+        "cancel_command",
+        "read_command_output",
         "write_file",
         "edit_file",
         "apply_patch",
@@ -138,6 +146,10 @@ def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     assert specs["git_status"].access == "read"
     assert specs["git_diff"].access == "read"
     assert specs["run_command"].approval_required is True
+    assert specs["run_tests"].approval_required is True
+    assert specs["poll_command"].approval_required is False
+    assert specs["cancel_command"].approval_required is False
+    assert specs["read_command_output"].access == "execute"
     assert specs["write_file"].approval_required is True
     assert specs["edit_file"].dry_run_supported is True
     assert specs["apply_patch"].dry_run_supported is True
@@ -436,6 +448,13 @@ def test_implement_v2_bypass_mode_fails_closed_until_explicit_policy_exists() ->
     assert tools == {"inspect_dir", "read_file", "search_text", "glob", "git_status", "git_diff", "finish"}
 
 
+def test_implement_v2_exec_mode_surfaces_lifecycle_tools() -> None:
+    tools = {spec.name for spec in list_v2_tool_specs_for_mode("exec")}
+
+    assert {"run_command", "run_tests", "poll_command", "cancel_command", "read_command_output"} <= tools
+    assert "write_file" not in tools
+
+
 def test_implement_v2_read_only_fake_runtime_can_inspect_workspace_and_finish_analysis(tmp_path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text("def target():\n    return 'ok'\n", encoding="utf-8")
@@ -670,3 +689,543 @@ def test_implement_v2_read_only_git_redacts_sensitive_rename_paths(tmp_path) -> 
 
     assert "[sensitive path redacted]" in stdout
     assert ".env" not in stdout
+
+
+def test_implement_v2_exec_short_command_finalizes_with_terminal_evidence(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('ok')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 2},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "command evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["terminal_evidence_count"] == 1
+    assert tool_result["status"] == "completed"
+    assert tool_result["evidence_refs"]
+    assert "ok" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_exec_nonzero_command_blocks_with_paired_failure(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "import sys; print('bad'); sys.exit(7)"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 2},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "failed command evidence"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
+    assert tool_result["status"] == "failed"
+    assert tool_result["is_error"] is True
+    assert tool_result["content"][0]["exit_code"] == 7
+
+
+def test_implement_v2_exec_timeout_is_interrupted_failure_evidence(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "import time; time.sleep(5)"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 1, "foreground_budget_seconds": 2},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "timed out"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert tool_result["content"][0]["timed_out"] is True
+
+
+def test_implement_v2_exec_yield_poll_and_read_output(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('start', flush=True); time.sleep(0.2); print('done', flush=True)",
+        ]
+    )
+    lane_attempt_id = "implement_v2:ws-1:task-1:exec"
+    command_run_id = _expected_command_run_id(lane_attempt_id=lane_attempt_id, provider_call_id="call-1")
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+            {
+                "provider_call_id": "call-2",
+                "tool_name": "poll_command",
+                "arguments": {"command_run_id": command_run_id, "wait_seconds": 1},
+            },
+            {
+                "provider_call_id": "call-3",
+                "tool_name": "read_command_output",
+                "arguments": {"command_run_id": command_run_id},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "polled command evidence ready"},
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    first = manifest["tool_results"][0]
+    run_id = first["content"][0]["command_run_id"]
+    poll_result = manifest["tool_results"][1]
+    read_result = manifest["tool_results"][2]
+
+    assert first["status"] == "yielded"
+    assert run_id == command_run_id
+    assert poll_result["status"] == "completed"
+    assert poll_result["evidence_refs"]
+    assert read_result["status"] == "completed"
+    assert "done" in read_result["content"][0]["content"]
+    assert result.status == "analysis_ready"
+    assert result.metrics["terminal_evidence_count"] == 1
+
+
+def test_implement_v2_exec_lifecycle_can_use_known_command_run_id(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    lane_attempt_id = "lane-v2-exec"
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path))
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('start', flush=True); time.sleep(0.2); print('done', flush=True)",
+        ]
+    )
+    start_call = adapter.normalize_tool_calls(
+        lane_attempt_id=lane_attempt_id,
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )[0]
+    start_result = runtime.execute(start_call)
+    run_id = start_result.content[0]["command_run_id"]
+    poll_call, read_call = adapter.normalize_tool_calls(
+        lane_attempt_id=lane_attempt_id,
+        turn_index=2,
+        calls=(
+            {"provider_call_id": "call-2", "tool_name": "poll_command", "arguments": {"command_run_id": run_id, "wait_seconds": 1}},
+            {"provider_call_id": "call-3", "tool_name": "read_command_output", "arguments": {"command_run_id": run_id}},
+        ),
+    )
+
+    poll_result = runtime.execute(poll_call)
+    read_result = runtime.execute(read_call)
+
+    assert start_result.status == "yielded"
+    assert poll_result.status == "completed"
+    assert poll_result.evidence_refs
+    assert "done" in poll_result.content[0]["stdout"]
+    assert read_result.status == "completed"
+    assert "done" in read_result.content[0]["content"]
+
+
+def test_implement_v2_exec_rejects_concurrent_side_effecting_command(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=1)
+    command = shlex.join([sys.executable, "-c", "import time; time.sleep(1)"])
+    first_call, second_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+            {
+                "provider_call_id": "call-2",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )
+
+    try:
+        first = runtime.execute(first_call)
+        second = runtime.execute(second_call)
+    finally:
+        runtime.runner.cancel("test cleanup")
+
+    assert first.status == "yielded"
+    assert second.status == "failed"
+    assert "managed command is already running" in second.content[0]["reason"]
+
+
+def test_implement_v2_exec_cancel_yielded_command_is_interrupted(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=1)
+    command = shlex.join([sys.executable, "-c", "import time; print('start', flush=True); time.sleep(5)"])
+    start_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 10, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )[0]
+    start_result = runtime.execute(start_call)
+    run_id = start_result.content[0]["command_run_id"]
+    cancel_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=2,
+        calls=({"provider_call_id": "call-2", "tool_name": "cancel_command", "arguments": {"command_run_id": run_id}},),
+    )[0]
+
+    cancel_result = runtime.execute(cancel_call)
+
+    assert start_result.status == "yielded"
+    assert cancel_result.status == "interrupted"
+    assert cancel_result.is_error is True
+
+
+def test_implement_v2_exec_rejects_resident_mew_loop_command(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": "./mew work --ai", "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "resident loop rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "resident mew loops" in tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_exec_rejects_shell_segment_resident_mew_loop_command(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "echo ok && ./mew work --ai",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "resident loop rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "resident mew loops" in tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_run_tests_rejects_shell_orchestration(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "echo ok && echo verify",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "shell rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "run_tests executes one argv command without a shell" in tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_run_tests_rejects_explicit_shell_interpreter(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "bash -lc 'echo ok && echo verify'",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "shell rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "run_tests executes one argv command without a shell" in tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_run_tests_rejects_background_redirect_and_env_split_shell(tmp_path) -> None:
+    commands = (
+        "python -m pytest &",
+        "python -m pytest > out.txt",
+        "env -S 'bash -lc echo-ok'",
+    )
+    for index, command in enumerate(commands, start=1):
+        result = run_fake_exec_implement_v2(
+            ImplementLaneInput(
+                work_session_id=f"ws-{index}",
+                task_id="task-1",
+                workspace=str(tmp_path),
+                lane=IMPLEMENT_V2_LANE,
+                lane_config={"mode": "exec"},
+            ),
+            provider_calls=(
+                {
+                    "provider_call_id": "call-1",
+                    "tool_name": "run_tests",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+            ),
+            finish_arguments={"outcome": "analysis_ready", "summary": "shell rejected"},
+        )
+        tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+        assert result.status == "blocked"
+        assert tool_result["status"] == "failed"
+        assert "run_tests executes one argv command without a shell" in tool_result["content"][0]["reason"]
+
+
+def test_implement_v2_exec_task_complete_claim_is_blocked_even_with_terminal_evidence(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('ok')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+        ),
+        finish_arguments={"outcome": "task_complete", "summary": "done"},
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["terminal_evidence_count"] == 1
+
+
+def test_implement_v2_exec_without_explicit_mode_does_not_run_side_effects(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('side_effect.txt').write_text('bad', encoding='utf-8')",
+        ]
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "must not run"},
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["exec_mode_enabled"] is False
+    assert result.metrics["tool_calls"] == 0
+    assert not (tmp_path / "side_effect.txt").exists()
+
+
+def test_implement_v2_exec_cleans_up_unpolled_yielded_command(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "import time; print('start', flush=True); time.sleep(5)"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 10, "foreground_budget_seconds": 0.01},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "not enough evidence"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "interrupted"
+    assert tool_result["is_error"] is True
+    assert tool_result["content"][0]["status"] == "killed"
+    assert result.metrics["terminal_evidence_count"] == 0
+    assert result.metrics["orphaned_command_cleanup_count"] == 1
+
+
+def test_implement_v2_exec_rejects_duplicate_provider_call_ids_before_side_effects(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('side_effect.txt').write_text('bad', encoding='utf-8')",
+        ]
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "dup-call",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+            {
+                "provider_call_id": "dup-call",
+                "tool_name": "read_file",
+                "arguments": {"path": "side_effect.txt"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "duplicate call ids rejected"},
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+
+    assert result.status == "failed"
+    assert result.metrics["replay_valid"] is False
+    assert [tool_result["status"] for tool_result in manifest["tool_results"]] == ["invalid", "invalid"]
+    assert "duplicate_provider_call_id:dup-call" in result.metrics["replay_errors"]
+    assert not (tmp_path / "side_effect.txt").exists()
+
+
+def _expected_command_run_id(*, lane_attempt_id: str, provider_call_id: str) -> str:
+    digest = hashlib.sha256(f"{lane_attempt_id}:{provider_call_id}".encode()).hexdigest()
+    return f"{lane_attempt_id}:command:{provider_call_id}-{digest[:8]}"
