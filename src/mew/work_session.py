@@ -14,7 +14,7 @@ from .acceptance import (
 )
 from .acceptance_evidence import COMMAND_EVIDENCE_TOOLS, long_dependency_artifact_proven_by_call
 from .cli_command import mew_command, mew_executable
-from .compatibility_frontier import update_session_active_compatibility_frontier
+from .compatibility_frontier import project_active_compatibility_frontier, update_session_active_compatibility_frontier
 from .data_tools import analyze_table
 from .read_tools import (
     DEFAULT_READ_MAX_CHARS,
@@ -10681,12 +10681,20 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
     )
     verifier_failure_repair_agenda = build_verifier_failure_repair_agenda(calls)
     search_anchor_observations = build_search_anchor_observations(calls, limit=5)
-    update_session_active_compatibility_frontier(
+    active_compatibility_frontier_state = update_session_active_compatibility_frontier(
         session,
         calls,
         verifier_failure_repair_agenda=verifier_failure_repair_agenda,
         search_anchor_observations=search_anchor_observations,
         current_time=current_time or session.get("updated_at"),
+    )
+    active_compatibility_frontier = project_active_compatibility_frontier(active_compatibility_frontier_state)
+    next_action = _prefer_active_compatibility_frontier_next_action(
+        next_action,
+        active_compatibility_frontier,
+        phase=phase,
+        pending_approvals=pending_approvals,
+        session_status=session.get("status"),
     )
     stale_runtime_artifact_risk = build_stale_runtime_artifact_risk(task, calls, session=session)
     final_verifier_state_transfer = build_final_verifier_state_transfer(task, calls, session=session)
@@ -10739,6 +10747,7 @@ def build_work_session_resume(session, task=None, limit=8, state=None, current_t
         "phase": phase,
         "updated_at": session.get("updated_at"),
         "active_work_todo": active_work_todo or {},
+        "active_compatibility_frontier": active_compatibility_frontier,
         "work_todos": list_work_session_todos(session),
         "active_rejection_frontier": session.get("active_rejection_frontier") or {},
         "rejection_frontiers": list(session.get("rejection_frontiers") or [])[-limit:],
@@ -10858,6 +10867,45 @@ def refresh_stale_memory_next_action(next_action, working_memory):
     return prefix
 
 
+def _active_compatibility_frontier_next_action(frontier):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    if not frontier or str(frontier.get("status") or "") != "open":
+        return ""
+    closure = frontier.get("closure_state") if isinstance(frontier.get("closure_state"), dict) else {}
+    next_action = str(closure.get("next_action") or "").strip()
+    if not next_action:
+        summary = frontier.get("compact_summary") if isinstance(frontier.get("compact_summary"), dict) else {}
+        next_action = str(summary.get("next_action") or "").strip()
+    if not next_action:
+        return ""
+    return f"resume active compatibility frontier: {clip_inline_text(next_action, 220)}"
+
+
+def _prefer_active_compatibility_frontier_next_action(
+    next_action,
+    frontier,
+    *,
+    phase,
+    pending_approvals,
+    session_status,
+):
+    frontier_next = _active_compatibility_frontier_next_action(frontier)
+    if not frontier_next:
+        return next_action
+    if pending_approvals:
+        return next_action
+    if str(session_status or "") == "closed":
+        return next_action
+    if str(phase or "") in {"running_tool", "planning", "stop_requested"}:
+        return next_action
+    next_action = str(next_action or "").strip()
+    if not next_action or next_action == frontier_next:
+        return frontier_next
+    if frontier_next in next_action:
+        return next_action
+    return f"{frontier_next}; then {next_action}"
+
+
 def attach_work_resume_world_state(resume, world_state):
     if not resume:
         return resume
@@ -10908,6 +10956,40 @@ def format_work_session_resume(resume):
             lines.append(f"rejection_stop_rule: {rejection_frontier.get('stop_rule')}")
         if rejection_frontier.get("next_action"):
             lines.append(f"rejection_next_action: {rejection_frontier.get('next_action')}")
+    compatibility_frontier = resume.get("active_compatibility_frontier") or {}
+    if compatibility_frontier:
+        closure = compatibility_frontier.get("closure_state") or {}
+        signature = compatibility_frontier.get("failure_signature") or {}
+        summary = compatibility_frontier.get("compact_summary") or {}
+        fingerprint = str(signature.get("fingerprint") or summary.get("failure_signature") or "")
+        lines.append(
+            "active_compatibility_frontier: "
+            f"id={compatibility_frontier.get('id') or ''} "
+            f"status={compatibility_frontier.get('status') or ''} "
+            f"state={closure.get('state') or ''} "
+            f"open_candidates={closure.get('open_candidate_count', len(compatibility_frontier.get('open_candidates') or []))} "
+            f"signature={fingerprint[:12]}"
+        )
+        if summary.get("one_line"):
+            lines.append(f"compatibility_frontier_summary: {summary.get('one_line')}")
+        if closure.get("next_action") or summary.get("next_action"):
+            lines.append(f"compatibility_frontier_next: {closure.get('next_action') or summary.get('next_action')}")
+        evidence_refs = compatibility_frontier.get("evidence_refs") or summary.get("evidence_refs") or []
+        if evidence_refs:
+            ref_parts = []
+            for ref in evidence_refs[:5]:
+                if not isinstance(ref, dict):
+                    continue
+                label = ref.get("kind") or "ref"
+                if ref.get("id") is not None:
+                    label += f"#{ref.get('id')}"
+                elif ref.get("key"):
+                    label += f":{ref.get('key')}"
+                elif ref.get("path"):
+                    label += f":{ref.get('path')}"
+                ref_parts.append(label)
+            if ref_parts:
+                lines.append(f"compatibility_frontier_evidence_refs: {', '.join(ref_parts)}")
     failed_patch_repair = resume.get("failed_patch_repair") or {}
     if failed_patch_repair:
         terms = ", ".join(failed_patch_repair.get("must_preserve_terms") or [])

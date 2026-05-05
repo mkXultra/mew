@@ -42389,6 +42389,9 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertIn("If the latest verification or write/apply step failed and the failure is not obviously permission/environment related, prefer one narrow repair step using the failing output or suggested_safe_reobserve before finish or ask_user", prompt)
         self.assertIn("If work_session.resume.broad_rollback_slice_repair is present", prompt)
         self.assertIn("Choose one smaller complete slice", prompt)
+        self.assertIn("work_session.resume.active_compatibility_frontier", prompt)
+        self.assertIn("current compatibility reentry pointer", prompt)
+        self.assertIn("does not add a deterministic action guard", prompt)
         self.assertIn("If work_session.resume.stale_runtime_artifact_risk is present", prompt)
         self.assertIn("clean stale runtime artifacts before finish", prompt)
         self.assertIn("A runnable smoke command with exit_code=0 is not enough to finish", prompt)
@@ -44197,6 +44200,80 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertEqual(compact["long_build_state"]["current_failure"]["failure_class"], "runtime_link_failed")
         self.assertTrue(compact["long_build_state"]["runtime_recovery_focus"])
         self.assertLess(len(json.dumps(compact)), 8000)
+
+    def test_compact_resume_preserves_active_compatibility_frontier_summary_and_refs(self):
+        from mew.work_loop import compact_resume_for_prompt
+
+        huge = "x" * 12000
+        frontier = {
+            "schema_version": 1,
+            "id": "compat-frontier-1-1",
+            "status": "open",
+            "failure_signature": {
+                "kind": "verifier_failure",
+                "fingerprint": "abc123",
+                "family_key": "family123",
+                "source_tool_call_id": 5,
+                "tool": "run_tests",
+                "token_categories": {"error_tokens": ["attributeerror"], "stack_anchor_tokens": [huge]},
+            },
+            "evidence_refs": [{"kind": "tool_call", "id": 5, "summary": "failed verifier"}],
+            "anchors": [{"id": "anchor-1", "kind": "search_match", "subject": huge, "path": "src/runtime.py"}],
+            "open_candidates": [{"id": "candidate-1", "kind": "file", "subject": huge, "path": "src/runtime.py"}],
+            "closure_state": {
+                "state": "read_needed",
+                "evidence_strength": "blocking",
+                "guard_mode": "block_finish",
+                "open_candidate_count": 1,
+                "next_action": "read_file src/runtime.py:12",
+            },
+            "compact_summary": {
+                "one_line": "verifier_failure frontier; 1 sibling candidates open",
+                "failure_signature": "abc123",
+                "evidence_refs": [{"kind": "tool_call", "id": 5}],
+                "open_candidates": ["candidate-1"],
+                "next_action": "read_file src/runtime.py:12",
+                "guard_mode": "block_finish",
+            },
+        }
+        resume = {
+            "session_id": 1,
+            "status": "active",
+            "active_compatibility_frontier": frontier,
+            "next_action": "continue work",
+            "long_build_state": {
+                "schema_version": 1,
+                "kind": "long_build_state",
+                "status": "blocked",
+                "current_failure": {"failure_class": "runtime_link_failed"},
+                "recovery_decision": {
+                    "failure_class": "runtime_link_failed",
+                    "decision": "continue",
+                    "allowed_next_action": {"kind": "command", "stage": "runtime_build_or_install"},
+                },
+            },
+            "commands": {"history": [{"stdout": huge}]},
+        }
+
+        compact = compact_resume_for_prompt(resume, mode="compact_memory")
+        recovery_compact = compact_resume_for_prompt(resume, mode="compact_recovery")
+
+        self.assertEqual(
+            compact["active_compatibility_frontier"]["compact_summary"]["next_action"],
+            "read_file src/runtime.py:12",
+        )
+        self.assertEqual(compact["active_compatibility_frontier"]["evidence_refs"][0]["id"], 5)
+        self.assertEqual(
+            recovery_compact["active_compatibility_frontier"]["failure_signature"]["fingerprint"],
+            "abc123",
+        )
+        self.assertEqual(
+            recovery_compact["active_compatibility_frontier"]["closure_state"]["next_action"],
+            "read_file src/runtime.py:12",
+        )
+        self.assertIn("active_compatibility_frontier", recovery_compact)
+        self.assertNotIn("commands", recovery_compact)
+        self.assertLess(len(json.dumps(recovery_compact["active_compatibility_frontier"])), 5000)
 
     def test_compact_recovery_runtime_link_prompt_omits_source_rediscovery_sections(self):
         from mew.work_loop import build_work_model_context, build_work_think_prompt_bundle
@@ -51079,7 +51156,36 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
                                     "confidence": "medium",
                                     "reason": "latest verifier passed, but does not appear to cover every inferred paired test",
                                     "expected_command": "uv run python -m unittest tests.test_commands",
-                                }
+                                },
+                                "active_compatibility_frontier": {
+                                    "id": "compat-frontier-1-1",
+                                    "status": "open",
+                                    "compact_summary": {
+                                        "one_line": "verifier_failure frontier; 1 sibling candidates open",
+                                        "failure_signature": "abc123",
+                                        "evidence_refs": [{"kind": "tool_call", "id": 5}],
+                                        "open_candidates": ["candidate-1"],
+                                        "next_action": "read_file src/runtime.py:12",
+                                        "guard_mode": "block_finish",
+                                    },
+                                    "evidence_refs": [{"kind": "tool_call", "id": 5, "summary": "failed verifier"}],
+                                    "open_candidates": [
+                                        {
+                                            "id": "candidate-1",
+                                            "kind": "file",
+                                            "subject": "src/runtime.py",
+                                            "path": "src/runtime.py",
+                                        }
+                                    ],
+                                    "closure_state": {
+                                        "state": "read_needed",
+                                        "evidence_strength": "blocking",
+                                        "guard_mode": "block_finish",
+                                        "open_candidate_count": 1,
+                                        "next_action": "read_file src/runtime.py:12",
+                                    },
+                                    "anchors": [{"id": "anchor-1", "subject": "x" * 5000}],
+                                },
                             },
                         }
                     ),
@@ -51103,6 +51209,11 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
                     "uv run python -m unittest tests.test_commands",
                 )
                 self.assertEqual(data["verification_confidence"]["status"], "partial")
+                self.assertEqual(
+                    data["active_compatibility_frontier"]["compact_summary"]["next_action"],
+                    "read_file src/runtime.py:12",
+                )
+                self.assertNotIn("anchors", data["active_compatibility_frontier"])
                 self.assertIsInstance(data["heartbeat_age_seconds"], float)
 
                 with redirect_stdout(StringIO()) as stdout:
@@ -51118,6 +51229,8 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
                 self.assertIn("did not cover src/mew/commands.py", text)
                 self.assertIn("expected uv run python -m unittest tests.test_commands", text)
                 self.assertIn("verification_confidence: medium status=partial", text)
+                self.assertIn("active_compatibility_frontier: id=compat-frontier-1-1", text)
+                self.assertIn("compatibility_frontier_next: read_file src/runtime.py:12", text)
             finally:
                 os.chdir(old_cwd)
 

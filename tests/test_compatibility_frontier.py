@@ -7,7 +7,7 @@ from mew.compatibility_frontier import (
     family_transition,
     update_session_active_compatibility_frontier,
 )
-from mew.work_session import build_work_session_resume
+from mew.work_session import build_work_session_resume, format_work_session_resume
 
 
 class CompatibilityFrontierTests(unittest.TestCase):
@@ -344,12 +344,20 @@ class CompatibilityFrontierTests(unittest.TestCase):
 
         resume = build_work_session_resume(session)
         frontier = session["active_compatibility_frontier"]
+        resume_frontier = resume["active_compatibility_frontier"]
+        text = format_work_session_resume(resume)
 
-        self.assertNotIn("active_compatibility_frontier", resume)
         self.assertEqual(frontier["failure_signature"]["source_tool_call_id"], 1)
+        self.assertEqual(resume_frontier["failure_signature"]["source_tool_call_id"], 1)
         self.assertEqual(frontier["family_transition"]["state"], "new")
         self.assertEqual(resume["search_anchor_observations"][0]["path"], "src/runtime_adapter.py")
         self.assertTrue(frontier["compact_summary"]["failure_signature"])
+        self.assertTrue(resume_frontier["compact_summary"]["failure_signature"])
+        self.assertTrue(resume_frontier["open_candidates"])
+        self.assertIn("resume active compatibility frontier: read_file", resume["next_action"])
+        self.assertIn("active_compatibility_frontier:", text)
+        self.assertIn("compatibility_frontier_next: read_file", text)
+        self.assertNotIn("module 'runtime' has no attribute", json.dumps(resume_frontier))
 
 
 if __name__ == "__main__":

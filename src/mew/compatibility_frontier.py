@@ -786,6 +786,130 @@ def _compact_summary(frontier):
     }
 
 
+def _limited_dict_list(items, *, limit=8):
+    return [dict(item) for item in items or [] if isinstance(item, dict)][:limit]
+
+
+def _project_failure_signature(signature):
+    signature = signature if isinstance(signature, dict) else {}
+    if not signature:
+        return {}
+    projected = {
+        key: signature.get(key)
+        for key in (
+            "schema_version",
+            "fingerprint_version",
+            "kind",
+            "fingerprint",
+            "family_key",
+            "source_tool_call_id",
+            "command_evidence_ref",
+            "tool",
+            "command_shape",
+            "cwd_shape",
+            "execution_contract",
+            "exit_class",
+            "error_fingerprint",
+            "failing_tests",
+            "runtime_component_kind",
+            "platform_facts",
+        )
+        if signature.get(key) not in (None, "", [], {})
+    }
+    token_categories = signature.get("token_categories")
+    if isinstance(token_categories, dict):
+        projected["token_categories"] = {
+            key: list(value or [])[:8]
+            for key, value in token_categories.items()
+            if value not in (None, "", [], {})
+        }
+    return projected
+
+
+def _project_anchor(anchor):
+    anchor = anchor if isinstance(anchor, dict) else {}
+    projected = {
+        key: anchor.get(key)
+        for key in ("id", "kind", "subject", "path", "line", "query", "source_event", "read_status")
+        if anchor.get(key) not in (None, "", [], {})
+    }
+    if anchor.get("evidence_refs"):
+        projected["evidence_refs"] = _limited_dict_list(anchor.get("evidence_refs"), limit=4)
+    return projected
+
+
+def _project_candidate(candidate):
+    candidate = candidate if isinstance(candidate, dict) else {}
+    projected = {
+        key: candidate.get(key)
+        for key in ("id", "kind", "subject", "path", "anchors", "reason", "status", "rejection_reason")
+        if candidate.get(key) not in (None, "", [], {})
+    }
+    if candidate.get("evidence_refs"):
+        projected["evidence_refs"] = _limited_dict_list(candidate.get("evidence_refs"), limit=4)
+    return projected
+
+
+def _project_closure_state(closure_state):
+    closure_state = closure_state if isinstance(closure_state, dict) else {}
+    if not closure_state:
+        return {}
+    return {
+        key: closure_state.get(key)
+        for key in (
+            "state",
+            "reason",
+            "evidence_strength",
+            "guard_mode",
+            "open_candidate_count",
+            "unread_anchor_count",
+            "unverified_patch_batch_count",
+            "verifier_obligations",
+            "blocked_action_kinds",
+            "broad_verifier_allowed",
+            "finish_allowed",
+            "next_action",
+        )
+        if closure_state.get(key) not in (None, "", [], {})
+    }
+
+
+def project_active_compatibility_frontier(frontier, *, anchor_limit=10, candidate_limit=10, history_limit=4):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    if not frontier:
+        return {}
+    candidate_source = frontier.get("sibling_candidates") or frontier.get("open_candidates") or []
+    candidates = [
+        _project_candidate(candidate)
+        for candidate in candidate_source
+        if isinstance(candidate, dict)
+        and (not candidate.get("status") or str(candidate.get("status") or "") in OPEN_CANDIDATE_STATUSES)
+    ]
+    projected = {
+        "schema_version": frontier.get("schema_version"),
+        "id": frontier.get("id"),
+        "status": frontier.get("status"),
+        "created_at": frontier.get("created_at"),
+        "updated_at": frontier.get("updated_at"),
+        "failure_signature": _project_failure_signature(frontier.get("failure_signature")),
+        "family_transition": frontier.get("family_transition") if isinstance(frontier.get("family_transition"), dict) else {},
+        "evidence_refs": _limited_dict_list(frontier.get("evidence_refs"), limit=12),
+        "anchors": [
+            _project_anchor(anchor)
+            for anchor in (frontier.get("anchors") or [])[:anchor_limit]
+            if isinstance(anchor, dict)
+        ],
+        "open_candidates": candidates[:candidate_limit],
+        "closure_state": _project_closure_state(frontier.get("closure_state")),
+        "compact_summary": frontier.get("compact_summary") if isinstance(frontier.get("compact_summary"), dict) else {},
+        "verifier_history": _limited_dict_list(
+            (frontier.get("verifier_history") or [])[-history_limit:] if history_limit > 0 else [],
+            limit=history_limit,
+        ),
+    }
+    return {key: value for key, value in projected.items() if value not in (None, "", [], {})}
+
+
 def build_active_compatibility_frontier(
     session,
     calls,

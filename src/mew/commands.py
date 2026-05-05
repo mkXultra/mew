@@ -38,6 +38,7 @@ from .agent_runs import (
 )
 from .archive import archive_state_records, format_archive_result
 from .cli_command import mew_command, mew_executable
+from .compatibility_frontier import project_active_compatibility_frontier
 from .brief import (
     build_activity_data,
     build_brief,
@@ -10705,6 +10706,44 @@ def _work_follow_status_latest_model_failure(snapshot_turns, session_turns, pref
     return chosen
 
 
+def _work_follow_status_compact_compatibility_frontier(resume):
+    resume = resume if isinstance(resume, dict) else {}
+    frontier = project_active_compatibility_frontier(
+        resume.get("active_compatibility_frontier"),
+        anchor_limit=0,
+        candidate_limit=4,
+        history_limit=0,
+    )
+    if not frontier:
+        return {}
+    closure = frontier.get("closure_state") if isinstance(frontier.get("closure_state"), dict) else {}
+    summary = frontier.get("compact_summary") if isinstance(frontier.get("compact_summary"), dict) else {}
+    open_candidates = []
+    for candidate in list(frontier.get("open_candidates") or [])[:4]:
+        if not isinstance(candidate, dict):
+            continue
+        open_candidates.append(
+            {
+                key: clip_inline_text(str(candidate.get(key) or ""), 120)
+                for key in ("id", "kind", "subject", "path", "status")
+                if candidate.get(key) not in (None, "", [], {})
+            }
+        )
+    compact = {
+        "id": frontier.get("id"),
+        "status": frontier.get("status"),
+        "compact_summary": summary,
+        "evidence_refs": list(frontier.get("evidence_refs") or [])[:6],
+        "open_candidates": open_candidates,
+        "closure_state": {
+            key: closure.get(key)
+            for key in ("state", "evidence_strength", "guard_mode", "open_candidate_count", "next_action")
+            if closure.get(key) not in (None, "", [], {})
+        },
+    }
+    return {key: value for key, value in compact.items() if value not in (None, "", [], {})}
+
+
 def _work_follow_status_from_snapshot(path, task_id=None, session=None, state=None):
     overdue_grace_seconds = 10.0
     checkpoint = compact_context_checkpoint(latest_context_checkpoint())
@@ -10802,6 +10841,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None, state=No
     if use_session_overlay and not active_work_todo:
         active_work_todo = (session or {}).get("active_work_todo") or {}
     recovery_plan = (effective_resume or {}).get("recovery_plan") or {}
+    active_compatibility_frontier = _work_follow_status_compact_compatibility_frontier(effective_resume)
     pending_approvals = (effective_resume or {}).get("pending_approvals") or []
     blocker_code = str((active_work_todo.get("blocker") or {}).get("code") or "")
     next_recovery_action = _work_follow_status_next_recovery_action(active_work_todo, recovery_plan)
@@ -10849,6 +10889,7 @@ def _work_follow_status_from_snapshot(path, task_id=None, session=None, state=No
         "verification_confidence": effective_resume.get("verification_confidence") or {},
         "continuity": effective_resume.get("continuity") or resume.get("continuity") or data.get("continuity") or {},
         "active_work_todo": active_work_todo,
+        "active_compatibility_frontier": active_compatibility_frontier,
         "blocker_code": blocker_code,
         "next_recovery_action": next_recovery_action,
         "stop_reason": data.get("stop_reason"),
@@ -10979,6 +11020,21 @@ def format_work_follow_status(data):
         lines.append(
             f"active_work_todo: id={todo.get('id') or '-'} status={todo.get('status') or '-'}{attempts_text}"
         )
+    if data.get("active_compatibility_frontier"):
+        frontier = data.get("active_compatibility_frontier") or {}
+        closure = frontier.get("closure_state") or {}
+        summary = frontier.get("compact_summary") or {}
+        lines.append(
+            "active_compatibility_frontier: "
+            f"id={frontier.get('id') or '-'} "
+            f"status={frontier.get('status') or '-'} "
+            f"state={closure.get('state') or '-'} "
+            f"open_candidates={closure.get('open_candidate_count', len(frontier.get('open_candidates') or []))}"
+        )
+        if summary.get("one_line"):
+            lines.append(f"compatibility_frontier_summary: {summary.get('one_line')}")
+        if closure.get("next_action") or summary.get("next_action"):
+            lines.append(f"compatibility_frontier_next: {closure.get('next_action') or summary.get('next_action')}")
     if data.get("next_recovery_action"):
         lines.append(f"next_recovery_action: {data.get('next_recovery_action')}")
     _append_work_follow_status_checkpoint_lines(lines, data)

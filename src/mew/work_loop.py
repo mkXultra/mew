@@ -12,6 +12,7 @@ import tokenize
 
 from .acceptance import extract_acceptance_constraints
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
+from .compatibility_frontier import project_active_compatibility_frontier
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .deliberation import (
     DELIBERATION_RESULT_SCHEMA_CONTRACT,
@@ -1756,6 +1757,7 @@ def compact_long_build_state_for_prompt(long_build_state, *, mode="compact_memor
 
 
 _COMPACT_RECOVERY_LONG_BUILD_RESUME_KEEP_KEYS = {
+    "active_compatibility_frontier",
     "active_memory",
     "active_work_todo",
     "context",
@@ -1848,7 +1850,14 @@ def compact_resume_for_prompt(resume, *, mode="compact_memory"):
         compacted.get("long_build_state"),
         mode=mode,
     )
+    compacted["active_compatibility_frontier"] = project_active_compatibility_frontier(
+        compacted.get("active_compatibility_frontier"),
+        anchor_limit=4 if mode == "compact_recovery" else 8,
+        candidate_limit=4 if mode == "compact_recovery" else 8,
+        history_limit=2 if mode == "compact_recovery" else 4,
+    )
     for key in (
+        "active_compatibility_frontier",
         "goal",
         "working_memory",
         "compressed_prior_think",
@@ -6400,6 +6409,7 @@ def _build_work_think_prompt_legacy(context):
         "If work_session.resume.failed_patch_repair is present, the previous write proposal was on-task but failed on exact old text; repair that same proposal using current anchors, preserve its must_preserve_terms/proposal_snippets, and do not substitute a nearby patch. "
         "If work_session.resume.broad_rollback_slice_repair is present, stop retrying the whole broad patch. Choose one smaller complete slice that includes its source, local tests/docs/report evidence, and verifier; record the remaining scope in working_memory before continuing. If broad_rollback_slice_repair.slice_focus is presentation_readability, split the visible text/wrapping/bubble/row/readability slice first before reconnecting broader live/state behavior. "
         "If work_session.resume.retry_context is present, treat it as the authoritative compact state after a rejected or rolled-back write: use its latest failure/status, target_windows, and pending_constraints, and do not reuse raw patch bodies from rejected or rolled-back tool_calls. "
+        "If work_session.resume.active_compatibility_frontier is present and open, treat its compact_summary, evidence_refs, open_candidates, and closure_state.next_action as the current compatibility reentry pointer before broad rediscovery; this resume object is guidance and does not add a deterministic action guard. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
