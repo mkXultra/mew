@@ -56,8 +56,8 @@ not mean every idea in every design note has shipped.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
-| 6.23.2 Lane Isolation Substrate | `in_progress` | Phase 3 read/search spike is proved; continue through Phase 6 before M6.24 resumes. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `pending` | Paused behind M6.23.2 Phase 4-6 so the next proof can identify an explicit lane and avoid mixing benchmark evidence with lane architecture changes. |
+| 6.23.2 Lane Isolation Substrate | `in_progress` | Phase 4 managed exec spike is proved; continue through Phase 6 before M6.24 resumes. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `pending` | Paused behind M6.23.2 Phase 5-6 so the next proof can identify an explicit lane and avoid mixing benchmark evidence with lane architecture changes. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.23.2 Lane Isolation Substrate**.
 
-Current controller mode: `implement_v2_phase_4_managed_exec_next`.
+Current controller mode: `implement_v2_phase_5_write_edit_apply_patch_next`.
 
 Scope:
 
@@ -80,6 +80,8 @@ Scope:
 - Phase 1 and Phase 2 are implemented. Phase 3 read/search v2 spike is
   implemented, reviewed, and proved in
   `docs/M6_23_2_PHASE3_READ_ONLY_PROOF_2026-05-05.md`.
+- Phase 4 managed exec v2 spike is implemented, reviewed, and proved in
+  `docs/M6_23_2_PHASE4_MANAGED_EXEC_PROOF_2026-05-05.md`.
 - `implement_v1` remains the current production/default lane during M6.23.2.
 - `implement_v2` remains default-off until the full Phase 1-6 sequence reaches
   the M6.24 reentry A/B gate.
@@ -91,12 +93,13 @@ Controller docs:
 - `docs/DESIGN_2026-05-05_M6_23_2_LANE_ISOLATION_SUBSTRATE.md`
 - `docs/DESIGN_2026-05-05_M6_23_2_IMPLEMENT_V2_NATIVE_TOOL_LOOP.md`
 - `docs/M6_23_2_PHASE3_READ_ONLY_PROOF_2026-05-05.md`
+- `docs/M6_23_2_PHASE4_MANAGED_EXEC_PROOF_2026-05-05.md`
 - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
 
 Paused M6.24 resume action:
 
 ```text
-M6.23.2 Phase 4 managed exec -> Phase 5 write/edit/apply_patch -> Phase 6 M6.24 reentry A/B gate -> only then resume M6.24 proof work
+M6.23.2 Phase 5 write/edit/apply_patch -> Phase 6 M6.24 reentry A/B gate -> only then resume M6.24 proof work
 ```
 
 ## Paused M6.24 Context
@@ -178,12 +181,11 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Implement Phase 4 managed exec for `implement_v2`: provider-native
-   `run_command`, `run_tests`, `poll_command`, `cancel_command`, and
-   `read_command_output` using shared managed exec and paired nonterminal tool
-   results.
-2. Run focused tests and codex-ultra review for Phase 4 before commit.
-3. Continue to Phase 5 write/edit/apply_patch only after Phase 4 review passes.
+1. Implement Phase 5 write/edit/apply_patch for `implement_v2`: dry-run diff
+   artifacts, approval-gated apply path, denied-result pairing, and no hidden
+   mutation.
+2. Run focused tests and codex-ultra review for Phase 5 before commit.
+3. Continue to Phase 6 M6.24 reentry A/B gate only after Phase 5 review passes.
 4. Keep M6.24 pending until Phase 6 M6.24 reentry A/B gate is implemented and
    reviewed.
 5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
