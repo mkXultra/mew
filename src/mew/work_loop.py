@@ -12,7 +12,10 @@ import tokenize
 
 from .acceptance import extract_acceptance_constraints
 from .agent import call_model_json_with_retries as _agent_call_model_json_with_retries
-from .compatibility_frontier import project_active_compatibility_frontier
+from .compatibility_frontier import (
+    active_compatibility_frontier_action_guard,
+    project_active_compatibility_frontier,
+)
 from .config import DEFAULT_CODEX_MODEL, DEFAULT_CODEX_WEB_BASE_URL, DEFAULT_MODEL_BACKEND
 from .deliberation import (
     DELIBERATION_RESULT_SCHEMA_CONTRACT,
@@ -631,6 +634,23 @@ def work_model_turn_for_model(turn, *, prompt_context_mode="full"):
     }
     if compact_prompt:
         item["prompt_context_compacted"] = True
+    guard = model_metrics.get("active_compatibility_frontier_guard")
+    if isinstance(guard, dict) and guard:
+        item["active_compatibility_frontier_guard"] = _compact_context_value(
+            {
+                key: guard.get(key)
+                for key in (
+                    "frontier_id",
+                    "frontier_state",
+                    "guard_mode",
+                    "blocked_action_kind",
+                    "replacement_action_type",
+                    "reason",
+                )
+                if guard.get(key) not in (None, "", [], {})
+            },
+            text_limit=500 if compact_prompt else 1000,
+        )
     return item
 
 
@@ -1133,6 +1153,70 @@ def _work_plan_with_session_trace_patch(result, trace_patch):
     planned = dict(result or {})
     planned["session_trace_patch"] = trace_patch
     return planned
+
+
+def _enforce_active_compatibility_frontier_action_guard(
+    *,
+    session,
+    context,
+    action,
+    action_plan,
+    model_metrics,
+):
+    work_session = (context or {}).get("work_session") if isinstance(context, dict) else {}
+    resume = (work_session or {}).get("resume") if isinstance(work_session, dict) else {}
+    frontier = project_active_compatibility_frontier(
+        (session or {}).get("active_compatibility_frontier") if isinstance(session, dict) else {}
+    )
+    if not frontier:
+        frontier = (resume or {}).get("active_compatibility_frontier") or {}
+    if not frontier:
+        return action
+
+    guarded_action, guard_decision = active_compatibility_frontier_action_guard(
+        frontier,
+        action,
+        resume=resume,
+        active_work_todo=(resume or {}).get("active_work_todo") or {},
+    )
+    if not (isinstance(guard_decision, dict) and guard_decision.get("applied")):
+        return action
+
+    if isinstance(model_metrics, dict):
+        model_metrics["active_compatibility_frontier_guard"] = {
+            key: guard_decision.get(key)
+            for key in (
+                "frontier_id",
+                "frontier_state",
+                "guard_mode",
+                "blocked_action_kind",
+                "original_action_type",
+                "replacement_action_type",
+                "action_fingerprint",
+                "reason",
+            )
+            if guard_decision.get(key) not in (None, "", [], {})
+        }
+    if isinstance(action_plan, dict):
+        action_plan["action"] = guarded_action
+        action_plan["summary"] = (
+            guarded_action.get("reason")
+            or action_plan.get("summary")
+            or "active compatibility frontier redirected action"
+        )
+        action_plan["act_mode"] = action_plan.get("act_mode") or "deterministic"
+        action_plan["active_compatibility_frontier_guard"] = {
+            key: guard_decision.get(key)
+            for key in (
+                "frontier_id",
+                "frontier_state",
+                "guard_mode",
+                "blocked_action_kind",
+                "replacement_action_type",
+            )
+            if guard_decision.get(key) not in (None, "", [], {})
+        }
+    return guarded_action
 
 
 def _work_deliberation_preflight_decision(
@@ -6409,7 +6493,7 @@ def _build_work_think_prompt_legacy(context):
         "If work_session.resume.failed_patch_repair is present, the previous write proposal was on-task but failed on exact old text; repair that same proposal using current anchors, preserve its must_preserve_terms/proposal_snippets, and do not substitute a nearby patch. "
         "If work_session.resume.broad_rollback_slice_repair is present, stop retrying the whole broad patch. Choose one smaller complete slice that includes its source, local tests/docs/report evidence, and verifier; record the remaining scope in working_memory before continuing. If broad_rollback_slice_repair.slice_focus is presentation_readability, split the visible text/wrapping/bubble/row/readability slice first before reconnecting broader live/state behavior. "
         "If work_session.resume.retry_context is present, treat it as the authoritative compact state after a rejected or rolled-back write: use its latest failure/status, target_windows, and pending_constraints, and do not reuse raw patch bodies from rejected or rolled-back tool_calls. "
-        "If work_session.resume.active_compatibility_frontier is present and open, treat its compact_summary, evidence_refs, open_candidates, and closure_state.next_action as the current compatibility reentry pointer before broad rediscovery; this resume object is guidance and does not add a deterministic action guard. "
+        "If work_session.resume.active_compatibility_frontier is present and open, treat its compact_summary, evidence_refs, open_candidates, and closure_state.next_action as the current compatibility reentry pointer before broad rediscovery; deterministic action guards may redirect blocked broad verifier, repeated search, or finish actions when closure_state.guard_mode requires it. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
@@ -7952,6 +8036,13 @@ def plan_work_model_turn(
                     or action_plan.get("summary")
                     or "refresh exact context before redrafting after reviewer rejection"
                 )
+            action = _enforce_active_compatibility_frontier_action_guard(
+                session=session,
+                context=context,
+                action=action,
+                action_plan=action_plan,
+                model_metrics=model_metrics,
+            )
             if progress:
                 progress(f"session #{session.get('id')}: ACT ok action={action.get('type') or 'unknown'}")
             return _work_plan_with_session_trace_patch(
@@ -8148,6 +8239,13 @@ def plan_work_model_turn(
                 or action_plan.get("summary")
                 or "refresh exact context before redrafting after reviewer rejection"
             )
+    action = _enforce_active_compatibility_frontier_action_guard(
+        session=session,
+        context=context,
+        action=action,
+        action_plan=action_plan,
+        model_metrics=model_metrics,
+    )
     model_metrics["total_model_seconds"] = _round_seconds(
         (model_metrics.get("think") or {}).get("elapsed_seconds", 0.0)
         + (model_metrics.get("act") or {}).get("elapsed_seconds", 0.0)

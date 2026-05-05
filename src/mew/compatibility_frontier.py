@@ -14,6 +14,40 @@ PRIMARY_TOKEN_CATEGORIES = (
     "stack_anchor_tokens",
 )
 OPEN_CANDIDATE_STATUSES = {"unexplored", "read", "anchored", "edited"}
+FRONTIER_BLOCKING_STATES = {"open", "search_needed", "read_needed", "edit_needed", "cheap_verify_needed"}
+FRONTIER_BLOCKING_GUARD_MODES = {"block_broad", "block_finish"}
+FRONTIER_CHEAP_CONTRACT_TERMS = {
+    "cheap",
+    "focused",
+    "targeted",
+    "narrow",
+    "smoke",
+    "behavior",
+    "runtime_behavior",
+    "repository_tail",
+    "unit",
+}
+FRONTIER_BROAD_CONTRACT_TERMS = {
+    "acceptance",
+    "all",
+    "broad",
+    "build",
+    "final",
+    "full",
+    "full_suite",
+    "install",
+    "rebuild",
+    "suite",
+    "task_verifier",
+}
+FRONTIER_DURABLE_EVIDENCE_REF_KINDS = {
+    "command_evidence",
+    "external_verifier",
+    "result_artifact",
+    "resume_key",
+    "tool_call",
+    "verifier_output",
+}
 
 
 def _clip_text(value, limit=160):
@@ -866,6 +900,7 @@ def _project_closure_state(closure_state):
             "unverified_patch_batch_count",
             "verifier_obligations",
             "blocked_action_kinds",
+            "blocked_action_fingerprints",
             "broad_verifier_allowed",
             "finish_allowed",
             "next_action",
@@ -908,6 +943,484 @@ def project_active_compatibility_frontier(frontier, *, anchor_limit=10, candidat
         ),
     }
     return {key: value for key, value in projected.items() if value not in (None, "", [], {})}
+
+
+def _frontier_signature(frontier):
+    signature = (frontier or {}).get("failure_signature")
+    return signature if isinstance(signature, dict) else {}
+
+
+def _frontier_closure(frontier):
+    closure = (frontier or {}).get("closure_state")
+    return closure if isinstance(closure, dict) else {}
+
+
+def _frontier_candidates(frontier):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    candidates = frontier.get("open_candidates")
+    if isinstance(candidates, list):
+        return [item for item in candidates if isinstance(item, dict)]
+    return _open_candidates(frontier.get("sibling_candidates") or [])
+
+
+def _frontier_guard_path(value):
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    if text.startswith("./"):
+        text = text[2:]
+    if text.startswith("<repo>/"):
+        text = text[len("<repo>/") :]
+    return text.strip("/")
+
+
+def _frontier_guard_paths_match(left, right):
+    left = _frontier_guard_path(left)
+    right = _frontier_guard_path(right)
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    return left.endswith(f"/{right}") or right.endswith(f"/{left}")
+
+
+def _frontier_anchor_paths(frontier):
+    paths = []
+    for anchor in (frontier or {}).get("anchors") or []:
+        if not isinstance(anchor, dict):
+            continue
+        path = _frontier_guard_path(anchor.get("path"))
+        if path:
+            paths.append(path)
+    return _dedupe(paths)
+
+
+def _frontier_candidate_paths(frontier):
+    paths = []
+    for candidate in _frontier_candidates(frontier):
+        path = _frontier_guard_path(candidate.get("path"))
+        if path:
+            paths.append(path)
+        for anchor in candidate.get("anchors") or []:
+            if isinstance(anchor, dict):
+                anchor_path = _frontier_guard_path(anchor.get("path"))
+                if anchor_path:
+                    paths.append(anchor_path)
+    return _dedupe(paths)
+
+
+def _frontier_required_edit_paths(frontier):
+    required = []
+    for candidate in _frontier_candidates(frontier):
+        status = str(candidate.get("status") or "unexplored").strip()
+        if status in {"verified", "rejected", "deferred"}:
+            continue
+        path = _frontier_guard_path(candidate.get("path"))
+        if path:
+            required.append(path)
+    return _dedupe(required)
+
+
+def _action_command(action):
+    action = action if isinstance(action, dict) else {}
+    return str(action.get("command") or "").strip()
+
+
+def _execution_contract_terms(action):
+    action = action if isinstance(action, dict) else {}
+    contract = action.get("execution_contract") if isinstance(action.get("execution_contract"), dict) else {}
+    terms = []
+    for key in ("purpose", "stage", "proof_role", "acceptance_kind"):
+        value = contract.get(key)
+        if isinstance(value, str) and value.strip():
+            terms.extend(re.findall(r"[a-zA-Z0-9_]+", value.casefold()))
+        elif isinstance(value, list):
+            for item in value:
+                terms.extend(re.findall(r"[a-zA-Z0-9_]+", str(item).casefold()))
+    return set(terms)
+
+
+def _command_mentions_frontier_target(command, frontier):
+    command = str(command or "").casefold()
+    if not command:
+        return False
+    signature = _frontier_signature(frontier)
+    targets = []
+    targets.extend(str(item or "") for item in signature.get("failing_tests") or [])
+    targets.extend(_frontier_anchor_paths(frontier))
+    targets.extend(_frontier_candidate_paths(frontier))
+    for target in targets:
+        target_text = str(target or "").strip().replace("\\", "/")
+        if target_text and target_text.casefold() in command:
+            return True
+    return False
+
+
+def _command_looks_broad_verifier(command):
+    command = str(command or "").casefold()
+    if not command:
+        return False
+    broad_patterns = (
+        r"\b(pytest|unittest|tox|nox)\b",
+        r"\b(cargo|go|npm|pnpm|yarn|mvn|gradle)\s+test\b",
+        r"\b(make|ninja|cmake|meson|bazel)\b",
+        r"\b(build|rebuild|install|full[-_ ]?suite|acceptance)\b",
+    )
+    return any(re.search(pattern, command) for pattern in broad_patterns)
+
+
+def _frontier_action_is_cheap_verifier(action, frontier):
+    action = action if isinstance(action, dict) else {}
+    action_type = str(action.get("type") or action.get("tool") or "").strip()
+    if action_type not in {"run_command", "run_tests"}:
+        return False
+    terms = _execution_contract_terms(action)
+    if terms & FRONTIER_CHEAP_CONTRACT_TERMS:
+        return True
+    if terms & FRONTIER_BROAD_CONTRACT_TERMS:
+        return False
+    return _command_mentions_frontier_target(_action_command(action), frontier)
+
+
+def _frontier_action_is_broad_verifier(action, frontier):
+    action = action if isinstance(action, dict) else {}
+    action_type = str(action.get("type") or action.get("tool") or "").strip()
+    if action_type == "batch":
+        return any(_frontier_action_is_broad_verifier(tool, frontier) for tool in action.get("tools") or [])
+    if action_type not in {"run_command", "run_tests"}:
+        return False
+    if _frontier_action_is_cheap_verifier(action, frontier):
+        return False
+    terms = _execution_contract_terms(action)
+    if terms & FRONTIER_BROAD_CONTRACT_TERMS:
+        return True
+    if action_type == "run_tests":
+        return True
+    return _command_looks_broad_verifier(_action_command(action))
+
+
+def _frontier_action_is_finish_like(action):
+    action = action if isinstance(action, dict) else {}
+    action_type = str(action.get("type") or action.get("tool") or "").strip()
+    if action_type == "finish":
+        return True
+    return action_type == "send_message" and bool(action.get("task_done"))
+
+
+def _frontier_action_repeats_search(action, frontier):
+    action = action if isinstance(action, dict) else {}
+    if str(action.get("type") or action.get("tool") or "").strip() != "search_text":
+        return False
+    closure = _frontier_closure(frontier)
+    blocked_fingerprints = {
+        str(item or "").strip()
+        for item in closure.get("blocked_action_fingerprints") or []
+        if str(item or "").strip()
+    }
+    if _frontier_action_fingerprint(action) in blocked_fingerprints:
+        return True
+    query = str(action.get("query") or "").strip().casefold()
+    path = _frontier_guard_path(action.get("path"))
+    if not query:
+        return False
+    for anchor in (frontier or {}).get("anchors") or []:
+        if not isinstance(anchor, dict):
+            continue
+        if anchor.get("kind") != "search_match":
+            continue
+        anchor_query = str(anchor.get("query") or "").strip().casefold()
+        if query != anchor_query:
+            continue
+        anchor_path = _frontier_guard_path(anchor.get("path"))
+        if not path or not anchor_path or _frontier_guard_paths_match(path, anchor_path):
+            return True
+    return False
+
+
+def _frontier_has_blocking_evidence(frontier):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    closure = _frontier_closure(frontier)
+    signature = _frontier_signature(frontier)
+    state = str(closure.get("state") or "open").strip()
+    evidence_strength = str(closure.get("evidence_strength") or "").strip()
+    if str(frontier.get("status") or "") != "open":
+        return False
+    if not _frontier_has_guard_evidence(frontier):
+        return False
+    guard_mode = str(closure.get("guard_mode") or "").strip()
+    if guard_mode in {"observe_only", "prompt_nudge"}:
+        return False
+    if not guard_mode and not (state == "open" and evidence_strength in {"actionable", "blocking"}):
+        return False
+    if guard_mode and guard_mode not in FRONTIER_BLOCKING_GUARD_MODES:
+        return False
+    if evidence_strength == "weak":
+        return False
+    if state not in FRONTIER_BLOCKING_STATES:
+        return False
+    try:
+        unverified_patch_batch_count = int(closure.get("unverified_patch_batch_count") or 0)
+    except (TypeError, ValueError):
+        unverified_patch_batch_count = 0
+    has_obligation = bool(
+        frontier.get("anchors")
+        or _frontier_candidates(frontier)
+        or signature.get("failing_tests")
+        or closure.get("verifier_obligations")
+        or unverified_patch_batch_count
+    )
+    return has_obligation
+
+
+def _frontier_has_guard_evidence(frontier):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    signature = _frontier_signature(frontier)
+    if not signature.get("fingerprint"):
+        return False
+    for ref in frontier.get("evidence_refs") or []:
+        if _frontier_evidence_ref_is_durable(ref):
+            return True
+    return False
+
+
+def _frontier_evidence_ref_is_durable(ref):
+    if not isinstance(ref, dict):
+        return False
+    kind = str(ref.get("kind") or "").strip()
+    if kind == "tool_call":
+        return ref.get("id") not in (None, "")
+    if kind == "command_evidence":
+        return any(ref.get(key) not in (None, "") for key in ("id", "path", "command_run_id"))
+    if kind == "resume_key":
+        return bool(ref.get("key"))
+    if kind in FRONTIER_DURABLE_EVIDENCE_REF_KINDS:
+        return any(ref.get(key) not in (None, "") for key in ("id", "key", "path", "command_run_id"))
+    return bool(kind and any(ref.get(key) not in (None, "") for key in ("id", "key", "path", "command_run_id")))
+
+
+def _frontier_has_finish_blocker(frontier):
+    frontier = frontier if isinstance(frontier, dict) else {}
+    if str(frontier.get("status") or "") != "open":
+        return False
+    if not _frontier_has_guard_evidence(frontier):
+        return False
+    closure = _frontier_closure(frontier)
+    signature = _frontier_signature(frontier)
+    return bool(
+        _frontier_has_blocking_evidence(frontier)
+        or signature.get("kind") == "finish_false_positive"
+        or closure.get("verifier_obligations")
+    )
+
+
+def _frontier_finish_guard_enabled(frontier):
+    closure = _frontier_closure(frontier)
+    return bool(
+        str(closure.get("guard_mode") or "").strip() == "block_finish"
+        and "finish" in (closure.get("blocked_action_kinds") or [])
+        and str(closure.get("evidence_strength") or "").strip() != "weak"
+    )
+
+
+def _active_work_todo_covers_frontier(active_work_todo, frontier):
+    todo = active_work_todo if isinstance(active_work_todo, dict) else {}
+    if not todo:
+        return False
+    source = todo.get("source") if isinstance(todo.get("source"), dict) else {}
+    raw_target_paths = source.get("target_paths") or todo.get("target_paths") or []
+    target_paths = [
+        _frontier_guard_path(path)
+        for path in raw_target_paths
+        if isinstance(path, str) and path.strip()
+    ]
+    if not target_paths:
+        return False
+    required_paths = _frontier_required_edit_paths(frontier)
+    if not required_paths:
+        return False
+    return all(
+        any(_frontier_guard_paths_match(required, target) for target in target_paths)
+        for required in required_paths
+    )
+
+
+def _frontier_first_unread_anchor_action(frontier, reason):
+    for anchor in (frontier or {}).get("anchors") or []:
+        if not isinstance(anchor, dict):
+            continue
+        if anchor.get("read_status") != "unread":
+            continue
+        if anchor.get("kind") not in {"source_location", "search_match"}:
+            continue
+        path = anchor.get("path")
+        if not path:
+            continue
+        try:
+            line = max(1, int(anchor.get("line") or 1))
+        except (TypeError, ValueError):
+            line = 1
+        return {
+            "type": "read_file",
+            "path": path,
+            "line_start": max(1, line - 20),
+            "line_count": 80,
+            "reason": reason,
+        }
+    return {}
+
+
+def _frontier_first_candidate_read_action(frontier, reason):
+    for candidate in _frontier_candidates(frontier):
+        path = candidate.get("path")
+        if not path:
+            continue
+        return {
+            "type": "read_file",
+            "path": path,
+            "reason": reason,
+        }
+    return {}
+
+
+def _frontier_first_search_action(frontier, reason):
+    for anchor in (frontier or {}).get("anchors") or []:
+        if not isinstance(anchor, dict):
+            continue
+        if anchor.get("kind") != "search_query":
+            continue
+        query = str(anchor.get("query") or "").strip()
+        if not query:
+            continue
+        action = {
+            "type": "search_text",
+            "path": anchor.get("path") or ".",
+            "query": query,
+            "reason": reason,
+        }
+        if anchor.get("pattern"):
+            action["pattern"] = anchor.get("pattern")
+        return action
+    return {}
+
+
+def _frontier_replacement_action(frontier, *, blocked_action_kind):
+    closure = _frontier_closure(frontier)
+    state = str(closure.get("state") or "open").strip()
+    base_reason = (
+        "active compatibility frontier requires "
+        f"{closure.get('next_action') or 'closing open evidence obligations'} "
+        f"before {blocked_action_kind}"
+    )
+    action = _frontier_first_unread_anchor_action(frontier, base_reason)
+    if action:
+        return action
+    if state == "search_needed":
+        action = _frontier_first_search_action(frontier, base_reason)
+        if action:
+            return action
+    action = _frontier_first_candidate_read_action(frontier, base_reason)
+    if action:
+        return action
+    if state == "search_needed":
+        action = _frontier_first_search_action(frontier, base_reason)
+        if action:
+            return action
+    return {
+        "type": "wait",
+        "reason": base_reason,
+    }
+
+
+def _frontier_action_fingerprint(action):
+    action = action if isinstance(action, dict) else {}
+    action_type = str(action.get("type") or action.get("tool") or "").strip()
+    core = {"type": action_type}
+    for key in ("command", "cwd", "path", "query", "pattern"):
+        value = action.get(key)
+        if value not in (None, "", [], {}):
+            core[key] = _normalize_shape(value) if isinstance(value, str) else value
+    if action_type == "batch":
+        core["tools"] = [_frontier_action_fingerprint(tool) for tool in action.get("tools") or []]
+    return _short_id("action", core)
+
+
+def active_compatibility_frontier_action_guard(
+    frontier,
+    action,
+    *,
+    resume=None,
+    active_work_todo=None,
+):
+    """Return a deterministic replacement for broad/finish actions blocked by an open frontier."""
+    frontier = frontier if isinstance(frontier, dict) else {}
+    action = action if isinstance(action, dict) else {}
+    resume = resume if isinstance(resume, dict) else {}
+    closure = _frontier_closure(frontier)
+    skipped_reason = ""
+    if resume.get("pending_approvals"):
+        skipped_reason = "pending_approvals"
+    elif resume.get("running_commands"):
+        skipped_reason = "running_commands"
+    elif resume.get("stop_request"):
+        skipped_reason = "stop_request"
+    elif str(resume.get("phase") or "") in {"running_tool", "planning", "stop_requested"}:
+        skipped_reason = f"phase:{resume.get('phase')}"
+    if skipped_reason:
+        return dict(action), {"applied": False, "skipped_reason": skipped_reason}
+
+    action_type = str(action.get("type") or action.get("tool") or "").strip()
+    if (
+        action_type in {"write_file", "edit_file", "edit_file_hunks"}
+        and _active_work_todo_covers_frontier(active_work_todo, frontier)
+    ):
+        return dict(action), {"applied": False, "skipped_reason": "active_work_todo_covers_frontier"}
+
+    blocked_action_kind = ""
+    if _frontier_action_is_finish_like(action):
+        if _frontier_finish_guard_enabled(frontier) and _frontier_has_finish_blocker(frontier):
+            blocked_action_kind = "finish"
+    elif (
+        _frontier_action_repeats_search(action, frontier)
+        and "repeat_search" in (closure.get("blocked_action_kinds") or [])
+    ):
+        if _frontier_has_blocking_evidence(frontier):
+            blocked_action_kind = "repeat_search"
+    elif _frontier_action_is_broad_verifier(action, frontier):
+        if (
+            _frontier_has_blocking_evidence(frontier)
+            and "broad_verifier" in (closure.get("blocked_action_kinds") or [])
+            and not bool(closure.get("broad_verifier_allowed"))
+        ):
+            blocked_action_kind = "broad_verifier"
+
+    if not blocked_action_kind:
+        return dict(action), {"applied": False}
+
+    original_fingerprint = _frontier_action_fingerprint(action)
+    replacement = _frontier_replacement_action(frontier, blocked_action_kind=blocked_action_kind)
+    if _frontier_action_fingerprint(replacement) == original_fingerprint:
+        if blocked_action_kind == "repeat_search":
+            replacement = {
+                "type": "wait",
+                "reason": "active compatibility frontier blocked repeated search but has no distinct read/search replacement",
+            }
+        else:
+            return dict(action), {
+                "applied": False,
+                "skipped_reason": "replacement_matches_original_action",
+            }
+    decision = {
+        "applied": True,
+        "frontier_id": frontier.get("id") or "",
+        "frontier_state": closure.get("state") or "open",
+        "guard_mode": closure.get("guard_mode") or "",
+        "blocked_action_kind": blocked_action_kind,
+        "original_action_type": action_type,
+        "replacement_action_type": replacement.get("type") or "",
+        "action_fingerprint": original_fingerprint,
+        "reason": replacement.get("reason") or "",
+    }
+    return replacement, decision
 
 
 def build_active_compatibility_frontier(
