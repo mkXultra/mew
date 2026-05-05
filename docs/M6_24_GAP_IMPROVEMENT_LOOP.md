@@ -27,6 +27,7 @@ now repository-test-tail repair frontier exhaustion, not broad Cython setup.
 Authoritative inputs:
 
 - `docs/M6_24_DECISION_LEDGER.md`
+- `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`
 - `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
 - `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`
 - `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
@@ -43,16 +44,25 @@ Authoritative inputs:
 - `docs/REVIEW_2026-05-02_CODEX_CLI_LONG_BUILD_CONTINUATION_PATTERNS.md`
 - `docs/REVIEW_2026-05-02_CLAUDE_CODE_LONG_BUILD_CONTINUATION_PATTERNS.md`
 
-Do not resume broad scoped Terminal-Bench measurement until this controller or
-the decision ledger records why measurement is higher value than repairing the
-selected gap class. The current-head recheck has already answered the immediate
-"architecture changed, remeasure first" question for `build-cython-ext`.
+Do not resume broad historical/v1 Terminal-Bench measurement. The active
+measurement lane is now `implement_v2`. Continue the scoped v2 rebaseline one
+task at a time, and pause it immediately if the latest task exposes a miss,
+harness problem, missing replay surface, or structural lane gap.
 
 Current selected gap class:
-`true_v2_build_cython_ext_speed_1_passed_after_active_command_closeout_repair`.
+`implement_v2_scoped_rebaseline_active`.
 
 Current selected next action:
-`M6.24 -> build-cython-ext true-v2 active-command closeout repair -> current-head pre-speed gate passed -> same-shape selected_lane=implement_v2 speed_1 passed -> do not rerun speed_1 blindly -> explicitly choose build-cython-ext proof_5 or the next scoped below-target software/coding task`.
+`M6.24 -> implement_v2 scoped rebaseline -> run next pending scoped task speed_1 with selected_lane=implement_v2 -> if miss or structural lane gap, reproduce through replay/dogfood/emulator and repair before measuring unrelated tasks`.
+
+Implement-v2 rebaseline decision on 2026-05-06 JST: after the post-closeout
+`build-cython-ext` v2 `speed_1` pass, the controller does not immediately spend
+`proof_5`. Instead it remeasures the 25 scoped software/coding tasks with
+`selected_lane=implement_v2` and records clean speed_1 evidence, gap classes,
+and repair routes in `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`.
+`build-cython-ext` and `prove-plus-comm` currently count as clean v2 `speed_1`
+passes; their `proof_5` close proof is deferred until the controller selects
+them as close candidates.
 
 Current live proof history on 2026-05-06 JST: the selected gap moved past the
 active compatibility frontier loops. The earlier same-shape run
@@ -77,8 +87,8 @@ scored reward `1.0` with runner errors `0`, total runtime `4m52s`,
 `runtime_id=implement_v2_model_json_tool_loop`, and external verifier
 `11 passed in 3.46s`. Exact replay and exact dogfood on the passing artifact
 both pass. The speed_1 gate is no longer pending; the next controller action is
-to decide whether to spend a same-shape proof_5 for `build-cython-ext` or move
-to the next scoped below-target software/coding task.
+to continue the `implement_v2` scoped rebaseline unless the user explicitly
+selects same-shape close proof first.
 
 Current pre-speed status:
 
@@ -135,6 +145,9 @@ Active authoritative design:
 
 Active scoped rebaseline:
 `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`.
+
+Active implement-v2 rebaseline:
+`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`.
 
 Active repair dossier:
 `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`.
@@ -701,6 +714,6 @@ regression.
 
 Proof result update: the same-shape v2 proof after that repair passed. Do not
 run another `build-cython-ext` speed_1 for the same shape. The next valid work
-is controller selection: either `build-cython-ext` proof_5 if the selected
-repair needs five-trial closure against the frozen Codex target, or the next
-scoped below-target software/coding task if measurement should resume.
+is the `implement_v2` scoped rebaseline: run pending scoped tasks one at a time
+with explicit lane attribution, and repair immediately if a task exposes a
+miss, harness defect, missing replay/dogfood surface, or structural lane gap.

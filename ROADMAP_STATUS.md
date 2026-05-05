@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; explicit `implement_v2` live JSON runtime canary passed, and post-closeout `build-cython-ext` speed_1 now passes. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is now implement_v2 scoped rebaseline: remeasure the 25 software/coding tasks with v2 and repair any miss before unrelated measurement continues. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_true_implement_v2_build_cython_speed_1_passed_select_next`.
+Current controller mode: `m6_24_implement_v2_scoped_rebaseline`.
 
 Scope:
 
@@ -94,10 +94,14 @@ Scope:
   through the v2 substrates. It remains explicit-selection only.
 - Provider-specific native tool-call transport is still future work; current
   v2 proof must be described as `model_json`, not provider-native.
-- M6.24 live proof work resumes only with explicit lane metadata. The newest
-  completed same-shape `build-cython-ext` speed/debug run used
-  `selected_lane=implement_v2` and passed. Any fallback execution must be a
-  separate attempt and cannot count as v2 success.
+- M6.24 live proof work resumes only with explicit lane metadata. The active
+  measurement lane is now `implement_v2`; historical `implement_v1` results
+  remain repair evidence but cannot close the current M6.24 gate.
+- The active controller is
+  `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`: run one `speed_1` per
+  scoped software/coding task with `selected_lane=implement_v2`, and pause to
+  repair if a task misses, is harness-invalid, lacks replayable artifacts, or
+  exposes a structural lane gap.
 - The first true-v2 `build-cython-ext` speed attempt
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
   product evidence: Docker failed before `mew` launched because the harness
@@ -127,9 +131,8 @@ Scope:
   with reward `1.0`, runner errors `0`, runtime `4m52s`, `work_exit_code=0`,
   `stop_reason=finish`, `selected_lane=implement_v2`, and external verifier
   `11/11` passing. Exact replay and dogfood on the passing artifact also pass.
-  Do not rerun the same speed_1 shape blindly; the next action is a controller
-  decision between same-shape `build-cython-ext` proof_5 and the next scoped
-  below-target software/coding task.
+  This counts as v2 rebaseline `speed_1` evidence, not as the whole M6.24 close
+  proof. Do not rerun the same speed_1 shape blindly.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded
@@ -150,13 +153,13 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 for build-cython-ext M6.24 speed/debug proof; every proof artifact must record lane id and lane attempt id; the post-closeout speed_1 passed, so do not rerun speed_1 blindly; choose proof_5 or the next scoped below-target task explicitly
+selected_lane=implement_v2 is now the active M6.24 measurement lane; remeasure scoped software/coding tasks with v2 speed_1; if a run misses or exposes a structural lane gap, reproduce through replay/dogfood/emulator and repair before unrelated measurement continues
 ```
 
 Latest update: that selected `build-cython-ext` speed/debug proof passed after
-the active-command closeout repair. The current decision is no longer "run the
-next speed_1"; it is "choose proof_5 for this selected repair or move to the
-next scoped below-target task."
+the active-command closeout repair. The current decision is no longer
+"build-cython proof_5 now"; it is "continue the implement_v2 scoped rebaseline,
+while preserving immediate repair on any miss or structural lane gap."
 
 ## Active M6.24 Context
 
@@ -180,6 +183,7 @@ Controller docs:
 
 - `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
 - `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`
+- `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`
 - `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
 - `docs/M6_24_REFERENCE_TRACE_BUILD_CYTHON_EXT_2026-05-05.md`
 - `docs/M6_24_DECISION_LEDGER.md`
@@ -190,7 +194,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> true implement_v2 selected -> build-cython-ext reference trace alignment -> first v2 speed attempt excluded as /workspace harness-invalid before mew launch -> /app v2 speed miss moved from tool-surface/frontier gap to active-command closeout gap -> closeout repair implemented -> focused UT/replay/dogfood/emulator pre-speed passed -> selected_lane=implement_v2 build-cython-ext speed_1 passed -> choose proof_5 or next scoped below-target task
+M6.24 -> implement_v2 scoped rebaseline -> selected_lane=implement_v2 speed_1 per scoped software/coding task -> if pass, record v2 evidence and continue queue -> if miss/harness-invalid/missing-replay/structural-gap, stop unrelated measurement, reproduce through replay/dogfood/emulator, repair, then rerun same shape
 ```
 
 The 2026-05-05 Codex/Claude Code reference traces both pass
@@ -207,7 +211,8 @@ re-read the scope doc plus decision ledger first.
 Done when:
 
 - all 25 scoped `software-engineering,coding` tasks have mew results with
-  complete artifacts and no unexplained Harbor runner errors;
+  `implement_v2` results, complete artifacts, and no unexplained Harbor runner
+  errors;
 - mew aggregate successes on the scoped 25-task cohort match or exceed the
   frozen Codex target for the same tasks and trial counts, or an explicit staged
   close gate is written after the scoped aggregate gap drops below the agreed
@@ -237,14 +242,14 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Record the passing true-v2 `build-cython-ext` speed_1 as current M6.24
-   evidence; do not spend another same-shape speed_1.
-2. Decide the next controller action explicitly: either run same-shape
-   `build-cython-ext` proof_5 to close the selected repair against the frozen
-   Codex target, or choose the next scoped below-target software/coding task if
-   threshold logic says measurement should resume.
-3. Before any further live proof item, run the existing pre-speed checks:
-   focused UT, replay, dogfood, and emulator where available. If a proof misses,
-   reproduce the exact artifact through replay/dogfood before code repair.
+1. Continue the `implement_v2` scoped rebaseline from
+   `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `build-cython-ext` and
+   `prove-plus-comm` already have clean v2 `speed_1` evidence.
+2. Run the next pending scoped task with `selected_lane=implement_v2` and a
+   task-correct cwd. Record artifact path, runner errors, reward, lane id, and
+   replay status.
+3. If any run misses, is harness-invalid, lacks replayable artifacts, or exposes
+   a structural lane gap, stop measuring unrelated tasks and repair via
+   replay/dogfood/emulator before rerunning the same shape.
 4. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
