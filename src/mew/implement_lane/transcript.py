@@ -20,17 +20,20 @@ def build_transcript_event(
     lane: object,
     turn_id: object,
     index: int,
+    lane_attempt_id: object = "",
     payload: dict[str, object] | None = None,
 ) -> ImplementLaneTranscriptEvent:
     """Build a replayable lane-scoped transcript event."""
 
     safe_lane = _safe_part(lane, default="implement_v1")
     safe_turn = _safe_part(turn_id, default="turn")
+    safe_attempt = _safe_part(lane_attempt_id, default="")
+    event_id_prefix = f"{safe_lane}:{safe_attempt}:{safe_turn}" if safe_attempt else f"{safe_lane}:{safe_turn}"
     return ImplementLaneTranscriptEvent(
         kind=kind,
         lane=safe_lane,
         turn_id=safe_turn,
-        event_id=f"{safe_lane}:{safe_turn}:{max(0, int(index))}",
+        event_id=f"{event_id_prefix}:{kind}:{max(0, int(index))}",
         payload=dict(payload or {}),
     )
 

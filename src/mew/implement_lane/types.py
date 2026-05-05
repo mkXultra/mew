@@ -10,6 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+TOOL_CALL_SCHEMA_VERSION = 1
+TOOL_RESULT_SCHEMA_VERSION = 1
+PROOF_MANIFEST_SCHEMA_VERSION = 1
+
 TranscriptEventKind = Literal[
     "model_message",
     "tool_call",
@@ -17,6 +21,17 @@ TranscriptEventKind = Literal[
     "approval",
     "verifier",
     "finish",
+]
+
+ToolCallStatus = Literal["received", "validated", "rejected", "executing", "completed"]
+ToolResultStatus = Literal[
+    "completed",
+    "failed",
+    "denied",
+    "invalid",
+    "interrupted",
+    "running",
+    "yielded",
 ]
 
 
@@ -51,6 +66,90 @@ class ImplementLaneInput:
 
 
 @dataclass(frozen=True)
+class ToolCallEnvelope:
+    """Provider-neutral representation of one provider-native tool call."""
+
+    lane_attempt_id: str
+    provider: str
+    provider_call_id: str
+    mew_tool_call_id: str
+    tool_name: str
+    arguments: dict[str, object] = field(default_factory=dict)
+    provider_message_id: str = ""
+    turn_index: int = 0
+    sequence_index: int = 0
+    raw_arguments_ref: str = ""
+    received_at: str = ""
+    status: ToolCallStatus = "received"
+    schema_version: int = field(default=TOOL_CALL_SCHEMA_VERSION, init=False)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "lane_attempt_id": self.lane_attempt_id,
+            "provider": self.provider,
+            "provider_message_id": self.provider_message_id,
+            "provider_call_id": self.provider_call_id,
+            "mew_tool_call_id": self.mew_tool_call_id,
+            "turn_index": self.turn_index,
+            "sequence_index": self.sequence_index,
+            "tool_name": self.tool_name,
+            "arguments": dict(self.arguments),
+            "raw_arguments_ref": self.raw_arguments_ref,
+            "received_at": self.received_at,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class ToolResultEnvelope:
+    """Provider-neutral representation of the paired result for a tool call."""
+
+    lane_attempt_id: str
+    provider_call_id: str
+    mew_tool_call_id: str
+    tool_name: str
+    status: ToolResultStatus
+    is_error: bool = False
+    content: tuple[object, ...] = ()
+    content_refs: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    side_effects: tuple[dict[str, object], ...] = ()
+    started_at: str = ""
+    finished_at: str = ""
+    schema_version: int = field(default=TOOL_RESULT_SCHEMA_VERSION, init=False)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "lane_attempt_id": self.lane_attempt_id,
+            "provider_call_id": self.provider_call_id,
+            "mew_tool_call_id": self.mew_tool_call_id,
+            "tool_name": self.tool_name,
+            "status": self.status,
+            "is_error": self.is_error,
+            "content": list(self.content),
+            "content_refs": list(self.content_refs),
+            "evidence_refs": list(self.evidence_refs),
+            "side_effects": [dict(effect) for effect in self.side_effects],
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+    def provider_visible_content(self) -> dict[str, object]:
+        """Return content suitable for provider tool_result payloads."""
+
+        return {
+            "mew_status": self.status,
+            "acceptance_evidence": bool(self.evidence_refs) and self.status == "completed",
+            "content": list(self.content),
+            "content_refs": list(self.content_refs),
+            "evidence_refs": list(self.evidence_refs),
+            "side_effects": [dict(effect) for effect in self.side_effects],
+        }
+
+
+@dataclass(frozen=True)
 class ImplementLaneTranscriptEvent:
     """Replayable transcript event emitted by an implementation lane."""
 
@@ -67,6 +166,30 @@ class ImplementLaneTranscriptEvent:
             "turn_id": self.turn_id,
             "event_id": self.event_id,
             "payload": dict(self.payload),
+        }
+
+
+@dataclass(frozen=True)
+class ImplementLaneProofManifest:
+    """Minimum v2 proof manifest shape for replay and M6.24 attribution."""
+
+    lane: str
+    lane_attempt_id: str
+    artifact_namespace: str
+    tool_calls: tuple[ToolCallEnvelope, ...] = ()
+    tool_results: tuple[ToolResultEnvelope, ...] = ()
+    metrics: dict[str, object] = field(default_factory=dict)
+    schema_version: int = field(default=PROOF_MANIFEST_SCHEMA_VERSION, init=False)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "lane": self.lane,
+            "lane_attempt_id": self.lane_attempt_id,
+            "artifact_namespace": self.artifact_namespace,
+            "tool_calls": [call.as_dict() for call in self.tool_calls],
+            "tool_results": [result.as_dict() for result in self.tool_results],
+            "metrics": dict(self.metrics),
         }
 
 
@@ -98,7 +221,15 @@ class ImplementLaneResult:
 
 __all__ = [
     "ImplementLaneInput",
+    "ImplementLaneProofManifest",
     "ImplementLaneResult",
     "ImplementLaneTranscriptEvent",
+    "PROOF_MANIFEST_SCHEMA_VERSION",
+    "TOOL_CALL_SCHEMA_VERSION",
+    "TOOL_RESULT_SCHEMA_VERSION",
     "TranscriptEventKind",
+    "ToolCallEnvelope",
+    "ToolCallStatus",
+    "ToolResultEnvelope",
+    "ToolResultStatus",
 ]

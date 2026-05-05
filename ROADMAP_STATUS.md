@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.23.2 Lane Isolation Substrate**.
 
-Current controller mode: `lane_isolation_planning`.
+Current controller mode: `implement_v2_phase_3_read_search_next`.
 
 Scope:
 
@@ -85,6 +85,9 @@ Scope:
   correctness is debuggable.
 - M6.24 live proof work is paused until the next proof can explicitly state
   which lane produced the artifact.
+- Phase 2 provider-neutral scaffold is implemented locally: tool/result
+  envelopes, fake provider adapter, pairing validator, proof manifest, and
+  v2 prompt-section metrics. Next implementation slice is Phase 3 read/search.
 
 Controller docs:
 
@@ -95,7 +98,7 @@ Controller docs:
 Paused M6.24 resume action:
 
 ```text
-M6.23.2 -> lane registry / v1 adapter plan -> lane transcript namespace -> default-off implement_v2 scaffold -> focused v1 regression -> resume M6.24 with explicit lane selection
+M6.23.2 -> Phase 3 read/search v2 spike -> focused v1 regression -> read-only v2 replay proof -> resume M6.24 only after explicit lane-selection decision
 ```
 
 ## Paused M6.24 Context
@@ -182,10 +185,10 @@ Useful historical files:
    design before any new M6.24 live proof.
 2. Preserve `implement_v1` as the default and keep v1 behavior/regression
    evidence separate from v2 design and scaffold work.
-3. Close the lane boundary plan: explicit lane selection, lane-scoped
-   transcript/proof namespaces, provider-native v2 tool/result pairing design,
-   prompt-section metadata, memory-light v0 boundary with deferred memory
-   sequence, metrics, rollback, and reviewer-approved phase gates.
+3. Implement Phase 3 read/search v2 spike: fake-provider read/search loop,
+   read-only finish as `analysis_ready`, allowed-root/path rejection, result
+   clipping/content refs, prompt-section hash/cache metrics, and replay-valid
+   paired tool results.
 4. Resume the paused M6.24 `build-cython-ext` repair path only after M6.23.2
    records a clean resume decision with explicit lane selection, focused v1
    regression, no accepted lane-isolation must-fix findings, and proof artifacts

@@ -82,4 +82,23 @@ def list_v2_base_tool_specs() -> tuple[ImplementLaneToolSpec, ...]:
     return V2_BASE_TOOL_SPECS
 
 
-__all__ = ["ImplementLaneToolSpec", "ToolAccess", "V2_BASE_TOOL_SPECS", "list_v2_base_tool_specs"]
+def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ...]:
+    """Return the tool surface allowed for a v2 permission mode."""
+
+    mode_name = str(mode or "read_only").strip() or "read_only"
+    if mode_name in {"read_only", "plan"}:
+        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "finish"})
+    if mode_name == "exec":
+        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "execute", "finish"})
+    if mode_name == "write":
+        return V2_BASE_TOOL_SPECS
+    return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "finish"})
+
+
+__all__ = [
+    "ImplementLaneToolSpec",
+    "ToolAccess",
+    "V2_BASE_TOOL_SPECS",
+    "list_v2_base_tool_specs",
+    "list_v2_tool_specs_for_mode",
+]
