@@ -15,6 +15,13 @@ class OutputPaths:
     self_memory: Path
 
 
+@dataclass(frozen=True)
+class PromotionAuditEntry:
+    learning: str
+    outcome: str
+    reason: str
+
+
 def load_state(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -106,12 +113,17 @@ def infer_repeated_traits(state: dict[str, Any]) -> list[str]:
     return [originals[key] for key, count in counts.items() if count >= 2]
 
 
-def collect_traits(state: dict[str, Any]) -> list[str]:
+def explicit_trait_items(state: dict[str, Any]) -> list[str]:
     traits = []
     traits.extend(string_items(state.get("traits")))
     self_memory = state.get("self_memory")
     if isinstance(self_memory, dict):
         traits.extend(string_items(self_memory.get("traits")))
+    return traits
+
+
+def collect_traits(state: dict[str, Any]) -> list[str]:
+    traits = explicit_trait_items(state)
     traits.extend(infer_repeated_traits(state))
     return unique(traits)
 
@@ -119,6 +131,60 @@ def collect_traits(state: dict[str, Any]) -> list[str]:
 def collect_self_learnings(state: dict[str, Any]) -> list[str]:
     learnings = raw_self_learning_candidates(state)
     return unique(learnings)
+
+
+def learning_counts_by_key(state: dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in raw_self_learning_candidates(state):
+        normalized = normalize_text(item)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def explicit_trait_keys(state: dict[str, Any]) -> set[str]:
+    keys = set()
+    for trait in explicit_trait_items(state):
+        normalized = normalize_text(trait)
+        if normalized:
+            keys.add(normalized.casefold())
+    return keys
+
+
+def collect_promotion_audit(state: dict[str, Any]) -> list[PromotionAuditEntry]:
+    counts = learning_counts_by_key(state)
+    explicit_keys = explicit_trait_keys(state)
+    entries = []
+    for learning in collect_self_learnings(state):
+        key = normalize_text(learning).casefold()
+        count = counts.get(key, 0)
+        if key in explicit_keys:
+            entries.append(
+                PromotionAuditEntry(
+                    learning,
+                    "promoted",
+                    "matches an explicit durable trait",
+                )
+            )
+        elif count >= 2:
+            entries.append(
+                PromotionAuditEntry(
+                    learning,
+                    "promoted",
+                    f"normalized learning repeated {count} times",
+                )
+            )
+        else:
+            entries.append(
+                PromotionAuditEntry(
+                    learning,
+                    "left as continuity cue",
+                    "seen once; needs a repeated normalized learning or explicit durable trait",
+                )
+            )
+    return entries
 
 
 def task_title_by_id(state: dict[str, Any]) -> dict[str, str]:
@@ -190,6 +256,14 @@ def render_self_memory(day: str, state: dict[str, Any]) -> str:
             lines.append(f"- {cue}")
     else:
         lines.append("- No active continuity cues")
+
+    lines.extend(["", "## Promotion audit"])
+    audit_entries = collect_promotion_audit(state)
+    if audit_entries:
+        for entry in audit_entries:
+            lines.append(f"- {entry.learning} -> {entry.outcome}: {entry.reason}")
+    else:
+        lines.append("- No self learnings to audit")
 
     return "\n".join(lines) + "\n"
 

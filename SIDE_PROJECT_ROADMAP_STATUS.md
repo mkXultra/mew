@@ -1,6 +1,6 @@
 # Mew Side Project Implementation Status
 
-Last updated: 2026-05-01
+Last updated: 2026-05-05
 
 This file is the compact operational dashboard for side-project implementation
 dogfood. It is intentionally separate from `ROADMAP_STATUS.md`; the main
@@ -55,6 +55,16 @@ roadmap consumes side-project evidence through M6.13.2 and M6.16.
 ## Active Focus
 
 Active side-project focus: **SP40 mew-wisp Cat Visual Acceptance Harness is blocked on issue #3; resume SP40 after the same-file batch guard recurrence is repaired**.
+
+Recent independent side-project dogfood:
+
+- 2026-05-05: `mew-bond` promotion-audit slice landed practical in task
+  #71/session #102. mew-authored product changes added deterministic promotion
+  audit output, tests, and README usage under `experiments/mew-bond`; focused
+  verifier passed (`9 passed`), rescue edits stayed `0`, and canonical ledger
+  row 68 records `source_only_patch_rollback_then_report_schema_repair`.
+  Codex rewrote only the invalid local side-dogfood report JSON into canonical
+  schema and opened issue #36 for the reusable closeout/schema gap.
 
 Current target:
 

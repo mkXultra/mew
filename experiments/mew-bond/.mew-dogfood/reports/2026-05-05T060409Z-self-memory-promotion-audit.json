@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": 71,
+  "session_id": 102,
+  "side_project": "mew-bond",
+  "branch_or_worktree": "mew_side_pj:experiments/mew-bond",
+  "task_summary": "Add a deterministic promotion audit section to the mew-bond self-memory markdown report.",
+  "task_kind": "coding",
+  "codex_cli_used_as": "operator",
+  "first_edit_latency": 594,
+  "read_turns_before_edit": 13,
+  "files_changed": [
+    "experiments/mew-bond/self_memory.py",
+    "experiments/mew-bond/test_self_memory.py",
+    "experiments/mew-bond/README.md"
+  ],
+  "tests_run": [
+    "UV_CACHE_DIR=.uv-cache uv run pytest --no-testmon -q experiments/mew-bond"
+  ],
+  "reviewer_rejections": 0,
+  "verifier_failures": 1,
+  "rescue_edits": 0,
+  "outcome": "practical",
+  "failure_class": "source_only_patch_rollback_then_report_schema_repair",
+  "repair_required": true,
+  "proof_artifacts": [
+    "experiments/mew-bond/.mew-dogfood/reports/2026-05-05T060409Z-self-memory-promotion-audit.json",
+    "/tmp/mew-bond-promotion-audit-report.json"
+  ],
+  "commit": "",
+  "notes": "mew implemented the product source/test/README patch after one verifier-rolled-back source-only attempt and one operator steer. Focused verifier passed with 9 tests. The side-dogfood report first written by mew was not in canonical ledger schema, so Codex as operator rewrote only this report JSON; no product-code rescue edits were made."
+}

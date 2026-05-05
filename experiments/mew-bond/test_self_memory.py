@@ -31,6 +31,7 @@ def test_generate_writes_self_memory_report(tmp_path: Path) -> None:
 
     assert paths.self_memory == tmp_path / ".mew" / "self" / "learned-2026-04-17.md"
     assert "# Mew Self Memory 2026-04-17" in text
+    assert "## Promotion audit" in text
     assert "- I prefer small verified steps." in text
     assert "- Cross-task memory matters." in text
     assert "- Added a self-memory report." in text
@@ -73,6 +74,7 @@ def test_active_work_sessions_feed_continuity_cues(tmp_path: Path) -> None:
     text = paths.self_memory.read_text()
 
     assert "## Continuity cues" in text
+    assert text.index("## Continuity cues") < text.index("## Promotion audit")
     assert "- Work session #9 task #3: Continue shell work is idle: Recover resident context; next: resume with mew code 3" in text
 
 
@@ -102,6 +104,7 @@ def test_empty_state_renders_fallbacks(tmp_path: Path) -> None:
     assert "- No durable traits recorded" in text
     assert "- No self learnings recorded" in text
     assert "- No active continuity cues" in text
+    assert "- No self learnings to audit" in text
 
 
 def test_repeated_self_learning_becomes_durable_trait(tmp_path: Path) -> None:
@@ -118,7 +121,8 @@ def test_repeated_self_learning_becomes_durable_trait(tmp_path: Path) -> None:
     text = paths.self_memory.read_text()
 
     assert "## Durable traits\n- I should verify every change." in text
-    assert text.count("I should verify every change.") == 2
+    assert "- I should verify every change. -> promoted: normalized learning repeated 2 times" in text
+    assert text.count("I should verify every change.") == 3
 
 
 def test_single_self_learning_does_not_become_durable_trait(tmp_path: Path) -> None:
@@ -133,6 +137,11 @@ def test_single_self_learning_does_not_become_durable_trait(tmp_path: Path) -> N
 
     assert "- No durable traits recorded" in text
     assert "- I should verify every change." in text
+    assert (
+        "- I should verify every change. -> left as continuity cue: "
+        "seen once; needs a repeated normalized learning or explicit durable trait"
+        in text
+    )
 
 
 def test_explicit_traits_stay_before_inferred_traits(tmp_path: Path) -> None:
