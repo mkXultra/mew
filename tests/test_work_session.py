@@ -13183,6 +13183,96 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
             "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
         )
 
+    def test_final_verifier_can_spend_final_proof_reserve(self):
+        parameters = {
+            "command": "python -m pytest -q /tmp/project/tests",
+            "cwd": "/tmp/project",
+            "timeout": 180,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "verification",
+                "stage": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "candidate_final_proof",
+                "risk_class": "read_only",
+                "continuation_policy": {
+                    "mode": "managed",
+                    "resume_policy": "same_resume_identity",
+                    "terminal_required_for_acceptance": True,
+                    "yield_after_seconds": 60,
+                    "final_proof_reserve_seconds": 60,
+                },
+                "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+                "declared_target_refs": [
+                    {"kind": "source_tree", "path": "/tmp/project", "ref": "source-tree:primary"}
+                ],
+            },
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_tests", parameters, task={}, session={})
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_tests",
+            parameters,
+            max_wall_seconds=66,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertTrue(policy["applies"])
+        self.assertEqual(policy["stage"], "verification")
+        self.assertEqual(policy["reserve_seconds"], 0.0)
+        self.assertTrue(policy["final_verifier_spends_final_proof_reserve"])
+        self.assertFalse(ceiling["blocked"])
+        self.assertEqual(ceiling["long_command_budget"]["stage"], "verification")
+        self.assertGreaterEqual(parameters["timeout"], policy["minimum_timeout_seconds"])
+
+    def test_final_verifier_still_blocks_when_remaining_budget_cannot_satisfy_yield(self):
+        parameters = {
+            "command": "python -m pytest -q /tmp/project/tests",
+            "cwd": "/tmp/project",
+            "timeout": 180,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "verification",
+                "stage": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+                "risk_class": "read_only",
+                "continuation_policy": {
+                    "mode": "managed",
+                    "resume_policy": "same_resume_identity",
+                    "terminal_required_for_acceptance": True,
+                    "yield_after_seconds": 60,
+                    "final_proof_reserve_seconds": 60,
+                },
+                "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+                "declared_target_refs": [
+                    {"kind": "source_tree", "path": "/tmp/project", "ref": "source-tree:primary"}
+                ],
+            },
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_tests", parameters, task={}, session={})
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_tests",
+            parameters,
+            max_wall_seconds=commands.WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS + 60.0,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertTrue(policy["applies"])
+        self.assertEqual(policy["reserve_seconds"], 0.0)
+        self.assertTrue(policy["final_verifier_spends_final_proof_reserve"])
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(
+            ceiling["reason"],
+            "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
+        )
+
     def test_long_build_recovery_command_can_spend_reserved_budget_after_linker_failure(self):
         task = {
             "title": "Build CompCert compiler",

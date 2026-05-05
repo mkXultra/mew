@@ -110,6 +110,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-terminal-bench-replay",
     "m6_24-compile-compcert-emulator",
     "m6_24-repository-test-tail-emulator",
+    "m6_24-final-verifier-budget-emulator",
     "m6_24-same-family-compatibility-emulator",
     "m6_24-runtime-finish-gate-emulator",
 )
@@ -15829,6 +15830,233 @@ def run_m6_24_repository_test_tail_emulator_scenario(
     return report
 
 
+def _final_verifier_budget_summary(trial_entry):
+    latest = ((trial_entry or {}).get("latest_llm_action_fixture") or {})
+    raw_action = latest.get("raw_action") if isinstance(latest.get("raw_action"), dict) else {}
+    post_policy = latest.get("post_policy_action") if isinstance(latest.get("post_policy_action"), dict) else {}
+    blocked = post_policy.get("blocked_action") if isinstance(post_policy.get("blocked_action"), dict) else {}
+    contract = blocked.get("execution_contract") if isinstance(blocked.get("execution_contract"), dict) else {}
+    raw_contract = raw_action.get("execution_contract") if isinstance(raw_action.get("execution_contract"), dict) else {}
+    wall_timeout_ceiling = (
+        blocked.get("wall_timeout_ceiling") if isinstance(blocked.get("wall_timeout_ceiling"), dict) else {}
+    )
+    long_command_budget = (
+        blocked.get("long_command_budget") if isinstance(blocked.get("long_command_budget"), dict) else {}
+    )
+    effective_contract = contract or raw_contract
+    return {
+        "trial_name": (trial_entry or {}).get("trial_name") or "",
+        "external_reward": (trial_entry or {}).get("external_reward"),
+        "mew_exit_code": (trial_entry or {}).get("mew_exit_code"),
+        "stop_reason": (trial_entry or {}).get("stop_reason") or "",
+        "wall_timeout": bool((trial_entry or {}).get("wall_timeout")),
+        "latest_action_type": raw_action.get("type") or "",
+        "post_policy_type": post_policy.get("type") or "",
+        "post_policy_reason": post_policy.get("reason") or "",
+        "stage": effective_contract.get("stage") or "",
+        "proof_role": effective_contract.get("proof_role") or "",
+        "purpose": effective_contract.get("purpose") or "",
+        "acceptance_kind": effective_contract.get("acceptance_kind") or "",
+        "risk_class": effective_contract.get("risk_class") or "",
+        "wall_timeout_ceiling": wall_timeout_ceiling,
+        "long_command_budget": long_command_budget,
+        "requested_timeout_seconds": blocked.get("timeout"),
+        "foreground_budget_seconds": blocked.get("foreground_budget_seconds"),
+        "task_done": bool(raw_action.get("task_done")),
+    }
+
+
+def _write_final_verifier_budget_fixture_json(path, *, replay, summary, contexts):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "kind": "final_verifier_budget_emulator",
+        "generated_at": now_iso(),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "summary": summary,
+        "latest_llm_action_fixture": _public_llm_action_fixture(contexts[-1]) if contexts else {},
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
+def _evaluate_final_verifier_budget_current_policy(summary, latest):
+    from .commands import (
+        _positive_float_or_none,
+        apply_work_tool_wall_timeout_ceiling,
+        work_tool_long_command_budget_policy,
+    )
+
+    raw_action = (latest or {}).get("raw_action") if isinstance((latest or {}).get("raw_action"), dict) else {}
+    if not raw_action:
+        return {"evaluated": False, "reason": "missing raw action"}
+    action_type = str(raw_action.get("type") or "")
+    parameters = dict(raw_action)
+    observed_ceiling = summary.get("wall_timeout_ceiling") if isinstance(summary.get("wall_timeout_ceiling"), dict) else {}
+    max_wall_seconds = (
+        _positive_float_or_none(observed_ceiling.get("remaining_seconds"))
+        or _positive_float_or_none(summary.get("foreground_budget_seconds"))
+        or 66.0
+    )
+    policy = work_tool_long_command_budget_policy(action_type, parameters, task={}, session={})
+    ceiling = apply_work_tool_wall_timeout_ceiling(
+        action_type,
+        parameters,
+        max_wall_seconds=max_wall_seconds,
+        run_started_at=time.monotonic(),
+        recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+        long_command_budget_policy=policy,
+    )
+    return {
+        "evaluated": True,
+        "max_wall_seconds": max_wall_seconds,
+        "policy": policy,
+        "ceiling": ceiling,
+        "post_policy_parameters": parameters,
+    }
+
+
+def run_m6_24_final_verifier_budget_emulator_scenario(
+    workspace,
+    *,
+    job_dir=None,
+    task=None,
+):
+    checks = []
+    commands = []
+    task_filter = task or "build-cython-ext"
+    source = (
+        Path(job_dir).expanduser()
+        if job_dir
+        else _write_repository_test_tail_emulator_fixture(workspace, task=task_filter)
+    )
+    replay = replay_terminal_bench_job(
+        source,
+        task=task_filter,
+        assertions={
+            "external_reward": 0.0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    contexts = terminal_bench_llm_action_fixture_contexts(source, task=task_filter)
+    projection = _evaluate_managed_action_projection(contexts)
+    summary = _final_verifier_budget_summary(first_trial)
+    current_policy = _evaluate_final_verifier_budget_current_policy(
+        summary,
+        first_trial.get("latest_llm_action_fixture") if isinstance(first_trial, dict) else {},
+    )
+    ceiling = summary.get("wall_timeout_ceiling") if isinstance(summary.get("wall_timeout_ceiling"), dict) else {}
+    budget = summary.get("long_command_budget") if isinstance(summary.get("long_command_budget"), dict) else {}
+    fixture_path = Path(workspace) / "final-verifier-budget-fixture.json"
+    fixture = _write_final_verifier_budget_fixture_json(
+        fixture_path,
+        replay=replay,
+        summary=summary,
+        contexts=contexts,
+    )
+
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_detects_budget_stop",
+        summary.get("stop_reason") == "long_command_budget_blocked"
+        and bool(summary.get("wall_timeout"))
+        and summary.get("mew_exit_code") not in (0, None),
+        summary,
+        "mew stopped before final verifier because remaining wall budget could not satisfy verifier budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_identifies_final_verifier_action",
+        summary.get("latest_action_type") in {"run_tests", "run_command"}
+        and summary.get("stage") == "verification"
+        and summary.get("proof_role") == "verifier"
+        and summary.get("acceptance_kind") in {"candidate_final_proof", "external_verifier"},
+        summary,
+        "latest blocked action is a final verifier/proof action, not another repair or source step",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_block_reason",
+        bool(ceiling.get("blocked"))
+        and ceiling.get("stop_reason") == "long_command_budget_blocked"
+        and "effective timeout cannot satisfy" in str(ceiling.get("reason") or summary.get("post_policy_reason") or ""),
+        {"ceiling": ceiling, "post_policy_reason": summary.get("post_policy_reason")},
+        "wall-time ceiling records the precise reserve/budget reason",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_verification_budget",
+        budget.get("stage") == "verification"
+        and str(budget.get("action_kind") or "") in {"start_long_command", "start_command", "run_command"}
+        and float(budget.get("minimum_timeout_seconds") or 0.0) > float(budget.get("effective_timeout_seconds") or 0.0),
+        budget,
+        "policy preserves verification budget details showing why the final proof could not start",
+    )
+    current_ceiling = current_policy.get("ceiling") if isinstance(current_policy.get("ceiling"), dict) else {}
+    current_policy_payload = current_policy.get("policy") if isinstance(current_policy.get("policy"), dict) else {}
+    current_parameters = (
+        current_policy.get("post_policy_parameters")
+        if isinstance(current_policy.get("post_policy_parameters"), dict)
+        else {}
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_current_policy_can_start_final_verifier",
+        bool(current_policy.get("evaluated"))
+        and bool(current_policy_payload.get("final_verifier_spends_final_proof_reserve"))
+        and not bool(current_ceiling.get("blocked"))
+        and float(current_parameters.get("timeout") or 0.0)
+        >= float(current_policy_payload.get("minimum_timeout_seconds") or 0.0),
+        current_policy,
+        "current policy lets the typed final verifier spend the final-proof reserve and start with the available wall budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_managed_contract_projection",
+        not projection.get("managed_lost"),
+        projection,
+        "current normalize_work_model_action preserves foreground_budget_seconds/execution_contract for managed run actions",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_runtime_command_identity",
+        not projection.get("runtime_identity_mismatches"),
+        projection,
+        "managed executor receives the same command_run_id recorded in the work session",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_writes_fixture",
+        fixture_path.is_file() and (fixture.get("summary") or {}).get("stop_reason") == "long_command_budget_blocked",
+        {"fixture_path": str(fixture_path), "summary": fixture.get("summary")},
+        "final-verifier-budget fixture file",
+    )
+
+    report = _scenario_report("m6_24-final-verifier-budget-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "task": task_filter,
+        "fixture_path": str(fixture_path),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "first_trial": first_trial,
+        "summary": summary,
+        "current_policy": current_policy,
+        "llm_action_fixture_count": len(contexts),
+        "managed_action_projection": projection,
+    }
+    return report
+
+
 def _same_family_compatibility_frontier_fixture():
     return {
         "schema_version": 1,
@@ -16145,6 +16373,14 @@ def run_dogfood_scenario(args):
         elif name == "m6_24-repository-test-tail-emulator":
             reports.append(
                 run_m6_24_repository_test_tail_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                    task=getattr(args, "terminal_bench_task", None),
+                )
+            )
+        elif name == "m6_24-final-verifier-budget-emulator":
+            reports.append(
+                run_m6_24_final_verifier_budget_emulator_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
                     task=getattr(args, "terminal_bench_task", None),

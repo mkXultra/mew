@@ -1510,6 +1510,127 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(report["status"], "fail")
             self.assertFalse(preserve_check["passed"])
 
+    def test_run_dogfood_m6_24_final_verifier_budget_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_dir = _write_repository_test_tail_emulator_fixture(root, task="build-cython-ext")
+            report_path = next(Path(job_dir).rglob("mew-report.json"))
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+            final_command = (
+                "cd /tmp && python - <<'PY'\n"
+                "import pyknotid\n"
+                "from pyknotid.spacecurves import chelpers, ccomplexity\n"
+                "from pyknotid import cinvariants\n"
+                "print('final smoke')\n"
+                "PY\n"
+                "python -m pytest -q /app/pyknotid/tests "
+                "--ignore=/app/pyknotid/tests/test_random_curves.py "
+                "--ignore=/app/pyknotid/tests/test_catalogue.py"
+            )
+            final_contract = {
+                "schema_version": 2,
+                "purpose": "verification",
+                "stage": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "candidate_final_proof",
+                "risk_class": "read_only",
+                "continuation_policy": {
+                    "mode": "managed",
+                    "resume_policy": "same_resume_identity",
+                    "terminal_required_for_acceptance": True,
+                    "yield_after_seconds": 60,
+                    "final_proof_reserve_seconds": 60,
+                },
+                "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+                "declared_target_refs": [
+                    {"kind": "source_tree", "path": "/app/pyknotid", "ref": "source-tree:primary"},
+                    {
+                        "kind": "artifact",
+                        "path": "/usr/local/lib/python3.13/site-packages/pyknotid",
+                        "ref": "global-python-install",
+                    },
+                ],
+            }
+            raw_action = {
+                "type": "run_tests",
+                "cwd": "/app",
+                "command": final_command,
+                "timeout": 180,
+                "foreground_budget_seconds": 60,
+                "execution_contract": final_contract,
+                "task_done": False,
+            }
+            blocked_action = dict(raw_action)
+            blocked_action.update(
+                {
+                    "timeout": 4.658,
+                    "long_command_budget": {
+                        "action_kind": "start_long_command",
+                        "stage": "verification",
+                        "requested_timeout_seconds": 180.0,
+                        "effective_timeout_seconds": 4.658,
+                        "minimum_timeout_seconds": 61.0,
+                        "diagnostic_budget": False,
+                    },
+                    "wall_timeout_ceiling": {
+                        "blocked": True,
+                        "stop_reason": "long_command_budget_blocked",
+                        "reason": "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
+                        "available_tool_timeout_seconds": 4.658,
+                        "remaining_seconds": 64.658,
+                        "reserve_seconds": 60.0,
+                    },
+                }
+            )
+            payload["work_report"]["stop_reason"] = "long_command_budget_blocked"
+            payload["work_report"]["wall_timeout"] = True
+            payload["resume"]["active_compatibility_frontier"] = {}
+            payload["resume"]["next_action"] = "verify the world and review side-effecting work before retry"
+            payload["work_report"]["steps"].append(
+                {
+                    "index": 3,
+                    "status": "blocked",
+                    "action": {"type": "wait", "reason": blocked_action["wall_timeout_ceiling"]["reason"]},
+                    "model_turn": {
+                        "id": 3,
+                        "status": "failed",
+                        "error": blocked_action["wall_timeout_ceiling"]["reason"],
+                        "action_plan": {
+                            "summary": "Run the final verifier after repair and smoke evidence.",
+                            "action": raw_action,
+                        },
+                        "action": {
+                            "type": "wait",
+                            "reason": blocked_action["wall_timeout_ceiling"]["reason"],
+                            "blocked_action": blocked_action,
+                        },
+                    },
+                    "wall_timeout": blocked_action["wall_timeout_ceiling"],
+                }
+            )
+            report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            args = SimpleNamespace(
+                workspace=str(root / "dog"),
+                scenario="m6_24-final-verifier-budget-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=str(job_dir),
+                terminal_bench_task="build-cython-ext",
+            )
+
+            report = run_dogfood_scenario(args)
+            text = format_dogfood_scenario_report(report)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-final-verifier-budget-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(scenario["artifacts"]["summary"]["stop_reason"], "long_command_budget_blocked")
+            self.assertEqual(scenario["artifacts"]["summary"]["stage"], "verification")
+            self.assertEqual(scenario["artifacts"]["summary"]["proof_role"], "verifier")
+            self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
+            self.assertIn("m6_24-final-verifier-budget-emulator: pass", text)
+
     def test_run_dogfood_m6_24_same_family_compatibility_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

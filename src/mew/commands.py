@@ -6441,6 +6441,19 @@ def _long_build_reserve_seconds(contract, recovery_decision):
     return WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS
 
 
+def _execution_contract_is_final_verifier(contract):
+    if not isinstance(contract, dict):
+        return False
+    if str(contract.get("stage") or "") != "verification":
+        return False
+    if str(contract.get("proof_role") or "") != "verifier":
+        return False
+    return str(contract.get("acceptance_kind") or "") in {
+        "candidate_final_proof",
+        "external_verifier",
+    }
+
+
 def work_tool_recovery_reserve_seconds(action_type, parameters, *, task=None, session=None):
     policy = work_tool_long_command_budget_policy(
         action_type,
@@ -6512,6 +6525,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
     minimum_timeout_seconds = WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
     diagnostic_budget = False
     poll_spends_final_proof_reserve = False
+    final_verifier_spends_final_proof_reserve = False
     if recovery_decision:
         allowed_next = recovery_decision.get("allowed_next_action")
         allowed_next = allowed_next if isinstance(allowed_next, dict) else {}
@@ -6589,9 +6603,16 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
         elif not reserve and not poll_spends_final_proof_reserve:
             reserve = _long_build_reserve_seconds(contract, recovery_decision)
     elif typed_managed:
-        reserve = _positive_float_or_none(typed_continuation.get("final_proof_reserve_seconds")) or _long_build_reserve_seconds(
-            contract, recovery_decision
-        )
+        if _execution_contract_is_final_verifier(typed_contract):
+            # The final-proof reserve exists so the actual final verifier can
+            # run after build/repair work. Once the typed action is itself the
+            # final verifier, holding that reserve strands near-complete tasks.
+            reserve = 0.0
+            final_verifier_spends_final_proof_reserve = True
+        else:
+            reserve = _positive_float_or_none(typed_continuation.get("final_proof_reserve_seconds")) or _long_build_reserve_seconds(
+                contract, recovery_decision
+            )
         requested_yield = _positive_float_or_none(typed_continuation.get("yield_after_seconds"))
         minimum_timeout_seconds = requested_yield + 1.0 if requested_yield is not None else minimum_timeout_seconds
         if effective_timeout < minimum_timeout_seconds:
@@ -6618,6 +6639,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
             "diagnostic_budget": diagnostic_budget,
             "execution_contract_managed": typed_managed,
             "poll_spends_final_proof_reserve": poll_spends_final_proof_reserve,
+            "final_verifier_spends_final_proof_reserve": final_verifier_spends_final_proof_reserve,
         }
     )
     return policy

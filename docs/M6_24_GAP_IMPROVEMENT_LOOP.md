@@ -49,21 +49,26 @@ selected gap class. The current-head recheck has already answered the immediate
 "architecture changed, remeasure first" question for `build-cython-ext`.
 
 Current selected gap class:
-`verified_sibling_repair_frontier_not_exhausted`.
+`final_verifier_budget_blocked_after_near_solution`.
 
 Current selected next action:
-`M6.24 -> current-head build-cython-ext artifact -> replay/dogfood/emulator pass -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
+`M6.24 -> latest build-cython-ext artifact 20260505-1909 -> final-verifier-budget repair validated/reviewed -> exactly one build-cython-ext speed_1 with selected_lane=implement_v1`.
 
-Current live proof status on 2026-05-05: the selected gap has moved through
-active compatibility frontier repairs. The latest same-shape run
-`mew-m6-24-acf-virtual-read-repair-build-cython-ext-1attempt-20260505-1803`
-still scored `0/1`, but the failure shape is now narrower:
-generated `build/lib*` copies and exhausted sibling searches kept the frontier
-blocking verifier/rebuild progress after the workspace source had already been
-found. The active local repair is
-`active_frontier_generated_build_copy_and_exhausted_search_loop`; do not spend
-another live `build-cython-ext` speed proof until its review/commit and the
-normal pre-speed operation are complete.
+Current live proof status on 2026-05-06 JST: the selected gap moved past the
+active compatibility frontier loops. The latest same-shape run
+`mew-m6-24-acf-generated-build-repair-build-cython-ext-1attempt-20260505-1909`
+still scored `0/1`, but the failure shape is narrower: mew reached source
+acquisition, patching, reinstall, and final smoke, then proposed the smallest
+remaining final verifier (`run_tests`, `stage=verification`,
+`proof_role=verifier`) with only `64.658s` wall remaining and a `60s` reserve.
+Policy correctly blocked the historical action with `long_command_budget_blocked`
+because the effective timeout was only `4.658s`, below the `61s` minimum. The
+local repair is now validated: typed final verifier/proof actions may spend the
+final-proof reserve, non-final managed build/repair actions still preserve it,
+and a boundary regression still blocks when the remaining wall budget cannot
+satisfy `yield_after < effective_timeout`. The next allowed live action is
+exactly one same-shape `build-cython-ext` speed proof with
+`selected_lane=implement_v1`.
 
 Current pre-speed status:
 
@@ -76,6 +81,22 @@ Current pre-speed status:
 - emulator: pass on the same artifact via
   `m6_24-repository-test-tail-emulator`. It detects main smoke pass,
   repository-test wrapper failure, and wall-timeout frontier exhaustion.
+- latest emulator: pass on
+  `mew-m6-24-acf-generated-build-repair-build-cython-ext-1attempt-20260505-1909`
+  via `m6_24-final-verifier-budget-emulator`. The previous
+  `repository-test-tail-emulator` intentionally fails on this newer shape
+  because the active frontier has been exhausted and the blocker has moved to
+  final verifier wall-budget/reserve planning.
+- final-verifier budget repair: validated on current head with focused
+  final-verifier work-session tests, focused dogfood tests, exact artifact
+  replay, exact artifact terminal-bench dogfood, exact artifact
+  `m6_24-final-verifier-budget-emulator`, scoped ruff, and the related full
+  work-session/dogfood/terminal-bench replay suite.
+- lightweight live canary: `prove-plus-comm` one-attempt run passed with
+  reward `1.0`, runner errors `0`, runtime `2m32s`, `work_exit_code=0`, and
+  verifier `4/4` passing when run with the task's correct `/workspace` cwd.
+  A prior `/app` cwd attempt is harness misconfiguration evidence only, not a
+  mew product miss.
 
 Active authoritative design:
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
