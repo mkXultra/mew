@@ -56,8 +56,8 @@ not mean every idea in every design note has shipped.
 | 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON. |
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
-| 6.23.2 Lane Isolation Substrate | `in_progress` | Phase 5 write approval spike is proved; continue through Phase 6 before M6.24 resumes. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `pending` | Paused behind M6.23.2 Phase 6 so the next proof can identify an explicit lane and avoid mixing benchmark evidence with lane architecture changes. |
+| 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Resumed after M6.23.2; next proof uses explicit `implement_v1` lane attribution unless a later decision selects v2 for an A/B attempt. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -67,13 +67,13 @@ not mean every idea in every design note has shipped.
 
 ## Active Milestone
 
-Active work: **M6.23.2 Lane Isolation Substrate**.
+Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `implement_v2_phase_6_m6_24_reentry_ab_gate_next`.
+Current controller mode: `m6_24_resume_explicit_implement_v1_lane_next`.
 
 Scope:
 
-- M6.23.2 is not closed at Phase 3. Continue the full sequence:
+- M6.23.2 is closed. The full sequence passed:
   Phase 1 lane isolation substrate, Phase 2 native tool-loop v0, Phase 3
   read/search spike, Phase 4 managed exec, Phase 5 write/edit/apply_patch, and
   Phase 6 M6.24 reentry A/B gate.
@@ -84,11 +84,15 @@ Scope:
   `docs/M6_23_2_PHASE4_MANAGED_EXEC_PROOF_2026-05-05.md`.
 - Phase 5 write/edit/apply_patch v2 spike is implemented, reviewed, and proved
   in `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`.
-- `implement_v1` remains the current production/default lane during M6.23.2.
-- `implement_v2` remains default-off until the full Phase 1-6 sequence reaches
-  the M6.24 reentry A/B gate.
-- M6.24 live proof work remains paused until Phase 6 records an explicit
-  reentry decision and proof artifacts can name the producing lane.
+- Phase 6 M6.24 reentry A/B gate is implemented, reviewed, and proved in
+  `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`.
+- `implement_v1` remains the current production/default lane for resumed
+  M6.24 proof work.
+- `implement_v2` remains default-off after M6.23.2 close; it may be used only
+  by explicit lane selection.
+- M6.24 live proof work resumes only with explicit lane metadata. The default
+  next proof lane is `implement_v1`; any `implement_v2` proof is an explicit
+  A/B attempt and cannot count fallback execution as v2 success.
 
 Controller docs:
 
@@ -97,15 +101,16 @@ Controller docs:
 - `docs/M6_23_2_PHASE3_READ_ONLY_PROOF_2026-05-05.md`
 - `docs/M6_23_2_PHASE4_MANAGED_EXEC_PROOF_2026-05-05.md`
 - `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`
+- `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`
 - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
 
-Paused M6.24 resume action:
+M6.24 reentry decision:
 
 ```text
-M6.23.2 Phase 6 M6.24 reentry A/B gate -> only then resume M6.24 proof work
+selected_lane=implement_v1 for the next M6.24 proof; every proof artifact must record lane id and lane attempt id
 ```
 
-## Paused M6.24 Context
+## Active M6.24 Context
 
 - M6.24 focuses only on the 25 Terminal-Bench 2.0 tasks returned by the
   `software-engineering,coding` filters.
@@ -184,11 +189,12 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Implement Phase 6 M6.24 reentry A/B gate: compare v1/v2 lane selection for
-   the next M6.24 proof shape and require explicit lane-attributed artifacts
-   before M6.24 resumes.
-2. Run focused tests and codex-ultra review for Phase 6 before commit.
-3. Keep M6.24 pending until Phase 6 M6.24 reentry A/B gate is implemented and
-   reviewed.
+1. Resume M6.24 on the scoped `software-engineering,coding` cohort with
+   explicit `selected_lane=implement_v1` attribution in the next proof artifact.
+2. Before spending a live proof item, run the existing pre-speed checks:
+   focused UT, replay, dogfood, and emulator where available.
+3. If a measured gap exceeds the recorded improvement threshold, stop broad
+   measurement and enter the M6.24 gap-improvement loop before measuring new
+   tasks.
 4. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
