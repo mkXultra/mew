@@ -366,7 +366,7 @@ class CompatibilityFrontierTests(unittest.TestCase):
             "error_lines": ["ImportError: cannot import name 'gcd' from 'fractions'"],
             "source_locations": [],
             "symbols": ["gcd"],
-            "sibling_search_queries": ["from fractions import gcd"],
+            "sibling_search_queries": ["from fractions import gcd", "fractions.gcd"],
         }
         calls = [
             {
@@ -397,6 +397,266 @@ class CompatibilityFrontierTests(unittest.TestCase):
         self.assertFalse(any(anchor["kind"] == "search_match" for anchor in frontier["anchors"]))
         self.assertEqual(frontier["closure_state"]["state"], "search_needed")
         self.assertEqual(frontier["closure_state"]["next_action"], "search_text from fractions import gcd")
+
+    def test_completed_search_with_generated_build_copy_allows_verifier(self):
+        session = {"id": 20, "updated_at": "2026-05-05T00:00:00Z"}
+        agenda = {
+            "source_tool_call_id": 11,
+            "tool": "run_tests",
+            "command": "python -m pytest",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": ["ImportError: cannot import name 'gcd' from 'fractions'"],
+            "source_locations": [],
+            "symbols": ["gcd"],
+            "sibling_search_queries": ["from fractions import gcd", "fractions.gcd"],
+        }
+        calls = [
+            {
+                "id": 11,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+            }
+        ]
+        update_session_active_compatibility_frontier(
+            session,
+            calls,
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[],
+            current_time="2026-05-05T00:00:01Z",
+        )
+
+        frontier = update_session_active_compatibility_frontier(
+            session,
+            [
+                *calls,
+                {
+                    "id": 12,
+                    "tool": "search_text",
+                    "status": "completed",
+                    "parameters": {"path": ".", "query": "from fractions import gcd"},
+                    "result": {
+                        "path": ".",
+                        "query": "from fractions import gcd",
+                        "matches": [
+                            "/repo/pkg/build/lib.linux-x86_64-cpython-313/pkg/make/torus.py:1:from fractions import gcd"
+                        ],
+                    },
+                },
+            ],
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[
+                {
+                    "tool": "search_text",
+                    "path": "/repo/pkg/build/lib.linux-x86_64-cpython-313/pkg/make/torus.py",
+                    "query": "from fractions import gcd",
+                    "tool_call_id": 12,
+                    "first_match_line": 1,
+                }
+            ],
+            current_time="2026-05-05T00:00:02Z",
+        )
+
+        self.assertFalse(any(anchor["kind"] == "search_match" for anchor in frontier["anchors"]))
+        self.assertFalse(any(anchor["kind"] == "search_query" for anchor in frontier["anchors"]))
+        self.assertNotIn("build/lib", json.dumps(frontier["anchors"]))
+        self.assertNotIn("build/lib", json.dumps(frontier["sibling_candidates"]))
+        self.assertEqual(frontier["closure_state"]["state"], "cheap_verify_needed")
+        self.assertNotIn("broad_verifier", frontier["closure_state"]["blocked_action_kinds"])
+        self.assertNotIn("repeat_search", frontier["closure_state"]["blocked_action_kinds"])
+
+        action, decision = active_compatibility_frontier_action_guard(
+            frontier,
+            {"type": "run_tests", "command": "pytest -q"},
+            resume={"phase": "idle"},
+        )
+
+        self.assertFalse(decision["applied"])
+        self.assertEqual(action["type"], "run_tests")
+
+    def test_pre_failure_search_does_not_exhaust_current_frontier_query(self):
+        session = {"id": 21, "updated_at": "2026-05-05T00:00:00Z"}
+        agenda = {
+            "source_tool_call_id": 11,
+            "tool": "run_tests",
+            "command": "python -m pytest",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": ["ImportError: cannot import name 'gcd' from 'fractions'"],
+            "source_locations": [],
+            "symbols": ["gcd"],
+            "sibling_search_queries": ["from fractions import gcd"],
+        }
+        calls = [
+            {
+                "id": 10,
+                "tool": "search_text",
+                "status": "completed",
+                "parameters": {"path": ".", "query": "from fractions import gcd"},
+                "result": {
+                    "path": ".",
+                    "query": "from fractions import gcd",
+                    "matches": ["src/runtime.py:1:from fractions import gcd"],
+                },
+            },
+            {
+                "id": 11,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+            },
+        ]
+
+        frontier = update_session_active_compatibility_frontier(
+            session,
+            calls,
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[],
+            current_time="2026-05-05T00:00:01Z",
+        )
+
+        self.assertEqual(frontier["closure_state"]["state"], "search_needed")
+        self.assertEqual(frontier["closure_state"]["next_action"], "search_text from fractions import gcd")
+
+    def test_out_of_surface_completed_search_does_not_exhaust_frontier_query(self):
+        session = {"id": 22, "updated_at": "2026-05-05T00:00:00Z"}
+        agenda = {
+            "source_tool_call_id": 11,
+            "tool": "run_tests",
+            "command": "python -m pytest",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": ["ImportError: cannot import name 'gcd' from 'fractions'"],
+            "source_locations": [],
+            "symbols": ["gcd"],
+            "sibling_search_queries": ["from fractions import gcd"],
+        }
+        calls = [
+            {
+                "id": 11,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+            },
+            {
+                "id": 12,
+                "tool": "search_text",
+                "status": "completed",
+                "parameters": {"path": "docs", "query": "from fractions import gcd"},
+                "result": {
+                    "path": "docs",
+                    "query": "from fractions import gcd",
+                    "matches": ["docs/notes.md:4:from fractions import gcd"],
+                },
+            },
+        ]
+
+        frontier = update_session_active_compatibility_frontier(
+            session,
+            calls,
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[],
+            current_time="2026-05-05T00:00:01Z",
+        )
+
+        self.assertEqual(frontier["closure_state"]["state"], "search_needed")
+        self.assertEqual(frontier["closure_state"]["next_action"], "search_text from fractions import gcd")
+
+    def test_generated_build_scoped_search_does_not_exhaust_frontier_query(self):
+        agenda = {
+            "source_tool_call_id": 11,
+            "tool": "run_tests",
+            "command": "python -m pytest",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": ["ImportError: cannot import name 'gcd' from 'fractions'"],
+            "source_locations": [],
+            "symbols": ["gcd"],
+            "sibling_search_queries": ["from fractions import gcd"],
+        }
+        cases = [
+            (
+                "pkg/build/lib.linux-x86_64-cpython-313",
+                "pkg/build/lib.linux-x86_64-cpython-313/pkg/make/torus.py",
+            ),
+            ("pkg/build/lib", "pkg/build/lib/pkg/make/torus.py"),
+        ]
+        for index, (search_path, generated_path) in enumerate(cases, start=24):
+            with self.subTest(search_path=search_path):
+                session = {"id": index, "updated_at": "2026-05-05T00:00:00Z"}
+                calls = [
+                    {
+                        "id": 11,
+                        "tool": "run_tests",
+                        "status": "completed",
+                        "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                        "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+                    },
+                    {
+                        "id": 12,
+                        "tool": "search_text",
+                        "status": "completed",
+                        "parameters": {"path": search_path, "query": "from fractions import gcd"},
+                        "result": {
+                            "path": search_path,
+                            "query": "from fractions import gcd",
+                            "matches": [f"{generated_path}:1:from fractions import gcd"],
+                        },
+                    },
+                ]
+
+                frontier = update_session_active_compatibility_frontier(
+                    session,
+                    calls,
+                    verifier_failure_repair_agenda=agenda,
+                    search_anchor_observations=[],
+                    current_time="2026-05-05T00:00:01Z",
+                )
+
+                self.assertEqual(frontier["closure_state"]["state"], "search_needed")
+                self.assertEqual(frontier["closure_state"]["next_action"], "search_text from fractions import gcd")
+
+    def test_real_build_named_source_files_remain_actionable(self):
+        session = {"id": 23, "updated_at": "2026-05-05T00:00:00Z"}
+        agenda = {
+            "source_tool_call_id": 11,
+            "tool": "run_tests",
+            "command": "python -m pytest",
+            "cwd": "/repo",
+            "exit_code": 1,
+            "error_lines": ["RuntimeError: build helper failed"],
+            "source_locations": [
+                {"path": "/repo/build/lib.py", "line": "5"},
+                {"path": "/repo/src/build/lib_utils.py", "line": "7"},
+            ],
+            "symbols": [],
+        }
+        calls = [
+            {
+                "id": 11,
+                "tool": "run_tests",
+                "status": "completed",
+                "parameters": {"command": agenda["command"], "cwd": agenda["cwd"]},
+                "result": {"command": agenda["command"], "cwd": agenda["cwd"], "exit_code": 1},
+            }
+        ]
+
+        frontier = update_session_active_compatibility_frontier(
+            session,
+            calls,
+            verifier_failure_repair_agenda=agenda,
+            search_anchor_observations=[],
+            current_time="2026-05-05T00:00:01Z",
+        )
+
+        anchor_paths = [anchor.get("path") for anchor in frontier["anchors"]]
+        self.assertIn("build/lib.py", anchor_paths)
+        self.assertIn("src/build/lib_utils.py", anchor_paths)
+        self.assertEqual(frontier["closure_state"]["state"], "read_needed")
 
     def test_repo_source_locations_remain_readable_frontier_anchors(self):
         session = {"id": 18, "updated_at": "2026-05-05T00:00:00Z"}

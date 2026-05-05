@@ -54,6 +54,17 @@ Current selected gap class:
 Current selected next action:
 `M6.24 -> current-head build-cython-ext artifact -> replay/dogfood/emulator pass -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
 
+Current live proof status on 2026-05-05: the selected gap has moved through
+active compatibility frontier repairs. The latest same-shape run
+`mew-m6-24-acf-virtual-read-repair-build-cython-ext-1attempt-20260505-1803`
+still scored `0/1`, but the failure shape is now narrower:
+generated `build/lib*` copies and exhausted sibling searches kept the frontier
+blocking verifier/rebuild progress after the workspace source had already been
+found. The active local repair is
+`active_frontier_generated_build_copy_and_exhausted_search_loop`; do not spend
+another live `build-cython-ext` speed proof until its review/commit and the
+normal pre-speed operation are complete.
+
 Current pre-speed status:
 
 - replay: pass on

@@ -110,6 +110,65 @@ def _normalize_shape(value, *, cwd=""):
     return text.strip()
 
 
+SOURCE_SURFACE_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".clj",
+    ".cpp",
+    ".cs",
+    ".ex",
+    ".exs",
+    ".go",
+    ".h",
+    ".hpp",
+    ".hs",
+    ".java",
+    ".jl",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".m",
+    ".ml",
+    ".mli",
+    ".mm",
+    ".php",
+    ".pl",
+    ".py",
+    ".pyi",
+    ".pyx",
+    ".rb",
+    ".rs",
+    ".scala",
+    ".sh",
+    ".swift",
+    ".ts",
+    ".tsx",
+    ".v",
+    ".zig",
+}
+SOURCE_SURFACE_NAMES = {
+    "cmakelists.txt",
+    "go.mod",
+    "makefile",
+    "pyproject.toml",
+    "setup.cfg",
+    "setup.py",
+}
+
+
+def _frontier_non_actionable_path(text):
+    lowered = str(text or "").casefold()
+    if re.search(r"(?:^|/)(?:site-packages|dist-packages)(?:/|$)", lowered):
+        return True
+    if re.search(r"(?:^|/)build/(?:lib|bdist)(?:/|$)", lowered):
+        return True
+    if re.search(r"(?:^|/)build/(?:lib|bdist)[.-][^/]*/", lowered):
+        return True
+    if re.match(r"^/(?:usr/(?:local/)?lib|opt/homebrew/lib)/python\d+(?:\.\d+)?/", lowered):
+        return True
+    return False
+
+
 def _frontier_actionable_read_path(value, *, cwd=""):
     text = str(value or "").strip().replace("\\", "/")
     if not text:
@@ -120,17 +179,13 @@ def _frontier_actionable_read_path(value, *, cwd=""):
         return ""
     if text.startswith(("<tmp>", "<cache>")):
         return ""
-    lowered = text.casefold()
-    if re.search(r"(?:^|/)(?:site-packages|dist-packages)(?:/|$)", lowered):
-        return ""
-    if re.match(r"^/(?:usr/(?:local/)?lib|opt/homebrew/lib)/python\d+(?:\.\d+)?/", lowered):
+    if _frontier_non_actionable_path(text):
         return ""
     if text == "<repo>":
         return "."
     if text.startswith("<repo>/"):
         text = text[len("<repo>/") :]
-        lowered = text.casefold()
-        if re.search(r"(?:^|/)(?:site-packages|dist-packages)(?:/|$)", lowered):
+        if _frontier_non_actionable_path(text):
             return ""
     if text.startswith("/"):
         return ""
@@ -166,6 +221,109 @@ def _find_call(calls, tool_call_id):
 
 def _source_call_for_agenda(calls, agenda):
     return _find_call(calls, (agenda or {}).get("source_tool_call_id"))
+
+
+def _frontier_path_looks_source_surface(value):
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return False
+    lowered = text.casefold().rstrip("/")
+    name = lowered.rsplit("/", 1)[-1]
+    if name in SOURCE_SURFACE_NAMES:
+        return True
+    if "." in name:
+        suffix = "." + name.rsplit(".", 1)[-1]
+        return suffix in SOURCE_SURFACE_EXTENSIONS
+    return name in {"src", "source", "lib", "pkg", "packages"}
+
+
+def _search_result_paths(result, *, cwd=""):
+    result = result if isinstance(result, dict) else {}
+    paths = []
+    for match in result.get("matches") or []:
+        if isinstance(match, dict):
+            path = match.get("path") or result.get("path") or ""
+        else:
+            path = str(match or "").split(":", 1)[0]
+        path = _frontier_actionable_read_path(path, cwd=cwd)
+        if path:
+            paths.append(path)
+    for snippet in result.get("snippets") or []:
+        if not isinstance(snippet, dict) or not snippet.get("path"):
+            continue
+        path = _frontier_actionable_read_path(snippet.get("path"), cwd=cwd)
+        if path:
+            paths.append(path)
+    return paths
+
+
+def _search_scope_can_cover_current_failure(call, *, cwd=""):
+    call = call if isinstance(call, dict) else {}
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    path = result.get("path") or parameters.get("path") or ""
+    raw_path = str(path or "").strip().replace("\\", "/")
+    raw_cwd = str(cwd or "").strip().replace("\\", "/")
+    if raw_path in {"", "."} or (raw_cwd and raw_path == raw_cwd):
+        return True
+    normalized_path = _frontier_actionable_read_path(path, cwd=cwd)
+    if normalized_path == ".":
+        return True
+    if _frontier_path_looks_source_surface(normalized_path):
+        return True
+    return any(_frontier_path_looks_source_surface(path) for path in _search_result_paths(result, cwd=cwd))
+
+
+def _call_happened_after(call, source_call_id):
+    if source_call_id in (None, ""):
+        return True
+    try:
+        return int(call.get("id")) > int(source_call_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def _completed_search_queries(calls, *, after_source_call_id=None, cwd=""):
+    queries = set()
+    for call in calls or []:
+        if not isinstance(call, dict) or call.get("tool") != "search_text" or call.get("status") != "completed":
+            continue
+        if not _call_happened_after(call, after_source_call_id):
+            continue
+        if not _search_scope_can_cover_current_failure(call, cwd=cwd):
+            continue
+        result = call.get("result") if isinstance(call.get("result"), dict) else {}
+        parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+        query = _clip_text(result.get("query") or parameters.get("query") or "", 160)
+        if query:
+            queries.add(query)
+    return queries
+
+
+def _search_query_tokens(value):
+    tokens = {
+        token
+        for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(value or "").casefold())
+        if token not in {"from", "import", "class", "def", "return", "raise"}
+    }
+    return tokens
+
+
+def _search_query_is_covered(query, searched_queries):
+    query_text = _clip_text(query, 160)
+    if not query_text:
+        return False
+    searched = {_clip_text(item, 160) for item in searched_queries or [] if _clip_text(item, 160)}
+    if query_text in searched:
+        return True
+    query_tokens = _search_query_tokens(query_text)
+    if len(query_tokens) < 2:
+        return False
+    for searched_query in searched:
+        searched_tokens = _search_query_tokens(searched_query)
+        if query_tokens and query_tokens.issubset(searched_tokens):
+            return True
+    return False
 
 
 def _exit_class(source_call, agenda):
@@ -466,8 +624,9 @@ def _anchor(kind, *, subject="", path="", line=None, query="", source_event=None
     return {key: value for key, value in anchor.items() if value not in (None, "", [], {})}
 
 
-def _build_anchors(agenda, signature, search_anchor_observations, evidence_refs, *, cwd=""):
+def _build_anchors(agenda, signature, search_anchor_observations, evidence_refs, *, cwd="", searched_queries=None):
     anchors = []
+    searched_queries = set(searched_queries or [])
     source_event = {"kind": "tool_call", "id": (agenda or {}).get("source_tool_call_id")}
     for location in (agenda or {}).get("source_locations") or []:
         if not isinstance(location, dict):
@@ -499,7 +658,7 @@ def _build_anchors(agenda, signature, search_anchor_observations, evidence_refs,
         )
     for query in (agenda or {}).get("sibling_search_queries") or []:
         query_text = _clip_text(query, 160)
-        if query_text:
+        if query_text and not _search_query_is_covered(query_text, searched_queries):
             anchors.append(
                 _anchor(
                     "search_query",
@@ -530,6 +689,40 @@ def _build_anchors(agenda, signature, search_anchor_observations, evidence_refs,
             )
         )
     return _merge_dicts_by_identity([], anchors, id_key="id", limit=30)
+
+
+def _retain_frontier_anchor(anchor, *, searched_queries=None, cwd=""):
+    if not isinstance(anchor, dict):
+        return False
+    searched_queries = set(searched_queries or [])
+    kind = anchor.get("kind")
+    if kind == "search_query":
+        query = _clip_text(anchor.get("query") or anchor.get("subject") or "", 160)
+        return bool(query and not _search_query_is_covered(query, searched_queries))
+    if kind in {"source_location", "search_match"}:
+        return bool(_frontier_actionable_read_path(anchor.get("path") or "", cwd=cwd))
+    return True
+
+
+def _retained_frontier_anchors(anchors, *, searched_queries=None, cwd=""):
+    return [
+        dict(anchor)
+        for anchor in anchors or []
+        if _retain_frontier_anchor(anchor, searched_queries=searched_queries, cwd=cwd)
+    ]
+
+
+def _retain_frontier_candidate(candidate, *, cwd=""):
+    if not isinstance(candidate, dict):
+        return False
+    path = candidate.get("path")
+    if path in (None, ""):
+        return True
+    return bool(_frontier_actionable_read_path(path, cwd=cwd))
+
+
+def _retained_frontier_candidates(candidates, *, cwd=""):
+    return [dict(candidate) for candidate in candidates or [] if _retain_frontier_candidate(candidate, cwd=cwd)]
 
 
 def _candidate(kind, *, subject="", path="", anchors=None, reason="", status="unexplored", evidence_refs=None):
@@ -614,6 +807,10 @@ def _open_candidates(candidates):
     return [item for item in candidates or [] if str(item.get("status") or "") in OPEN_CANDIDATE_STATUSES]
 
 
+def _blocking_open_candidates(candidates):
+    return [item for item in _open_candidates(candidates) if _frontier_actionable_read_path(item.get("path") or "")]
+
+
 def _closure_state(anchors, candidates, signature):
     unread_anchors = [
         item
@@ -622,6 +819,7 @@ def _closure_state(anchors, candidates, signature):
     ]
     search_queries = [item for item in anchors or [] if item.get("kind") == "search_query"]
     open_candidates = _open_candidates(candidates)
+    blocking_candidates = _blocking_open_candidates(candidates)
     runtime_kind = (signature or {}).get("runtime_component_kind") or "unknown"
     verifier_obligations = []
     if runtime_kind != "unknown":
@@ -632,7 +830,7 @@ def _closure_state(anchors, candidates, signature):
     elif search_queries:
         state = "search_needed"
         next_action = f"search_text {search_queries[0].get('query')}"
-    elif open_candidates:
+    elif blocking_candidates:
         state = "edit_needed"
         next_action = "repair the open same-family sibling candidates"
     else:
@@ -642,12 +840,12 @@ def _closure_state(anchors, candidates, signature):
     evidence_strength = "none"
     if has_signature:
         evidence_strength = "actionable"
-    broad_blocker = bool(unread_anchors or search_queries or open_candidates)
-    finish_blocker = bool(verifier_obligations or broad_blocker)
+    broad_blocker = bool(unread_anchors or search_queries or blocking_candidates)
+    finish_blocker = bool(verifier_obligations or broad_blocker or open_candidates)
     if finish_blocker:
         evidence_strength = "blocking"
     blocked_actions = []
-    if broad_blocker or finish_blocker:
+    if broad_blocker:
         blocked_actions.append("broad_verifier")
     if finish_blocker:
         blocked_actions.append("finish")
@@ -1761,11 +1959,32 @@ def build_active_compatibility_frontier(
     source_result = source_call.get("result") if isinstance(source_call.get("result"), dict) else {}
     source_parameters = source_call.get("parameters") if isinstance(source_call.get("parameters"), dict) else {}
     source_cwd = agenda.get("cwd") or source_result.get("cwd") or source_parameters.get("cwd") or ""
-    anchors = _build_anchors(agenda, signature, search_anchor_observations, evidence_refs, cwd=source_cwd)
+    searched_queries = _completed_search_queries(
+        calls,
+        after_source_call_id=(agenda or {}).get("source_tool_call_id"),
+        cwd=source_cwd,
+    )
+    anchors = _build_anchors(
+        agenda,
+        signature,
+        search_anchor_observations,
+        evidence_refs,
+        cwd=source_cwd,
+        searched_queries=searched_queries,
+    )
     candidates = _build_candidates(agenda, signature, anchors, evidence_refs)
     closure = _closure_state(anchors, candidates, signature)
     verifier_entry = _verifier_history_entry(signature, agenda, source_call, transition)
     keep_previous = transition in {"same", "narrower"}
+    previous_anchors = _retained_frontier_anchors(
+        previous.get("anchors") if keep_previous else [],
+        searched_queries=searched_queries,
+        cwd=source_cwd,
+    )
+    previous_candidates = _retained_frontier_candidates(
+        previous.get("sibling_candidates") if keep_previous else [],
+        cwd=source_cwd,
+    )
     frontier = {
         "schema_version": SCHEMA_VERSION,
         "id": previous.get("id") if keep_previous and previous.get("id") else _next_frontier_id(session),
@@ -1779,9 +1998,9 @@ def build_active_compatibility_frontier(
             "previous_frontier_id": previous.get("id") if previous and not keep_previous else "",
         },
         "evidence_refs": _merge_dicts_by_identity(previous.get("evidence_refs") if keep_previous else [], evidence_refs, limit=30),
-        "anchors": _merge_dicts_by_identity(previous.get("anchors") if keep_previous else [], anchors, id_key="id", limit=40),
+        "anchors": _merge_dicts_by_identity(previous_anchors, anchors, id_key="id", limit=40),
         "sibling_candidates": _merge_dicts_by_identity(
-            previous.get("sibling_candidates") if keep_previous else [],
+            previous_candidates,
             candidates,
             id_key="id",
             limit=40,
