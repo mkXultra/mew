@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | current-head miss after VM-timeout frontier repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-204057-vm-timeout-frontier` | repair generic prior-terminal-failure reaction gap, then replay/dogfood/emulator before one same-shape v2 speed_1 |
+| `make-doom-for-mips` | 1/5 | expected-artifact contract green; live speed still 0/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-expected-artifact-contract-make-doom-speed1-20260507-013823` | classify next gap from replay before another live speed; latest is task-solving/runtime artifact production plus contract role normalization follow-up |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -407,6 +407,37 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   boundary, exact replay/dogfood on the artifact, full implement/replay/dogfood
   suite, scoped ruff, `git diff --check`, and codex-ultra review session
   `019dfd67-ebb8-7f22-8f08-93c6ce5f9130` passed.
+- The expected-artifact contract repair Phase 1-6 was implemented and reviewed
+  through codex-ultra session `019dfe1f-c6e2-79b1-85ed-faff0d3b08bc`. Phase 7
+  pre-speed passed: focused schema/classifier/checker UT (`300 passed, 6
+  subtests passed`), exact replay on the latest replayable `make-doom-for-mips`
+  artifact (`2143-provider-id-replay`), matching terminal-bench replay dogfood,
+  the new `m6_24-expected-artifact-contract-emulator`, scoped ruff, and
+  `git diff --check`.
+- The Phase 7 same-shape live speed
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-expected-artifact-contract-make-doom-speed1-20260507-013823`
+  scored reward `0.0` with runner errors `0` and total runtime `13m11s`.
+  This is valid product evidence, not a harness/provider miss:
+  `selected_lane=implement_v2`, `runtime_id=implement_v2_model_json_tool_loop`,
+  `mew_exit_code=1`, `stop_reason=implement_v2_blocked`, `model_turns=26`,
+  `tool_calls=57`, `tool_results=57`, and
+  `terminal_failure_reaction_turns_used=2`. Replay and terminal-bench dogfood
+  pass, and the structured replay recomputes `26` classification records with
+  `mismatch_count=0`.
+- The new failure is no longer "missing evidence". The final structured command
+  declared `/tmp/frame.bmp`, checked it after a source-backed MIPS build plus
+  fresh `node vm.js`, and correctly recorded missing artifact evidence:
+  `VM_RC=0`, `Program terminated at PC=0x0`, `Executed 34 instructions`,
+  `BMP_MISSING`, and `VM_STDOUT_MARKER_MISSING`. The immediate product gap is
+  actual runtime/artifact production in the task-solving strategy.
+- There is one measurement follow-up before another live speed: the model
+  declared `role=generated_artifact` / `proof_role=final_verifier`, but the
+  normalizer projected this to `role=unknown`, `proof_role=none`, and
+  `acceptance_kind=not_acceptance`. As a result the latest structured class is
+  `artifact_validation_failure` with `phase=unknown` instead of a more precise
+  runtime-artifact class. Do not add task-specific Doom logic; repair or record
+  this as a generic contract-role vocabulary/normalization gap if the next
+  repair depends on phase-specific routing.
 
 ## Repair Trigger
 
