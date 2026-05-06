@@ -57,6 +57,28 @@ def build_implement_v2_prompt_sections(
             profile="implement_v2",
         ),
         PromptSection(
+            id="implement_v2_execution_artifact_contract",
+            version="v0",
+            title="Implement V2 Execution Artifact Contract",
+            content=(
+                "For run_command and run_tests, attach an execution_contract when the command is intended to build, "
+                "run, verify, or prove an artifact. poll_command inherits the original command's contract by "
+                "command_run_id; do not introduce new artifact obligations only on a later poll. Declare role, "
+                "stage, purpose, proof_role, "
+                "acceptance_kind, expected_exit, and expected_artifacts. Expected artifacts should name path or "
+                "stream targets plus cheap checks such as exists, non_empty, kind, size_between, text_contains, "
+                "or regex. Mew owns artifact checking at runtime; do not treat stdout/stderr text markers as proof "
+                "when an artifact contract exists. A finish claim should cite structured evidence ids, artifact "
+                "evidence ids, verifier evidence, or blocker classes from the latest tool result instead of only "
+                "describing terminal output. If task or frontier state already declares a final artifact, a "
+                "verifier-shaped command may rely on mew to runtime-infer that artifact, but explicit "
+                "expected_artifacts are preferred."
+            ),
+            stability=STABILITY_STATIC,
+            cache_policy=CACHE_POLICY_CACHEABLE,
+            profile="implement_v2",
+        ),
+        PromptSection(
             id="implement_v2_tool_surface",
             version="v0",
             title="Implement V2 Tool Surface",

@@ -2034,14 +2034,39 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     assert metrics["contract_version"] == "prompt_sections_v1"
     assert "implement_v2_lane_base" in by_id
     assert "implement_v2_tool_contract" in by_id
+    assert "implement_v2_execution_artifact_contract" in by_id
     assert "implement_v2_tool_surface" in by_id
     assert "implement_v2_compatibility_frontier" in by_id
     assert "implement_v2_task_contract" in by_id
     assert "implement_v2_lane_state" in by_id
     assert "implement_v2_memory_summary" not in by_id
     assert by_id["implement_v2_lane_base"]["cache_hint"] == "cacheable_prefix"
+    assert by_id["implement_v2_execution_artifact_contract"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_compatibility_frontier"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_lane_state"]["cache_hint"] == "dynamic"
+
+
+def test_implement_v2_prompt_explains_expected_artifact_contract() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"objective": "build and verify an artifact"},
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    section = next(item for item in sections if item.id == "implement_v2_execution_artifact_contract")
+
+    assert section.cache_policy == "cacheable"
+    assert section.stability == "static"
+    assert "expected_artifacts" in section.content
+    assert "poll_command inherits the original command's contract" in section.content
+    assert "do not introduce new artifact obligations only on a later poll" in section.content
+    assert "Mew owns artifact checking" in section.content
+    assert "stdout/stderr text markers" in section.content
+    assert "evidence ids" in section.content
 
 
 def test_implement_v2_v0_filters_memory_even_when_memory_summary_exists() -> None:
@@ -2784,6 +2809,62 @@ def test_implement_v2_exec_missing_expected_artifact_blocks_result(tmp_path) -> 
     assert payload["verifier_evidence"]["verdict"] == "fail"
     assert payload["failure_classification"]["class"] == "runtime_artifact_missing"
     assert payload["structured_finish_gate"]["blocked"] is True
+
+
+def test_implement_v2_provider_history_surfaces_structured_evidence_summary(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "artifact-missing",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "true",
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "any"},
+                        "expected_artifacts": [{"id": "frame", "kind": "file", "path": "frame.bmp"}],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "artifact evidence missing"},
+    )
+    tool_result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="artifact-missing",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=tuple(result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"]),
+        content_refs=tuple(result.updated_lane_state["proof_manifest"]["tool_results"][0]["content_refs"]),
+        evidence_refs=tuple(result.updated_lane_state["proof_manifest"]["tool_results"][0]["evidence_refs"]),
+        side_effects=tuple(result.updated_lane_state["proof_manifest"]["tool_results"][0]["side_effects"]),
+    )
+
+    history = _provider_visible_tool_result_for_history(tool_result)
+    structured = history["content"]["content"][0]["structured_execution_evidence"]
+
+    assert structured["artifact_evidence"][0]["evidence_id"].startswith("artifact-evidence:frame:")
+    assert structured["failure_classification"]["class"] == "runtime_artifact_missing"
+    assert structured["structured_finish_gate"]["blocked"] is True
+    assert "stdout_stderr_body_omitted" not in structured
 
 
 def test_implement_v2_exec_contract_accepted_nonzero_exit_can_complete(tmp_path) -> None:

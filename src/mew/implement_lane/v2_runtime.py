@@ -2820,6 +2820,9 @@ def _project_terminal_payload_for_provider_history(payload: dict[str, object]) -
         projected[key] = projected_value
         if clipped:
             projected[f"{key}_history_truncated"] = True
+    structured_summary = _structured_execution_summary_for_provider_history(payload)
+    if structured_summary:
+        projected["structured_execution_evidence"] = structured_summary
     command = str(payload.get("command") or "")
     if command:
         projected["command_excerpt"] = _clip_provider_history_text(command, limit=900)[0]
@@ -2836,6 +2839,74 @@ def _project_terminal_payload_for_provider_history(payload: dict[str, object]) -
         projected["stdout_chars"] = len(stdout)
         projected["stderr_chars"] = len(stderr)
     return projected
+
+
+def _structured_execution_summary_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
+    summary: dict[str, object] = {}
+    tool_run = payload.get("tool_run_record")
+    if isinstance(tool_run, dict):
+        summary["tool_run_record"] = _drop_empty_frontier_values(
+            {
+                "record_id": tool_run.get("record_id"),
+                "command_run_id": tool_run.get("command_run_id"),
+                "contract_id": tool_run.get("contract_id"),
+                "status": tool_run.get("status"),
+                "semantic_exit": tool_run.get("semantic_exit"),
+            }
+        )
+    artifacts = payload.get("artifact_evidence")
+    if isinstance(artifacts, list):
+        compact_artifacts = []
+        for artifact in artifacts[:_PROVIDER_HISTORY_LIST_LIMIT]:
+            if not isinstance(artifact, dict):
+                continue
+            compact_artifacts.append(
+                _drop_empty_frontier_values(
+                    {
+                        "evidence_id": artifact.get("evidence_id"),
+                        "artifact_id": artifact.get("artifact_id"),
+                        "status": artifact.get("status"),
+                        "blocking": artifact.get("blocking"),
+                        "source": artifact.get("source"),
+                        "confidence": artifact.get("confidence"),
+                        "path": artifact.get("path"),
+                    }
+                )
+            )
+        if compact_artifacts:
+            summary["artifact_evidence"] = compact_artifacts
+    verifier = payload.get("verifier_evidence")
+    if isinstance(verifier, dict):
+        summary["verifier_evidence"] = _drop_empty_frontier_values(
+            {
+                "verifier_id": verifier.get("verifier_id"),
+                "contract_id": verifier.get("contract_id"),
+                "verdict": verifier.get("verdict"),
+                "reason": verifier.get("reason"),
+            }
+        )
+    classification = payload.get("failure_classification")
+    if isinstance(classification, dict):
+        summary["failure_classification"] = _drop_empty_frontier_values(
+            {
+                "classification_id": classification.get("classification_id"),
+                "phase": classification.get("phase"),
+                "kind": classification.get("kind"),
+                "class": classification.get("class") or classification.get("failure_class"),
+                "summary": classification.get("summary"),
+                "required_next_probe": classification.get("required_next_probe"),
+            }
+        )
+    finish_gate = payload.get("structured_finish_gate")
+    if isinstance(finish_gate, dict):
+        summary["structured_finish_gate"] = _drop_empty_frontier_values(
+            {
+                "blocked": finish_gate.get("blocked"),
+                "reasons": finish_gate.get("reasons"),
+                "evidence_refs": finish_gate.get("evidence_refs"),
+            }
+        )
+    return _drop_empty_frontier_values(summary)
 
 
 def _compact_provider_visible_content_for_history(content: dict[str, object]) -> dict[str, object]:
