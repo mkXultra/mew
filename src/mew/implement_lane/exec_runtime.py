@@ -26,6 +26,19 @@ RESIDENT_MEW_LOOP_TEXT_RE = re.compile(
 )
 
 
+class RunTestsShellSurfaceMisuse(ValueError):
+    """Structured run_tests tool-contract misuse.
+
+    `run_tests` remains argv-only. This exception makes shell-shaped verifier
+    attempts machine-readable so v2 can later route or recover them without
+    widening the run_tests contract.
+    """
+
+    def __init__(self, payload: dict[str, object]):
+        self.payload = dict(payload)
+        super().__init__(str(self.payload.get("reason") or "run_tests shell surface misuse"))
+
+
 class ImplementV2ManagedExecRuntime:
     """Lane-local managed exec runtime for Phase 4 fake-provider tests."""
 
@@ -47,6 +60,16 @@ class ImplementV2ManagedExecRuntime:
                 payload = self._cancel_command(call)
             else:
                 payload = self._read_command_output(call)
+        except RunTestsShellSurfaceMisuse as exc:
+            return ToolResultEnvelope(
+                lane_attempt_id=call.lane_attempt_id,
+                provider_call_id=call.provider_call_id,
+                mew_tool_call_id=call.mew_tool_call_id,
+                tool_name=call.tool_name,
+                status="failed",
+                is_error=True,
+                content=(dict(exc.payload),),
+            )
         except (OSError, RuntimeError, ValueError) as exc:
             return ToolResultEnvelope(
                 lane_attempt_id=call.lane_attempt_id,
@@ -267,8 +290,9 @@ def _reject_resident_mew_loop_command(command: object, *, tool_name: str) -> Non
 
 
 def _reject_run_tests_shell_surface(command: object, *, use_shell: bool) -> None:
-    if use_shell or _has_unquoted_run_tests_shell_surface(command) or _has_explicit_shell_interpreter(command):
-        raise ValueError("run_tests executes one argv command without a shell; use run_command for shell orchestration")
+    misuse = _run_tests_shell_surface_misuse(command, use_shell=use_shell)
+    if misuse is not None:
+        raise RunTestsShellSurfaceMisuse(misuse)
 
 
 def _has_unquoted_shell_surface(command: object) -> bool:
@@ -276,11 +300,47 @@ def _has_unquoted_shell_surface(command: object) -> bool:
 
 
 def _has_unquoted_run_tests_shell_surface(command: object) -> bool:
+    return bool(_unquoted_run_tests_shell_surface_features(command))
+
+
+def _run_tests_shell_surface_misuse(command: object, *, use_shell: bool) -> dict[str, object] | None:
+    features: list[str] = []
+    if use_shell:
+        features.append("use_shell")
+    features.extend(_unquoted_run_tests_shell_surface_features(command))
+    if _has_explicit_shell_interpreter(command):
+        features.append("explicit_shell_interpreter")
+    if not features:
+        return None
+    unique_features = list(dict.fromkeys(features))
+    return {
+        "reason": "run_tests executes one argv command without a shell; use run_command for shell orchestration",
+        "kind": "run_tests_shell_surface",
+        "failure_class": "tool_contract_misuse",
+        "failure_subclass": "run_tests_shell_surface",
+        "recoverable": True,
+        "recoverable_tool_contract_misuse": True,
+        "tool_contract_recovery_eligible": True,
+        "terminal_failure_reaction_eligible": False,
+        "features": unique_features,
+        "preserved_command": str(command or ""),
+        "suggested_tool": "run_command",
+        "suggested_use_shell": True,
+    }
+
+
+def _unquoted_run_tests_shell_surface_features(command: object) -> list[str]:
     text = str(command or "")
     in_single = False
     in_double = False
     escaped = False
     index = 0
+    features: list[str] = []
+
+    def add(feature: str) -> None:
+        if feature not in features:
+            features.append(feature)
+
     while index < len(text):
         char = text[index]
         if escaped:
@@ -303,10 +363,24 @@ def _has_unquoted_run_tests_shell_surface(command: object) -> bool:
             index += 1
             continue
         two_chars = text[index : index + 2]
-        if char in {"\n", "\r", "|", ";", "&", "<", ">"} or two_chars in {"&&", "||", ">>", "<<"}:
-            return True
+        if char in {"\n", "\r"}:
+            add("newline")
+        elif two_chars in {"&&", "||"}:
+            add("and_or")
+            index += 1
+        elif two_chars in {">>", "<<"}:
+            add("redirect" if two_chars == ">>" else "heredoc")
+            index += 1
+        elif char == "|":
+            add("pipe")
+        elif char == ";":
+            add("semicolon")
+        elif char == "&":
+            add("background")
+        elif char in {"<", ">"}:
+            add("redirect")
         index += 1
-    return False
+    return features
 
 
 def _has_explicit_shell_interpreter(command: object) -> bool:

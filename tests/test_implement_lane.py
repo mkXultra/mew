@@ -2343,7 +2343,75 @@ def test_implement_v2_run_tests_rejects_shell_orchestration(tmp_path) -> None:
 
     assert result.status == "blocked"
     assert tool_result["status"] == "failed"
-    assert "run_tests executes one argv command without a shell" in tool_result["content"][0]["reason"]
+    payload = tool_result["content"][0]
+    assert "run_tests executes one argv command without a shell" in payload["reason"]
+    assert payload["kind"] == "run_tests_shell_surface"
+    assert payload["failure_class"] == "tool_contract_misuse"
+    assert payload["failure_subclass"] == "run_tests_shell_surface"
+    assert payload["tool_contract_recovery_eligible"] is True
+    assert payload["terminal_failure_reaction_eligible"] is False
+    assert payload["suggested_tool"] == "run_command"
+    assert payload["suggested_use_shell"] is True
+    assert set(payload["features"]) >= {"use_shell", "and_or"}
+
+
+def test_implement_v2_run_tests_simple_argv_command_still_runs(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": shlex.join([sys.executable, "-c", "print('ok')"]),
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "argv test ran"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["execution_mode"] == "argv"
+    assert "ok" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_run_tests_allows_quoted_shell_metacharacters(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": shlex.join([sys.executable, "-c", "print('a|b && c > d')"]),
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "quoted shell chars are argv data"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert "a|b && c > d" in tool_result["content"][0]["stdout"]
 
 
 def test_implement_v2_run_tests_rejects_explicit_shell_interpreter(tmp_path) -> None:
@@ -2373,16 +2441,56 @@ def test_implement_v2_run_tests_rejects_explicit_shell_interpreter(tmp_path) -> 
 
     assert result.status == "blocked"
     assert tool_result["status"] == "failed"
-    assert "run_tests executes one argv command without a shell" in tool_result["content"][0]["reason"]
+    payload = tool_result["content"][0]
+    assert "run_tests executes one argv command without a shell" in payload["reason"]
+    assert payload["failure_class"] == "tool_contract_misuse"
+    assert payload["failure_subclass"] == "run_tests_shell_surface"
+    assert "explicit_shell_interpreter" in payload["features"]
+
+
+def test_implement_v2_run_tests_rejects_shell_interpreter_argv(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "argv": ["bash", "-lc", "echo ok && echo verify"],
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "argv shell rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert payload["failure_class"] == "tool_contract_misuse"
+    assert "explicit_shell_interpreter" in payload["features"]
 
 
 def test_implement_v2_run_tests_rejects_background_redirect_and_env_split_shell(tmp_path) -> None:
-    commands = (
-        "python -m pytest &",
-        "python -m pytest > out.txt",
-        "env -S 'bash -lc echo-ok'",
+    cases = (
+        ("python -m pytest &", "background"),
+        ("python -m pytest > out.txt", "redirect"),
+        ("printf ok | wc -c", "pipe"),
+        ("printf ok || echo fallback", "and_or"),
+        ("cat <<EOF\nok\nEOF", "heredoc"),
+        ("python -m pytest\npython -m unittest", "newline"),
+        ("env -S 'bash -lc echo-ok'", "explicit_shell_interpreter"),
     )
-    for index, command in enumerate(commands, start=1):
+    for index, (command, expected_feature) in enumerate(cases, start=1):
         result = run_fake_exec_implement_v2(
             ImplementLaneInput(
                 work_session_id=f"ws-{index}",
@@ -2409,7 +2517,45 @@ def test_implement_v2_run_tests_rejects_background_redirect_and_env_split_shell(
 
         assert result.status == "blocked"
         assert tool_result["status"] == "failed"
-        assert "run_tests executes one argv command without a shell" in tool_result["content"][0]["reason"]
+        payload = tool_result["content"][0]
+        assert "run_tests executes one argv command without a shell" in payload["reason"]
+        assert payload["failure_class"] == "tool_contract_misuse"
+        assert payload["failure_subclass"] == "run_tests_shell_surface"
+        assert payload["terminal_failure_reaction_eligible"] is False
+        assert expected_feature in payload["features"]
+
+
+def test_implement_v2_run_tests_resident_mew_loop_rejection_wins_before_tool_contract_payload(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "./mew work --ai && echo ok",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "resident loop rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "resident mew loops" in payload["reason"]
+    assert "failure_class" not in payload
 
 
 def test_implement_v2_exec_task_complete_claim_is_blocked_even_with_terminal_evidence(tmp_path) -> None:
