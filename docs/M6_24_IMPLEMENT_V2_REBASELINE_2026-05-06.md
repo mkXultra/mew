@@ -388,6 +388,25 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   manifests remain pairable and replay/dogfood can classify the subsequent
   terminal failure. This is a provider-tool-loop robustness repair, not a
   Doom/MIPS rule.
+- The provider-id-replay rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-2143-provider-id-replay`
+  scored reward `0.0` with runner errors `0` and total runtime `19m09s`.
+  Replay and terminal-bench dogfood pass; `replay_valid=true` and the bounded
+  terminal-failure reaction path used all three extra turns. The new gap is
+  frontier classification: the final compound command rebuilt and linked, then
+  executed the VM verifier, but the VM returned `vm_rc=0`, terminated at
+  `PC=0x0` after `9` instructions, and produced `NO_FRAME`. Because the
+  command also contained build/link text and warnings, the frontier stored this
+  as `latest_build_failure`. Current-head classification treats observed
+  VM/emulator runtime termination evidence plus missing-output-artifact markers
+  as `latest_runtime_failure` with
+  `failure_class=runtime_artifact_missing`, even when build/link output is
+  present. This is a generic observed-evidence repair: the next model turn
+  should inspect runtime progress and artifact production, not repeat a broad
+  rebuild loop. Focused frontier tests, the negative build-artifact-missing
+  boundary, exact replay/dogfood on the artifact, full implement/replay/dogfood
+  suite, scoped ruff, `git diff --check`, and codex-ultra review session
+  `019dfd67-ebb8-7f22-8f08-93c6ce5f9130` passed.
 
 ## Repair Trigger
 

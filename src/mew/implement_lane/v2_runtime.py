@@ -2261,6 +2261,8 @@ def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
         return "runtime_artifact_contract_mismatch"
     if _frontier_runtime_execution_timeout(evidence_text):
         return "latest_runtime_failure"
+    if _frontier_runtime_artifact_missing(evidence_text):
+        return "latest_runtime_failure"
     if any(marker in text for marker in ("build", "compile", "link", "toolchain", "make ")):
         return "latest_build_failure"
     return "latest_runtime_failure"
@@ -2285,6 +2287,11 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
         failure["failure_class"] = "runtime_execution_timeout"
         failure["required_next_probe"] = (
             "Inspect runtime progress, timeout point, and expected artifact production before another rebuild."
+        )
+    elif _frontier_runtime_artifact_missing(evidence_text):
+        failure["failure_class"] = "runtime_artifact_missing"
+        failure["required_next_probe"] = (
+            "Inspect runtime progress, termination point, and expected output artifact production before another rebuild."
         )
     if payload.get("output_ref"):
         failure["output_ref"] = _frontier_clip_text(payload.get("output_ref"), limit=240)
@@ -2358,6 +2365,37 @@ def _frontier_runtime_execution_timeout(evidence_text: str) -> bool:
             "execution timed out",
         )
     )
+
+
+def _frontier_runtime_artifact_missing(evidence_text: str) -> bool:
+    """Detect verifier-observed runtime execution that produced no required artifact."""
+
+    text = str(evidence_text or "").casefold()
+    runtime_marker = any(
+        marker in text
+        for marker in (
+            "vm_rc=",
+            "vm rc=",
+            "vm exit ",
+            "program terminated at pc=",
+            "emulator",
+            "executed instructions",
+        )
+    )
+    missing_artifact_marker = any(
+        marker in text
+        for marker in (
+            "no_frame",
+            "no frame",
+            "no output artifact",
+            "missing output artifact",
+            "artifact missing",
+            "missing artifact",
+            "did not create",
+            "not created",
+        )
+    )
+    return runtime_marker and missing_artifact_marker
 
 
 def _frontier_failure_summary(payload: dict[str, object]) -> str:

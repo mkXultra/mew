@@ -3592,6 +3592,149 @@ def test_implement_v2_frontier_classifies_observed_vm_timeout_as_runtime_failure
     assert "runtime progress" in runtime_failure["required_next_probe"]
 
 
+def test_implement_v2_frontier_classifies_observed_runtime_missing_artifact_over_build_text(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        failure_script = (
+            "import sys; "
+            "print('=== link completed ==='); "
+            "print('=== fresh vm verification ==='); "
+            "print('vm_rc=0'); "
+            "print('Program terminated at PC=0x0'); "
+            "print('Executed 9 instructions'); "
+            "print('NO_FRAME'); "
+            "sys.stderr.write('linker warning: mixed ABI objects\\n'); "
+            "sys.exit(4)"
+        )
+        return {
+            "summary": "compound build plus runtime verifier produced no output artifact",
+            "tool_calls": [
+                {
+                    "id": "rebuild-and-vm-no-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            f"printf 'make all completed\\n'; "
+                            f"{shlex.quote(sys.executable)} -c {shlex.quote(failure_script)}"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "purpose": "repair, build, link, and verification",
+                            "stage": "build+verification",
+                            "proof_role": "runtime",
+                            "target": "runtime artifact",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "runtime exited without the required artifact"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source for vm.js so the emulator writes /tmp/frame.bmp "
+                    "from the runtime artifact."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    runtime_failure = frontier["latest_runtime_failure"]
+
+    assert "latest_build_failure" not in frontier
+    assert runtime_failure["failure_class"] == "runtime_artifact_missing"
+    assert "NO_FRAME" in runtime_failure["stdout_tail"]
+    assert "output artifact production" in runtime_failure["required_next_probe"]
+
+
+def test_implement_v2_frontier_does_not_classify_build_artifact_missing_as_runtime(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        failure_script = (
+            "import sys; "
+            "print('Executed 7 build steps'); "
+            "print('required build artifact was not created'); "
+            "sys.stderr.write('link failed before binary existed\\n'); "
+            "sys.exit(2)"
+        )
+        return {
+            "summary": "build artifact missing before runtime",
+            "tool_calls": [
+                {
+                    "id": "build-artifact-missing",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            f"printf 'make all started\\n'; "
+                            f"{shlex.quote(sys.executable)} -c {shlex.quote(failure_script)}"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "purpose": "build",
+                            "stage": "build",
+                            "proof_role": "builder",
+                            "target": "compiled artifact",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "build artifact missing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source for vm.js so the emulator writes /tmp/frame.bmp "
+                    "from the runtime artifact."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert "latest_runtime_failure" not in frontier
+    assert frontier["latest_build_failure"]["failure_summary"] == "link failed before binary existed"
+
+
 def test_implement_v2_frontier_drops_model_only_latest_failures_and_prefix_artifact_refs(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
