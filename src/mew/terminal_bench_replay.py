@@ -1,11 +1,44 @@
 import json
 from pathlib import Path
 
+from .implement_lane.execution_evidence import (
+    classify_execution_failure,
+    derive_verifier_evidence,
+    normalize_execution_contract,
+)
 from .timeutil import now_iso
 from .work_session import build_work_session_resume
 
 
 _IMPLEMENT_V2_TERMINAL_TOOLS = {"run_command", "run_tests", "poll_command"}
+_FAILURE_CLASSIFICATION_COMPARE_KEYS = (
+    "schema_version",
+    "classification_id",
+    "phase",
+    "kind",
+    "class",
+    "secondary_classes",
+    "secondary_kinds",
+    "confidence",
+    "retryable",
+    "summary",
+    "evidence_refs",
+    "required_next_probe",
+)
+_FAILURE_CLASSIFICATION_DEFAULTS = {
+    "schema_version": 1,
+    "classification_id": "",
+    "phase": "unknown",
+    "kind": "unknown_failure",
+    "class": "unknown_failure",
+    "secondary_classes": [],
+    "secondary_kinds": [],
+    "confidence": "low",
+    "retryable": True,
+    "summary": "",
+    "evidence_refs": [],
+    "required_next_probe": "",
+}
 
 
 def _read_json(path, default=None):
@@ -191,6 +224,7 @@ def _implement_v2_replay_summary(report_path, report):
         result for result in tool_results
         if isinstance(result, dict) and str(result.get("tool_name") or "") in {"run_command", "run_tests", "poll_command"}
     ]
+    structured_replay = _implement_v2_structured_execution_replay(tool_results)
     return {
         "runtime_id": runtime_id or "implement_v2_model_json_tool_loop",
         "lane": selected_lane or "implement_v2",
@@ -203,7 +237,8 @@ def _implement_v2_replay_summary(report_path, report):
         "terminal_result_count": len(terminal_results),
         "terminal_evidence_count": int(metrics.get("terminal_evidence_count") or 0),
         "write_evidence_count": int(metrics.get("write_evidence_count") or 0),
-        "latest_failure": _implement_v2_latest_failure(failed_results),
+        "latest_failure": _implement_v2_latest_failure(failed_results, structured_replay=structured_replay),
+        "structured_execution_replay": structured_replay,
         "model_error": model_error,
         "active_command_closeout_failed": _implement_v2_active_command_closeout_failed(failed_results),
         "tool_contract_shell_surface_misuse": _implement_v2_tool_contract_shell_surface_misuse(failed_results),
@@ -318,17 +353,132 @@ def _raw_excerpt_from_error_text(message):
     return str(message)[index + len(marker) :]
 
 
-def _implement_v2_latest_failure(failed_results):
+def _implement_v2_structured_execution_replay(tool_results):
+    records = []
+    mismatches = []
+    stored_count = 0
+    missing_stored_count = 0
+    for index, result in enumerate(tool_results):
+        if not isinstance(result, dict) or str(result.get("tool_name") or "") not in _IMPLEMENT_V2_TERMINAL_TOOLS:
+            continue
+        payload = _first_tool_result_payload(result)
+        if not payload:
+            continue
+        tool_run = payload.get("tool_run_record")
+        if not isinstance(tool_run, dict):
+            continue
+        contract_raw = payload.get("execution_contract_normalized") or payload.get("execution_contract")
+        if not isinstance(contract_raw, dict):
+            contract_raw = {"id": tool_run.get("contract_id") or f"contract:{tool_run.get('command_run_id') or index}"}
+        artifacts_raw = payload.get("artifact_evidence")
+        artifacts = [item for item in artifacts_raw if isinstance(item, dict)] if isinstance(artifacts_raw, list) else []
+        contract = normalize_execution_contract(contract_raw)
+        verifier = derive_verifier_evidence(contract, (tool_run,), artifacts)
+        classification = classify_execution_failure(tool_run, artifacts, verifier, contract).as_dict()
+        stored = payload.get("failure_classification")
+        stored_classification = dict(stored) if isinstance(stored, dict) else {}
+        if stored_classification:
+            stored_count += 1
+        else:
+            missing_stored_count += 1
+        matches = None
+        if stored_classification:
+            matches = _failure_classification_core(stored_classification) == _failure_classification_core(classification)
+            if not matches:
+                mismatches.append(
+                    {
+                        "tool_result_index": index,
+                        "provider_call_id": str(result.get("provider_call_id") or ""),
+                        "tool_name": str(result.get("tool_name") or ""),
+                        "stored": _failure_classification_core(stored_classification),
+                        "recomputed": _failure_classification_core(classification),
+                    }
+                )
+        records.append(
+            {
+                "tool_result_index": index,
+                "provider_call_id": str(result.get("provider_call_id") or ""),
+                "tool_name": str(result.get("tool_name") or ""),
+                "status": str(result.get("status") or ""),
+                "tool_run_record_id": str(tool_run.get("record_id") or ""),
+                "command_run_id": str(tool_run.get("command_run_id") or ""),
+                "artifact_evidence_count": len(artifacts),
+                "verifier_verdict": verifier.verdict,
+                "classification": classification,
+                "stored_classification_matches": matches,
+            }
+        )
+    latest = {}
+    for record in reversed(records):
+        classification = record.get("classification") if isinstance(record.get("classification"), dict) else {}
+        if classification.get("class") and classification.get("class") != "unknown_failure":
+            latest = dict(classification)
+            break
+    return {
+        "classification_count": len(records),
+        "stored_classification_count": stored_count,
+        "missing_stored_classification_count": missing_stored_count,
+        "mismatch_count": len(mismatches),
+        "mismatches": mismatches[:8],
+        "latest_failure_classification": latest,
+        "records": records[-8:],
+    }
+
+
+def _failure_classification_core(classification):
+    return {
+        key: _json_comparable_failure_value(classification.get(key, _FAILURE_CLASSIFICATION_DEFAULTS[key]))
+        for key in _FAILURE_CLASSIFICATION_COMPARE_KEYS
+    }
+
+
+def _json_comparable_failure_value(value):
+    if isinstance(value, dict):
+        return {str(key): _json_comparable_failure_value(value[key]) for key in sorted(value)}
+    if isinstance(value, (list, tuple)):
+        return [_json_comparable_failure_value(item) for item in value]
+    return value
+
+
+def _first_tool_result_payload(result):
+    content = result.get("content") if isinstance(result, dict) else None
+    return content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+
+
+def _latest_structured_failure_record(structured_replay):
+    records = structured_replay.get("records") if isinstance(structured_replay, dict) else []
+    for record in reversed(records if isinstance(records, list) else []):
+        if not isinstance(record, dict):
+            continue
+        classification = record.get("classification") if isinstance(record.get("classification"), dict) else {}
+        if classification.get("class") and classification.get("class") != "unknown_failure":
+            return record
+    return {}
+
+
+def _implement_v2_latest_failure(failed_results, *, structured_replay=None):
+    structured_record = _latest_structured_failure_record(structured_replay or {})
     if not failed_results:
+        if structured_record:
+            classification = structured_record.get("classification") or {}
+            return {
+                "provider_call_id": str(structured_record.get("provider_call_id") or ""),
+                "tool_name": str(structured_record.get("tool_name") or ""),
+                "status": str(structured_record.get("status") or ""),
+                "failure_class": str(classification.get("class") or ""),
+                "failure_kind": str(classification.get("kind") or ""),
+                "failure_phase": str(classification.get("phase") or ""),
+                "required_next_probe": str(classification.get("required_next_probe") or ""),
+                "source": "recomputed_structured_execution_evidence",
+            }
         return {}
     result = failed_results[-1]
     for candidate in reversed(failed_results):
         if isinstance(candidate, dict) and str(candidate.get("tool_name") or "") in _IMPLEMENT_V2_TERMINAL_TOOLS:
             result = candidate
             break
-    content = result.get("content")
-    first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
-    return {
+    first_content = _first_tool_result_payload(result)
+    latest = {
         "provider_call_id": str(result.get("provider_call_id") or ""),
         "tool_name": str(result.get("tool_name") or ""),
         "status": str(result.get("status") or ""),
@@ -339,6 +489,18 @@ def _implement_v2_latest_failure(failed_results):
         "stderr_tail": _clip_text(first_content.get("stderr_tail") or first_content.get("stderr") or ""),
         "stdout_tail": _clip_text(first_content.get("stdout_tail") or first_content.get("stdout") or ""),
     }
+    if structured_record:
+        classification = structured_record.get("classification") if isinstance(structured_record.get("classification"), dict) else {}
+        latest.update(
+            {
+                "failure_class": str(classification.get("class") or ""),
+                "failure_kind": str(classification.get("kind") or ""),
+                "failure_phase": str(classification.get("phase") or ""),
+                "required_next_probe": str(classification.get("required_next_probe") or ""),
+                "source": "recomputed_structured_execution_evidence",
+            }
+        )
+    return latest
 
 
 def _implement_v2_latest_failed_terminal_result(failed_results):
@@ -499,6 +661,12 @@ def _implement_v2_next_action(summary, *, external_reward=None):
     if summary.get("tool_contract_shell_surface_misuse_seen") and latest:
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
+    if latest.get("failure_class") == "runtime_artifact_missing":
+        required_next_probe = str(latest.get("required_next_probe") or "inspect the producing substep and artifact path")
+        return (
+            "debug implement_v2 divergence: expected runtime artifact is missing after structured verifier evidence; "
+            f"{required_next_probe} before another live speed run"
+        )
     if summary.get("runtime_artifact_contract_mismatch"):
         return (
             "debug implement_v2 divergence: compare runtime artifact ABI/ISA/endianness/entrypoint "
@@ -780,6 +948,24 @@ def _check_assertions(entry, assertions):
     if expected:
         observed = (entry.get("current") or {}).get("next_action") or ""
         add("next_action_contains", expected in observed, observed, expected)
+    current_v2 = ((entry.get("current") or {}).get("implement_v2") or {})
+    structured_replay = current_v2.get("structured_execution_replay") if isinstance(current_v2, dict) else {}
+    if assertions.get("structured_execution_replay_required"):
+        observed = (structured_replay or {}).get("classification_count") if isinstance(structured_replay, dict) else 0
+        add("structured_execution_replay_required", int(observed or 0) > 0, observed, ">=1 structured classification")
+    expected = assertions.get("structured_failure_class")
+    if expected:
+        latest_structured = (
+            (structured_replay or {}).get("latest_failure_classification")
+            if isinstance(structured_replay, dict)
+            else {}
+        )
+        observed = latest_structured.get("class") if isinstance(latest_structured, dict) else ""
+        add("structured_failure_class", observed == expected, observed, expected)
+    expected = assertions.get("structured_replay_mismatch_count")
+    if expected is not None:
+        observed = (structured_replay or {}).get("mismatch_count") if isinstance(structured_replay, dict) else None
+        add("structured_replay_mismatch_count", observed == expected, observed, expected)
     current_frontier = ((entry.get("current") or {}).get("active_compatibility_frontier") or {})
     expected = assertions.get("frontier_signature")
     if expected:
@@ -881,6 +1067,17 @@ def replay_terminal_bench_job(
                 "expected": "current resume rebuilt from work_report steps",
             }
         )
+        current_v2 = ((entry.get("current") or {}).get("implement_v2") or {})
+        structured_replay = current_v2.get("structured_execution_replay") if isinstance(current_v2, dict) else {}
+        if isinstance(structured_replay, dict) and structured_replay.get("mismatch_count"):
+            checks.append(
+                {
+                    "name": f"{entry.get('trial_name')}:structured_execution_classification_matches",
+                    "passed": False,
+                    "observed": structured_replay.get("mismatches") or [],
+                    "expected": "stored failure_classification matches replay-recomputed classification",
+                }
+            )
     return {
         "kind": "terminal_bench_replay",
         "schema_version": 1,
@@ -919,6 +1116,12 @@ def format_terminal_bench_replay(report):
         if blockers:
             lines.append(f"  blockers: {', '.join(str(item) for item in blockers)}")
         if current_v2:
+            structured_replay = current_v2.get("structured_execution_replay")
+            latest_structured = (
+                structured_replay.get("latest_failure_classification")
+                if isinstance(structured_replay, dict)
+                else {}
+            )
             lines.append(
                 "  implement_v2: "
                 f"status={current_v2.get('lane_status') or '-'} "
@@ -927,6 +1130,13 @@ def format_terminal_bench_replay(report):
                 f"compiled_frontier={current_v2.get('compiled_source_frontier_observed')} "
                 f"tool_contract_misuse={current_v2.get('tool_contract_shell_surface_misuse')}"
             )
+            if isinstance(structured_replay, dict) and structured_replay.get("classification_count"):
+                lines.append(
+                    "  structured_execution: "
+                    f"classifications={structured_replay.get('classification_count')} "
+                    f"mismatches={structured_replay.get('mismatch_count')} "
+                    f"latest={latest_structured.get('class') or '-'}"
+                )
     failed = [check for check in report.get("checks") or [] if not check.get("passed")]
     if failed:
         lines.append("")

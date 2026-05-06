@@ -6,7 +6,11 @@ import unittest
 from pathlib import Path
 
 from mew.cli import build_parser
-from mew.dogfood import _write_repository_test_tail_emulator_fixture, _write_terminal_bench_replay_fixture
+from mew.dogfood import (
+    _write_expected_artifact_contract_emulator_fixture,
+    _write_repository_test_tail_emulator_fixture,
+    _write_terminal_bench_replay_fixture,
+)
 from mew.terminal_bench_replay import (
     format_terminal_bench_replay,
     replay_terminal_bench_job,
@@ -330,6 +334,111 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertFalse(current_v2["compiled_source_frontier_observed"])
             self.assertIn("compiled/native source frontier", trial["current"]["next_action"])
             self.assertIn("implement_v2:", text)
+
+    def test_replay_terminal_bench_job_recomputes_expected_artifact_classification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_expected_artifact_contract_emulator_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-doom-for-mips",
+                assertions={
+                    "mew_exit_code": 1,
+                    "external_reward": 0.0,
+                    "structured_execution_replay_required": True,
+                    "structured_failure_class": "runtime_artifact_missing",
+                    "structured_replay_mismatch_count": 0,
+                },
+            )
+            text = format_terminal_bench_replay(report)
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+            structured_replay = current_v2["structured_execution_replay"]
+            latest = structured_replay["latest_failure_classification"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(structured_replay["classification_count"], 1)
+            self.assertEqual(structured_replay["mismatch_count"], 0)
+            self.assertEqual(latest["class"], "runtime_artifact_missing")
+            self.assertEqual(current_v2["latest_failure"]["source"], "recomputed_structured_execution_evidence")
+            self.assertIn("expected runtime artifact", trial["current"]["next_action"])
+            self.assertIn("runtime_artifact_missing", text)
+
+    def test_replay_terminal_bench_job_reports_stored_classification_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_expected_artifact_contract_emulator_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "make-doom-for-mips__expected-artifact-contract"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            manifest_path = v2_dir / "proof-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["tool_results"][0]["content"][0]["failure_classification"]["class"] = "build_failure"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-doom-for-mips",
+                assertions={
+                    "mew_exit_code": 1,
+                    "external_reward": 0.0,
+                    "structured_execution_replay_required": True,
+                    "structured_failure_class": "runtime_artifact_missing",
+                    "structured_replay_mismatch_count": 1,
+                },
+            )
+            structured_replay = report["trials"][0]["current"]["implement_v2"]["structured_execution_replay"]
+            failed_checks = [check for check in report["checks"] if not check["passed"]]
+
+            self.assertEqual(report["status"], "fail")
+            self.assertEqual(structured_replay["mismatch_count"], 1)
+            self.assertEqual(structured_replay["mismatches"][0]["stored"]["class"], "build_failure")
+            self.assertEqual(structured_replay["mismatches"][0]["recomputed"]["class"], "runtime_artifact_missing")
+            self.assertTrue(
+                any(check["name"].endswith(":structured_execution_classification_matches") for check in failed_checks)
+            )
+
+    def test_replay_terminal_bench_job_reports_stored_evidence_ref_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_expected_artifact_contract_emulator_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "make-doom-for-mips__expected-artifact-contract"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            manifest_path = v2_dir / "proof-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["tool_results"][0]["content"][0]["failure_classification"]["evidence_refs"] = [
+                {"kind": "artifact_evidence", "id": "stale-artifact-evidence"}
+            ]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-doom-for-mips",
+                assertions={
+                    "mew_exit_code": 1,
+                    "external_reward": 0.0,
+                    "structured_execution_replay_required": True,
+                    "structured_failure_class": "runtime_artifact_missing",
+                    "structured_replay_mismatch_count": 1,
+                },
+            )
+            structured_replay = report["trials"][0]["current"]["implement_v2"]["structured_execution_replay"]
+
+            self.assertEqual(report["status"], "fail")
+            self.assertEqual(structured_replay["mismatch_count"], 1)
+            self.assertEqual(
+                structured_replay["mismatches"][0]["stored"]["evidence_refs"],
+                [{"kind": "artifact_evidence", "id": "stale-artifact-evidence"}],
+            )
 
     def test_replay_terminal_bench_job_accepts_implement_v2_model_parse_error_without_tool_calls(self):
         with tempfile.TemporaryDirectory() as tmp:

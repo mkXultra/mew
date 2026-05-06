@@ -1690,6 +1690,28 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["import_only_decision"]["decision"], "block_continue")
             self.assertEqual(scenario["artifacts"]["behavior_decision"]["decision"], "allow_complete")
 
+    def test_run_dogfood_m6_24_expected_artifact_contract_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-expected-artifact-contract-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+            structured_replay = scenario["artifacts"]["structured_execution_replay"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-expected-artifact-contract-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(
+                structured_replay["latest_failure_classification"]["class"],
+                "runtime_artifact_missing",
+            )
+            self.assertEqual(structured_replay["mismatch_count"], 0)
+
     def test_run_dogfood_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

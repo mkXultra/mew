@@ -109,6 +109,7 @@ DOGFOOD_SCENARIOS = (
     "m6_13-deliberation-internalization",
     "m6_24-terminal-bench-replay",
     "m6_24-compile-compcert-emulator",
+    "m6_24-expected-artifact-contract-emulator",
     "m6_24-repository-test-tail-emulator",
     "m6_24-final-verifier-budget-emulator",
     "m6_24-same-family-compatibility-emulator",
@@ -14673,6 +14674,233 @@ def _write_terminal_bench_replay_fixture(workspace, *, task="compile-compcert"):
     return job_dir
 
 
+def _write_expected_artifact_contract_emulator_fixture(workspace, *, task="make-doom-for-mips"):
+    job_dir = Path(workspace) / "expected-artifact-contract-emulator-fixture"
+    trial_name = f"{task}__expected-artifact-contract"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "expected-artifact-contract-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text("missing runtime frame artifact\n", encoding="utf-8")
+    contract = {
+        "schema_version": 3,
+        "id": "contract:runtime-frame",
+        "role": "runtime",
+        "stage": "verification",
+        "purpose": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_exit": {"mode": "any"},
+        "verifier_required": True,
+        "expected_artifacts": [
+            {
+                "id": "frame.bmp",
+                "kind": "file",
+                "path": "/tmp/doom/frame.bmp",
+                "required": True,
+                "confidence": "high",
+                "producer_substep_id": "runtime-smoke",
+                "freshness": "created_after_run_start",
+                "checks": [{"type": "exists", "severity": "blocking"}],
+            }
+        ],
+        "substeps": [
+            {
+                "id": "runtime-smoke",
+                "role": "runtime",
+                "stage": "verification",
+                "purpose": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+                "expected_exit": {"mode": "any"},
+                "produces_artifacts": ["frame.bmp"],
+                "verifier_required": True,
+            }
+        ],
+    }
+    tool_run_record = {
+        "schema_version": 1,
+        "record_id": "tool-run:runtime-frame",
+        "command_run_id": "command:runtime-frame",
+        "provider_call_id": "runtime-frame",
+        "declared_tool_name": "run_command",
+        "effective_tool_name": "run_command",
+        "contract_id": "contract:runtime-frame",
+        "substep_id": "runtime-smoke",
+        "status": "failed",
+        "exit_code": 2,
+        "timed_out": False,
+        "interrupted": False,
+        "semantic_exit": {"ok": True, "category": "ok", "source": "contract_override", "message": "any exit accepted"},
+        "stdout_preview": "renderer started and Program terminated at PC=0x4002e8",
+        "stderr_preview": "runtime returned nonzero and no frame artifact was written",
+    }
+    artifact_evidence = [
+        {
+            "schema_version": 1,
+            "evidence_id": "artifact-evidence:frame.bmp:tool-run:runtime-frame",
+            "artifact_id": "frame.bmp",
+            "command_run_id": "command:runtime-frame",
+            "tool_run_record_id": "tool-run:runtime-frame",
+            "contract_id": "contract:runtime-frame",
+            "substep_id": "runtime-smoke",
+            "target": {"path": "/tmp/doom/frame.bmp"},
+            "path": "/tmp/doom/frame.bmp",
+            "kind": "file",
+            "required": True,
+            "source": "model_declared",
+            "confidence": "high",
+            "freshness": "created_after_run_start",
+            "pre_run_stat": {"exists": False, "path": "/tmp/doom/frame.bmp"},
+            "post_run_stat": {"exists": False, "path": "/tmp/doom/frame.bmp"},
+            "checks": [
+                {
+                    "id": "frame.bmp:exists:0",
+                    "type": "exists",
+                    "passed": False,
+                    "severity": "blocking",
+                    "observed": {"exists": False},
+                    "message": "artifact frame.bmp check exists failed",
+                }
+            ],
+            "status": "failed",
+            "blocking": True,
+        }
+    ]
+    expected_classification = {
+        "schema_version": 1,
+        "classification_id": "failure:contract:runtime-frame",
+        "phase": "runtime",
+        "kind": "missing_artifact",
+        "class": "runtime_artifact_missing",
+        "confidence": "high",
+        "retryable": True,
+        "summary": "required artifact frame.bmp failed structured checks",
+        "evidence_refs": [
+            {"kind": "tool_run_record", "id": "tool-run:runtime-frame"},
+            {"kind": "command_run", "id": "command:runtime-frame"},
+            {"kind": "artifact_evidence", "id": "artifact-evidence:frame.bmp:tool-run:runtime-frame"},
+        ],
+        "required_next_probe": "Inspect the producing substep and artifact path before another rebuild.",
+    }
+    payload = {
+        "command": "make -j2 && node vm.js --write-frame /tmp/doom/frame.bmp",
+        "cwd": "/tmp/doom",
+        "exit_code": 2,
+        "stdout_tail": "renderer started and Program terminated at PC=0x4002e8",
+        "stderr_tail": "runtime returned nonzero and no frame artifact was written",
+        "execution_contract_normalized": contract,
+        "tool_run_record": tool_run_record,
+        "artifact_evidence": artifact_evidence,
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:contract:runtime-frame",
+            "contract_id": "contract:runtime-frame",
+            "verdict": "fail",
+            "reason": "required run or artifact evidence failed",
+        },
+        "failure_classification": expected_classification,
+        "structured_finish_gate": {"blocked": True, "reasons": ["runtime_artifact_missing"]},
+    }
+    report = {
+        "work_exit_code": 1,
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 0,
+                },
+            },
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction expected-artifact", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"], "execution_contract": contract},
+                        }
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "runtime-frame",
+                        "tool_name": "run_command",
+                        "status": "failed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
 def _write_repository_test_tail_emulator_fixture(workspace, *, task="build-cython-ext"):
     job_dir = Path(workspace) / "repository-test-tail-emulator-fixture"
     trial_name = f"{task}__repository-tail"
@@ -15563,6 +15791,66 @@ def run_m6_24_terminal_bench_replay_scenario(
         "replay_status": replay.get("status"),
         "first_trial": first_trial.get("trial_name") or "",
         "current_long_build": current_long,
+        "structured_execution_replay": (
+            ((first_trial.get("current") or {}).get("implement_v2") or {}).get("structured_execution_replay") or {}
+        ),
+    }
+    return report
+
+
+def run_m6_24_expected_artifact_contract_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_expected_artifact_contract_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-doom-for-mips",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "expected runtime artifact",
+            "structured_execution_replay_required": True,
+            "structured_failure_class": "runtime_artifact_missing",
+            "structured_replay_mismatch_count": 0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    structured_replay = current_v2.get("structured_execution_replay") if isinstance(current_v2, dict) else {}
+    latest = (
+        structured_replay.get("latest_failure_classification")
+        if isinstance(structured_replay, dict)
+        else {}
+    )
+    _scenario_check(
+        checks,
+        "m6_24_expected_artifact_contract_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_expected_artifact_contract_recomputes_runtime_artifact_missing",
+        isinstance(latest, dict) and latest.get("class") == "runtime_artifact_missing",
+        latest,
+        "runtime_artifact_missing",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_expected_artifact_contract_compares_stored_classification",
+        isinstance(structured_replay, dict)
+        and structured_replay.get("stored_classification_count") == 1
+        and structured_replay.get("mismatch_count") == 0,
+        structured_replay,
+        "stored classification matches recomputed classification",
+    )
+    report = _scenario_report("m6_24-expected-artifact-contract-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "structured_execution_replay": structured_replay if isinstance(structured_replay, dict) else {},
+        "next_action": ((first_trial.get("current") or {}).get("next_action") or ""),
     }
     return report
 
@@ -16884,6 +17172,13 @@ def run_dogfood_scenario(args):
         elif name == "m6_24-compile-compcert-emulator":
             reports.append(
                 run_m6_24_compile_compcert_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-expected-artifact-contract-emulator":
+            reports.append(
+                run_m6_24_expected_artifact_contract_emulator_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
                 )
