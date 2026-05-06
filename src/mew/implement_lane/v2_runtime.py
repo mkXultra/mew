@@ -117,16 +117,51 @@ def run_live_json_implement_v2(
     finish_gate_decision: dict[str, object] = {}
     finish_gate_block_count = 0
     run_started = time.monotonic()
+    base_max_turns = max(1, int(max_turns))
+    turn_budget_limit = base_max_turns
+    terminal_failure_reaction_turn_limit = _terminal_failure_reaction_turn_limit(lane_input, base_max_turns)
+    terminal_failure_reaction_turns_used = 0
+    turn_index = 0
+
+    def extend_for_terminal_failure_reaction_if_available(
+        tool_result_slice: tuple[ToolResultEnvelope, ...],
+        *,
+        reason: str,
+    ) -> bool:
+        nonlocal terminal_failure_reaction_turns_used, turn_budget_limit
+        if not _should_extend_for_terminal_failure_reaction(
+            lane_input,
+            tool_result_slice,
+            turn_index=turn_index,
+            turn_budget_limit=turn_budget_limit,
+            reaction_turns_used=terminal_failure_reaction_turns_used,
+            reaction_turn_limit=terminal_failure_reaction_turn_limit,
+            run_started=run_started,
+        ):
+            return False
+        terminal_failure_reaction_turns_used += 1
+        turn_budget_limit += 1
+        if progress:
+            progress(
+                "implement_v2 extending one terminal-failure reaction turn "
+                f"({terminal_failure_reaction_turns_used}/{terminal_failure_reaction_turn_limit}) "
+                f"reason={reason}"
+            )
+        return True
 
     try:
-        for turn_index in range(1, max(1, int(max_turns)) + 1):
+        while turn_index < turn_budget_limit:
+            turn_index += 1
             model_turns = turn_index
             turn_id = f"turn-{turn_index}"
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
                 turn_index=turn_index,
-                max_turns=max_turns,
+                max_turns=turn_budget_limit,
+                base_max_turns=base_max_turns,
+                terminal_failure_reaction_turns_used=terminal_failure_reaction_turns_used,
+                terminal_failure_reaction_turn_limit=terminal_failure_reaction_turn_limit,
                 history=tuple(history),
             )
             prompt_chars_total += len(prompt)
@@ -216,7 +251,7 @@ def run_live_json_implement_v2(
                                 decision=finish_gate_decision,
                             )
                         )
-                        if turn_index < max(1, int(max_turns)):
+                        if turn_index < turn_budget_limit:
                             history.append(
                                 _finish_gate_history(
                                     turn_index=turn_index,
@@ -283,6 +318,24 @@ def run_live_json_implement_v2(
                     for call in current_calls
                 )
                 seen_provider_call_ids.update(call.provider_call_id for call in current_calls if call.provider_call_id)
+            finish_gate_tool_results = tuple(tool_results) + tuple(current_results)
+            if _should_closeout_for_terminal_failure_reaction(
+                current_results,
+                turn_index=turn_index,
+                turn_budget_limit=turn_budget_limit,
+            ):
+                closeout_chunk, cleanup_chunk = _closeout_active_commands(
+                    exec_runtime,
+                    lane_input=lane_input,
+                    run_started=run_started,
+                )
+                closeout_payloads += closeout_chunk
+                cleanup_payloads += cleanup_chunk
+                current_results = _project_command_closeouts(
+                    current_results,
+                    closeout_payloads=closeout_chunk,
+                    cleanup_payloads=cleanup_chunk,
+                )
             tool_calls.extend(current_calls)
             tool_results.extend(current_results)
             transcript.extend(
@@ -320,7 +373,7 @@ def run_live_json_implement_v2(
                 finish_gate_decision = _live_acceptance_done_gate(
                     lane_input,
                     finish_arguments,
-                    tuple(tool_results),
+                    finish_gate_tool_results,
                 )
                 if (
                     _finish_outcome(finish_arguments) in _COMPLETED_FINISH_OUTCOMES
@@ -335,7 +388,7 @@ def run_live_json_implement_v2(
                             decision=finish_gate_decision,
                         )
                     )
-                    if turn_index < max(1, int(max_turns)):
+                    if turn_index < turn_budget_limit:
                         history.append(
                             _finish_gate_history(
                                 turn_index=turn_index,
@@ -354,6 +407,25 @@ def run_live_json_implement_v2(
                         "summary": continuation_prompt,
                         "finish_gate": finish_gate_decision,
                     }
+                    if extend_for_terminal_failure_reaction_if_available(
+                        current_results,
+                        reason="finish_gate_terminal_failure",
+                    ):
+                        finish_arguments = {
+                            "outcome": "continue",
+                            "summary": "terminal failure reaction turn reserved after finish gate blocked completion",
+                            "finish_gate": finish_gate_decision,
+                        }
+                        continue
+                elif extend_for_terminal_failure_reaction_if_available(
+                    current_results,
+                    reason="finish_with_terminal_failure",
+                ):
+                    finish_arguments = {
+                        "outcome": "continue",
+                        "summary": "terminal failure reaction turn reserved before accepting finish",
+                    }
+                    continue
                 transcript.append(
                     adapter.finish_event_for_turn(
                         lane=IMPLEMENT_V2_LANE,
@@ -363,6 +435,11 @@ def run_live_json_implement_v2(
                     )
                 )
                 break
+            if extend_for_terminal_failure_reaction_if_available(
+                current_results,
+                reason="continue_terminal_failure",
+            ):
+                continue
         else:
             finish_arguments = {
                 "outcome": "blocked",
@@ -373,17 +450,19 @@ def run_live_json_implement_v2(
             reason="implement_v2 live_json attempt closed before command finalized"
         )
         raise
-    closeout_payloads, cleanup_payloads = _closeout_active_commands(
+    final_closeout_payloads, final_cleanup_payloads = _closeout_active_commands(
         exec_runtime,
         lane_input=lane_input,
         run_started=run_started,
     )
-    if closeout_payloads or cleanup_payloads:
+    closeout_payloads += final_closeout_payloads
+    cleanup_payloads += final_cleanup_payloads
+    if final_closeout_payloads or final_cleanup_payloads:
         tool_results = list(
             _project_command_closeouts(
                 tuple(tool_results),
-                closeout_payloads=closeout_payloads,
-                cleanup_payloads=cleanup_payloads,
+                closeout_payloads=final_closeout_payloads,
+                cleanup_payloads=final_cleanup_payloads,
             )
         )
 
@@ -404,6 +483,10 @@ def run_live_json_implement_v2(
             "tool_results": len(tool_results),
             "model_turns": model_turns,
             "model_error": dict(model_error),
+            "base_max_turns": base_max_turns,
+            "turn_budget_limit": turn_budget_limit,
+            "terminal_failure_reaction_turn_limit": terminal_failure_reaction_turn_limit,
+            "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
             "command_closeout_count": len(closeout_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
@@ -457,6 +540,10 @@ def run_live_json_implement_v2(
             "model_turns": model_turns,
             "model_error": dict(model_error),
             "model_elapsed_seconds": round(model_elapsed_seconds, 3),
+            "base_max_turns": base_max_turns,
+            "turn_budget_limit": turn_budget_limit,
+            "terminal_failure_reaction_turn_limit": terminal_failure_reaction_turn_limit,
+            "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
             "prompt_chars_total": prompt_chars_total,
@@ -1012,6 +1099,65 @@ def _remaining_wall_budget_seconds(lane_input: ImplementLaneInput, *, run_starte
     return max(0.0, min(600.0, remaining))
 
 
+def _terminal_failure_reaction_turn_limit(lane_input: ImplementLaneInput, base_max_turns: int) -> int:
+    configured = lane_input.lane_config.get("terminal_failure_reaction_turns")
+    if configured not in (None, ""):
+        try:
+            return max(0, min(5, int(configured)))
+        except (TypeError, ValueError):
+            return 0
+    return max(1, min(3, int(base_max_turns) // 8 or 1))
+
+
+def _should_extend_for_terminal_failure_reaction(
+    lane_input: ImplementLaneInput,
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    turn_index: int,
+    turn_budget_limit: int,
+    reaction_turns_used: int,
+    reaction_turn_limit: int,
+    run_started: float,
+) -> bool:
+    if turn_index < turn_budget_limit:
+        return False
+    if reaction_turns_used >= reaction_turn_limit:
+        return False
+    if not _has_terminal_failure_result(tool_results):
+        return False
+    remaining_wall = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining_wall is None:
+        return True
+    configured_minimum = lane_input.lane_config.get("terminal_failure_reaction_min_wall_seconds")
+    try:
+        minimum_wall = float(configured_minimum) if configured_minimum not in (None, "") else 30.0
+    except (TypeError, ValueError):
+        minimum_wall = 30.0
+    return remaining_wall >= max(0.0, minimum_wall)
+
+
+def _should_closeout_for_terminal_failure_reaction(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    turn_index: int,
+    turn_budget_limit: int,
+) -> bool:
+    if turn_index < turn_budget_limit:
+        return False
+    return any(
+        result.tool_name in {"run_command", "run_tests", "poll_command"} and result.status == "yielded"
+        for result in tool_results
+    )
+
+
+def _has_terminal_failure_result(tool_results: tuple[ToolResultEnvelope, ...]) -> bool:
+    return any(
+        result.tool_name in {"run_command", "run_tests", "poll_command"}
+        and result.status in {"failed", "interrupted"}
+        for result in tool_results
+    )
+
+
 def _projected_command_closeout_status(payload: dict[str, object]) -> str:
     status = str(payload.get("status") or "")
     if status == "completed" or payload.get("exit_code") == 0:
@@ -1356,6 +1502,9 @@ def _live_json_prompt(
     lane_attempt_id: str,
     turn_index: int,
     max_turns: int,
+    base_max_turns: int | None = None,
+    terminal_failure_reaction_turns_used: int = 0,
+    terminal_failure_reaction_turn_limit: int = 0,
     history: tuple[dict[str, object], ...],
 ) -> str:
     sections = render_prompt_sections(build_implement_v2_prompt_sections(lane_input))
@@ -1384,9 +1533,15 @@ def _live_json_prompt(
         "set finish.outcome to continue or omit finish. For edits, prefer exact edit_file old/new "
         "(old_string/new_string aliases are accepted) or apply_patch. If the CLI grants accept-edits, you may request apply=true; mew supplies "
         "independent approval outside the model output. If tests or an external verifier matter, "
-        "run a concrete run_command or run_tests before claiming completed.\n"
+        "run a concrete run_command or run_tests before claiming completed. "
+        "If this is a terminal-failure reaction turn, do not broaden the task: make the smallest "
+        "repair/check that directly responds to the latest failed terminal result, or finish blocked "
+        "with the exact blocker.\n"
         f"lane_attempt_id: {lane_attempt_id}\n"
         f"turn: {turn_index}/{max_turns}\n"
+        f"base_max_turns: {base_max_turns if base_max_turns is not None else max_turns}\n"
+        f"terminal_failure_reaction_turns_used: {terminal_failure_reaction_turns_used}/"
+        f"{terminal_failure_reaction_turn_limit}\n"
         f"response_contract_json:\n{json.dumps(response_contract, ensure_ascii=False, indent=2)}\n"
         f"history_json:\n{json.dumps(list(history)[-8:], ensure_ascii=False, indent=2)}\n"
         "[/section:implement_v2_live_json_transport]"

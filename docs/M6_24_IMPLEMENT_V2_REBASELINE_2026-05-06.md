@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | max-turn/latest-terminal reentry classifier repair reviewed; commit pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1243-empty-assistant-retry` | commit classifier repair, then select bounded generic repair for the compile frontier / turn-budget gap before another live speed_1 |
+| `make-doom-for-mips` | 1/5 | terminal-failure reaction-turn repair reviewed; pre-speed pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1243-empty-assistant-retry` | commit reaction-turn repair, run pre-speed on current head, then exactly one same-shape v2 speed_1 if green |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -227,14 +227,21 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   classifies it as `max_turns_before_finish` / `ImplementV2LoopLimit`,
   preserves active-command closeout as a more specific diagnosis, and makes the
   next action point to the latest failed terminal result rather than a later
-  non-terminal tool failure. Focused implement_v2 replay tests, exact replay on
-  the 1243 artifact with `--assert-next-action-contains 'latest failed
-  run_command'`, matching terminal-bench replay dogfood, scoped ruff, JSONL
-  validation, and `git diff --check` passed. codex-ultra reviewer session
-  `019dfb76-b107-76c3-8613-2c7d5219ec10` requested the closeout/terminal
-  priority fixes and approved the corrected diff. After commit, choose a
-  bounded generic compile-frontier or turn-budget repair before spending
-  another live `make-doom-for-mips` speed item.
+  non-terminal tool failure.
+- The follow-up bounded reaction-turn repair lets `implement_v2` spend a small
+  extra turn only when the configured turn budget is exhausted on a latest
+  terminal tool failure and wall budget remains. It also closes out yielded
+  terminal commands at the budget boundary before reaction classification,
+  preserves accumulated closeout metrics, keeps deterministic finish-gate
+  evaluation on pre-closeout provider-visible results, and prevents
+  `finish.completed` from bypassing a final terminal failure. Validation
+  passed: full `tests/test_implement_lane.py` (`88 passed`), focused
+  terminal-bench replay/dogfood suite (`18 passed, 108 deselected`), exact
+  replay/dogfood on the 1243 artifact, scoped ruff, and `git diff --check`.
+  codex-ultra reviewer session `019dfb88-3c9e-7261-bc6a-01b8e993a874`
+  requested the closeout/finish edge-case regressions and then approved. After
+  commit, run the pre-speed operation on current head and spend exactly one
+  same-shape `implement_v2` speed_1 only if pre-speed stays green.
 
 ## Repair Trigger
 

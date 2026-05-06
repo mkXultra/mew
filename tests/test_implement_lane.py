@@ -741,18 +741,7 @@ def test_implement_v2_live_json_model_parse_error_is_replayable_lane_failure(tmp
 
 
 def test_implement_v2_live_json_drains_active_command_at_max_turns(tmp_path) -> None:
-    command = shlex.join(
-        [
-            sys.executable,
-            "-c",
-            (
-                "from pathlib import Path; import time; "
-                "print('start', flush=True); time.sleep(0.05); "
-                "Path('done.txt').write_text('done', encoding='utf-8'); "
-                "print('done', flush=True)"
-            ),
-        ]
-    )
+    command = "printf 'start\\n'; sleep 0.2; printf done > done.txt; printf 'done\\n'"
 
     def fake_model(*_args, **_kwargs):
         return {
@@ -764,8 +753,9 @@ def test_implement_v2_live_json_drains_active_command_at_max_turns(tmp_path) -> 
                     "arguments": {
                         "command": command,
                         "cwd": ".",
+                        "use_shell": True,
                         "timeout": 5,
-                        "foreground_budget_seconds": 0.001,
+                        "foreground_budget_seconds": 0,
                     },
                 }
             ],
@@ -803,6 +793,224 @@ def test_implement_v2_live_json_drains_active_command_at_max_turns(tmp_path) -> 
     assert result.metrics["command_closeout_count"] == 1
     assert result.metrics["orphaned_command_cleanup_count"] == 0
     assert result.metrics["terminal_evidence_count"] == 1
+
+
+def test_implement_v2_live_json_extends_one_reaction_turn_after_final_terminal_failure(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run final compile attempt",
+            "tool_calls": [
+                {
+                    "id": "compile-fail",
+                    "name": "run_command",
+                    "arguments": {"command": "printf 'compile failed\\n' >&2; exit 2", "cwd": ".", "use_shell": True},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "make the smallest terminal-failure repair and verify",
+            "tool_calls": [
+                {
+                    "id": "repair-verify",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf fixed > fixed.txt && test \"$(cat fixed.txt)\" = fixed",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "latest terminal failure repaired",
+                "acceptance_evidence": ["repair-verify confirmed fixed.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify fixed.txt"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["base_max_turns"] == 1
+    assert result.metrics["turn_budget_limit"] == 2
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert result.metrics["model_turns"] == 2
+    assert "terminal_failure_reaction_turns_used: 1/1" in prompts[1]
+    assert (tmp_path / "fixed.txt").read_text(encoding="utf-8") == "fixed"
+
+
+def test_implement_v2_live_json_extends_after_final_closeout_failure(tmp_path) -> None:
+    failing_command = "printf 'start\\n'; sleep 0.2; printf 'failed\\n' >&2; exit 2"
+    outputs = [
+        {
+            "summary": "start final command that fails after foreground handoff",
+            "tool_calls": [
+                {
+                    "id": "closeout-fail",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": failing_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "react to the closeout failure",
+            "tool_calls": [
+                {
+                    "id": "repair-after-closeout",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf closeout-repaired > closeout.txt "
+                            "&& test \"$(cat closeout.txt)\" = closeout-repaired"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "closeout failure repaired",
+                "acceptance_evidence": ["repair-after-closeout confirmed closeout.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify closeout.txt", "max_wall_seconds": 5},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    assert result.status == "completed"
+    assert manifest["tool_results"][0]["status"] == "failed"
+    assert result.metrics["command_closeout_count"] == 1
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert result.metrics["model_turns"] == 2
+    assert "terminal_failure_reaction_turns_used: 1/1" in prompts[1]
+    assert (tmp_path / "closeout.txt").read_text(encoding="utf-8") == "closeout-repaired"
+
+
+def test_implement_v2_live_json_extends_after_final_failed_tool_claims_completed(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "failed terminal result but claims done",
+            "tool_calls": [
+                {
+                    "id": "failed-smoke",
+                    "name": "run_command",
+                    "arguments": {"command": "printf 'failed\\n' >&2; exit 2", "cwd": ".", "use_shell": True},
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "incorrectly claims completion",
+                "acceptance_evidence": ["failed-smoke was enough"],
+            },
+        },
+        {
+            "summary": "repair after failed finish",
+            "tool_calls": [
+                {
+                    "id": "repair-after-finish",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf finished > finish.txt && test \"$(cat finish.txt)\" = finished",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "failed finish repaired",
+                "acceptance_evidence": ["repair-after-finish confirmed finish.txt"],
+            },
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify finish.txt"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert result.metrics["model_turns"] == 2
+    assert (tmp_path / "finish.txt").read_text(encoding="utf-8") == "finished"
 
 
 def test_implement_v2_closeout_preserves_command_timeout(tmp_path) -> None:
