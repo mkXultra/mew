@@ -33,6 +33,7 @@ from mew.implement_lane import (
     validate_proof_manifest_pairing,
     validate_tool_result_pairing,
 )
+from mew.implement_lane.v2_runtime import _finish_evidence_refs
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
 
@@ -281,6 +282,425 @@ def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_pa
     manifest = result.updated_lane_state["proof_manifest"]
     assert manifest["tool_results"][1]["status"] == "invalid"
     assert "duplicate_provider_call_id_across_turns" in manifest["tool_results"][1]["content"][0]["reason"]
+
+
+def test_implement_v2_live_json_blocks_format_only_visual_finish(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run visual smoke",
+            "tool_calls": [
+                {
+                    "id": "visual-smoke",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "python3 - <<'PY'\n"
+                            "print('saved /tmp/frame.bmp')\n"
+                            "print('verified BMP 320x200 valid header')\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "frame was generated",
+                "acceptance_evidence": [
+                    "turn 1 visual-smoke: saved /tmp/frame.bmp and verified BMP 320x200 valid header"
+                ],
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert blockers[0]["code"] == "runtime_visual_artifact_quality_evidence"
+    assert result.updated_lane_state["finish"]["outcome"] == "blocked"
+
+
+def test_implement_v2_live_json_finish_gate_can_continue_then_complete(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run weak visual smoke",
+            "tool_calls": [
+                {
+                    "id": "visual-smoke",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'saved /tmp/frame.bmp\\nvalid BMP header\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "format smoke passed",
+                "acceptance_evidence": ["visual-smoke produced a valid /tmp/frame.bmp"],
+            },
+        },
+        {
+            "summary": "run visual quality smoke",
+            "tool_calls": [
+                {
+                    "id": "visual-quality",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'expected dimensions 640x400\\nreference similarity passed\\nsaved /tmp/frame.bmp\\n'"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "quality smoke passed",
+                "acceptance_evidence": [
+                    (
+                        "visual-quality confirmed expected dimensions 640x400 "
+                        "and reference similarity for /tmp/frame.bmp"
+                    )
+                ],
+            },
+        },
+        {
+            "summary": "clean stale runtime artifact after preserving quality proof",
+            "tool_calls": [
+                {
+                    "id": "clean-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "rm -f /tmp/frame.bmp && printf 'removed /tmp/frame.bmp\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "quality smoke passed and stale artifact removed",
+                "acceptance_evidence": [
+                    (
+                        "visual-quality confirmed expected dimensions 640x400 "
+                        "and reference similarity for /tmp/frame.bmp; "
+                        "clean-frame removed stale /tmp/frame.bmp"
+                    )
+                ],
+            },
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["completion_credit"] is True
+    assert result.metrics["finish_gate_block_count"] == 2
+    assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
+    assert any(event.payload.get("type") == "deterministic_finish_gate" for event in result.transcript)
+
+
+def test_implement_v2_live_json_finish_only_turn_uses_finish_gate(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run weak visual smoke",
+            "tool_calls": [
+                {
+                    "id": "visual-smoke",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'saved /tmp/frame.bmp\\nvalid BMP header\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "finish from prior evidence",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "frame was generated",
+                "acceptance_evidence": ["visual-smoke produced a valid /tmp/frame.bmp"],
+            },
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["finish_gate_block_count"] == 1
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "runtime_visual_artifact_quality_evidence"
+
+
+def test_implement_v2_live_json_finish_gate_does_not_link_ambiguous_alpha_call_id(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run visual quality smoke",
+            "tool_calls": [
+                {
+                    "id": "run",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'expected dimensions 640x400\\nreference similarity passed\\nremoved /tmp/frame.bmp\\n'"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "quality smoke passed",
+                "acceptance_evidence": [
+                    "run completed and confirmed expected dimensions 640x400 with reference similarity"
+                ],
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert blockers[0]["code"] == "runtime_final_verifier_artifact_evidence"
+
+
+def test_implement_v2_finish_evidence_refs_ignore_ambiguous_alpha_call_id() -> None:
+    results = (
+        ToolResultEnvelope(
+            lane_attempt_id="attempt-1",
+            provider_call_id="run",
+            mew_tool_call_id="attempt-1:tool:1:1",
+            tool_name="run_command",
+            status="completed",
+            content=({"stdout": "expected dimensions 640x400\nreference similarity passed\n"},),
+        ),
+        ToolResultEnvelope(
+            lane_attempt_id="attempt-1",
+            provider_call_id="visual-quality",
+            mew_tool_call_id="attempt-1:tool:1:2",
+            tool_name="run_command",
+            status="completed",
+            content=({"stdout": "expected dimensions 640x400\nreference similarity passed\n"},),
+        ),
+        ToolResultEnvelope(
+            lane_attempt_id="attempt-1",
+            provider_call_id="1",
+            mew_tool_call_id="attempt-1:tool:1:3",
+            tool_name="run_command",
+            status="completed",
+            content=({"stdout": "expected dimensions 640x400\nreference similarity passed\n"},),
+        ),
+    )
+
+    assert _finish_evidence_refs("run completed with expected dimensions 640x400", results) == []
+    assert _finish_evidence_refs("turn 1 confirmed expected dimensions 640x400", results) == []
+    assert _finish_evidence_refs("visual-quality confirmed expected dimensions 640x400", results) == [
+        {"kind": "tool_call", "id": 2}
+    ]
+    assert _finish_evidence_refs("visual-quality: confirmed expected dimensions 640x400", results) == [
+        {"kind": "tool_call", "id": 2}
+    ]
+    assert _finish_evidence_refs("visual-quality. confirmed expected dimensions 640x400", results) == [
+        {"kind": "tool_call", "id": 2}
+    ]
+    assert _finish_evidence_refs("visual-quality-extra confirmed expected dimensions 640x400", results) == []
+    assert _finish_evidence_refs("visual-quality.extra confirmed expected dimensions 640x400", results) == []
+
+
+def test_implement_v2_live_json_finish_gate_does_not_link_numeric_turn_ids(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run visual quality smoke",
+            "tool_calls": [
+                {
+                    "id": "1",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'expected dimensions 640x400\\nreference similarity passed\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                },
+                {
+                    "id": "2",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'removed /tmp/frame.bmp\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                },
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "quality smoke passed and stale artifact removed",
+                "acceptance_evidence": [
+                    (
+                        "turn 1 confirmed expected dimensions 640x400 and reference similarity; "
+                        "turn 2 removed /tmp/frame.bmp"
+                    )
+                ],
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert blockers[0]["code"] == "runtime_final_verifier_artifact_evidence"
 
 
 def test_implement_v2_live_json_model_parse_error_is_replayable_lane_failure(tmp_path) -> None:

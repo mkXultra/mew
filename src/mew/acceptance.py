@@ -128,6 +128,8 @@ _RUNTIME_VISUAL_ARTIFACT_MARKERS = (
     "screen size",
 )
 _RUNTIME_VISUAL_ARTIFACT_QUALITY_TASK_MARKERS = (
+    "appropriate",
+    "appropriately",
     "check that",
     "correct",
     "correctly",

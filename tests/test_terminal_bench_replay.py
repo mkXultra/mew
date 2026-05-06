@@ -330,6 +330,34 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertIn("record implement_v2 pass", next_action)
             self.assertNotIn("debug implement_v2 divergence", next_action)
 
+    def test_replay_terminal_bench_job_debugs_completed_implement_v2_with_zero_reward(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            trial_dir = Path(job_dir) / "build-cython-ext__v2fixture"
+            agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+            report_path = agent_dir / "mew-report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["work_exit_code"] = 0
+            report["work_report"]["stop_reason"] = "finish"
+            report["work_report"]["implement_lane_result"]["status"] = "completed"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            (trial_dir / "result.json").write_text(
+                json.dumps({"trial_name": "build-cython-ext__v2fixture", "verifier_result": {"reward": 0.0}}),
+                encoding="utf-8",
+            )
+
+            replay = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 0, "external_reward": 0.0},
+            )
+            next_action = replay["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(replay["status"], "pass")
+            self.assertIn("external verifier reward 0 after v2 completed", next_action)
+            self.assertIn("finish acceptance gate", next_action)
+            self.assertNotIn("record implement_v2 pass", next_action)
+
     def test_terminal_bench_llm_action_fixture_contexts_extract_model_actions(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = _write_terminal_bench_replay_fixture(tmp)

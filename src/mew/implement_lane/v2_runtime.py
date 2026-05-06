@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import time
 
+from ..acceptance import acceptance_done_gate_decision
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
@@ -20,6 +22,10 @@ from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
 from .types import ToolResultEnvelope
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
+
+_COMPLETED_FINISH_OUTCOMES = {"completed", "task_complete", "done", "success"}
+_EVIDENCE_PROVIDER_CALL_RE = re.compile(r"\bcall-[A-Za-z0-9_.:-]+\b")
+_PROVIDER_ID_TOKEN_RE = re.compile(r"[A-Za-z0-9_.:-]+")
 
 
 def describe_implement_v2_runtime(*, work_session_id: object, task_id: object) -> dict[str, object]:
@@ -108,6 +114,8 @@ def run_live_json_implement_v2(
     model_error: dict[str, object] = {}
     cleanup_payloads: tuple[dict[str, object], ...] = ()
     closeout_payloads: tuple[dict[str, object], ...] = ()
+    finish_gate_decision: dict[str, object] = {}
+    finish_gate_block_count = 0
     run_started = time.monotonic()
 
     try:
@@ -190,6 +198,43 @@ def run_live_json_implement_v2(
                     )
                 )
                 if finish_arguments:
+                    finish_gate_decision = _live_acceptance_done_gate(
+                        lane_input,
+                        finish_arguments,
+                        tuple(tool_results),
+                    )
+                    if (
+                        _finish_outcome(finish_arguments) in _COMPLETED_FINISH_OUTCOMES
+                        and finish_gate_decision.get("decision") != "allow_complete"
+                    ):
+                        finish_gate_block_count += 1
+                        continuation_prompt = _finish_gate_continuation_text(finish_gate_decision)
+                        transcript.append(
+                            _finish_gate_transcript_event(
+                                lane_attempt_id=lane_attempt_id,
+                                turn_id=turn_id,
+                                decision=finish_gate_decision,
+                            )
+                        )
+                        if turn_index < max(1, int(max_turns)):
+                            history.append(
+                                _finish_gate_history(
+                                    turn_index=turn_index,
+                                    decision=finish_gate_decision,
+                                    continuation_prompt=continuation_prompt,
+                                )
+                            )
+                            finish_arguments = {
+                                "outcome": "continue",
+                                "summary": continuation_prompt,
+                                "finish_gate": finish_gate_decision,
+                            }
+                            continue
+                        finish_arguments = {
+                            "outcome": "blocked",
+                            "summary": continuation_prompt,
+                            "finish_gate": finish_gate_decision,
+                        }
                     transcript.append(
                         adapter.finish_event_for_turn(
                             lane=IMPLEMENT_V2_LANE,
@@ -272,6 +317,43 @@ def run_live_json_implement_v2(
                     f"{len(current_calls)} call(s), statuses={','.join(result.status for result in current_results)}"
                 )
             if _finish_outcome(finish_arguments) not in {"", "continue"}:
+                finish_gate_decision = _live_acceptance_done_gate(
+                    lane_input,
+                    finish_arguments,
+                    tuple(tool_results),
+                )
+                if (
+                    _finish_outcome(finish_arguments) in _COMPLETED_FINISH_OUTCOMES
+                    and finish_gate_decision.get("decision") != "allow_complete"
+                ):
+                    finish_gate_block_count += 1
+                    continuation_prompt = _finish_gate_continuation_text(finish_gate_decision)
+                    transcript.append(
+                        _finish_gate_transcript_event(
+                            lane_attempt_id=lane_attempt_id,
+                            turn_id=turn_id,
+                            decision=finish_gate_decision,
+                        )
+                    )
+                    if turn_index < max(1, int(max_turns)):
+                        history.append(
+                            _finish_gate_history(
+                                turn_index=turn_index,
+                                decision=finish_gate_decision,
+                                continuation_prompt=continuation_prompt,
+                            )
+                        )
+                        finish_arguments = {
+                            "outcome": "continue",
+                            "summary": continuation_prompt,
+                            "finish_gate": finish_gate_decision,
+                        }
+                        continue
+                    finish_arguments = {
+                        "outcome": "blocked",
+                        "summary": continuation_prompt,
+                        "finish_gate": finish_gate_decision,
+                    }
                 transcript.append(
                     adapter.finish_event_for_turn(
                         lane=IMPLEMENT_V2_LANE,
@@ -324,6 +406,8 @@ def run_live_json_implement_v2(
             "model_error": dict(model_error),
             "command_closeout_count": len(closeout_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
+            "finish_gate_block_count": finish_gate_block_count,
+            "finish_gate_decision": dict(finish_gate_decision),
         },
     )
     validation = _validate_write_proof_manifest(manifest)
@@ -351,10 +435,12 @@ def run_live_json_implement_v2(
             "status": status,
             "replay_valid": validation.valid,
             "transport": adapter.provider,
+            "finish_gate_decision": dict(finish_gate_decision),
         },
         updated_lane_state={
             "lane_attempt_id": lane_attempt_id,
             "finish": dict(finish_arguments),
+            "finish_gate": dict(finish_gate_decision),
             "proof_manifest": manifest.as_dict(),
             "artifact_paths": list(artifact_paths),
         },
@@ -371,6 +457,8 @@ def run_live_json_implement_v2(
             "model_turns": model_turns,
             "model_error": dict(model_error),
             "model_elapsed_seconds": round(model_elapsed_seconds, 3),
+            "finish_gate_block_count": finish_gate_block_count,
+            "finish_gate_decision": dict(finish_gate_decision),
             "prompt_chars_total": prompt_chars_total,
             "prompt_sections": prompt_metrics,
             "write_evidence_count": _write_evidence_count(tool_results),
@@ -1417,6 +1505,272 @@ def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dic
 
 def _finish_outcome(finish_arguments: dict[str, object]) -> str:
     return str((finish_arguments or {}).get("outcome") or (finish_arguments or {}).get("status") or "").strip()
+
+
+def _live_acceptance_done_gate(
+    lane_input: ImplementLaneInput,
+    finish_arguments: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    outcome = _finish_outcome(finish_arguments)
+    if outcome not in _COMPLETED_FINISH_OUTCOMES:
+        return {
+            "decision": "allow_complete",
+            "reason": "",
+            "blockers": [],
+            "invalid_evidence_refs": [],
+            "continuation_prompt": "",
+        }
+    return acceptance_done_gate_decision(
+        _live_task_description(lane_input),
+        _finish_acceptance_action(finish_arguments, tool_results),
+        session=_acceptance_session_from_tool_results(tool_results),
+    )
+
+
+def _live_task_description(lane_input: ImplementLaneInput) -> str:
+    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
+    chunks = [
+        str(contract.get("title") or "").strip(),
+        str(contract.get("description") or "").strip(),
+        str(contract.get("guidance") or "").strip(),
+        str(contract.get("verify_command") or "").strip(),
+    ]
+    return "\n".join(chunk for chunk in chunks if chunk)
+
+
+def _finish_acceptance_action(
+    finish_arguments: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    action = dict(finish_arguments or {})
+    action["task_done"] = _finish_outcome(action) in _COMPLETED_FINISH_OUTCOMES
+    checks = action.get("acceptance_checks")
+    if isinstance(checks, list):
+        action["acceptance_checks"] = [
+            _with_finish_evidence_refs(check, tool_results) if isinstance(check, dict) else check for check in checks
+        ]
+        return action
+    action["acceptance_checks"] = _synthetic_finish_acceptance_checks(action, tool_results)
+    return action
+
+
+def _synthetic_finish_acceptance_checks(
+    finish_arguments: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> list[dict[str, object]]:
+    evidence_items = finish_arguments.get("acceptance_evidence")
+    if isinstance(evidence_items, str):
+        items = [evidence_items]
+    elif isinstance(evidence_items, (list, tuple)):
+        items = list(evidence_items)
+    else:
+        items = []
+    checks: list[dict[str, object]] = []
+    for item in items[:8]:
+        evidence = str(item or "").strip()
+        if not evidence:
+            continue
+        check: dict[str, object] = {
+            "constraint": _finish_constraint_from_evidence(evidence),
+            "status": "verified",
+            "evidence": evidence,
+        }
+        refs = _finish_evidence_refs(evidence, tool_results)
+        if refs:
+            check["evidence_refs"] = refs
+        checks.append(check)
+    return checks
+
+
+def _with_finish_evidence_refs(
+    check: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    enriched = dict(check)
+    if enriched.get("evidence_refs") or enriched.get("evidence_ref"):
+        return enriched
+    evidence = "\n".join(str(enriched.get(key) or "") for key in ("constraint", "evidence", "proof"))
+    refs = _finish_evidence_refs(evidence, tool_results)
+    if refs:
+        enriched["evidence_refs"] = refs
+    return enriched
+
+
+def _finish_constraint_from_evidence(evidence: str) -> str:
+    lowered = evidence.casefold()
+    if any(marker in lowered for marker in ("frame", "screenshot", "image", "render")):
+        return "runtime visual artifact is correct"
+    if any(marker in lowered for marker in ("stdout", "stderr", "exit_code", "command")):
+        return "command behavior is verified"
+    return "finish acceptance evidence"
+
+
+def _finish_evidence_refs(
+    evidence: str,
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> list[dict[str, object]]:
+    refs: list[dict[str, object]] = []
+    provider_to_tool_id = {
+        result.provider_call_id: index
+        for index, result in enumerate(tool_results, start=1)
+        if str(result.provider_call_id or "").strip()
+    }
+    for provider_call_id, tool_id in provider_to_tool_id.items():
+        if _provider_call_id_mentioned(evidence, provider_call_id):
+            ref = {"kind": "tool_call", "id": tool_id}
+            if ref not in refs:
+                refs.append(ref)
+    for match in _EVIDENCE_PROVIDER_CALL_RE.finditer(evidence):
+        provider_call_id = match.group(0)
+        tool_id = provider_to_tool_id.get(provider_call_id)
+        if tool_id is not None:
+            ref = {"kind": "tool_call", "id": tool_id}
+            if ref not in refs:
+                refs.append(ref)
+    for index, result in enumerate(tool_results, start=1):
+        if any(str(ref or "") and str(ref or "") in evidence for ref in result.evidence_refs):
+            ref = {"kind": "tool_call", "id": index}
+            if ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def _provider_call_id_mentioned(evidence: str, provider_call_id: object) -> bool:
+    provider_id = str(provider_call_id or "").strip()
+    if not provider_id:
+        return False
+    if len(provider_id) < 4:
+        return False
+    if provider_id.isalpha() or provider_id.isdigit():
+        return False
+    if not any(char.isalpha() for char in provider_id):
+        return False
+    if not any(char in "-_.:" for char in provider_id):
+        return False
+    for match in _PROVIDER_ID_TOKEN_RE.finditer(evidence):
+        token = match.group(0)
+        if token == provider_id:
+            return True
+        if token.rstrip(".,:;") == provider_id:
+            return True
+    return False
+
+
+def _acceptance_session_from_tool_results(tool_results: tuple[ToolResultEnvelope, ...]) -> dict[str, object]:
+    return {
+        "tool_calls": [
+            _acceptance_tool_call_from_result(index, result)
+            for index, result in enumerate(tool_results, start=1)
+        ]
+    }
+
+
+def _acceptance_tool_call_from_result(index: int, result: ToolResultEnvelope) -> dict[str, object]:
+    content_items = [item for item in result.content if isinstance(item, dict)]
+    primary = dict(content_items[0]) if content_items else {}
+    command = str(primary.get("command") or "").strip()
+    argv = primary.get("argv")
+    if not command and isinstance(argv, list):
+        command = " ".join(str(item) for item in argv)
+    text = _tool_result_content_text(result)
+    result_payload: dict[str, object] = {
+        "text": text,
+        "stdout": str(primary.get("stdout") or ""),
+        "stderr": str(primary.get("stderr") or ""),
+        "summary": text[:500],
+        "output": text,
+        "command": command,
+    }
+    if "exit_code" in primary:
+        result_payload["exit_code"] = primary.get("exit_code")
+    elif result.tool_name in EXEC_TOOL_NAMES:
+        result_payload["exit_code"] = 0 if result.status == "completed" else 1
+    if "timed_out" in primary:
+        result_payload["timed_out"] = bool(primary.get("timed_out"))
+    elif result.tool_name in EXEC_TOOL_NAMES:
+        result_payload["timed_out"] = False
+    parameters: dict[str, object] = {}
+    if command:
+        parameters["command"] = command
+    if primary.get("cwd"):
+        parameters["cwd"] = primary.get("cwd")
+    return {
+        "id": index,
+        "tool": result.tool_name,
+        "status": result.status,
+        "parameters": parameters,
+        "result": result_payload,
+        "summary": text[:500],
+    }
+
+
+def _tool_result_content_text(result: ToolResultEnvelope) -> str:
+    chunks: list[str] = []
+    for item in result.content:
+        if isinstance(item, dict):
+            for key in ("command", "stdout", "stderr", "text", "summary", "output", "reason"):
+                value = item.get(key)
+                if value:
+                    chunks.append(str(value))
+            argv = item.get("argv")
+            if isinstance(argv, list):
+                chunks.append(" ".join(str(part) for part in argv))
+        elif item:
+            chunks.append(str(item))
+    return "\n".join(chunks)
+
+
+def _finish_gate_transcript_event(
+    *,
+    lane_attempt_id: str,
+    turn_id: str,
+    decision: dict[str, object],
+) -> ImplementLaneTranscriptEvent:
+    return ImplementLaneTranscriptEvent(
+        kind="verifier",
+        lane=IMPLEMENT_V2_LANE,
+        turn_id=turn_id,
+        event_id=f"{turn_id}:finish-gate",
+        payload={
+            "lane_attempt_id": lane_attempt_id,
+            "type": "deterministic_finish_gate",
+            "decision": dict(decision),
+        },
+    )
+
+
+def _finish_gate_continuation_text(decision: dict[str, object]) -> str:
+    return str(
+        decision.get("continuation_prompt")
+        or decision.get("reason")
+        or "finish blocked by deterministic done gate"
+    ).strip()
+
+
+def _finish_gate_history(
+    *,
+    turn_index: int,
+    decision: dict[str, object],
+    continuation_prompt: str,
+) -> dict[str, object]:
+    return {
+        "turn": turn_index,
+        "summary": "finish gate blocked completion; continue the same task",
+        "tool_calls": [],
+        "tool_results": [
+            {
+                "tool_name": "finish_gate",
+                "status": "failed",
+                "is_error": True,
+                "content": {
+                    "mew_status": "failed",
+                    "finish_gate": decision,
+                    "continuation_prompt": continuation_prompt,
+                },
+            }
+        ],
+    }
 
 
 def _live_finish_status(

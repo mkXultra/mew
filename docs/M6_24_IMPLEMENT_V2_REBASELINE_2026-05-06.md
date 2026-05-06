@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | pending | none | run v2 speed_1 |
+| `make-doom-for-mips` | 1/5 | repair validated locally; live rerun inconclusive after transient backend error | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1144-finish-gate`, `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1158-visual-quality-gate` | rerun v2 speed_1 once; 1158 stopped on Codex Web API `IncompleteRead`, not a product score |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -150,6 +150,41 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   recovered failed tool results before finish; they are not score blockers
   because final reward, replay, and dogfood are clean, but they remain
   efficiency evidence.
+- `make-doom-for-mips` first live v2 speed_1
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1102`
+  scored reward `0.0` with runner errors `0` because `implement_v2` falsely
+  completed after generating a small self-smoke BMP artifact instead of
+  satisfying the hidden stdout and frame-quality contract. The generic replay
+  repair classifies `completed` plus external reward `0.0` as
+  `debug implement_v2 divergence`, and terminal-bench replay dogfood can
+  reproduce the saved artifact.
+- The finish-gate repair made completed finish actions pass through
+  `acceptance_done_gate_decision`, including finish-only turns, and grounds
+  finish evidence refs without accepting ambiguous alpha or numeric provider
+  ids. The same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1144-finish-gate`
+  still scored reward `0.0`: the gate blocked three weak finishes but
+  eventually allowed a valid-BMP/header-only proof. The external verifier
+  expected the Doom screen stdout and a reference-similar `640x400` frame, but
+  mew produced a synthetic `2x2` BMP. Exact replay and matching dogfood pass
+  and classify this as finish-gate divergence.
+- The follow-up visual-quality repair treats task contracts that require
+  artifacts to be printed or written "appropriately" as requiring grounded
+  runtime visual/stdout quality evidence, not just file existence or image
+  header validity. Focused acceptance, implement-lane, and terminal-bench
+  replay tests passed; scoped ruff and `git diff --check` passed; codex-ultra
+  reviewer session `019dfb1a-5815-7f62-9669-cff64ea61fbc` approved.
+- The post-repair rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1158-visual-quality-gate`
+  is inconclusive product evidence. It scored reward `0.0` with runner errors
+  `0`, but `mew_exit_code=1`, `stop_reason=implement_v2_blocked`, and
+  `finish.outcome=failed` because the Codex Web API returned
+  `IncompleteRead(101768 bytes read)` after three model turns. Exact replay
+  passes and matching terminal-bench replay dogfood passes with next action
+  `inspect model backend failure before another live speed run`. Since no
+  false completion occurred and the model backend failed before a finish
+  attempt, rerun exactly one same-shape `make-doom-for-mips` v2 `speed_1`
+  before classifying the remaining product gap.
 
 ## Repair Trigger
 

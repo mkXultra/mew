@@ -326,10 +326,15 @@ def _implement_v2_history_mentions_compiled_source_frontier(history):
     return False
 
 
-def _implement_v2_next_action(summary):
+def _implement_v2_next_action(summary, *, external_reward=None):
     if not summary:
         return ""
     if str(summary.get("lane_status") or "") == "completed" and bool(summary.get("replay_valid", True)):
+        if external_reward == 0.0:
+            return (
+                "debug implement_v2 divergence: external verifier reward 0 after v2 completed; "
+                "inspect verifier stdout and repair finish acceptance gate before another live speed run"
+            )
         return "record implement_v2 pass and continue M6.24 scoped parity"
     model_error = summary.get("model_error") if isinstance(summary.get("model_error"), dict) else {}
     if model_error.get("failure_class") == "model_json_parse_error":
@@ -467,6 +472,7 @@ def _trial_entry_from_report(report_path):
     session = _session_from_report(report)
     task = _task_from_report(report, stored_resume)
     implement_v2_replay = _implement_v2_replay_summary(report_path, report)
+    reward = _reward_from_trial(trial_dir, trial_result)
     recomputed_resume = {}
     replay_error = ""
     if session.get("tool_calls"):
@@ -482,14 +488,13 @@ def _trial_entry_from_report(report_path):
         if replay_valid:
             recomputed_resume = {
                 "phase": "implement_v2_replay",
-                "next_action": _implement_v2_next_action(implement_v2_replay),
+                "next_action": _implement_v2_next_action(implement_v2_replay, external_reward=reward),
                 "implement_v2": dict(implement_v2_replay),
             }
         else:
             replay_error = "implement_v2 proof manifest reported replay_valid=false"
     else:
         replay_error = "work_report steps did not contain replayable tool calls"
-    reward = _reward_from_trial(trial_dir, trial_result)
     verifier_stdout = _read_text(trial_dir / "verifier" / "test-stdout.txt")
     stored_long = _summarize_long_build_state(stored_resume.get("long_build_state") or {})
     current_long = _summarize_long_build_state(recomputed_resume.get("long_build_state") or {})

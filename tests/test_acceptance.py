@@ -1188,6 +1188,71 @@ def test_acceptance_finish_blocker_rejects_runtime_visual_artifact_format_only_e
     assert "runtime visual artifact quality evidence ungrounded" in blocker
 
 
+def test_acceptance_finish_blocker_rejects_appropriate_visual_artifact_without_quality_evidence():
+    text = (
+        "I have provided /app/doomgeneric/, the source code to doom. "
+        "I have provided vm.js that will expect a file called doomgeneric_mips and will run it. "
+        "Please build the doomgeneric_mips ELF for me, so that I can run `node vm.js`. "
+        "After running `node vm.js` I expect that stdout will be printed appropriately, "
+        "and frames will be written to /tmp/frame.bmp."
+    )
+    checks = [
+        {
+            "constraint": "provided source tree is grounded",
+            "status": "verified",
+            "evidence": "Tool #23 listed /app/doomgeneric/ and confirmed doomgeneric_img.c exists.",
+        },
+        {
+            "constraint": "node vm.js writes a frame",
+            "status": "verified",
+            "evidence": (
+                "Tool #24 removed /tmp/frame.bmp, ran node vm.js, and proved a valid BMP was created /tmp/frame.bmp; "
+                "tool #25 removed the stale frame."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 23,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "find /app/doomgeneric -maxdepth 2 -type f | head"},
+                "result": {
+                    "command": "find /app/doomgeneric -maxdepth 2 -type f | head",
+                    "exit_code": 0,
+                    "stdout": "/app/doomgeneric/doomgeneric/doomgeneric_img.c\n",
+                },
+            },
+            {
+                "id": 24,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp && node vm.js && python3 inspect_frame.py"},
+                "result": {
+                    "command": "rm -f /tmp/frame.bmp && node vm.js && python3 inspect_frame.py",
+                    "exit_code": 0,
+                    "stdout": (
+                        "doomgeneric_mips: drawing one frame to /tmp/frame.bmp\n"
+                        "created /tmp/frame.bmp by node vm.js: BMP bytes 70 header 424d\n"
+                    ),
+                },
+            },
+            {
+                "id": 25,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp"},
+                "result": {"command": "rm -f /tmp/frame.bmp", "exit_code": 0, "stdout": "removed /tmp/frame.bmp\n"},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime visual artifact quality evidence ungrounded" in blocker
+
+
 def test_acceptance_finish_blocker_accepts_runtime_visual_artifact_quality_evidence():
     text = (
         "Implement vm.js so I can run `node vm.js`. It should save rendered frames to /tmp/frame.bmp. "
