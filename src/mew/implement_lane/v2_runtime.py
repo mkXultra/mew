@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import time
+from dataclasses import replace
 
 from ..acceptance import acceptance_done_gate_decision
 from ..errors import ModelBackendError
@@ -13,7 +14,7 @@ from ..work_lanes import IMPLEMENT_V2_LANE
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from ..prompt_sections import render_prompt_sections
-from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics
+from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics, is_hard_runtime_artifact_task
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
 from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
@@ -52,6 +53,10 @@ _PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS = (
     "validation_error",
     "blocked_reason",
 )
+_HARD_RUNTIME_FRONTIER_SCHEMA_VERSION = 1
+_FRONTIER_LIST_LIMIT = 8
+_FRONTIER_TEXT_LIMIT = 500
+_FRONTIER_COMMAND_TEXT_LIMIT = 1200
 
 
 def describe_implement_v2_runtime(*, work_session_id: object, task_id: object) -> dict[str, object]:
@@ -123,6 +128,11 @@ def run_live_json_implement_v2(
 
     mode = str(lane_input.lane_config.get("mode") or "full").strip() or "full"
     lane_attempt_id = _lane_attempt_id(lane_input, mode=mode)
+    artifact_namespace = lane_artifact_namespace(
+        work_session_id=lane_input.work_session_id,
+        task_id=lane_input.task_id,
+        lane=IMPLEMENT_V2_LANE,
+    )
     adapter = JsonModelProviderAdapter()
     exec_runtime = ImplementV2ManagedExecRuntime(
         workspace=lane_input.workspace,
@@ -154,6 +164,10 @@ def run_live_json_implement_v2(
     tool_contract_recovery_turn_limit = _tool_contract_recovery_turn_limit(lane_input)
     tool_contract_recovery_turns_used = 0
     tool_contract_recovery_instruction = ""
+    hard_runtime_frontier_state = _initial_hard_runtime_frontier_state(lane_input)
+    hard_runtime_frontier_enabled = bool(hard_runtime_frontier_state) or is_hard_runtime_artifact_task(
+        lane_input.task_contract
+    )
     turn_index = 0
 
     def extend_for_terminal_failure_reaction_if_available(
@@ -218,6 +232,7 @@ def run_live_json_implement_v2(
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
+                hard_runtime_frontier_state=hard_runtime_frontier_state,
                 turn_index=turn_index,
                 max_turns=turn_budget_limit,
                 base_max_turns=base_max_turns,
@@ -287,8 +302,20 @@ def run_live_json_implement_v2(
             model_elapsed_seconds += time.monotonic() - started
             normalized = _normalize_live_json_payload(payload, turn_index=turn_index)
             finish_arguments = normalized.get("finish") or {}
+            frontier_state_update = (
+                normalized.get("frontier_state_update") if isinstance(normalized.get("frontier_state_update"), dict) else {}
+            )
+            if frontier_state_update:
+                hard_runtime_frontier_enabled = True
             raw_tool_calls = normalized.get("tool_calls") or ()
             if not raw_tool_calls:
+                if hard_runtime_frontier_enabled or frontier_state_update:
+                    hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
+                        existing=hard_runtime_frontier_state,
+                        update=frontier_state_update,
+                        tool_results=tuple(tool_results),
+                        artifact_namespace=artifact_namespace,
+                    )
                 transcript.extend(
                     adapter.transcript_events_for_turn(
                         lane=IMPLEMENT_V2_LANE,
@@ -405,6 +432,13 @@ def run_live_json_implement_v2(
                 )
             tool_calls.extend(current_calls)
             tool_results.extend(current_results)
+            if hard_runtime_frontier_enabled or frontier_state_update:
+                hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
+                    existing=hard_runtime_frontier_state,
+                    update=frontier_state_update,
+                    tool_results=tuple(tool_results),
+                    artifact_namespace=artifact_namespace,
+                )
             transcript.extend(
                 adapter.transcript_events_for_turn(
                     lane=IMPLEMENT_V2_LANE,
@@ -561,15 +595,18 @@ def run_live_json_implement_v2(
                 cleanup_payloads=final_cleanup_payloads,
             )
         )
+    if hard_runtime_frontier_enabled or hard_runtime_frontier_state:
+        hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
+            existing=hard_runtime_frontier_state,
+            update={},
+            tool_results=tuple(tool_results),
+            artifact_namespace=artifact_namespace,
+        )
 
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
         lane_attempt_id=lane_attempt_id,
-        artifact_namespace=lane_artifact_namespace(
-            work_session_id=lane_input.work_session_id,
-            task_id=lane_input.task_id,
-            lane=IMPLEMENT_V2_LANE,
-        ),
+        artifact_namespace=artifact_namespace,
         tool_calls=tuple(tool_calls),
         tool_results=tuple(tool_results),
         metrics={
@@ -597,7 +634,9 @@ def run_live_json_implement_v2(
         validation_valid=validation.valid,
         tool_results=tuple(tool_results),
     )
-    prompt_metrics = implement_v2_prompt_section_metrics(lane_input)
+    prompt_metrics = implement_v2_prompt_section_metrics(
+        _lane_input_with_hard_runtime_frontier(lane_input, hard_runtime_frontier_state)
+    )
     artifact_paths = _write_live_json_artifacts(
         lane_input,
         manifest=manifest,
@@ -624,6 +663,7 @@ def run_live_json_implement_v2(
             "finish_gate": dict(finish_gate_decision),
             "proof_manifest": manifest.as_dict(),
             "artifact_paths": list(artifact_paths),
+            **({"lane_hard_runtime_frontier": dict(hard_runtime_frontier_state)} if hard_runtime_frontier_state else {}),
         },
         metrics={
             "completion_credit": status == "completed",
@@ -1159,7 +1199,7 @@ def _project_command_closeouts(
 def _preserve_result_command_context(result: ToolResultEnvelope, payload: dict[str, object]) -> dict[str, object]:
     preserved = dict(payload)
     previous_payload = next((item for item in result.content if isinstance(item, dict)), {})
-    for key in ("tool_name", "effective_tool_name", "command_source", "tool_contract_recovery"):
+    for key in ("tool_name", "effective_tool_name", "command_source", "execution_contract", "tool_contract_recovery"):
         if key in previous_payload and key not in preserved:
             value = previous_payload.get(key)
             preserved[key] = dict(value) if isinstance(value, dict) else value
@@ -1749,10 +1789,470 @@ def _safe_id_part(value: object, default: str) -> str:
     return "".join(safe).strip("-") or default
 
 
+def _lane_input_with_hard_runtime_frontier(
+    lane_input: ImplementLaneInput,
+    frontier_state: dict[str, object] | None,
+) -> ImplementLaneInput:
+    if not frontier_state:
+        return lane_input
+    persisted_lane_state = dict(lane_input.persisted_lane_state)
+    persisted_lane_state["lane_hard_runtime_frontier"] = dict(frontier_state)
+    return replace(lane_input, persisted_lane_state=persisted_lane_state)
+
+
+def _initial_hard_runtime_frontier_state(lane_input: ImplementLaneInput) -> dict[str, object]:
+    value = lane_input.persisted_lane_state.get("lane_hard_runtime_frontier")
+    return _compact_hard_runtime_frontier_state(value) if isinstance(value, dict) else {}
+
+
+def _merge_hard_runtime_frontier_state(
+    *,
+    existing: dict[str, object],
+    update: object,
+    tool_results: tuple[ToolResultEnvelope, ...],
+    artifact_namespace: str,
+) -> dict[str, object]:
+    update_state = _compact_hard_runtime_frontier_state(update) if isinstance(update, dict) else {}
+    merged = _compact_hard_runtime_frontier_state(existing)
+    for key in (
+        "status",
+        "objective",
+        "source_roles",
+        "harness_runtime_source",
+        "build_target",
+        "final_artifact",
+        "prohibited_surrogates",
+        "next_verifier_shaped_command",
+    ):
+        if key in update_state:
+            merged[key] = update_state[key]
+
+    registry = _frontier_evidence_registry(tool_results, artifact_namespace=artifact_namespace)
+    for key in ("source_roles", "harness_runtime_source"):
+        merged[key] = _resolve_frontier_entry_list(merged.get(key), registry)
+    for key in ("build_target", "final_artifact", "next_verifier_shaped_command"):
+        if isinstance(merged.get(key), dict):
+            merged[key] = _resolve_frontier_mapping_refs(merged[key], registry)
+    for key, value in _frontier_state_from_execution_contracts(tool_results, registry).items():
+        merged[key] = value
+
+    contract_verifier = _latest_tool_contract_verifier_command(tool_results)
+    if contract_verifier:
+        merged["next_verifier_shaped_command"] = _resolve_frontier_mapping_refs(contract_verifier, registry)
+
+    runtime_failure = _latest_runtime_frontier_failure(tool_results)
+    if runtime_failure is not None:
+        failure_key, failure_value = runtime_failure
+        merged[failure_key] = failure_value
+
+    merged["schema_version"] = _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION
+    status = str(merged.get("status") or "active").strip().lower()
+    merged["status"] = status if status in {"active", "blocked", "resolved"} else "active"
+    return _drop_empty_frontier_values(merged)
+
+
+def _compact_hard_runtime_frontier_state(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, object] = {}
+    for key in (
+        "schema_version",
+        "status",
+        "objective",
+        "source_roles",
+        "harness_runtime_source",
+        "build_target",
+        "final_artifact",
+        "prohibited_surrogates",
+        "latest_build_failure",
+        "latest_runtime_failure",
+        "next_verifier_shaped_command",
+    ):
+        if key in value:
+            compact[key] = _frontier_compact_value(value[key], key=key)
+    return _drop_empty_frontier_values(compact)
+
+
+def _frontier_compact_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): _frontier_compact_value(item, key=str(key))
+        for key, item in value.items()
+        if item not in (None, "", [], {})
+    }
+
+
+def _frontier_compact_value(value: object, *, key: str = "", depth: int = 0) -> object:
+    if depth > 3:
+        return _frontier_clip_text(value)
+    if isinstance(value, dict):
+        return {
+            str(item_key): _frontier_compact_value(item, key=str(item_key), depth=depth + 1)
+            for item_key, item in value.items()
+            if item not in (None, "", [], {})
+        }
+    if isinstance(value, (list, tuple)):
+        return [
+            _frontier_compact_value(item, key=key, depth=depth + 1)
+            for item in list(value)[:_FRONTIER_LIST_LIMIT]
+            if item not in (None, "", [], {})
+        ]
+    if isinstance(value, bool) or isinstance(value, int | float):
+        return value
+    limit = _FRONTIER_COMMAND_TEXT_LIMIT if key in {"command", "preserved_command"} else _FRONTIER_TEXT_LIMIT
+    return _frontier_clip_text(value, limit=limit)
+
+
+def _frontier_clip_text(value: object, *, limit: int = _FRONTIER_TEXT_LIMIT) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 35)]}...<truncated {len(text) - max(0, limit - 35)} chars>"
+
+
+def _drop_empty_frontier_values(value: dict[str, object]) -> dict[str, object]:
+    return {str(key): item for key, item in value.items() if item not in (None, "", [], {})}
+
+
+def _frontier_evidence_registry(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    artifact_namespace: str,
+) -> dict[str, object]:
+    output_refs: set[str] = set()
+    command_run_ids: set[str] = set()
+    for result in tool_results:
+        for item in result.content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("command_run_id"):
+                command_run_ids.add(str(item.get("command_run_id")))
+            if item.get("output_ref"):
+                output_refs.add(str(item.get("output_ref")))
+    return {
+        "tool_call_ids": set(range(1, len(tool_results) + 1)),
+        "provider_call_ids": {result.provider_call_id for result in tool_results if result.provider_call_id},
+        "command_run_ids": command_run_ids,
+        "output_refs": output_refs,
+        "content_refs": {ref for result in tool_results for ref in result.content_refs},
+        "evidence_refs": {ref for result in tool_results for ref in result.evidence_refs},
+        "artifact_namespace": artifact_namespace,
+    }
+
+
+def _resolve_frontier_entry_list(value: object, registry: dict[str, object]) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    entries = []
+    for item in value[:_FRONTIER_LIST_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        entry = _resolve_frontier_mapping_refs(item, registry)
+        state = str(entry.get("state") or "hypothesis").strip().lower()
+        entry["state"] = state if state in {"hypothesis", "grounded"} else "hypothesis"
+        if not entry.get("evidence_refs"):
+            entry["state"] = "hypothesis"
+        entries.append(entry)
+    return entries
+
+
+def _resolve_frontier_mapping_refs(value: object, registry: dict[str, object]) -> dict[str, object]:
+    mapping = _frontier_compact_mapping(value)
+    if "evidence_refs" in mapping:
+        mapping["evidence_refs"] = _resolve_frontier_refs(mapping.get("evidence_refs"), registry)
+    return mapping
+
+
+def _resolve_frontier_refs(value: object, registry: dict[str, object]) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    refs: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for item in value[: _FRONTIER_LIST_LIMIT * 2]:
+        normalized = _normalize_frontier_ref(item, registry)
+        if not normalized:
+            continue
+        key = json.dumps(normalized, ensure_ascii=True, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(normalized)
+        if len(refs) >= _FRONTIER_LIST_LIMIT:
+            break
+    return refs
+
+
+def _normalize_frontier_ref(item: object, registry: dict[str, object]) -> dict[str, object] | None:
+    if isinstance(item, dict):
+        kind = str(item.get("kind") or "").strip()
+        if kind == "tool_call":
+            try:
+                tool_id = int(item.get("id"))
+            except (TypeError, ValueError):
+                return None
+            return {"kind": "tool_call", "id": tool_id} if tool_id in registry["tool_call_ids"] else None
+        if kind == "provider_call":
+            provider_id = str(item.get("id") or "").strip()
+            return {"kind": "provider_call", "id": provider_id} if provider_id in registry["provider_call_ids"] else None
+        if kind == "command_run":
+            command_run_id = str(item.get("id") or "").strip()
+            return {"kind": "command_run", "id": command_run_id} if command_run_id in registry["command_run_ids"] else None
+        if kind == "command_output":
+            output_ref = str(item.get("ref") or "").strip()
+            return {"kind": "command_output", "ref": output_ref} if output_ref in registry["output_refs"] else None
+        if kind == "content_ref":
+            content_ref = str(item.get("ref") or "").strip()
+            return {"kind": "content_ref", "ref": content_ref} if content_ref in registry["content_refs"] else None
+        if kind == "evidence_ref":
+            evidence_ref = str(item.get("ref") or "").strip()
+            return {"kind": "evidence_ref", "ref": evidence_ref} if evidence_ref in registry["evidence_refs"] else None
+        if kind == "proof_artifact":
+            path = str(item.get("path") or "").strip()
+            namespace = str(registry.get("artifact_namespace") or "")
+            if _proof_artifact_ref_resolves(path, namespace=namespace):
+                return {"kind": "proof_artifact", "path": path}
+            return None
+        return None
+    if isinstance(item, str):
+        ref = item.strip()
+        if ref in registry["content_refs"]:
+            return {"kind": "content_ref", "ref": ref}
+        if ref in registry["evidence_refs"]:
+            return {"kind": "evidence_ref", "ref": ref}
+        if ref in registry["output_refs"]:
+            return {"kind": "command_output", "ref": ref}
+    return None
+
+
+def _proof_artifact_ref_resolves(path: str, *, namespace: str) -> bool:
+    if not path or not namespace:
+        return False
+    normalized_text = path.replace("\\", "/")
+    while normalized_text.startswith("./"):
+        normalized_text = normalized_text[2:]
+    normalized = PurePosixPath(normalized_text)
+    namespace_path = PurePosixPath(namespace)
+    if normalized.is_absolute() or ".." in normalized.parts or ".." in namespace_path.parts:
+        return False
+    namespace_parts = namespace_path.parts
+    return (
+        len(normalized.parts) > len(namespace_parts)
+        and normalized.parts[: len(namespace_parts)] == namespace_parts
+    )
+
+
+def _frontier_state_from_execution_contracts(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    registry: dict[str, object],
+) -> dict[str, object]:
+    derived: dict[str, object] = {}
+    for result in reversed(tool_results):
+        if result.tool_name not in {"run_command", "run_tests", "poll_command"}:
+            continue
+        payload = next((item for item in result.content if isinstance(item, dict)), {})
+        contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
+        if not contract:
+            continue
+        refs = _frontier_result_refs(result, registry)
+        expected_artifact = _frontier_expected_artifact_from_contract(contract)
+        if expected_artifact and "final_artifact" not in derived:
+            final_artifact = _resolve_frontier_mapping_refs(expected_artifact, registry)
+            if refs:
+                final_artifact["evidence_refs"] = refs
+            derived["final_artifact"] = final_artifact
+        if _execution_contract_is_build_like(contract, payload) and "build_target" not in derived:
+            build_target = _frontier_build_target_from_contract(contract, payload, expected_artifact)
+            if refs:
+                build_target["evidence_refs"] = refs
+            derived["build_target"] = _resolve_frontier_mapping_refs(build_target, registry)
+    return derived
+
+
+def _frontier_result_refs(result: ToolResultEnvelope, registry: dict[str, object]) -> list[dict[str, object]]:
+    return _resolve_frontier_refs([*result.evidence_refs, *result.content_refs], registry)
+
+
+def _frontier_expected_artifact_from_contract(contract: dict[str, object]) -> dict[str, object]:
+    raw_artifact = (
+        contract.get("expected_artifact")
+        or contract.get("final_artifact")
+        or _first_contract_list_item(contract.get("expected_artifacts"))
+        or _first_contract_list_item(contract.get("artifacts"))
+    )
+    if isinstance(raw_artifact, dict):
+        path = (
+            raw_artifact.get("path")
+            or raw_artifact.get("artifact_path")
+            or raw_artifact.get("target_path")
+            or raw_artifact.get("file")
+        )
+        artifact = {
+            "path": _frontier_clip_text(path, limit=400),
+            "kind": _frontier_clip_text(raw_artifact.get("kind") or raw_artifact.get("type"), limit=120),
+            "freshness": _frontier_clip_text(
+                raw_artifact.get("freshness") or "must be created by final verifier-shaped command"
+            ),
+        }
+    else:
+        artifact = {
+            "path": _frontier_clip_text(raw_artifact, limit=400),
+            "freshness": "must be created by final verifier-shaped command",
+        }
+    return _drop_empty_frontier_values(artifact)
+
+
+def _first_contract_list_item(value: object) -> object:
+    if isinstance(value, (list, tuple)) and value:
+        return value[0]
+    return None
+
+
+def _execution_contract_is_build_like(contract: dict[str, object], payload: dict[str, object]) -> bool:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            contract.get("purpose"),
+            contract.get("stage"),
+            contract.get("proof_role"),
+            contract.get("target"),
+            contract.get("build_target"),
+            payload.get("command"),
+        )
+    ).lower()
+    return any(marker in text for marker in ("build", "compile", "link", "toolchain", "make "))
+
+
+def _execution_contract_is_verifier_like(contract: dict[str, object]) -> bool:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            contract.get("purpose"),
+            contract.get("stage"),
+            contract.get("proof_role"),
+            contract.get("acceptance_kind"),
+        )
+    ).lower()
+    return any(marker in text for marker in ("verify", "verification", "proof", "acceptance", "test"))
+
+
+def _frontier_build_target_from_contract(
+    contract: dict[str, object],
+    payload: dict[str, object],
+    expected_artifact: dict[str, object],
+) -> dict[str, object]:
+    target = (
+        contract.get("target")
+        or contract.get("build_target")
+        or contract.get("declared_target")
+        or contract.get("declared_target_ref")
+    )
+    artifact_path = expected_artifact.get("path") if isinstance(expected_artifact, dict) else ""
+    return _drop_empty_frontier_values(
+        {
+            "cwd": _frontier_clip_text(payload.get("cwd") or "."),
+            "target": _frontier_clip_text(target, limit=240),
+            "command": _frontier_clip_text(payload.get("command"), limit=_FRONTIER_COMMAND_TEXT_LIMIT),
+            "artifact_path": _frontier_clip_text(artifact_path, limit=400),
+        }
+    )
+
+
+def _latest_runtime_frontier_failure(
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> tuple[str, dict[str, object]] | None:
+    for result in reversed(tool_results):
+        if result.tool_name not in {"run_command", "run_tests", "poll_command"}:
+            continue
+        if result.status not in {"failed", "interrupted"} or _is_tool_contract_misuse_result(result):
+            continue
+        payload = next((item for item in result.content if isinstance(item, dict)), {})
+        if not payload:
+            continue
+        key = _frontier_failure_key_from_payload(payload)
+        return key, _frontier_failure_payload(payload)
+    return None
+
+
+def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
+    contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
+    text = " ".join(
+        str(value or "")
+        for value in (
+            contract.get("purpose"),
+            contract.get("stage"),
+            contract.get("proof_role"),
+            payload.get("command"),
+        )
+    ).lower()
+    if any(marker in text for marker in ("build", "compile", "link", "toolchain", "make ")):
+        return "latest_build_failure"
+    return "latest_runtime_failure"
+
+
+def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
+    failure = {
+        "command_run_id": _frontier_clip_text(payload.get("command_run_id"), limit=160),
+        "exit_code": payload.get("exit_code"),
+        "stdout_tail": _frontier_clip_text(payload.get("stdout_tail") or payload.get("stdout")),
+        "stderr_tail": _frontier_clip_text(payload.get("stderr_tail") or payload.get("stderr")),
+        "failure_summary": _frontier_failure_summary(payload),
+    }
+    if payload.get("output_ref"):
+        failure["output_ref"] = _frontier_clip_text(payload.get("output_ref"), limit=240)
+    return _drop_empty_frontier_values(failure)
+
+
+def _frontier_failure_summary(payload: dict[str, object]) -> str:
+    for key in ("stderr_tail", "stderr", "stdout_tail", "stdout"):
+        text = str(payload.get(key) or "").strip()
+        if text:
+            return _frontier_clip_text(next((line.strip() for line in text.splitlines() if line.strip()), text))
+    status = str(payload.get("status") or "failed")
+    exit_code = payload.get("exit_code")
+    return f"{status} exit_code={exit_code}"
+
+
+def _latest_tool_contract_verifier_command(tool_results: tuple[ToolResultEnvelope, ...]) -> dict[str, object]:
+    for result in reversed(tool_results):
+        if result.tool_name not in {"run_command", "run_tests"}:
+            continue
+        payload = next((item for item in result.content if isinstance(item, dict)), {})
+        if not payload:
+            continue
+        recovery = payload.get("tool_contract_recovery") if isinstance(payload.get("tool_contract_recovery"), dict) else {}
+        if not recovery and not _is_tool_contract_misuse_result(result):
+            continue
+        command = str(payload.get("preserved_command") or payload.get("command") or "").strip()
+        if not command:
+            continue
+        contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
+        if contract and not _execution_contract_is_verifier_like(contract):
+            continue
+        verifier: dict[str, object] = {
+            "tool": "run_command",
+            "cwd": _frontier_clip_text(payload.get("cwd") or "."),
+            "command": _frontier_clip_text(command, limit=_FRONTIER_COMMAND_TEXT_LIMIT),
+            "use_shell": True,
+        }
+        if contract:
+            verifier["execution_contract"] = _frontier_compact_mapping(contract)
+        evidence_refs: list[object] = []
+        if result.evidence_refs:
+            evidence_refs.append(result.evidence_refs[0])
+        if result.content_refs:
+            evidence_refs.append(result.content_refs[0])
+        if evidence_refs:
+            verifier["evidence_refs"] = evidence_refs
+        return verifier
+    return {}
+
+
 def _live_json_prompt(
     lane_input: ImplementLaneInput,
     *,
     lane_attempt_id: str,
+    hard_runtime_frontier_state: dict[str, object] | None = None,
     turn_index: int,
     max_turns: int,
     base_max_turns: int | None = None,
@@ -1763,9 +2263,30 @@ def _live_json_prompt(
     tool_contract_recovery_instruction: str = "",
     history: tuple[dict[str, object], ...],
 ) -> str:
-    sections = render_prompt_sections(build_implement_v2_prompt_sections(lane_input))
+    sections = render_prompt_sections(
+        build_implement_v2_prompt_sections(_lane_input_with_hard_runtime_frontier(lane_input, hard_runtime_frontier_state))
+    )
     response_contract = {
         "summary": "short natural-language summary of this turn",
+        "frontier_state_update": {
+            "status": "active | blocked | resolved",
+            "objective": "short hard-runtime objective when relevant",
+            "source_roles": [
+                {
+                    "path": "relative/source/path",
+                    "role": "primary_source | runtime_harness | build_file | generated_artifact | test_harness | toolchain_probe",
+                    "state": "hypothesis | grounded",
+                    "evidence_refs": [{"kind": "provider_call", "id": "stable-provider-call-id"}],
+                }
+            ],
+            "next_verifier_shaped_command": {
+                "tool": "run_command",
+                "cwd": ".",
+                "command": "short command",
+                "use_shell": True,
+                "execution_contract": {"purpose": "verification", "stage": "verification"},
+            },
+        },
         "tool_calls": [
             {
                 "id": "stable-provider-call-id",
@@ -1824,6 +2345,9 @@ def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[st
         }
     summary = str(payload.get("summary") or payload.get("reason") or "")
     finish = payload.get("finish") if isinstance(payload.get("finish"), dict) else {}
+    frontier_state_update = (
+        dict(payload.get("frontier_state_update")) if isinstance(payload.get("frontier_state_update"), dict) else {}
+    )
     raw_calls = payload.get("tool_calls")
     if raw_calls is None:
         raw_calls = payload.get("tools")
@@ -1867,7 +2391,12 @@ def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[st
         outcome = _finish_outcome(finish)
         if not outcome:
             finish["outcome"] = "completed"
-    return {"summary": summary, "tool_calls": tuple(calls), "finish": finish}
+    return {
+        "summary": summary,
+        "frontier_state_update": frontier_state_update,
+        "tool_calls": tuple(calls),
+        "finish": finish,
+    }
 
 
 def _live_json_model_error(exc: BaseException) -> dict[str, object]:

@@ -171,6 +171,7 @@ class ImplementV2ManagedExecRuntime:
             "tool_name": call.tool_name,
             "effective_tool_name": effective_tool_name,
             "command_source": command_source,
+            **({"execution_contract": dict(args["execution_contract"])} if isinstance(args.get("execution_contract"), dict) else {}),
             **({"tool_contract_recovery": dict(tool_contract_recovery)} if tool_contract_recovery is not None else {}),
         }
         payload = self.runner.poll(wait_seconds=foreground_budget, command_run_id=command_run_id)
@@ -182,6 +183,8 @@ class ImplementV2ManagedExecRuntime:
         payload["tool_name"] = call.tool_name
         payload["effective_tool_name"] = effective_tool_name
         payload["command_source"] = command_source
+        if isinstance(args.get("execution_contract"), dict):
+            payload["execution_contract"] = dict(args["execution_contract"])
         if tool_contract_recovery is not None:
             payload["tool_contract_recovery"] = tool_contract_recovery
         return payload

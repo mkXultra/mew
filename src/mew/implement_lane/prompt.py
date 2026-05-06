@@ -83,7 +83,9 @@ def build_implement_v2_prompt_sections(
             profile="implement_v2",
         ),
     ]
-    if _is_hard_runtime_artifact_task(lane_input.task_contract):
+    hard_runtime_profile_active = is_hard_runtime_artifact_task(lane_input.task_contract)
+    hard_runtime_frontier = _hard_runtime_frontier_state(lane_input.persisted_lane_state)
+    if hard_runtime_profile_active:
         sections.append(
             PromptSection(
                 id="implement_v2_hard_runtime_profile",
@@ -105,6 +107,28 @@ def build_implement_v2_prompt_sections(
                 ),
                 stability=STABILITY_STATIC,
                 cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement_v2",
+            )
+        )
+    if hard_runtime_profile_active or hard_runtime_frontier:
+        sections.append(
+            PromptSection(
+                id="implement_v2_hard_runtime_frontier_state",
+                version="v0",
+                title="Implement V2 Hard Runtime Frontier State",
+                content=_stable_json(
+                    {
+                        "instructions": (
+                            "Use this compact state before broad rediscovery. Update it when a newer "
+                            "build/runtime result supersedes it. Do not finish from this state alone; "
+                            "completion still requires deterministic terminal/write evidence."
+                        ),
+                        "lane_hard_runtime_frontier": hard_runtime_frontier
+                        or {"schema_version": 1, "status": "active", "source": "not_yet_populated"},
+                    }
+                ),
+                stability=STABILITY_DYNAMIC,
+                cache_policy=CACHE_POLICY_DYNAMIC,
                 profile="implement_v2",
             )
         )
@@ -158,7 +182,7 @@ def _stable_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, indent=2)
 
 
-def _is_hard_runtime_artifact_task(task_contract: object) -> bool:
+def is_hard_runtime_artifact_task(task_contract: object) -> bool:
     text = _contract_text(task_contract)
     if not text:
         return False
@@ -228,4 +252,13 @@ def _lane_local_state(persisted_lane_state: dict[str, object]) -> dict[str, obje
     return filtered
 
 
-__all__ = ["build_implement_v2_prompt_sections", "implement_v2_prompt_section_metrics"]
+def _hard_runtime_frontier_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
+    value = persisted_lane_state.get("lane_hard_runtime_frontier")
+    return dict(value) if isinstance(value, dict) else {}
+
+
+__all__ = [
+    "build_implement_v2_prompt_sections",
+    "implement_v2_prompt_section_metrics",
+    "is_hard_runtime_artifact_task",
+]

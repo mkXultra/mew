@@ -1908,6 +1908,37 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "provided source" in by_id["implement_v2_hard_runtime_profile"].content
     assert "fresh verifier-shaped run" in by_id["implement_v2_hard_runtime_profile"].content
     assert "reference similarity" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "implement_v2_hard_runtime_frontier_state" in by_id
+    assert "Do not finish from this state alone" in by_id["implement_v2_hard_runtime_frontier_state"].content
+
+
+def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Update docs only."},
+        persisted_lane_state={
+            "lane_hard_runtime_frontier": {
+                "schema_version": 1,
+                "status": "active",
+                "objective": "preserve source-backed artifact proof",
+                "source_roles": [{"path": "vm.js", "role": "runtime_harness", "state": "hypothesis"}],
+            }
+        },
+        lane_config={"mode": "full"},
+    )
+
+    metrics = implement_v2_prompt_section_metrics(lane_input)
+    by_id = {section["id"]: section for section in metrics["sections"]}
+    sections = build_implement_v2_prompt_sections(lane_input)
+    frontier_section = next(section for section in sections if section.id == "implement_v2_hard_runtime_frontier_state")
+
+    assert "implement_v2_hard_runtime_profile" not in by_id
+    assert by_id["implement_v2_hard_runtime_frontier_state"]["cache_hint"] == "dynamic"
+    assert "preserve source-backed artifact proof" in frontier_section.content
+    assert "runtime_harness" in frontier_section.content
 
 
 def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> None:
@@ -1923,6 +1954,7 @@ def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> Non
     sections = build_implement_v2_prompt_sections(lane_input)
 
     assert "implement_v2_hard_runtime_profile" not in {section.id for section in sections}
+    assert "implement_v2_hard_runtime_frontier_state" not in {section.id for section in sections}
 
 
 def test_implement_v2_prompt_read_only_mode_does_not_surface_exec_or_write_tools() -> None:
@@ -3019,6 +3051,361 @@ def test_implement_v2_run_tests_resident_mew_loop_rejection_wins_before_tool_con
     assert tool_result["status"] == "failed"
     assert "resident mew loops" in payload["reason"]
     assert "failure_class" not in payload
+
+
+def test_implement_v2_frontier_drops_fabricated_refs_and_keeps_valid_refs(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "probe source frontier",
+            "frontier_state_update": {
+                "status": "active",
+                "objective": "build source-backed artifact",
+                "source_roles": [
+                    {
+                        "path": "doomgeneric_img.c",
+                        "role": "primary_source",
+                        "state": "grounded",
+                        "evidence_refs": [
+                            {"kind": "provider_call", "id": "probe-1"},
+                            {"kind": "provider_call", "id": "fabricated"},
+                        ],
+                    },
+                    {
+                        "path": "fake.c",
+                        "role": "primary_source",
+                        "state": "grounded",
+                        "evidence_refs": [{"kind": "command_run", "id": "missing-run"}],
+                    },
+                ],
+            },
+            "tool_calls": [
+                {
+                    "id": "probe-1",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf source-ok",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and vm.js expects a binary. Build the source "
+                    "so node vm.js writes /tmp/frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    by_path = {item["path"]: item for item in frontier["source_roles"]}
+
+    assert frontier["schema_version"] == 1
+    assert by_path["doomgeneric_img.c"]["state"] == "grounded"
+    assert by_path["doomgeneric_img.c"]["evidence_refs"] == [{"kind": "provider_call", "id": "probe-1"}]
+    assert by_path["fake.c"]["state"] == "hypothesis"
+    assert by_path["fake.c"].get("evidence_refs", []) == []
+
+
+def test_implement_v2_frontier_runtime_failure_overrides_model_claim(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        failure_script = "import sys; sys.stderr.write('real linker error\\n'); sys.exit(2)"
+        return {
+            "summary": "build fails",
+            "frontier_state_update": {
+                "latest_build_failure": {
+                    "command_run_id": "fabricated",
+                    "exit_code": 99,
+                    "stderr_tail": "fake failure",
+                    "failure_summary": "fake",
+                }
+            },
+            "tool_calls": [
+                {
+                    "id": "build-1",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": f"{shlex.quote(sys.executable)} -c {shlex.quote(failure_script)}",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "purpose": "build",
+                            "stage": "build",
+                            "proof_role": "builder",
+                            "target": "doomgeneric_mips",
+                            "expected_artifact": {"path": "build/doomgeneric_mips", "kind": "executable"},
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "build failed"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and vm.js expects a binary. Build the source "
+                    "so node vm.js writes /tmp/frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    failure = result.updated_lane_state["lane_hard_runtime_frontier"]["latest_build_failure"]
+
+    assert failure["command_run_id"] != "fabricated"
+    assert "build-1" in failure["command_run_id"]
+    assert failure["exit_code"] == 2
+    assert "real linker error" in failure["stderr_tail"]
+    assert result.updated_lane_state["lane_hard_runtime_frontier"]["build_target"]["target"] == "doomgeneric_mips"
+    assert result.updated_lane_state["lane_hard_runtime_frontier"]["final_artifact"]["path"] == "build/doomgeneric_mips"
+
+
+def test_implement_v2_frontier_drops_model_only_latest_failures_and_prefix_artifact_refs(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "model only frontier",
+            "frontier_state_update": {
+                "latest_build_failure": {
+                    "command_run_id": "fabricated",
+                    "exit_code": 99,
+                    "stderr_tail": "fake failure",
+                },
+                "source_roles": [
+                    {
+                        "path": "manifest",
+                        "role": "test_harness",
+                        "state": "grounded",
+                        "evidence_refs": [
+                            {
+                                "kind": "proof_artifact",
+                                "path": "implement-lane/implement_v2/ws-1/task-1/proof-manifest.json",
+                            }
+                        ],
+                    },
+                    {
+                        "path": "evil",
+                        "role": "test_harness",
+                        "state": "grounded",
+                        "evidence_refs": [
+                            {
+                                "kind": "proof_artifact",
+                                "path": "implement-lane/implement_v2/ws-1/task-1_evil/proof-manifest.json",
+                            }
+                        ],
+                    },
+                    {
+                        "path": "traversal",
+                        "role": "test_harness",
+                        "state": "grounded",
+                        "evidence_refs": [
+                            {
+                                "kind": "proof_artifact",
+                                "path": "../implement-lane/implement_v2/ws-1/task-1/proof-manifest.json",
+                            }
+                        ],
+                    },
+                ],
+            },
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and vm.js expects a binary. Build the source "
+                    "so node vm.js writes /tmp/frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    by_path = {item["path"]: item for item in frontier["source_roles"]}
+
+    assert "latest_build_failure" not in frontier
+    assert by_path["manifest"]["state"] == "grounded"
+    assert by_path["manifest"]["evidence_refs"] == [
+        {"kind": "proof_artifact", "path": "implement-lane/implement_v2/ws-1/task-1/proof-manifest.json"}
+    ]
+    assert by_path["evil"]["state"] == "hypothesis"
+    assert by_path["evil"].get("evidence_refs", []) == []
+    assert by_path["traversal"]["state"] == "hypothesis"
+    assert by_path["traversal"].get("evidence_refs", []) == []
+
+
+def test_implement_v2_frontier_tracks_routed_tool_contract_next_verifier(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "final verifier through wrong tool",
+            "tool_calls": [
+                {
+                    "id": "verify-1",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": "printf ok > frame.txt && test -s frame.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "purpose": "verification",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "candidate_final_proof",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and vm.js expects a binary. Build the source "
+                    "so node vm.js writes /tmp/frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    next_verifier = result.updated_lane_state["lane_hard_runtime_frontier"]["next_verifier_shaped_command"]
+
+    assert next_verifier["tool"] == "run_command"
+    assert next_verifier["use_shell"] is True
+    assert "printf ok > frame.txt" in next_verifier["command"]
+    assert next_verifier["execution_contract"]["proof_role"] == "verifier"
+    assert next_verifier["evidence_refs"]
+
+
+def test_implement_v2_frontier_state_does_not_satisfy_finish_gate_without_terminal_evidence(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "claim from state only",
+            "frontier_state_update": {
+                "status": "resolved",
+                "final_artifact": {
+                    "path": "/tmp/frame.bmp",
+                    "kind": "image",
+                    "freshness": "fresh verifier-shaped command",
+                    "evidence_refs": [{"kind": "evidence_ref", "ref": "fabricated"}],
+                },
+            },
+            "finish": {
+                "outcome": "completed",
+                "summary": "state says artifact exists",
+                "acceptance_evidence": ["frontier says frame exists"],
+            },
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and vm.js expects a binary. Build the source "
+                    "so node vm.js writes /tmp/frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert result.status == "blocked"
+    assert result.metrics["terminal_evidence_count"] == 0
+    assert frontier["final_artifact"].get("evidence_refs", []) == []
+    assert result.metrics["finish_gate_decision"]["decision"] != "allow_complete"
 
 
 def test_implement_v2_exec_task_complete_claim_is_blocked_even_with_terminal_evidence(tmp_path) -> None:
