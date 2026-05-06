@@ -21,6 +21,7 @@ from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, 
 from .tool_policy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode
 from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
+from .types import ToolCallEnvelope
 from .types import ToolResultEnvelope
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 
@@ -384,11 +385,15 @@ def run_live_json_implement_v2(
                 turn_index=turn_index,
                 calls=raw_tool_calls,
             )
+            current_calls, provider_call_id_repairs = _repair_live_json_provider_call_ids_for_replay(
+                current_calls,
+                seen_provider_call_ids=seen_provider_call_ids,
+            )
             identity_errors = _tool_call_identity_errors(
                 current_calls,
                 expected_lane_attempt_id=lane_attempt_id,
                 seen_provider_call_ids=seen_provider_call_ids,
-            )
+            ) + provider_call_id_repairs
             if identity_errors:
                 current_results = tuple(
                     build_invalid_tool_result(call, reason=f"tool_call_identity_invalid: {'; '.join(identity_errors)}")
@@ -411,7 +416,7 @@ def run_live_json_implement_v2(
                     )
                     for call in current_calls
                 )
-                seen_provider_call_ids.update(call.provider_call_id for call in current_calls if call.provider_call_id)
+            seen_provider_call_ids.update(call.provider_call_id for call in current_calls if call.provider_call_id)
             finish_gate_tool_results = tuple(tool_results) + tuple(current_results)
             if _should_closeout_for_terminal_failure_reaction(
                 current_results,
@@ -1566,6 +1571,63 @@ def _tool_call_identity_errors(
     return tuple(errors)
 
 
+def _repair_live_json_provider_call_ids_for_replay(
+    tool_calls: tuple[ToolCallEnvelope, ...],
+    *,
+    seen_provider_call_ids: set[str] | None = None,
+) -> tuple[tuple[ToolCallEnvelope, ...], tuple[str, ...]]:
+    """Keep invalid provider-id reuse replayable by assigning internal ids.
+
+    Provider call ids are model-authored. If the model reuses one, the tool call
+    must still be rejected before side effects, but the proof manifest should
+    remain pairable so replay/dogfood can classify the real failure that came
+    next.
+    """
+
+    used_ids = set(seen_provider_call_ids or ())
+    current_ids: set[str] = set()
+    repaired: list[ToolCallEnvelope] = []
+    errors: list[str] = []
+
+    for call in tool_calls:
+        provider_call_id = str(call.provider_call_id or "")
+        repair_reason = ""
+        if not provider_call_id:
+            repair_reason = f"tool_call_missing_provider_call_id:{call.mew_tool_call_id}"
+            provider_call_id = "missing-provider-call-id"
+        elif provider_call_id in current_ids:
+            repair_reason = f"duplicate_provider_call_id:{provider_call_id}"
+        elif provider_call_id in used_ids:
+            repair_reason = f"duplicate_provider_call_id_across_turns:{provider_call_id}"
+
+        if repair_reason:
+            errors.append(repair_reason)
+            provider_call_id = _unique_repaired_provider_call_id(provider_call_id, call=call, used_ids=used_ids | current_ids)
+            call = replace(call, provider_call_id=provider_call_id)
+
+        repaired.append(call)
+        current_ids.add(str(call.provider_call_id or ""))
+        used_ids.add(str(call.provider_call_id or ""))
+
+    return tuple(repaired), tuple(errors)
+
+
+def _unique_repaired_provider_call_id(
+    provider_call_id: str,
+    *,
+    call: ToolCallEnvelope,
+    used_ids: set[str],
+) -> str:
+    base = _safe_id_part(provider_call_id, "provider-call")
+    candidate = f"{base}-turn{int(call.turn_index or 0)}-seq{int(call.sequence_index or 0)}"
+    if candidate not in used_ids:
+        return candidate
+    suffix = 2
+    while f"{candidate}-{suffix}" in used_ids:
+        suffix += 1
+    return f"{candidate}-{suffix}"
+
+
 def _lane_attempt_id(lane_input: ImplementLaneInput, *, mode: str) -> str:
     safe_session = _safe_id_part(lane_input.work_session_id, "ws")
     safe_task = _safe_id_part(lane_input.task_id, "task")
@@ -2479,7 +2541,7 @@ def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[st
                 for key, value in raw.items()
                 if key not in {"id", "provider_call_id", "name", "tool_name", "tool", "type", "args", "arguments"}
             }
-        provider_call_id = str(raw.get("provider_call_id") or raw.get("id") or f"turn-{turn_index}-call-{index}")
+        provider_call_id = str(raw.get("provider_call_id") or raw.get("id") or "")
         calls.append({"provider_call_id": provider_call_id, "tool_name": name, "arguments": dict(arguments)})
     if finish:
         finish = dict(finish)

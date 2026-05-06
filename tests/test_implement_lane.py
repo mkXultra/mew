@@ -276,12 +276,108 @@ def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_pa
         max_turns=2,
     )
 
-    assert result.status == "failed"
-    assert result.metrics["replay_valid"] is False
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
     assert target.read_text(encoding="utf-8") == "before\n"
     manifest = result.updated_lane_state["proof_manifest"]
     assert manifest["tool_results"][1]["status"] == "invalid"
+    assert manifest["tool_results"][1]["provider_call_id"] == "duplicate-call-turn2-seq1"
+    assert manifest["tool_calls"][1]["provider_call_id"] == "duplicate-call-turn2-seq1"
     assert "duplicate_provider_call_id_across_turns" in manifest["tool_results"][1]["content"][0]["reason"]
+
+
+def test_implement_v2_live_json_rejects_missing_provider_call_id_before_write(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "try write without provider call id",
+            "tool_calls": [
+                {
+                    "name": "edit_file",
+                    "arguments": {"path": "sample.txt", "old": "before\n", "new": "after\n", "apply": True},
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "should not mutate"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
+    assert target.read_text(encoding="utf-8") == "before\n"
+    manifest = result.updated_lane_state["proof_manifest"]
+    assert manifest["tool_results"][0]["status"] == "invalid"
+    assert manifest["tool_results"][0]["provider_call_id"] == "missing-provider-call-id-turn1-seq1"
+    assert "tool_call_missing_provider_call_id" in manifest["tool_results"][0]["content"][0]["reason"]
+
+
+def test_implement_v2_live_json_rejects_same_turn_duplicate_with_same_turn_reason(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "duplicate provider ids in one turn",
+            "tool_calls": [
+                {"id": "dup", "name": "read_file", "arguments": {"path": "sample.txt"}},
+                {
+                    "id": "dup",
+                    "name": "edit_file",
+                    "arguments": {"path": "sample.txt", "old": "before\n", "new": "after\n", "apply": True},
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "should not mutate"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["replay_valid"] is True
+    assert target.read_text(encoding="utf-8") == "before\n"
+    manifest = result.updated_lane_state["proof_manifest"]
+    assert [item["status"] for item in manifest["tool_results"]] == ["invalid", "invalid"]
+    assert manifest["tool_calls"][1]["provider_call_id"] == "dup-turn1-seq2"
+    reason = manifest["tool_results"][1]["content"][0]["reason"]
+    assert "duplicate_provider_call_id:dup" in reason
+    assert "duplicate_provider_call_id_across_turns" not in reason
 
 
 def test_implement_v2_live_json_blocks_format_only_visual_finish(tmp_path) -> None:

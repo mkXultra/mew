@@ -372,6 +372,22 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator`, scoped
   ruff, and `git diff --check` must pass before the next same-shape live
   speed_1.
+- The post-reaction-rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-2109-prior-terminal-reaction`
+  scored reward `0.0` with runner errors `0` and total runtime `21m59s`.
+  This confirms the prior repair changed behavior: the lane used all three
+  bounded terminal-failure reaction turns (`turn_budget_limit=27`,
+  `terminal_failure_reaction_turns_used=3`) instead of stopping at the base
+  `24` turns. The new blocker is replay integrity, not the same reaction gap:
+  the model reused `provider_call_id=read-img-backend` on turn `20` after an
+  earlier turn `2` read, so the artifact recorded
+  `replay_valid=false` with `duplicate_provider_call_id` /
+  `duplicate_result_for_provider_call_id`. The generic repair keeps provider-id
+  reuse side-effect safe by rejecting the tool call as invalid, but assigns a
+  deterministic internal provider id to the rejected call so future proof
+  manifests remain pairable and replay/dogfood can classify the subsequent
+  terminal failure. This is a provider-tool-loop robustness repair, not a
+  Doom/MIPS rule.
 
 ## Repair Trigger
 
