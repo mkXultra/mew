@@ -364,6 +364,62 @@ def test_missing_input_evidence_prevents_later_runtime_artifact_from_becoming_pr
     assert classification.secondary_classes == ("runtime_artifact_missing",)
 
 
+def test_partial_input_artifact_keeps_partial_kind_before_later_runtime_artifact() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:1",
+            "role": "compound",
+            "substeps": [
+                {
+                    "id": "substep:build",
+                    "role": "build",
+                    "stage": "build",
+                    "proof_role": "target_build",
+                    "acceptance_kind": "candidate_artifact_proof",
+                    "produces_artifacts": ["binary"],
+                },
+                {
+                    "id": "substep:runtime",
+                    "role": "runtime",
+                    "stage": "verification",
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                    "requires_artifacts": ["binary"],
+                    "produces_artifacts": ["frame"],
+                },
+            ],
+            "expected_artifacts": [
+                {"id": "binary", "producer_substep_id": "substep:build"},
+                {"id": "frame", "producer_substep_id": "substep:runtime"},
+            ],
+        }
+    )
+    runtime_artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:frame",
+        artifact_id="frame",
+        command_run_id="command-run:1",
+        tool_run_record_id="tool-run-record:1",
+        substep_id="substep:runtime",
+        status="failed",
+        blocking=True,
+    )
+    build_artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:binary",
+        artifact_id="binary",
+        command_run_id="command-run:1",
+        tool_run_record_id="tool-run-record:1",
+        substep_id="substep:build",
+        status="partial",
+        blocking=True,
+    )
+
+    classification = classify_execution_failure(None, [runtime_artifact, build_artifact], None, contract)
+
+    assert classification.failure_class == "build_artifact_missing"
+    assert classification.kind == "partial_evidence"
+    assert classification.evidence_refs[-1] == {"kind": "artifact_evidence", "id": "artifact-evidence:binary"}
+
+
 def test_contract_required_artifact_cannot_be_weakened_by_evidence_required_false() -> None:
     contract = normalize_execution_contract(
         {
@@ -388,6 +444,29 @@ def test_contract_required_artifact_cannot_be_weakened_by_evidence_required_fals
     assert verifier.verdict == "fail"
     assert classification.failure_class == "artifact_validation_failure"
     assert classification.kind == "missing_artifact"
+
+
+def test_partial_artifact_evidence_classifies_as_partial_not_missing() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:1",
+            "role": "runtime",
+            "expected_artifacts": [{"id": "frame", "required": True}],
+        }
+    )
+    artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:frame",
+        artifact_id="frame",
+        command_run_id="command-run:1",
+        tool_run_record_id="tool-run-record:1",
+        status="partial",
+        blocking=True,
+    )
+
+    classification = classify_execution_failure(None, [artifact], None, contract)
+
+    assert classification.failure_class == "artifact_validation_failure"
+    assert classification.kind == "partial_evidence"
 
 
 def test_runtime_inferred_confidence_uses_matching_expected_artifact_source() -> None:
