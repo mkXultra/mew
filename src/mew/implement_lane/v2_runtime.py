@@ -129,6 +129,7 @@ def run_live_json_implement_v2(
         allowed_roots=_allowed_read_roots(lane_input),
         allow_shell=bool(lane_input.lane_config.get("allow_shell")),
         run_command_available=_v2_tool_available(lane_input, "run_command"),
+        route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
     )
     transcript: list[ImplementLaneTranscriptEvent] = []
     tool_calls: list[object] = []
@@ -150,6 +151,9 @@ def run_live_json_implement_v2(
     turn_budget_limit = base_max_turns
     terminal_failure_reaction_turn_limit = _terminal_failure_reaction_turn_limit(lane_input, base_max_turns)
     terminal_failure_reaction_turns_used = 0
+    tool_contract_recovery_turn_limit = _tool_contract_recovery_turn_limit(lane_input)
+    tool_contract_recovery_turns_used = 0
+    tool_contract_recovery_instruction = ""
     turn_index = 0
 
     def extend_for_terminal_failure_reaction_if_available(
@@ -178,6 +182,34 @@ def run_live_json_implement_v2(
             )
         return True
 
+    def extend_for_tool_contract_recovery_if_available(
+        tool_result_slice: tuple[ToolResultEnvelope, ...],
+        *,
+        reason: str,
+    ) -> bool:
+        nonlocal tool_contract_recovery_turns_used, turn_budget_limit, tool_contract_recovery_instruction
+        if not _should_extend_for_tool_contract_recovery(
+            lane_input,
+            tool_result_slice,
+            turn_index=turn_index,
+            turn_budget_limit=turn_budget_limit,
+            recovery_turns_used=tool_contract_recovery_turns_used,
+            recovery_turn_limit=tool_contract_recovery_turn_limit,
+            run_started=run_started,
+        ):
+            return False
+        result = _latest_tool_contract_misuse_result(tool_result_slice)
+        tool_contract_recovery_turns_used += 1
+        turn_budget_limit += 1
+        tool_contract_recovery_instruction = _tool_contract_recovery_instruction(result)
+        if progress:
+            progress(
+                "implement_v2 extending one tool-contract recovery turn "
+                f"({tool_contract_recovery_turns_used}/{tool_contract_recovery_turn_limit}) "
+                f"reason={reason}"
+            )
+        return True
+
     try:
         while turn_index < turn_budget_limit:
             turn_index += 1
@@ -191,8 +223,12 @@ def run_live_json_implement_v2(
                 base_max_turns=base_max_turns,
                 terminal_failure_reaction_turns_used=terminal_failure_reaction_turns_used,
                 terminal_failure_reaction_turn_limit=terminal_failure_reaction_turn_limit,
+                tool_contract_recovery_turns_used=tool_contract_recovery_turns_used,
+                tool_contract_recovery_turn_limit=tool_contract_recovery_turn_limit,
+                tool_contract_recovery_instruction=tool_contract_recovery_instruction,
                 history=tuple(prompt_history),
             )
+            tool_contract_recovery_instruction = ""
             prompt_chars_total += len(prompt)
             if progress:
                 progress(f"implement_v2 turn #{turn_index}: model_json start")
@@ -443,6 +479,16 @@ def run_live_json_implement_v2(
                         "summary": continuation_prompt,
                         "finish_gate": finish_gate_decision,
                     }
+                    if extend_for_tool_contract_recovery_if_available(
+                        current_results,
+                        reason="finish_gate_tool_contract_misuse",
+                    ):
+                        finish_arguments = {
+                            "outcome": "continue",
+                            "summary": "tool-contract recovery turn reserved after finish gate blocked completion",
+                            "finish_gate": finish_gate_decision,
+                        }
+                        continue
                     if extend_for_terminal_failure_reaction_if_available(
                         current_results,
                         reason="finish_gate_terminal_failure",
@@ -453,6 +499,15 @@ def run_live_json_implement_v2(
                             "finish_gate": finish_gate_decision,
                         }
                         continue
+                elif extend_for_tool_contract_recovery_if_available(
+                    current_results,
+                    reason="finish_with_tool_contract_misuse",
+                ):
+                    finish_arguments = {
+                        "outcome": "continue",
+                        "summary": "tool-contract recovery turn reserved before accepting finish",
+                    }
+                    continue
                 elif extend_for_terminal_failure_reaction_if_available(
                     current_results,
                     reason="finish_with_terminal_failure",
@@ -471,6 +526,11 @@ def run_live_json_implement_v2(
                     )
                 )
                 break
+            if extend_for_tool_contract_recovery_if_available(
+                current_results,
+                reason="continue_tool_contract_misuse",
+            ):
+                continue
             if extend_for_terminal_failure_reaction_if_available(
                 current_results,
                 reason="continue_terminal_failure",
@@ -523,6 +583,8 @@ def run_live_json_implement_v2(
             "turn_budget_limit": turn_budget_limit,
             "terminal_failure_reaction_turn_limit": terminal_failure_reaction_turn_limit,
             "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
+            "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
+            "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "command_closeout_count": len(closeout_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
@@ -580,6 +642,8 @@ def run_live_json_implement_v2(
             "turn_budget_limit": turn_budget_limit,
             "terminal_failure_reaction_turn_limit": terminal_failure_reaction_turn_limit,
             "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
+            "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
+            "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
             "prompt_chars_total": prompt_chars_total,
@@ -732,6 +796,7 @@ def run_fake_exec_implement_v2(
             allowed_roots=_allowed_read_roots(lane_input),
             allow_shell=bool(lane_input.lane_config.get("allow_shell")),
             run_command_available=_v2_tool_available(lane_input, "run_command"),
+            route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
         )
         try:
             tool_results = tuple(
@@ -856,6 +921,7 @@ def run_fake_write_implement_v2(
             allowed_roots=_allowed_read_roots(lane_input),
             allow_shell=bool(lane_input.lane_config.get("allow_shell")),
             run_command_available=_v2_tool_available(lane_input, "run_command"),
+            route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
         )
         write_runtime = ImplementV2WriteRuntime(
             workspace=lane_input.workspace,
@@ -1160,6 +1226,27 @@ def _terminal_failure_reaction_turn_limit(lane_input: ImplementLaneInput, base_m
     return max(1, min(3, int(base_max_turns) // 8 or 1))
 
 
+def _tool_contract_recovery_turn_limit(lane_input: ImplementLaneInput) -> int:
+    configured = lane_input.lane_config.get("tool_contract_recovery_turns")
+    if configured not in (None, ""):
+        try:
+            return 1 if int(configured) > 0 else 0
+        except (TypeError, ValueError):
+            return 0
+    return 1
+
+
+def _route_run_tests_shell_surface(lane_input: ImplementLaneInput) -> bool:
+    configured = lane_input.lane_config.get("route_run_tests_shell_surface")
+    if configured is None:
+        configured = lane_input.lane_config.get("auto_route_run_tests_shell_surface")
+    if configured in (None, ""):
+        return True
+    if isinstance(configured, str):
+        return configured.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(configured)
+
+
 def _should_extend_for_terminal_failure_reaction(
     lane_input: ImplementLaneInput,
     tool_results: tuple[ToolResultEnvelope, ...],
@@ -1205,8 +1292,113 @@ def _has_terminal_failure_result(tool_results: tuple[ToolResultEnvelope, ...]) -
     return any(
         result.tool_name in {"run_command", "run_tests", "poll_command"}
         and result.status in {"failed", "interrupted"}
+        and not _is_tool_contract_misuse_result(result)
         for result in tool_results
     )
+
+
+def _should_extend_for_tool_contract_recovery(
+    lane_input: ImplementLaneInput,
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    turn_index: int,
+    turn_budget_limit: int,
+    recovery_turns_used: int,
+    recovery_turn_limit: int,
+    run_started: float,
+) -> bool:
+    if turn_index < turn_budget_limit:
+        return False
+    if recovery_turns_used >= recovery_turn_limit:
+        return False
+    result = _latest_terminal_exec_result(tool_results)
+    if result is None or not _is_tool_contract_misuse_result(result):
+        return False
+    if _has_real_terminal_failure_result(tool_results):
+        return False
+    if not bool(lane_input.lane_config.get("allow_shell")):
+        return False
+    if not _v2_tool_available(lane_input, "run_command"):
+        return False
+    remaining_wall = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining_wall is None:
+        return True
+    configured_minimum = lane_input.lane_config.get("terminal_failure_reaction_min_wall_seconds")
+    try:
+        minimum_wall = float(configured_minimum) if configured_minimum not in (None, "") else 30.0
+    except (TypeError, ValueError):
+        minimum_wall = 30.0
+    return remaining_wall >= max(0.0, minimum_wall)
+
+
+def _latest_tool_contract_misuse_result(tool_results: tuple[ToolResultEnvelope, ...]) -> ToolResultEnvelope | None:
+    result = _latest_terminal_exec_result(tool_results)
+    if result is not None and _is_tool_contract_misuse_result(result):
+        return result
+    return None
+
+
+def _has_real_terminal_failure_result(tool_results: tuple[ToolResultEnvelope, ...]) -> bool:
+    return any(
+        result.tool_name in {"run_command", "run_tests", "poll_command"}
+        and result.status in {"failed", "interrupted"}
+        and not _is_tool_contract_misuse_result(result)
+        for result in tool_results
+    )
+
+
+def _latest_terminal_exec_result(tool_results: tuple[ToolResultEnvelope, ...]) -> ToolResultEnvelope | None:
+    for result in reversed(tool_results):
+        if result.tool_name in {"run_command", "run_tests", "poll_command"} and result.status in {
+            "completed",
+            "failed",
+            "interrupted",
+        }:
+            return result
+    return None
+
+
+def _is_tool_contract_misuse_result(result: ToolResultEnvelope) -> bool:
+    if result.tool_name != "run_tests" or result.status not in {"failed", "interrupted"}:
+        return False
+    for item in result.content:
+        if not isinstance(item, dict):
+            continue
+        if (
+            item.get("failure_class") == "tool_contract_misuse"
+            and item.get("failure_subclass") == "run_tests_shell_surface"
+            and item.get("recoverable_tool_contract_misuse") is True
+            and item.get("tool_contract_recovery_eligible") is True
+            and item.get("terminal_failure_reaction_eligible") is False
+            and item.get("preserved_command")
+            and item.get("suggested_tool") == "run_command"
+            and item.get("suggested_use_shell") is True
+        ):
+            return True
+    return False
+
+
+def _tool_contract_recovery_instruction(result: ToolResultEnvelope | None) -> str:
+    payload = next((item for item in (result.content if result is not None else ()) if isinstance(item, dict)), {})
+    command = _clip_recovery_command(payload.get("preserved_command"))
+    if not command:
+        return ""
+    cwd = str(payload.get("cwd") or ".")
+    return (
+        "Tool-contract recovery turn: the last action failed only because run_tests is argv-only. "
+        "Re-run the exact preserved command with run_command/use_shell=true from the same cwd and keep the same "
+        "execution_contract. Do not broaden source investigation or invent a new surrogate. "
+        "If it cannot be run safely, finish blocked with the exact blocker.\n"
+        f"cwd: {cwd}\n"
+        f"preserved_command: {command}\n"
+    )
+
+
+def _clip_recovery_command(command: object, *, limit: int = 1000) -> str:
+    text = str(command or "")
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 40]}...<truncated {len(text) - (limit - 40)} chars>"
 
 
 def _projected_command_closeout_status(payload: dict[str, object]) -> str:
@@ -1566,6 +1758,9 @@ def _live_json_prompt(
     base_max_turns: int | None = None,
     terminal_failure_reaction_turns_used: int = 0,
     terminal_failure_reaction_turn_limit: int = 0,
+    tool_contract_recovery_turns_used: int = 0,
+    tool_contract_recovery_turn_limit: int = 0,
+    tool_contract_recovery_instruction: str = "",
     history: tuple[dict[str, object], ...],
 ) -> str:
     sections = render_prompt_sections(build_implement_v2_prompt_sections(lane_input))
@@ -1584,6 +1779,16 @@ def _live_json_prompt(
             "acceptance_evidence": ["tool result or verifier evidence refs"],
         },
     }
+    recovery_instruction_section = ""
+    if tool_contract_recovery_instruction:
+        recovery_instruction_section = f"tool_contract_recovery_instruction:\n{tool_contract_recovery_instruction}"
+    terminal_reaction_guidance = ""
+    if terminal_failure_reaction_turns_used > 0 and not tool_contract_recovery_instruction:
+        terminal_reaction_guidance = (
+            "If this is a terminal-failure reaction turn, do not broaden the task: make the smallest "
+            "repair/check that directly responds to the latest failed terminal result, or finish blocked "
+            "with the exact blocker.\n"
+        )
     return (
         f"{sections}\n\n"
         "[section:implement_v2_live_json_transport version=v0 stability=dynamic cache_policy=dynamic]\n"
@@ -1594,15 +1799,16 @@ def _live_json_prompt(
         "set finish.outcome to continue or omit finish. For edits, prefer exact edit_file old/new "
         "(old_string/new_string aliases are accepted) or apply_patch. If the CLI grants accept-edits, you may request apply=true; mew supplies "
         "independent approval outside the model output. If tests or an external verifier matter, "
-        "run a concrete run_command or run_tests before claiming completed. "
-        "If this is a terminal-failure reaction turn, do not broaden the task: make the smallest "
-        "repair/check that directly responds to the latest failed terminal result, or finish blocked "
-        "with the exact blocker.\n"
+        "run a concrete run_command or run_tests before claiming completed.\n"
+        f"{terminal_reaction_guidance}"
         f"lane_attempt_id: {lane_attempt_id}\n"
         f"turn: {turn_index}/{max_turns}\n"
         f"base_max_turns: {base_max_turns if base_max_turns is not None else max_turns}\n"
         f"terminal_failure_reaction_turns_used: {terminal_failure_reaction_turns_used}/"
         f"{terminal_failure_reaction_turn_limit}\n"
+        f"tool_contract_recovery_turns_used: {tool_contract_recovery_turns_used}/"
+        f"{tool_contract_recovery_turn_limit}\n"
+        f"{recovery_instruction_section}"
         f"response_contract_json:\n{json.dumps(response_contract, ensure_ascii=False, indent=2)}\n"
         f"history_json:\n{json.dumps(list(history)[-8:], ensure_ascii=False, indent=2)}\n"
         "[/section:implement_v2_live_json_transport]"

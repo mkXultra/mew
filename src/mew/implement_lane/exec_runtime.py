@@ -50,11 +50,13 @@ class ImplementV2ManagedExecRuntime:
         max_active: int = 1,
         allow_shell: bool = False,
         run_command_available: bool = False,
+        route_run_tests_shell_surface: bool = True,
     ):
         self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
         self.allowed_roots = tuple(str(root) for root in (allowed_roots or (str(self.workspace),)))
         self.allow_shell = bool(allow_shell)
         self.run_command_available = bool(run_command_available)
+        self.route_run_tests_shell_surface = bool(route_run_tests_shell_surface)
         self.runner = ManagedCommandRunner(max_active=max_active)
         self.output_paths: dict[str, str] = {}
         self.command_metadata: dict[str, dict[str, object]] = {}
@@ -127,7 +129,8 @@ class ImplementV2ManagedExecRuntime:
         if call.tool_name == "run_tests":
             misuse = _run_tests_shell_surface_misuse(command, use_shell=use_shell)
             if misuse is not None:
-                if not self.allow_shell or not self.run_command_available:
+                misuse["cwd"] = str(args.get("cwd") or ".")
+                if not self.allow_shell or not self.run_command_available or not self.route_run_tests_shell_surface:
                     raise RunTestsShellSurfaceMisuse(misuse)
                 use_shell = True
                 effective_tool_name = "run_command"

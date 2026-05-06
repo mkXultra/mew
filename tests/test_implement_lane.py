@@ -1013,6 +1013,305 @@ def test_implement_v2_live_json_extends_after_final_failed_tool_claims_completed
     assert (tmp_path / "finish.txt").read_text(encoding="utf-8") == "finished"
 
 
+def test_implement_v2_live_json_tool_contract_recovery_extends_exactly_one_narrow_turn(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "wrong verifier surface at final turn",
+            "tool_calls": [
+                {
+                    "id": "wrong-tool-verifier",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": "printf recovered > recovered.txt && test \"$(cat recovered.txt)\" = recovered",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "retry exact verifier with run_command",
+            "tool_calls": [
+                {
+                    "id": "corrected-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf recovered > recovered.txt && test \"$(cat recovered.txt)\" = recovered",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "tool contract recovered",
+                "acceptance_evidence": ["corrected-verifier confirmed recovered.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify recovered.txt"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "route_run_tests_shell_surface": False,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    first_result = manifest["tool_results"][0]
+
+    assert result.status == "completed"
+    assert first_result["status"] == "failed"
+    assert first_result["content"][0]["failure_class"] == "tool_contract_misuse"
+    assert result.metrics["base_max_turns"] == 1
+    assert result.metrics["turn_budget_limit"] == 2
+    assert result.metrics["tool_contract_recovery_turns_used"] == 1
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 0
+    assert result.metrics["model_turns"] == 2
+    assert "Tool-contract recovery turn" in prompts[1]
+    assert "run_tests is argv-only" in prompts[1]
+    assert "preserved_command: printf recovered > recovered.txt" in prompts[1]
+    assert "If this is a terminal-failure reaction turn" not in prompts[1]
+    assert "terminal_failure_reaction_turns_used: 0/" in prompts[1]
+    assert (tmp_path / "recovered.txt").read_text(encoding="utf-8") == "recovered"
+
+
+def test_implement_v2_live_json_tool_contract_recovery_does_not_extend_after_later_success(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "wrong verifier then corrected verifier in same turn",
+            "tool_calls": [
+                {
+                    "id": "wrong-tool-verifier",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": "printf should-not-run > wrong.txt && test -f wrong.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+                {
+                    "id": "corrected-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf ok > ok.txt && test \"$(cat ok.txt)\" = ok",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "corrected verifier succeeded",
+                "acceptance_evidence": ["corrected-verifier confirmed ok.txt"],
+            },
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify ok.txt"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "route_run_tests_shell_surface": False,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["turn_budget_limit"] == 1
+    assert result.metrics["tool_contract_recovery_turns_used"] == 0
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 0
+    assert not (tmp_path / "wrong.txt").exists()
+    assert (tmp_path / "ok.txt").read_text(encoding="utf-8") == "ok"
+
+
+def test_implement_v2_live_json_tool_contract_misuse_does_not_use_terminal_failure_reaction(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "wrong verifier surface without shell permission",
+            "tool_calls": [
+                {
+                    "id": "wrong-tool-verifier",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": "printf should-not-run > denied.txt && test -f denied.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Do not run shell verifier"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_verify": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert first_result["status"] == "failed"
+    assert first_result["content"][0]["failure_class"] == "tool_contract_misuse"
+    assert result.metrics["tool_contract_recovery_turns_used"] == 0
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 0
+    assert result.metrics["turn_budget_limit"] == 1
+    assert not (tmp_path / "denied.txt").exists()
+
+
+def test_implement_v2_live_json_real_terminal_failure_takes_precedence_over_tool_contract_misuse(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "real failure and wrong verifier surface in same final turn",
+            "tool_calls": [
+                {
+                    "id": "real-terminal-failure",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf real-fail >&2; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+                {
+                    "id": "wrong-tool-verifier",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": "printf should-not-run > wrong.txt && test -f wrong.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "react to real terminal failure",
+            "tool_calls": [
+                {
+                    "id": "repair-real-failure",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf real-repaired > real.txt && test \"$(cat real.txt)\" = real-repaired",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "real failure repaired",
+                "acceptance_evidence": ["repair-real-failure confirmed real.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Repair real terminal failure"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "route_run_tests_shell_surface": False,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["tool_contract_recovery_turns_used"] == 0
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert "Tool-contract recovery turn" not in prompts[1]
+    assert "If this is a terminal-failure reaction turn" in prompts[1]
+    assert not (tmp_path / "wrong.txt").exists()
+    assert (tmp_path / "real.txt").read_text(encoding="utf-8") == "real-repaired"
+
+
 def test_implement_v2_closeout_preserves_command_timeout(tmp_path) -> None:
     command = shlex.join([sys.executable, "-c", "import time; print('start', flush=True); time.sleep(3)"])
 
