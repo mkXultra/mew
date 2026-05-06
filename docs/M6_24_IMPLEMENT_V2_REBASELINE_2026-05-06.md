@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | terminal-history projection repair reviewed; commit pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1453-terminal-tail` | commit repair, then run current-head pre-speed and exactly one same-shape v2 speed_1 if green |
+| `make-doom-for-mips` | 1/5 | current-head miss after reference compare | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-152558-reference-compare` | repair generic final tool-contract selection gap, then replay/dogfood/emulator before one same-shape v2 speed_1 |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -276,6 +276,16 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   codex-ultra review session `019dfbe8-f49c-7341-b9bc-1e0c04975c19`
   approved. This is a generic provider-history projection repair, not a
   Doom/MIPS solver.
+- The reference-compare rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-152558-reference-compare`
+  scored reward `0.0` with runner errors `0` and total runtime `11m34s`.
+  It used true `implement_v2` (`runtime_id=implement_v2_model_json_tool_loop`),
+  preserved the source-backed MIPS/Doom path, and reached build/link repairs.
+  The final blocker was generic tool-contract selection: the model sent a
+  multi-line shell verifier to `run_tests`, but `run_tests` is argv-only and
+  instructed it to use `run_command` for shell orchestration. Codex and
+  Claude Code reference traces for the same task are captured in
+  `docs/M6_24_REFERENCE_TRACE_MAKE_DOOM_FOR_MIPS_2026-05-06.md`.
 
 ## Repair Trigger
 
