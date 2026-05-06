@@ -496,11 +496,16 @@ def _contract_from_payload(
     fallback_id: str,
 ):
     normalized = payload.get("execution_contract_normalized") or metadata.get("execution_contract_normalized")
-    if isinstance(normalized, dict):
-        return normalize_execution_contract(normalized, task_contract=task_contract, frontier_state=frontier_state)
     raw = payload.get("execution_contract") or metadata.get("execution_contract")
+    contract_input: dict[str, object] = {}
+    if isinstance(normalized, dict):
+        contract_input.update(normalized)
+    if isinstance(raw, dict):
+        contract_input.update(raw)
+    if contract_input:
+        return normalize_execution_contract(contract_input, task_contract=task_contract, frontier_state=frontier_state)
     return _normalize_runtime_contract(
-        raw if isinstance(raw, dict) else {},
+        {},
         task_contract=task_contract,
         frontier_state=frontier_state,
         fallback_id=fallback_id,

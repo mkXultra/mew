@@ -438,6 +438,16 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   runtime-artifact class. Do not add task-specific Doom logic; repair or record
   this as a generic contract-role vocabulary/normalization gap if the next
   repair depends on phase-specific routing.
+- Post-repair update on 2026-05-07 JST: the vocabulary normalization gap is
+  repaired generically. `execution_contract` now tolerates near-miss model
+  vocabulary such as `generated_artifact`, `final_verifier`, and
+  `artifact_and_runtime_verification` by projecting it back to the v3 contract
+  vocabulary without expanding the enum set. Replay also prefers raw contract
+  fields over stale stored normalized fields when recomputing historical
+  artifacts. The same historical job now replays as latest
+  `runtime_artifact_missing` / `phase=runtime` with an expected
+  `structured_replay_mismatch_count=7` because old stored classifications were
+  less specific. This is a replay semantics repair, not a new live proof.
 
 ## Repair Trigger
 

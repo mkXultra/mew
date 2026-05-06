@@ -197,6 +197,27 @@ TOOL_RUN_STATUSES = set(ToolRunStatus.__args__)
 FAILURE_CLASSES = set(FailureClass.__args__)
 FAILURE_KINDS = set(FailureKind.__args__)
 FAILURE_PHASES = set(FailurePhase.__args__)
+ROLE_ALIASES = {
+    # These are model-facing source/frontier roles that sometimes leak into
+    # execution_contract.role. Keep them as compatibility aliases rather than
+    # expanding the execution contract vocabulary.
+    "primary_source": "source",
+    "runtime_harness": "runtime",
+    "build_file": "build",
+    "test_harness": "test",
+    "toolchain_probe": "dependency",
+    "final_verifier": "verify",
+}
+PROOF_ROLE_ALIASES = {
+    "final_verifier": "verifier",
+    "artifact_verifier": "final_artifact",
+}
+ACCEPTANCE_KIND_ALIASES = {
+    "final_verification": "external_verifier",
+    "runtime_verification": "external_verifier",
+    "artifact_verification": "external_verifier",
+    "artifact_and_runtime_verification": "external_verifier",
+}
 
 TERMINAL_TOOL_STATUSES = frozenset(
     {
@@ -567,11 +588,11 @@ def normalize_execution_contract(
     substeps = tuple(_normalize_substep(item) for item in _list(raw.get("substeps")))
     return ExecutionContract(
         id=str(raw.get("id") or raw.get("contract_id") or "contract:unknown"),
-        role=_enum(raw.get("role"), ROLES, "unknown"),
+        role=_normalize_contract_role(raw),
         stage=_enum(raw.get("stage"), STAGES, "command"),
         purpose=_enum(raw.get("purpose"), PURPOSES, "generic_command"),
-        proof_role=_enum(raw.get("proof_role"), PROOF_ROLES, "none"),
-        acceptance_kind=_enum(raw.get("acceptance_kind"), ACCEPTANCE_KINDS, "not_acceptance"),
+        proof_role=_normalize_proof_role(raw.get("proof_role")),
+        acceptance_kind=_normalize_acceptance_kind(raw.get("acceptance_kind")),
         expected_exit=_normalize_expected_exit(raw.get("expected_exit")),
         expected_artifacts=expected_artifacts,
         substeps=substeps,
@@ -891,15 +912,68 @@ def apply_finish_gate(
     return FinishGateResult(blocked=bool(reasons), reasons=tuple(dict.fromkeys(reasons)), evidence_refs=tuple(evidence_refs))
 
 
+def _normalize_contract_role(raw: Mapping[str, Any]) -> Role:
+    role = _enum(raw.get("role"), ROLES, "")
+    if role:
+        return role
+    raw_role = _enum_text(raw.get("role"))
+    if raw_role == "generated_artifact":
+        if _raw_contract_is_build_artifact_intent(raw):
+            return "build"
+        if _raw_contract_is_runtime_artifact_intent(raw):
+            return "runtime"
+        return "artifact_probe"
+    aliased = ROLE_ALIASES.get(raw_role)
+    if aliased:
+        return aliased  # type: ignore[return-value]
+    return "unknown"
+
+
+def _normalize_proof_role(value: object) -> ProofRole:
+    proof_role = _enum(value, PROOF_ROLES, "")
+    if proof_role:
+        return proof_role
+    aliased = PROOF_ROLE_ALIASES.get(_enum_text(value), "")
+    return _enum(aliased, PROOF_ROLES, "none")
+
+
+def _normalize_acceptance_kind(value: object) -> AcceptanceKind:
+    acceptance_kind = _enum(value, ACCEPTANCE_KINDS, "")
+    if acceptance_kind:
+        return acceptance_kind
+    aliased = ACCEPTANCE_KIND_ALIASES.get(_enum_text(value), "")
+    return _enum(aliased, ACCEPTANCE_KINDS, "not_acceptance")
+
+
+def _raw_contract_is_runtime_artifact_intent(raw: Mapping[str, Any]) -> bool:
+    purpose = _enum(raw.get("purpose"), PURPOSES, "")
+    stage = _enum(raw.get("stage"), STAGES, "")
+    proof_role = _normalize_proof_role(raw.get("proof_role"))
+    acceptance_kind = _normalize_acceptance_kind(raw.get("acceptance_kind"))
+    return (
+        purpose in {"runtime_build", "runtime_install", "smoke", "verification", "artifact_proof"}
+        or stage in {"runtime_build", "runtime_install", "default_smoke", "custom_runtime_smoke", "artifact_proof", "verification"}
+        or proof_role in {"runtime_install", "default_smoke", "custom_runtime_smoke", "final_artifact", "verifier"}
+        or acceptance_kind in {"candidate_runtime_smoke", "candidate_final_proof", "external_verifier"}
+    )
+
+
+def _raw_contract_is_build_artifact_intent(raw: Mapping[str, Any]) -> bool:
+    purpose = _enum(raw.get("purpose"), PURPOSES, "")
+    stage = _enum(raw.get("stage"), STAGES, "")
+    proof_role = _normalize_proof_role(raw.get("proof_role"))
+    return purpose in {"build", "runtime_build"} or stage in {"build", "runtime_build"} or proof_role == "target_build"
+
+
 def _normalize_substep(value: object) -> ExecutionSubstep:
     raw = _mapping(value)
     return ExecutionSubstep(
         id=str(raw.get("id") or ""),
-        role=_enum(raw.get("role"), ROLES, "unknown"),
+        role=_normalize_contract_role(raw),
         stage=_enum(raw.get("stage"), STAGES, "command"),
         purpose=_enum(raw.get("purpose"), PURPOSES, "generic_command"),
-        proof_role=_enum(raw.get("proof_role"), PROOF_ROLES, "none"),
-        acceptance_kind=_enum(raw.get("acceptance_kind"), ACCEPTANCE_KINDS, "not_acceptance"),
+        proof_role=_normalize_proof_role(raw.get("proof_role")),
+        acceptance_kind=_normalize_acceptance_kind(raw.get("acceptance_kind")),
         declared_target_refs=_tuple_dicts(raw.get("declared_target_refs")),
         expected_exit=_normalize_expected_exit(raw.get("expected_exit")),
         requires_artifacts=tuple(str(item) for item in _list(raw.get("requires_artifacts")) if str(item)),
@@ -1306,8 +1380,12 @@ def _list(value: object) -> list[Any]:
     return []
 
 
+def _enum_text(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
 def _enum(value: object, allowed: set[str], default: str) -> Any:
-    text = str(value or "")
+    text = _enum_text(value)
     return text if text in allowed else default
 
 

@@ -154,6 +154,107 @@ def test_runtime_missing_artifact_classifies_from_structured_evidence_without_ma
     assert classification.evidence_refs[-1] == {"kind": "artifact_evidence", "id": "artifact-evidence:frame"}
 
 
+def test_model_near_miss_verifier_vocabulary_normalizes_to_runtime_artifact_gap() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:near-miss-verifier",
+            "role": "generated_artifact",
+            "stage": "verification",
+            "purpose": "verification",
+            "proof_role": "final_verifier",
+            "acceptance_kind": "artifact_and_runtime_verification",
+            "expected_exit": {"mode": "any"},
+            "expected_artifacts": [
+                {
+                    "id": "frame",
+                    "kind": "file",
+                    "path": "/tmp/frame.bmp",
+                    "freshness": "created_after_run_start",
+                    "checks": [{"type": "exists", "severity": "blocking"}],
+                }
+            ],
+        }
+    )
+    record = ToolRunRecord(
+        record_id="tool-run-record:vm",
+        command_run_id="command-run:vm",
+        status="completed",
+        exit_code=0,
+    )
+    artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:frame",
+        artifact_id="frame",
+        command_run_id="command-run:vm",
+        tool_run_record_id="tool-run-record:vm",
+        contract_id="contract:near-miss-verifier",
+        status="failed",
+        blocking=True,
+    )
+
+    classification = classify_execution_failure(record, [artifact], None, contract)
+
+    assert contract.role == "runtime"
+    assert contract.proof_role == "verifier"
+    assert contract.acceptance_kind == "external_verifier"
+    assert classification.failure_class == "runtime_artifact_missing"
+    assert classification.phase == "runtime"
+    assert classification.kind == "missing_artifact"
+
+
+def test_generated_artifact_build_contract_normalizes_to_build_gap() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:near-miss-build",
+            "role": "generated_artifact",
+            "stage": "build",
+            "purpose": "build",
+            "proof_role": "target_build",
+            "acceptance_kind": "candidate_artifact_proof",
+            "expected_artifacts": [{"id": "binary", "kind": "executable", "path": "build/app"}],
+        }
+    )
+    artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:binary",
+        artifact_id="binary",
+        command_run_id="command-run:build",
+        tool_run_record_id="tool-run-record:build",
+        contract_id="contract:near-miss-build",
+        status="failed",
+        blocking=True,
+    )
+
+    classification = classify_execution_failure(None, [artifact], None, contract)
+
+    assert contract.role == "build"
+    assert classification.failure_class == "build_artifact_missing"
+    assert classification.phase == "build"
+
+
+def test_builder_near_miss_proof_role_does_not_create_invalid_acceptance_pair() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:builder-near-miss",
+            "stage": "build",
+            "purpose": "build",
+            "proof_role": "builder",
+        }
+    )
+    record = ToolRunRecord(
+        record_id="tool-run-record:build",
+        command_run_id="command-run:build",
+        status="completed",
+        exit_code=0,
+    )
+
+    verifier = derive_verifier_evidence(contract, [record], [])
+    gate = apply_finish_gate(contract, verifier, [])
+
+    assert contract.proof_role == "none"
+    assert contract.acceptance_kind == "not_acceptance"
+    assert verifier.verdict != "fail"
+    assert gate.blocked is False
+
+
 def test_build_missing_artifact_does_not_classify_as_runtime() -> None:
     contract = normalize_execution_contract(
         {

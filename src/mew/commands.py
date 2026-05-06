@@ -15087,6 +15087,11 @@ def cmd_replay(args):
         assertions["mew_exit_code"] = args.assert_mew_exit_code
     if getattr(args, "assert_external_reward", None) is not None:
         assertions["external_reward"] = args.assert_external_reward
+    if getattr(args, "assert_structured_failure_class", None):
+        assertions["structured_execution_replay_required"] = True
+        assertions["structured_failure_class"] = args.assert_structured_failure_class
+    if getattr(args, "assert_structured_replay_mismatch_count", None) is not None:
+        assertions["structured_replay_mismatch_count"] = args.assert_structured_replay_mismatch_count
     report = replay_terminal_bench_job(
         args.job_dir,
         task=getattr(args, "task", None),

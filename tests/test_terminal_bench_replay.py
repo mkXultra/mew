@@ -364,6 +364,65 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertIn("expected runtime artifact", trial["current"]["next_action"])
             self.assertIn("runtime_artifact_missing", text)
 
+    def test_replay_terminal_bench_job_prefers_raw_contract_when_stored_normalized_vocabulary_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_expected_artifact_contract_emulator_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "make-doom-for-mips__expected-artifact-contract"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            manifest_path = v2_dir / "proof-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            payload = manifest["tool_results"][0]["content"][0]
+            artifact = payload["execution_contract_normalized"]["expected_artifacts"][0]
+            stale_normalized = dict(payload["execution_contract_normalized"])
+            stale_normalized.update(
+                {
+                    "role": "unknown",
+                    "proof_role": "none",
+                    "acceptance_kind": "not_acceptance",
+                    "substeps": [],
+                }
+            )
+            payload["execution_contract_normalized"] = stale_normalized
+            payload["execution_contract"] = {
+                "id": stale_normalized["id"],
+                "role": "generated_artifact",
+                "stage": "verification",
+                "purpose": "verification",
+                "proof_role": "final_verifier",
+                "acceptance_kind": "artifact_and_runtime_verification",
+                "expected_exit": {"mode": "any"},
+                "expected_artifacts": [artifact],
+            }
+            payload["failure_classification"]["phase"] = "unknown"
+            payload["failure_classification"]["class"] = "artifact_validation_failure"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-doom-for-mips",
+                assertions={
+                    "mew_exit_code": 1,
+                    "external_reward": 0.0,
+                    "structured_execution_replay_required": True,
+                    "structured_failure_class": "runtime_artifact_missing",
+                    "structured_replay_mismatch_count": 1,
+                },
+            )
+            structured_replay = report["trials"][0]["current"]["implement_v2"]["structured_execution_replay"]
+            latest = structured_replay["latest_failure_classification"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(latest["class"], "runtime_artifact_missing")
+            self.assertEqual(latest["phase"], "runtime")
+            self.assertEqual(structured_replay["mismatches"][0]["stored"]["class"], "artifact_validation_failure")
+            self.assertEqual(structured_replay["mismatches"][0]["recomputed"]["class"], "runtime_artifact_missing")
+
     def test_replay_terminal_bench_job_reports_stored_classification_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = _write_expected_artifact_contract_emulator_fixture(tmp)
@@ -388,7 +447,6 @@ class TerminalBenchReplayTests(unittest.TestCase):
                     "external_reward": 0.0,
                     "structured_execution_replay_required": True,
                     "structured_failure_class": "runtime_artifact_missing",
-                    "structured_replay_mismatch_count": 1,
                 },
             )
             structured_replay = report["trials"][0]["current"]["implement_v2"]["structured_execution_replay"]
@@ -428,7 +486,6 @@ class TerminalBenchReplayTests(unittest.TestCase):
                     "external_reward": 0.0,
                     "structured_execution_replay_required": True,
                     "structured_failure_class": "runtime_artifact_missing",
-                    "structured_replay_mismatch_count": 1,
                 },
             )
             structured_replay = report["trials"][0]["current"]["implement_v2"]["structured_execution_replay"]

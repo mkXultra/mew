@@ -1095,6 +1095,15 @@ def build_parser():
         type=float,
         help="require saved external verifier reward to equal this value",
     )
+    terminal_bench_replay.add_argument(
+        "--assert-structured-failure-class",
+        help="require latest replay-recomputed implement_v2 structured failure class",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-structured-replay-mismatch-count",
+        type=int,
+        help="require stored-vs-recomputed structured failure classification mismatch count",
+    )
     terminal_bench_replay.add_argument("--json", action="store_true", help="print structured JSON")
     terminal_bench_replay.set_defaults(func=cmd_replay)
 

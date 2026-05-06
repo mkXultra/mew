@@ -372,8 +372,14 @@ def _implement_v2_structured_execution_replay(tool_results):
         tool_run = payload.get("tool_run_record")
         if not isinstance(tool_run, dict):
             continue
-        contract_raw = payload.get("execution_contract_normalized") or payload.get("execution_contract")
-        if not isinstance(contract_raw, dict):
+        normalized_contract = payload.get("execution_contract_normalized")
+        raw_contract = payload.get("execution_contract")
+        contract_raw = {}
+        if isinstance(normalized_contract, dict):
+            contract_raw.update(normalized_contract)
+        if isinstance(raw_contract, dict):
+            contract_raw.update(raw_contract)
+        if not contract_raw:
             contract_raw = {"id": tool_run.get("contract_id") or f"contract:{tool_run.get('command_run_id') or index}"}
         artifacts_raw = payload.get("artifact_evidence")
         artifacts = [item for item in artifacts_raw if isinstance(item, dict)] if isinstance(artifacts_raw, list) else []
@@ -1096,7 +1102,14 @@ def replay_terminal_bench_job(
         )
         current_v2 = ((entry.get("current") or {}).get("implement_v2") or {})
         structured_replay = current_v2.get("structured_execution_replay") if isinstance(current_v2, dict) else {}
-        if isinstance(structured_replay, dict) and structured_replay.get("mismatch_count"):
+        expected_mismatch_count = None
+        if isinstance(assertions, dict):
+            expected_mismatch_count = assertions.get("structured_replay_mismatch_count")
+        if (
+            isinstance(structured_replay, dict)
+            and structured_replay.get("mismatch_count")
+            and structured_replay.get("mismatch_count") != expected_mismatch_count
+        ):
             checks.append(
                 {
                     "name": f"{entry.get('trial_name')}:structured_execution_classification_matches",
