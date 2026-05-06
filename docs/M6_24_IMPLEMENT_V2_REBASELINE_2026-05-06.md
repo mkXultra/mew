@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | terminal-failure reaction-turn repair reviewed; pre-speed pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1243-empty-assistant-retry` | commit reaction-turn repair, run pre-speed on current head, then exactly one same-shape v2 speed_1 if green |
+| `make-doom-for-mips` | 1/5 | terminal-failure reaction emulator reviewed; speed_1 pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1243-empty-assistant-retry` | commit emulator support, then exactly one same-shape v2 speed_1 |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -240,8 +240,12 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   replay/dogfood on the 1243 artifact, scoped ruff, and `git diff --check`.
   codex-ultra reviewer session `019dfb88-3c9e-7261-bc6a-01b8e993a874`
   requested the closeout/finish edge-case regressions and then approved. After
-  commit, run the pre-speed operation on current head and spend exactly one
-  same-shape `implement_v2` speed_1 only if pre-speed stays green.
+  commit, `m6_24-implement-v2-terminal-failure-reaction-emulator` was added as
+  the selected gap emulator. It reproduces the final yielded command closeout
+  failure plus one bounded reaction turn without Harbor. Scoped ruff, focused
+  dogfood tests, the real emulator scenario, and codex-ultra review session
+  `019dfb9a-6778-7532-9a21-109841f65c28` passed. After committing the emulator
+  support, spend exactly one same-shape `implement_v2` speed_1.
 
 ## Repair Trigger
 

@@ -113,6 +113,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-final-verifier-budget-emulator",
     "m6_24-same-family-compatibility-emulator",
     "m6_24-runtime-finish-gate-emulator",
+    "m6_24-implement-v2-terminal-failure-reaction-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -16260,6 +16261,142 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
     return report
 
 
+def run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    failing_command = "printf 'compile start\\n'; sleep 0.1; printf 'compile failed\\n' >&2; exit 2"
+    outputs = [
+        {
+            "summary": "start final compile command that fails after foreground handoff",
+            "tool_calls": [
+                {
+                    "id": "compile-closeout-fail",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": failing_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "react to the terminal failure and verify the repair",
+            "tool_calls": [
+                {
+                    "id": "terminal-repair-verify",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf repaired > terminal-reaction.txt && test \"$(cat terminal-reaction.txt)\" = repaired",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "terminal failure repaired",
+                "acceptance_evidence": ["terminal-repair-verify confirmed terminal-reaction.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-terminal-failure-reaction",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Repair a failed terminal build and verify terminal-reaction.txt.",
+                "max_wall_seconds": 5,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state.get("proof_manifest") or {}
+    tool_results = manifest.get("tool_results") or []
+    first_result = tool_results[0] if tool_results else {}
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "completed after one bounded reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_projects_closeout_failure",
+        first_result.get("status") == "failed" and int(metrics.get("command_closeout_count") or 0) == 1,
+        {"first_result_status": first_result.get("status"), "command_closeout_count": metrics.get("command_closeout_count")},
+        "final yielded terminal command is closed out as failed",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_spends_one_reaction_turn",
+        int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 1
+        and int(metrics.get("model_turns") or 0) == 2,
+        {
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "one reaction turn is added beyond base max_turns",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_prompts_reaction_scope",
+        len(prompts) >= 2 and "terminal_failure_reaction_turns_used: 1/1" in prompts[1],
+        {"prompt_count": len(prompts), "second_prompt_excerpt": (prompts[1] if len(prompts) >= 2 else "")[:300]},
+        "reaction prompt carries reaction-turn counter",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_writes_repair_artifact",
+        (Path(workspace) / "terminal-reaction.txt").read_text(encoding="utf-8", errors="replace") == "repaired",
+        {"path": str(Path(workspace) / "terminal-reaction.txt")},
+        "repair verification command wrote the expected artifact",
+    )
+    report = _scenario_report("m6_24-implement-v2-terminal-failure-reaction-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "command_closeout_count": metrics.get("command_closeout_count"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "first_tool_result_status": first_result.get("status"),
+        "repair_artifact": str(Path(workspace) / "terminal-reaction.txt"),
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -16396,6 +16533,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_24_same_family_compatibility_emulator_scenario(scenario_workspace))
         elif name == "m6_24-runtime-finish-gate-emulator":
             reports.append(run_m6_24_runtime_finish_gate_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-implement-v2-terminal-failure-reaction-emulator":
+            reports.append(run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(scenario_workspace))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-repeated-task-recall":

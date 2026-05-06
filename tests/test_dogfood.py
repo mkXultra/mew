@@ -1690,6 +1690,26 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["import_only_decision"]["decision"], "block_continue")
             self.assertEqual(scenario["artifacts"]["behavior_decision"]["decision"], "allow_complete")
 
+    def test_run_dogfood_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-implement-v2-terminal-failure-reaction-emulator",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-implement-v2-terminal-failure-reaction-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["status"], "completed")
+            self.assertEqual(scenario["artifacts"]["first_tool_result_status"], "failed")
+            self.assertEqual(scenario["artifacts"]["metrics"]["terminal_failure_reaction_turns_used"], 1)
+            self.assertEqual(scenario["artifacts"]["metrics"]["command_closeout_count"], 1)
+            self.assertTrue(Path(scenario["artifacts"]["repair_artifact"]).is_file())
+
     def test_m6_24_projection_detects_lifecycle_parameter_pollution(self):
         projection = _evaluate_managed_action_projection(
             [
