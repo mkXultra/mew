@@ -11,6 +11,7 @@ from dataclasses import replace
 from ..acceptance import acceptance_done_gate_decision
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
+from .execution_evidence import normalize_execution_contract
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from ..prompt_sections import render_prompt_sections
@@ -1953,6 +1954,10 @@ def _merge_hard_runtime_frontier_state(
     if runtime_failure is not None:
         failure_key, failure_value = runtime_failure
         merged[failure_key] = failure_value
+        if failure_key == "latest_runtime_failure":
+            merged.pop("latest_build_failure", None)
+        elif failure_key == "latest_build_failure":
+            merged.pop("latest_runtime_failure", None)
 
     merged["schema_version"] = _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION
     status = str(merged.get("status") or "active").strip().lower()
@@ -2165,7 +2170,7 @@ def _frontier_state_from_execution_contracts(
         if not contract:
             continue
         refs = _frontier_result_refs(result, registry)
-        expected_artifact = _frontier_expected_artifact_from_contract(contract)
+        expected_artifact = _frontier_expected_artifact_from_contract(contract, payload=payload)
         if expected_artifact and "final_artifact" not in derived:
             final_artifact = _resolve_frontier_mapping_refs(expected_artifact, registry)
             if refs:
@@ -2183,7 +2188,15 @@ def _frontier_result_refs(result: ToolResultEnvelope, registry: dict[str, object
     return _resolve_frontier_refs([*result.evidence_refs, *result.content_refs], registry)
 
 
-def _frontier_expected_artifact_from_contract(contract: dict[str, object]) -> dict[str, object]:
+def _frontier_expected_artifact_from_contract(
+    contract: dict[str, object],
+    *,
+    payload: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if payload and _execution_contract_is_verifier_like(contract):
+        blocking_artifact = _frontier_blocking_artifact_from_payload(payload)
+        if blocking_artifact:
+            return blocking_artifact
     raw_artifact = (
         contract.get("expected_artifact")
         or contract.get("final_artifact")
@@ -2212,6 +2225,32 @@ def _frontier_expected_artifact_from_contract(contract: dict[str, object]) -> di
     return _drop_empty_frontier_values(artifact)
 
 
+def _frontier_blocking_artifact_from_payload(payload: dict[str, object]) -> dict[str, object]:
+    artifacts = payload.get("artifact_evidence")
+    if not isinstance(artifacts, list):
+        return {}
+    for artifact in artifacts:
+        if isinstance(artifact, dict) and bool(artifact.get("blocking")):
+            return _frontier_artifact_from_evidence(artifact)
+    for artifact in artifacts:
+        if isinstance(artifact, dict) and str(artifact.get("status") or "").strip().lower() == "failed":
+            return _frontier_artifact_from_evidence(artifact)
+    return {}
+
+
+def _frontier_artifact_from_evidence(artifact: dict[str, object]) -> dict[str, object]:
+    return _drop_empty_frontier_values(
+        {
+            "path": _frontier_clip_text(artifact.get("path"), limit=400),
+            "kind": _frontier_clip_text(artifact.get("kind"), limit=120),
+            "freshness": _frontier_clip_text(artifact.get("freshness")),
+            "status": _frontier_clip_text(artifact.get("status"), limit=120),
+            "blocking": bool(artifact.get("blocking")),
+            "source": _frontier_clip_text(artifact.get("source"), limit=160),
+        }
+    )
+
+
 def _first_contract_list_item(value: object) -> object:
     if isinstance(value, (list, tuple)) and value:
         return value[0]
@@ -2222,9 +2261,16 @@ def _payload_execution_contract(payload: dict[str, object]) -> dict[str, object]
     raw = payload.get("execution_contract")
     raw_contract = raw if isinstance(raw, dict) else {}
     normalized = payload.get("execution_contract_normalized")
-    if isinstance(normalized, dict):
-        return {**raw_contract, **normalized}
-    return raw_contract
+    normalized_contract = normalized if isinstance(normalized, dict) else {}
+    merged = {**normalized_contract, **raw_contract}
+    if not merged:
+        return {}
+    contract = normalize_execution_contract(merged).as_dict()
+    for source in (normalized_contract, raw_contract):
+        for key, value in source.items():
+            if key not in contract:
+                contract[key] = value
+    return contract
 
 
 def _execution_contract_enum(contract: dict[str, object], key: str) -> str:

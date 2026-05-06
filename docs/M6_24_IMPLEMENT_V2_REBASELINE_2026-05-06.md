@@ -448,6 +448,16 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `runtime_artifact_missing` / `phase=runtime` with an expected
   `structured_replay_mismatch_count=7` because old stored classifications were
   less specific. This is a replay semantics repair, not a new live proof.
+- Post-repair update on 2026-05-07 JST: hard-runtime frontier state now follows
+  the same structured blocking-artifact evidence. For verifier-like execution
+  contracts with multiple expected artifacts, `lane_hard_runtime_frontier` no
+  longer chooses the first expected artifact such as a log file; it prefers the
+  failed/blocking `artifact_evidence` that caused the terminal verdict. On the
+  Phase 7 `make-doom-for-mips` artifact, the frontier therefore points at
+  `/tmp/frame.bmp` and drops stale broad build failure state when the latest
+  terminal failure is runtime-artifact missing. This is a generic reentry/state
+  repair so the next model turn investigates runtime artifact production
+  instead of another broad rebuild or log-proof path.
 
 ## Repair Trigger
 

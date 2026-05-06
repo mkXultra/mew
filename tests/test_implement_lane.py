@@ -4047,6 +4047,82 @@ def test_implement_v2_frontier_prefers_structured_missing_runtime_artifact(tmp_p
     assert "producing substep" in runtime_failure["required_next_probe"]
 
 
+def test_implement_v2_frontier_final_artifact_uses_blocking_runtime_artifact(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "runtime verifier produced logs and binary but missed final frame",
+            "tool_calls": [
+                {
+                    "id": "runtime-multi-artifact",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'VERIFY START\\n' > verify.log\n"
+                            "printf 'binary' > doomgeneric_mips\n"
+                            "printf 'VM_RC=0\\nProgram terminated at PC=0x0\\nExecuted 34 instructions\\n' > vm.log\n"
+                            "printf 'VM_RC=0\\nProgram terminated at PC=0x0\\nExecuted 34 instructions\\nBMP_MISSING\\n'\n"
+                            "exit 1"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:runtime-multi-artifact",
+                            "role": "generated_artifact",
+                            "stage": "verification",
+                            "purpose": "build and verify runtime artifact",
+                            "proof_role": "final_verifier",
+                            "acceptance_kind": "artifact_and_runtime_verification",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"path": "verify.log", "checks": [{"kind": "exists"}]},
+                                {"path": "doomgeneric_mips", "checks": [{"kind": "exists"}]},
+                                {"path": "vm.log", "checks": [{"kind": "exists"}]},
+                                {"path": "frame.bmp", "checks": [{"kind": "exists"}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "frame artifact missing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Run a VM verifier that must produce frame.bmp."},
+            persisted_lane_state={
+                "lane_hard_runtime_frontier": {
+                    "latest_build_failure": {"failure_summary": "stale broad rebuild failure"}
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert frontier["final_artifact"]["path"].endswith("/frame.bmp")
+    assert frontier["final_artifact"]["blocking"] is True
+    assert "latest_build_failure" not in frontier
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
+    assert "BMP_MISSING" in frontier["latest_runtime_failure"]["stdout_tail"]
+
+
 def test_implement_v2_frontier_marker_only_without_contract_is_audit_only() -> None:
     failure = _frontier_failure_payload(
         {
