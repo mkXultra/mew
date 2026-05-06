@@ -343,6 +343,16 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `019dfd0d-23ca-7d20-a92f-489e1c2a0a25` passed. Next repair should use the
   latest terminal failure as product evidence, not rerun live speed or chase
   provider transport.
+- Follow-up frontier repair: the same artifact showed the final compound
+  command's observed `VM_RC=124` timeout was stored as `latest_build_failure`
+  because the command text included rebuild steps. Current-head classification
+  now treats observed VM/emulator timeout markers such as `VM_RC=124` as
+  `latest_runtime_failure` with `failure_class=runtime_execution_timeout`, even
+  when the compound command also contains build/link text. This keeps the next
+  model turn on runtime progress and artifact production rather than another
+  generic rebuild loop. Focused implement-lane tests, scoped ruff, and
+  `git diff --check` passed; codex-ultra review session
+  `019dfd13-6160-72b3-871e-fae47d4c99bb` approved.
 
 ## Repair Trigger
 

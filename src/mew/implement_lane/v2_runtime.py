@@ -2189,6 +2189,8 @@ def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
     evidence_text = _frontier_failure_evidence_text(payload)
     if _frontier_runtime_artifact_contract_mismatch(evidence_text):
         return "runtime_artifact_contract_mismatch"
+    if _frontier_runtime_execution_timeout(evidence_text):
+        return "latest_runtime_failure"
     if any(marker in text for marker in ("build", "compile", "link", "toolchain", "make ")):
         return "latest_build_failure"
     return "latest_runtime_failure"
@@ -2208,6 +2210,11 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
         failure["required_next_probe"] = (
             "Compare the generated artifact ABI/ISA/endianness/entrypoint with the runtime loader or "
             "emulator contract before rebuilding or finishing."
+        )
+    elif _frontier_runtime_execution_timeout(evidence_text):
+        failure["failure_class"] = "runtime_execution_timeout"
+        failure["required_next_probe"] = (
+            "Inspect runtime progress, timeout point, and expected artifact production before another rebuild."
         )
     if payload.get("output_ref"):
         failure["output_ref"] = _frontier_clip_text(payload.get("output_ref"), limit=240)
@@ -2264,6 +2271,23 @@ def _frontier_runtime_artifact_contract_mismatch(evidence_text: str) -> bool:
         )
     )
     return runtime_marker and artifact_contract_marker
+
+
+def _frontier_runtime_execution_timeout(evidence_text: str) -> bool:
+    """Detect observed VM/emulator/runtime timeout evidence in compound commands."""
+
+    text = str(evidence_text or "").casefold()
+    return any(
+        marker in text
+        for marker in (
+            "vm_rc=124",
+            "vm rc=124",
+            "vm exit 124",
+            "runtime timed out",
+            "emulator timed out",
+            "execution timed out",
+        )
+    )
 
 
 def _frontier_failure_summary(payload: dict[str, object]) -> str:

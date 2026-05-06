@@ -3335,6 +3335,77 @@ def test_implement_v2_frontier_does_not_classify_runtime_mismatch_from_command_t
     assert frontier["latest_runtime_failure"]["failure_summary"] == "no vm mismatch found"
 
 
+def test_implement_v2_frontier_classifies_observed_vm_timeout_as_runtime_failure(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        failure_script = (
+            "import sys; "
+            "print('PATCHED vm.js JALR decode variables'); "
+            "print('VM_RC=124'); "
+            "print('--- vm stdout tail ---'); "
+            "sys.exit(1)"
+        )
+        return {
+            "summary": "compound build plus runtime verifier timed out",
+            "tool_calls": [
+                {
+                    "id": "rebuild-and-vm-verify",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            f"printf 'make all completed\\n'; "
+                            f"{shlex.quote(sys.executable)} -c {shlex.quote(failure_script)}"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "purpose": "verification",
+                            "stage": "verification",
+                            "proof_role": "runtime",
+                            "target": "vm artifact",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "VM timed out before artifact production"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source for vm.js so the emulator writes /tmp/frame.bmp "
+                    "from the runtime artifact."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    runtime_failure = frontier["latest_runtime_failure"]
+
+    assert "latest_build_failure" not in frontier
+    assert runtime_failure["failure_class"] == "runtime_execution_timeout"
+    assert "VM_RC=124" in runtime_failure["stdout_tail"]
+    assert "runtime progress" in runtime_failure["required_next_probe"]
+
+
 def test_implement_v2_frontier_drops_model_only_latest_failures_and_prefix_artifact_refs(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
