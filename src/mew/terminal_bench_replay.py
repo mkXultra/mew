@@ -225,6 +225,10 @@ def _implement_v2_replay_summary(report_path, report):
         if isinstance(result, dict) and str(result.get("tool_name") or "") in {"run_command", "run_tests", "poll_command"}
     ]
     structured_replay = _implement_v2_structured_execution_replay(tool_results)
+    legacy_marker_fallback = _implement_v2_legacy_runtime_marker_fallback(
+        failed_results,
+        structured_replay=structured_replay,
+    )
     return {
         "runtime_id": runtime_id or "implement_v2_model_json_tool_loop",
         "lane": selected_lane or "implement_v2",
@@ -244,7 +248,8 @@ def _implement_v2_replay_summary(report_path, report):
         "tool_contract_shell_surface_misuse": _implement_v2_tool_contract_shell_surface_misuse(failed_results),
         "tool_contract_shell_surface_misuse_seen": _implement_v2_any_tool_contract_shell_surface_misuse(failed_results),
         "tool_contract_recovery_observed": _implement_v2_tool_contract_recovery_observed(tool_results),
-        "runtime_artifact_contract_mismatch": _implement_v2_runtime_artifact_contract_mismatch(failed_results),
+        "runtime_artifact_contract_mismatch": False,
+        "legacy_runtime_marker_fallback": legacy_marker_fallback,
         "hard_runtime_frontier_present": isinstance(updated_lane_state.get("lane_hard_runtime_frontier"), dict)
         and bool(updated_lane_state.get("lane_hard_runtime_frontier")),
         "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
@@ -615,6 +620,28 @@ def _implement_v2_runtime_artifact_contract_mismatch(failed_results):
         )
     )
     return runtime_marker and artifact_contract_marker
+
+
+def _implement_v2_legacy_runtime_marker_fallback(failed_results, *, structured_replay=None):
+    structured_count = (
+        structured_replay.get("classification_count")
+        if isinstance(structured_replay, dict)
+        else 0
+    )
+    detected = _implement_v2_runtime_artifact_contract_mismatch(failed_results)
+    if not detected:
+        return {}
+    return {
+        "detected": True,
+        "kind": "runtime_artifact_contract_mismatch",
+        "confidence": "low",
+        "active": False,
+        "inactive_reason": (
+            "structured_execution_evidence_present"
+            if int(structured_count or 0) > 0
+            else "marker_only_not_authoritative"
+        ),
+    }
 
 
 def _clip_text(text, limit=500):

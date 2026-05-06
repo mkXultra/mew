@@ -1975,7 +1975,7 @@ def _compact_hard_runtime_frontier_state(value: object) -> dict[str, object]:
         "prohibited_surrogates",
         "latest_build_failure",
         "latest_runtime_failure",
-        "runtime_artifact_contract_mismatch",
+        "legacy_runtime_marker_fallback",
         "next_verifier_shaped_command",
     ):
         if key in value:
@@ -2161,7 +2161,7 @@ def _frontier_state_from_execution_contracts(
         if result.tool_name not in {"run_command", "run_tests", "poll_command"}:
             continue
         payload = next((item for item in result.content if isinstance(item, dict)), {})
-        contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
+        contract = _payload_execution_contract(payload)
         if not contract:
             continue
         refs = _frontier_result_refs(result, registry)
@@ -2171,7 +2171,7 @@ def _frontier_state_from_execution_contracts(
             if refs:
                 final_artifact["evidence_refs"] = refs
             derived["final_artifact"] = final_artifact
-        if _execution_contract_is_build_like(contract, payload) and "build_target" not in derived:
+        if _execution_contract_is_build_like(contract) and "build_target" not in derived:
             build_target = _frontier_build_target_from_contract(contract, payload, expected_artifact)
             if refs:
                 build_target["evidence_refs"] = refs
@@ -2218,32 +2218,80 @@ def _first_contract_list_item(value: object) -> object:
     return None
 
 
-def _execution_contract_is_build_like(contract: dict[str, object], payload: dict[str, object]) -> bool:
-    text = " ".join(
-        str(value or "")
-        for value in (
-            contract.get("purpose"),
-            contract.get("stage"),
-            contract.get("proof_role"),
-            contract.get("target"),
-            contract.get("build_target"),
-            payload.get("command"),
-        )
-    ).lower()
-    return any(marker in text for marker in ("build", "compile", "link", "toolchain", "make "))
+def _payload_execution_contract(payload: dict[str, object]) -> dict[str, object]:
+    raw = payload.get("execution_contract")
+    raw_contract = raw if isinstance(raw, dict) else {}
+    normalized = payload.get("execution_contract_normalized")
+    if isinstance(normalized, dict):
+        return {**raw_contract, **normalized}
+    return raw_contract
+
+
+def _execution_contract_enum(contract: dict[str, object], key: str) -> str:
+    return str(contract.get(key) or "").strip().lower()
+
+
+def _execution_contract_is_build_like(contract: dict[str, object]) -> bool:
+    role = _execution_contract_enum(contract, "role")
+    if role in {"runtime", "test", "verify", "artifact_probe"}:
+        return False
+    return (
+        role == "build"
+        or _execution_contract_enum(contract, "purpose") in {"build", "runtime_build"}
+        or _execution_contract_enum(contract, "stage") in {"build", "runtime_build"}
+        or _execution_contract_enum(contract, "proof_role") == "target_build"
+    )
+
+
+def _execution_contract_is_runtime_like(contract: dict[str, object]) -> bool:
+    role = _execution_contract_enum(contract, "role")
+    if role == "build":
+        return False
+    return (
+        role == "runtime"
+        or _execution_contract_enum(contract, "purpose") in {"runtime_build", "runtime_install", "smoke", "verification"}
+        or _execution_contract_enum(contract, "stage")
+        in {"runtime_build", "runtime_install", "default_smoke", "custom_runtime_smoke", "verification"}
+        or _execution_contract_enum(contract, "proof_role")
+        in {"runtime_install", "default_smoke", "custom_runtime_smoke", "verifier"}
+        or _execution_contract_enum(contract, "acceptance_kind") == "external_verifier"
+    )
 
 
 def _execution_contract_is_verifier_like(contract: dict[str, object]) -> bool:
-    text = " ".join(
-        str(value or "")
-        for value in (
-            contract.get("purpose"),
-            contract.get("stage"),
-            contract.get("proof_role"),
-            contract.get("acceptance_kind"),
+    return (
+        _execution_contract_is_runtime_like(contract)
+        or _execution_contract_enum(contract, "purpose") in {"artifact_proof", "verification"}
+        or _execution_contract_enum(contract, "stage") in {"artifact_proof", "verification"}
+        or _execution_contract_enum(contract, "proof_role") in {"final_artifact", "verifier"}
+        or _execution_contract_enum(contract, "acceptance_kind") in {"candidate_final_proof", "external_verifier"}
+    )
+
+
+def _legacy_frontier_marker_fallback_allowed(payload: dict[str, object]) -> bool:
+    return not bool(_payload_execution_contract(payload))
+
+
+def _execution_contract_bridge_failure_class(contract: dict[str, object]) -> str:
+    if _execution_contract_is_runtime_like(contract):
+        return "runtime_failure"
+    if _execution_contract_is_build_like(contract):
+        return "build_failure"
+    return "unknown_failure"
+
+
+def _execution_contract_bridge_required_next_probe(contract: dict[str, object]) -> str:
+    if _execution_contract_is_runtime_like(contract):
+        return (
+            "Attach execution_contract.expected_artifacts and rerun the runtime verifier so mew can classify "
+            "artifact evidence structurally."
         )
-    ).lower()
-    return any(marker in text for marker in ("verify", "verification", "proof", "acceptance", "test"))
+    if _execution_contract_is_build_like(contract):
+        return (
+            "Attach execution_contract.expected_artifacts or target_build evidence before treating command text "
+            "as a build artifact proof."
+        )
+    return "Attach structured execution_contract evidence before classifying this terminal failure."
 
 
 def _frontier_build_target_from_contract(
@@ -2307,30 +2355,18 @@ def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
             return "latest_runtime_failure" if phase in {"runtime", "verification"} else "latest_build_failure"
         if failure_class == "verification_failure":
             return "latest_runtime_failure"
-    contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
-    text = " ".join(
-        str(value or "")
-        for value in (
-            contract.get("purpose"),
-            contract.get("stage"),
-            contract.get("proof_role"),
-            payload.get("command"),
-        )
-    ).lower()
-    evidence_text = _frontier_failure_evidence_text(payload)
-    if _frontier_runtime_artifact_contract_mismatch(evidence_text):
-        return "runtime_artifact_contract_mismatch"
-    if _frontier_runtime_execution_timeout(evidence_text):
+    contract = _payload_execution_contract(payload)
+    if contract:
+        failure_class = _execution_contract_bridge_failure_class(contract)
+        if failure_class == "build_failure":
+            return "latest_build_failure"
         return "latest_runtime_failure"
-    if _frontier_runtime_artifact_missing(evidence_text):
-        return "latest_runtime_failure"
-    if any(marker in text for marker in ("build", "compile", "link", "toolchain", "make ")):
-        return "latest_build_failure"
     return "latest_runtime_failure"
 
 
 def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
     structured = _structured_failure_classification(payload)
+    contract = _payload_execution_contract(payload)
     evidence_text = _frontier_failure_evidence_text(payload)
     failure = {
         "command_run_id": _frontier_clip_text(payload.get("command_run_id"), limit=160),
@@ -2356,22 +2392,15 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
         evidence_refs = structured.get("evidence_refs")
         if isinstance(evidence_refs, list):
             failure["evidence_refs"] = _frontier_compact_value(evidence_refs, key="evidence_refs")
-    elif _frontier_runtime_artifact_contract_mismatch(evidence_text):
-        failure["failure_class"] = "runtime_artifact_contract_mismatch"
-        failure["required_next_probe"] = (
-            "Compare the generated artifact ABI/ISA/endianness/entrypoint with the runtime loader or "
-            "emulator contract before rebuilding or finishing."
-        )
-    elif _frontier_runtime_execution_timeout(evidence_text):
-        failure["failure_class"] = "runtime_execution_timeout"
-        failure["required_next_probe"] = (
-            "Inspect runtime progress, timeout point, and expected artifact production before another rebuild."
-        )
-    elif _frontier_runtime_artifact_missing(evidence_text):
-        failure["failure_class"] = "runtime_artifact_missing"
-        failure["required_next_probe"] = (
-            "Inspect runtime progress, termination point, and expected output artifact production before another rebuild."
-        )
+    elif contract:
+        failure["failure_class"] = _execution_contract_bridge_failure_class(contract)
+        failure["failure_confidence"] = "low"
+        failure["legacy_marker_authority"] = "inactive_contract_backed"
+        failure["required_next_probe"] = _execution_contract_bridge_required_next_probe(contract)
+    else:
+        legacy_marker = _legacy_runtime_marker_audit(payload, evidence_text=evidence_text)
+        if legacy_marker:
+            failure["legacy_runtime_marker_fallback"] = legacy_marker
     if payload.get("output_ref"):
         failure["output_ref"] = _frontier_clip_text(payload.get("output_ref"), limit=240)
     return _drop_empty_frontier_values(failure)
@@ -2500,6 +2529,27 @@ def _frontier_runtime_artifact_missing(evidence_text: str) -> bool:
     return runtime_marker and missing_artifact_marker
 
 
+def _legacy_runtime_marker_audit(payload: dict[str, object], *, evidence_text: str) -> dict[str, object]:
+    if not _legacy_frontier_marker_fallback_allowed(payload):
+        return {}
+    kind = ""
+    if _frontier_runtime_artifact_contract_mismatch(evidence_text):
+        kind = "runtime_artifact_contract_mismatch"
+    elif _frontier_runtime_execution_timeout(evidence_text):
+        kind = "runtime_execution_timeout"
+    elif _frontier_runtime_artifact_missing(evidence_text):
+        kind = "runtime_artifact_missing"
+    if not kind:
+        return {}
+    return {
+        "detected": True,
+        "kind": kind,
+        "confidence": "low",
+        "active": False,
+        "inactive_reason": "marker_only_not_authoritative",
+    }
+
+
 def _frontier_failure_summary(payload: dict[str, object]) -> str:
     for key in ("stderr_tail", "stderr", "stdout_tail", "stdout"):
         text = str(payload.get(key) or "").strip()
@@ -2523,7 +2573,7 @@ def _latest_tool_contract_verifier_command(tool_results: tuple[ToolResultEnvelop
         command = str(payload.get("preserved_command") or payload.get("command") or "").strip()
         if not command:
             continue
-        contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
+        contract = _payload_execution_contract(payload)
         if contract and not _execution_contract_is_verifier_like(contract):
             continue
         verifier: dict[str, object] = {

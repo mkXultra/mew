@@ -830,7 +830,7 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertIn("latest failed run_command result", next_action)
             self.assertNotIn("recover run_tests shell-surface", next_action)
 
-    def test_replay_terminal_bench_job_routes_runtime_artifact_contract_mismatch(self):
+    def test_replay_terminal_bench_job_demotes_legacy_runtime_artifact_contract_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_replay_fixture(tmp)
             v2_dir = (
@@ -874,11 +874,14 @@ class TerminalBenchReplayTests(unittest.TestCase):
             )
             current_v2 = report["trials"][0]["current"]["implement_v2"]
             next_action = report["trials"][0]["current"]["next_action"]
+            marker_fallback = current_v2["legacy_runtime_marker_fallback"]
 
             self.assertEqual(report["status"], "pass")
-            self.assertTrue(current_v2["runtime_artifact_contract_mismatch"])
-            self.assertIn("artifact ABI/ISA/endianness/entrypoint", next_action)
-            self.assertNotIn("compiled/native source frontier", next_action)
+            self.assertFalse(current_v2["runtime_artifact_contract_mismatch"])
+            self.assertTrue(marker_fallback["detected"])
+            self.assertFalse(marker_fallback["active"])
+            self.assertEqual(marker_fallback["confidence"], "low")
+            self.assertNotIn("artifact ABI/ISA/endianness/entrypoint", next_action)
 
     def test_replay_terminal_bench_job_uses_latest_failure_for_runtime_artifact_contract_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -33,7 +33,11 @@ from mew.implement_lane import (
     validate_proof_manifest_pairing,
     validate_tool_result_pairing,
 )
-from mew.implement_lane.v2_runtime import _finish_evidence_refs, _provider_visible_tool_result_for_history
+from mew.implement_lane.v2_runtime import (
+    _finish_evidence_refs,
+    _frontier_failure_payload,
+    _provider_visible_tool_result_for_history,
+)
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
 
@@ -3638,7 +3642,7 @@ def test_implement_v2_frontier_runtime_failure_overrides_model_claim(tmp_path) -
     assert result.updated_lane_state["lane_hard_runtime_frontier"]["final_artifact"]["path"] == "build/doomgeneric_mips"
 
 
-def test_implement_v2_frontier_classifies_runtime_artifact_contract_mismatch(tmp_path) -> None:
+def test_implement_v2_frontier_demotes_marker_only_runtime_artifact_contract_mismatch(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         failure_script = (
             "import sys; "
@@ -3698,11 +3702,74 @@ def test_implement_v2_frontier_classifies_runtime_artifact_contract_mismatch(tmp
         max_turns=1,
     )
 
-    failure = result.updated_lane_state["lane_hard_runtime_frontier"]["runtime_artifact_contract_mismatch"]
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    failure = frontier["latest_runtime_failure"]
 
-    assert failure["failure_class"] == "runtime_artifact_contract_mismatch"
+    assert "runtime_artifact_contract_mismatch" not in frontier
+    assert failure["failure_class"] == "runtime_failure"
+    assert failure["failure_confidence"] == "low"
+    assert failure["legacy_marker_authority"] == "inactive_contract_backed"
     assert "Unknown opcode" in failure["stdout_tail"]
-    assert "artifact ABI/ISA/endianness/entrypoint" in failure["required_next_probe"]
+    assert "expected_artifacts" in failure["required_next_probe"]
+
+
+def test_implement_v2_frontier_normalized_role_wins_over_raw_build_text(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        failure_script = "import sys; sys.stderr.write('runtime failure after build-looking contract\\n'); sys.exit(2)"
+        return {
+            "summary": "runtime role should win over build-looking raw fields",
+            "tool_calls": [
+                {
+                    "id": "runtime-role-build-text",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": f"{shlex.quote(sys.executable)} -c {shlex.quote(failure_script)}",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:runtime-role-build-text",
+                            "role": "runtime",
+                            "purpose": "build",
+                            "stage": "build",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "target": "build/link/runtime artifact",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "runtime contract failed"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Build source for vm.js and run the runtime verifier so it writes /tmp/frame.bmp."
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert "latest_build_failure" not in frontier
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_failure"
 
 
 def test_implement_v2_frontier_does_not_classify_runtime_mismatch_from_command_text_only(tmp_path) -> None:
@@ -3829,9 +3896,11 @@ def test_implement_v2_frontier_classifies_observed_vm_timeout_as_runtime_failure
     runtime_failure = frontier["latest_runtime_failure"]
 
     assert "latest_build_failure" not in frontier
-    assert runtime_failure["failure_class"] == "runtime_execution_timeout"
+    assert runtime_failure["failure_class"] == "runtime_failure"
+    assert runtime_failure["failure_confidence"] == "low"
+    assert runtime_failure["legacy_marker_authority"] == "inactive_contract_backed"
     assert "VM_RC=124" in runtime_failure["stdout_tail"]
-    assert "runtime progress" in runtime_failure["required_next_probe"]
+    assert "expected_artifacts" in runtime_failure["required_next_probe"]
 
 
 def test_implement_v2_frontier_classifies_observed_runtime_missing_artifact_over_build_text(tmp_path) -> None:
@@ -3904,9 +3973,11 @@ def test_implement_v2_frontier_classifies_observed_runtime_missing_artifact_over
     runtime_failure = frontier["latest_runtime_failure"]
 
     assert "latest_build_failure" not in frontier
-    assert runtime_failure["failure_class"] == "runtime_artifact_missing"
+    assert runtime_failure["failure_class"] == "unknown_failure"
+    assert runtime_failure["failure_confidence"] == "low"
+    assert runtime_failure["legacy_marker_authority"] == "inactive_contract_backed"
     assert "NO_FRAME" in runtime_failure["stdout_tail"]
-    assert "output artifact production" in runtime_failure["required_next_probe"]
+    assert "structured execution_contract" in runtime_failure["required_next_probe"]
 
 
 def test_implement_v2_frontier_prefers_structured_missing_runtime_artifact(tmp_path) -> None:
@@ -3974,6 +4045,96 @@ def test_implement_v2_frontier_prefers_structured_missing_runtime_artifact(tmp_p
     assert runtime_failure["failure_kind"] == "missing_artifact"
     assert "NO_FRAME" not in runtime_failure["stdout_tail"]
     assert "producing substep" in runtime_failure["required_next_probe"]
+
+
+def test_implement_v2_frontier_marker_only_without_contract_is_audit_only() -> None:
+    failure = _frontier_failure_payload(
+        {
+            "command_run_id": "marker-only",
+            "exit_code": 1,
+            "stdout_tail": "VM_RC=124\nNO_FRAME\n",
+            "stderr_tail": "",
+        }
+    )
+    marker = failure["legacy_runtime_marker_fallback"]
+
+    assert "failure_class" not in failure
+    assert marker["kind"] == "runtime_execution_timeout"
+    assert marker["active"] is False
+    assert marker["confidence"] == "low"
+
+
+def test_implement_v2_frontier_drops_stale_runtime_mismatch_key_after_contract_evidence(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "structured runtime verifier exited without producing declared artifact",
+            "tool_calls": [
+                {
+                    "id": "structured-runtime-missing",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:structured-runtime-missing",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "freshness": "created_after_run_start",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "runtime artifact missing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Run verifier so it writes frame.bmp."},
+            persisted_lane_state={
+                "lane_hard_runtime_frontier": {
+                    "runtime_artifact_contract_mismatch": {
+                        "failure_class": "runtime_artifact_contract_mismatch",
+                        "failure_summary": "stale marker bridge",
+                    }
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert "runtime_artifact_contract_mismatch" not in frontier
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
 
 
 def test_implement_v2_frontier_update_can_infer_same_turn_expected_artifact(tmp_path) -> None:
