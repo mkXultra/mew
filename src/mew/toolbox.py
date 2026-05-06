@@ -500,8 +500,8 @@ def run_command_record_streaming(
     stderr = "".join(chunks["stderr"])
     finished_at = now_iso()
     duration_seconds = max(0.0, time.monotonic() - started_monotonic)
-    stdout_tail = _tail_output(stdout) if timed_out else ""
-    stderr_tail = _tail_output(stderr) if timed_out else ""
+    stdout_tail = _tail_output(stdout)
+    stderr_tail = _tail_output(stderr)
     if timed_out:
         timeout_message = f"command timed out after {timeout} second(s)"
         if stderr and not stderr.endswith("\n"):
@@ -649,8 +649,8 @@ class ManagedCommandHandle:
             "stdout": clip_output(stdout),
             "stderr": clip_output(stderr),
             "kill_status": kill_status,
-            "stdout_tail": _tail_output(stdout) if timed_out else "",
-            "stderr_tail": _tail_output(stderr) if timed_out else "",
+            "stdout_tail": _tail_output(stdout),
+            "stderr_tail": _tail_output(stderr),
             "timeout_seconds": (self.timeout if timeout is None else timeout) if timed_out else None,
             "output_bytes": self.output_bytes,
             "output_truncated": self.output_truncated,

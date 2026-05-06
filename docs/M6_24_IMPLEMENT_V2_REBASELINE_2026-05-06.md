@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | provider-visible prompt-history compaction reviewed; pre-speed pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1352-terminal-reaction` | commit history-compaction repair, run current-head pre-speed, then exactly one same-shape v2 speed_1 if green |
+| `make-doom-for-mips` | 1/5 | command-tail evidence repaired; pre-speed pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1420-history-compaction` | run current-head pre-speed, then exactly one same-shape v2 speed_1 if green |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -246,6 +246,19 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   dogfood tests, the real emulator scenario, and codex-ultra review session
   `019dfb9a-6778-7532-9a21-109841f65c28` passed. After committing the emulator
   support, spend exactly one same-shape `implement_v2` speed_1.
+- The provider-history-compaction rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1420-history-compaction`
+  scored reward `0.0` with runner errors `0` and total runtime `12m16s`. This
+  is valid product evidence, not a backend transport miss: v2 ran
+  `model_turns=27`, `tool_calls=52`, and `tool_results=52`, preserved the
+  source-backed MIPS build path, and stopped with
+  `max_turns_before_finish` after a final terminal failure. Replay and
+  terminal-bench dogfood pass, but the replay could not expose the actionable
+  compiler/linker tail because managed command terminal results only populated
+  `stdout_tail` / `stderr_tail` on timeout. The generic repair makes managed
+  command results preserve stdout/stderr tails for all terminal outcomes, so
+  future replay/dogfood can classify failed build frontiers without another
+  live proof. Focused implement-lane and terminal-bench replay tests passed.
 
 ## Repair Trigger
 

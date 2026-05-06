@@ -102,6 +102,28 @@ class ToolboxTests(unittest.TestCase):
             self.assertIn("hello-err", result["stderr_tail"])
             self.assertIn("command timed out after 0.3 second(s)", result["stderr"])
 
+    def test_run_command_record_streaming_records_non_timeout_tails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            command = shlex.join(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys; "
+                        "print('non-timeout-out'); "
+                        "print('non-timeout-err', file=sys.stderr); "
+                        "sys.exit(7)"
+                    ),
+                ]
+            )
+
+            result = run_command_record_streaming(command, cwd=tmp, timeout=1)
+
+            self.assertFalse(result["timed_out"])
+            self.assertEqual(result["exit_code"], 7)
+            self.assertIn("non-timeout-out", result["stdout_tail"])
+            self.assertIn("non-timeout-err", result["stderr_tail"])
+
     def test_run_command_record_streaming_uses_devnull_stdin(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = shlex.join([sys.executable, "-c", "print('ok')"])

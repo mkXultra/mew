@@ -1948,7 +1948,13 @@ def test_implement_v2_exec_compound_command_auto_uses_shell(tmp_path) -> None:
 
 
 def test_implement_v2_exec_nonzero_command_blocks_with_paired_failure(tmp_path) -> None:
-    command = shlex.join([sys.executable, "-c", "import sys; print('bad'); sys.exit(7)"])
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('bad-stdout'); print('bad-stderr', file=sys.stderr); sys.exit(7)",
+        ]
+    )
 
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
@@ -1974,6 +1980,8 @@ def test_implement_v2_exec_nonzero_command_blocks_with_paired_failure(tmp_path) 
     assert tool_result["status"] == "failed"
     assert tool_result["is_error"] is True
     assert tool_result["content"][0]["exit_code"] == 7
+    assert "bad-stdout" in tool_result["content"][0]["stdout_tail"]
+    assert "bad-stderr" in tool_result["content"][0]["stderr_tail"]
 
 
 def test_implement_v2_exec_timeout_is_interrupted_failure_evidence(tmp_path) -> None:
