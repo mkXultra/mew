@@ -325,6 +325,24 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   regressions; after those were added, it approved.
   After this repair, run one same-shape `make-doom-for-mips` `implement_v2`
   speed_1.
+- The same-shape post-repair speed
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-200527-runtime-artifact-contract`
+  scored reward `0.0` with runner errors `0` and total runtime `19m45s`.
+  Replay and terminal-bench dogfood pass. The lane no longer stops at the
+  previous ABI/endianness mismatch: it built a source-backed MIPS ELF, patched
+  `vm.js` through JALR decode, and reached a later VM execution gap. The latest
+  failed terminal result is `node vm.js` timing out with `VM_RC=124` and no
+  `/tmp/frame.bmp`; the external verifier also failed frame existence and
+  similarity. A replay instrumentation bug initially routed this to `model
+  backend failure` because the product summary contained the words "timed out".
+  The repair is generic: only explicit backend/parse/loop-limit markers are
+  treated as model errors, and hard-runtime replay routes product terminal
+  failures to the latest failed terminal result. Focused replay tests, exact
+  replay with `latest failed run_command result`, terminal-bench replay
+  dogfood, scoped ruff, `git diff --check`, and codex-ultra review session
+  `019dfd0d-23ca-7d20-a92f-489e1c2a0a25` passed. Next repair should use the
+  latest terminal failure as product evidence, not rerun live speed or chase
+  provider transport.
 
 ## Repair Trigger
 

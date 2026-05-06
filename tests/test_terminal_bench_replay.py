@@ -370,6 +370,81 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertNotIn("model backend", next_action)
             self.assertNotIn("compiled/native source frontier", next_action)
 
+    def test_replay_terminal_bench_job_does_not_treat_product_timeout_summary_as_model_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            trial_dir = Path(job_dir) / "build-cython-ext__v2fixture"
+            agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+            report_path = agent_dir / "mew-report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["work_report"]["implement_lane_result"]["updated_lane_state"] = {
+                "lane_hard_runtime_frontier": {
+                    "latest_runtime_failure": {"failure_summary": "VM_RC=124 no frame"}
+                }
+            }
+            report["work_report"]["steps"] = [
+                {
+                    "status": "blocked",
+                    "error": (
+                        "node vm.js timed out with VM_RC=124 and /tmp/frame.bmp was not produced"
+                    ),
+                    "action": {
+                        "type": "implement_lane",
+                        "lane": "implement_v2",
+                        "runtime_id": "implement_v2_model_json_tool_loop",
+                    },
+                    "model_turn": {
+                        "status": "failed",
+                        "error": "node vm.js timed out with VM_RC=124 and /tmp/frame.bmp was not produced",
+                        "model_metrics": {
+                            "runtime_id": "implement_v2_model_json_tool_loop",
+                            "model_error": {},
+                        },
+                    },
+                }
+            ]
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            v2_dir = agent_dir / "implement_v2"
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "fix-vm-jalr-decode-and-verify",
+                                "tool_name": "run_command",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "exit_code": 1,
+                                        "stdout_tail": (
+                                            "PATCHED vm.js JALR decode variables\n"
+                                            "VM_RC=124\n"
+                                            "--- vm stdout tail ---\n"
+                                        ),
+                                        "stderr_tail": "--- vm stderr tail ---\n",
+                                    }
+                                ],
+                            }
+                        ],
+                        "metrics": {"model_error": {}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["model_error"], {})
+            self.assertIn("latest failed run_command result", next_action)
+            self.assertNotIn("model backend", next_action)
+
     def test_replay_terminal_bench_job_prefers_terminal_failure_for_implement_v2_max_turns(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_max_turns_fixture(tmp)

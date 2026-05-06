@@ -252,9 +252,32 @@ def _implement_v2_model_error_from_report(report, *, history, metrics, manifest)
         ]
         for candidate in candidates:
             text = str(candidate or "")
-            if text:
+            if text and _looks_like_implement_v2_model_error_text(text):
                 return _normalize_implement_v2_model_error({"message": text, "error_type": "ModelBackendError"})
     return {}
+
+
+def _looks_like_implement_v2_model_error_text(message):
+    lowered = str(message or "").casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "codex web api",
+            "incompleteread",
+            "modelbackenderror",
+            "model backend",
+            "failed to parse json plan",
+            "response did not contain json",
+            "response did not contain assistant",
+            "max_turns before finish",
+            "max turns before finish",
+            "request timed out",
+            "model timed out",
+            "model timeout",
+            "model_timeout",
+            "readtimeout",
+        )
+    )
 
 
 def _normalize_implement_v2_model_error(model_error):
@@ -266,7 +289,13 @@ def _normalize_implement_v2_model_error(model_error):
             failure_class = "model_json_parse_error"
         elif "max_turns before finish" in lowered or "max turns before finish" in lowered:
             failure_class = "max_turns_before_finish"
-        elif "request timed out" in lowered or "timed out" in lowered or "timeout" in lowered:
+        elif (
+            "request timed out" in lowered
+            or "model timed out" in lowered
+            or "model timeout" in lowered
+            or "model_timeout" in lowered
+            or "readtimeout" in lowered
+        ):
             failure_class = "model_timeout"
         else:
             failure_class = "model_backend_error"
@@ -485,6 +514,9 @@ def _implement_v2_next_action(summary, *, external_reward=None):
         return "debug implement_v2 divergence: max-turn limit reached before finish; inspect lane loop budget before another live speed run"
     if model_error:
         return "debug implement_v2 divergence: inspect model backend failure before another live speed run"
+    if summary.get("hard_runtime_frontier_present") and latest:
+        tool = latest.get("tool_name") or "tool"
+        return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
     if not summary.get("compiled_source_frontier_observed"):
         return "debug implement_v2 divergence: broaden compiled/native source frontier before another live speed run"
     if latest:
