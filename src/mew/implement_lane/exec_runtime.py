@@ -42,11 +42,22 @@ class RunTestsShellSurfaceMisuse(ValueError):
 class ImplementV2ManagedExecRuntime:
     """Lane-local managed exec runtime for Phase 4 fake-provider tests."""
 
-    def __init__(self, *, workspace: object, allowed_roots: tuple[str, ...] | list[str] | None = None, max_active: int = 1):
+    def __init__(
+        self,
+        *,
+        workspace: object,
+        allowed_roots: tuple[str, ...] | list[str] | None = None,
+        max_active: int = 1,
+        allow_shell: bool = False,
+        run_command_available: bool = False,
+    ):
         self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
         self.allowed_roots = tuple(str(root) for root in (allowed_roots or (str(self.workspace),)))
+        self.allow_shell = bool(allow_shell)
+        self.run_command_available = bool(run_command_available)
         self.runner = ManagedCommandRunner(max_active=max_active)
         self.output_paths: dict[str, str] = {}
+        self.command_metadata: dict[str, dict[str, object]] = {}
 
     def execute(self, call: ToolCallEnvelope) -> ToolResultEnvelope:
         if call.tool_name not in EXEC_TOOL_NAMES:
@@ -85,7 +96,9 @@ class ImplementV2ManagedExecRuntime:
     def cancel_active_commands(self, *, reason: str) -> tuple[dict[str, object], ...]:
         cancelled = []
         while self.runner.active is not None:
-            cancelled.append(self.runner.cancel(reason=reason))
+            payload = self.runner.cancel(reason=reason)
+            payload.update(self.command_metadata.get(str(payload.get("command_run_id") or ""), {}))
+            cancelled.append(payload)
         return tuple(cancelled)
 
     def finalize_active_commands(self, *, timeout_seconds: float | None = None) -> tuple[dict[str, object], ...]:
@@ -97,7 +110,9 @@ class ImplementV2ManagedExecRuntime:
                 effective_timeout = command_remaining
             else:
                 effective_timeout = min(max(0.0, float(timeout_seconds)), command_remaining)
-            finalized.append(self.runner.finalize(timeout=effective_timeout))
+            payload = self.runner.finalize(timeout=effective_timeout)
+            payload.update(self.command_metadata.get(str(payload.get("command_run_id") or ""), {}))
+            finalized.append(payload)
         return tuple(finalized)
 
     def _run_command(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -107,8 +122,23 @@ class ImplementV2ManagedExecRuntime:
             raise ValueError(f"{call.tool_name} command is empty")
         _reject_resident_mew_loop_command(command, tool_name=call.tool_name)
         use_shell = _use_shell_for_call(call.tool_name, command, args=args, command_source=command_source)
+        effective_tool_name = call.tool_name
+        tool_contract_recovery: dict[str, object] | None = None
         if call.tool_name == "run_tests":
-            _reject_run_tests_shell_surface(command, use_shell=use_shell)
+            misuse = _run_tests_shell_surface_misuse(command, use_shell=use_shell)
+            if misuse is not None:
+                if not self.allow_shell or not self.run_command_available:
+                    raise RunTestsShellSurfaceMisuse(misuse)
+                use_shell = True
+                effective_tool_name = "run_command"
+                tool_contract_recovery = {
+                    "kind": "run_tests_shell_surface_routed_to_run_command",
+                    "features": list(misuse.get("features") or ()),
+                    "preserved_command_hash": _preserved_command_hash(command),
+                    "suggested_use_shell": True,
+                    "failure_class": misuse.get("failure_class"),
+                    "failure_subclass": misuse.get("failure_subclass"),
+                }
         cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
         cwd = resolve_allowed_path(cwd, self.allowed_roots)
         if not cwd.is_dir():
@@ -134,6 +164,12 @@ class ImplementV2ManagedExecRuntime:
             output_path=str(output_path),
         )
         self.output_paths[command_run_id] = str(output_path)
+        self.command_metadata[command_run_id] = {
+            "tool_name": call.tool_name,
+            "effective_tool_name": effective_tool_name,
+            "command_source": command_source,
+            **({"tool_contract_recovery": dict(tool_contract_recovery)} if tool_contract_recovery is not None else {}),
+        }
         payload = self.runner.poll(wait_seconds=foreground_budget, command_run_id=command_run_id)
         if payload.get("status") == "running":
             payload["status"] = "yielded"
@@ -141,7 +177,10 @@ class ImplementV2ManagedExecRuntime:
         payload["output_ref"] = output_ref
         payload["output_path"] = str(output_path)
         payload["tool_name"] = call.tool_name
+        payload["effective_tool_name"] = effective_tool_name
         payload["command_source"] = command_source
+        if tool_contract_recovery is not None:
+            payload["tool_contract_recovery"] = tool_contract_recovery
         return payload
 
     def _poll_command(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -151,6 +190,7 @@ class ImplementV2ManagedExecRuntime:
             wait_seconds=_bounded_float(args.get("wait_seconds"), default=0.0, minimum=0.0, maximum=30.0),
             command_run_id=command_run_id,
         )
+        payload.update(self.command_metadata.get(command_run_id, {}))
         if payload.get("status") == "running":
             payload["status"] = "yielded"
         payload["command_run_id"] = command_run_id
@@ -163,6 +203,7 @@ class ImplementV2ManagedExecRuntime:
             reason=str(args.get("reason") or "cancelled"),
             command_run_id=command_run_id,
         )
+        payload.update(self.command_metadata.get(command_run_id, {}))
         payload["command_run_id"] = command_run_id
         return payload
 
@@ -293,6 +334,11 @@ def _reject_run_tests_shell_surface(command: object, *, use_shell: bool) -> None
     misuse = _run_tests_shell_surface_misuse(command, use_shell=use_shell)
     if misuse is not None:
         raise RunTestsShellSurfaceMisuse(misuse)
+
+
+def _preserved_command_hash(command: object) -> str:
+    digest = hashlib.sha256(str(command or "").encode("utf-8", errors="replace")).hexdigest()
+    return f"sha256:{digest}"
 
 
 def _has_unquoted_shell_surface(command: object) -> bool:

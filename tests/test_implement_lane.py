@@ -2355,6 +2355,170 @@ def test_implement_v2_run_tests_rejects_shell_orchestration(tmp_path) -> None:
     assert set(payload["features"]) >= {"use_shell", "and_or"}
 
 
+def test_implement_v2_run_tests_shell_orchestration_routes_to_run_command_when_shell_allowed(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "printf routed > routed.txt && test \"$(cat routed.txt)\" = routed",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "shell verifier routed"},
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    tool_result = manifest["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.metrics["replay_valid"] is True
+    assert manifest["tool_calls"][0]["tool_name"] == "run_tests"
+    assert tool_result["tool_name"] == "run_tests"
+    assert tool_result["status"] == "completed"
+    assert tool_result["evidence_refs"]
+    assert payload["tool_name"] == "run_tests"
+    assert payload["effective_tool_name"] == "run_command"
+    assert payload["execution_mode"] == "shell"
+    assert payload["tool_contract_recovery"]["kind"] == "run_tests_shell_surface_routed_to_run_command"
+    assert payload["tool_contract_recovery"]["preserved_command_hash"].startswith("sha256:")
+    assert (tmp_path / "routed.txt").read_text(encoding="utf-8") == "routed"
+
+
+def test_implement_v2_routed_run_tests_shell_failure_preserves_terminal_failure(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "printf routed-fail >&2; exit 3",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "shell verifier routed and failed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["effective_tool_name"] == "run_command"
+    assert payload["tool_contract_recovery"]["kind"] == "run_tests_shell_surface_routed_to_run_command"
+    assert payload["exit_code"] == 3
+    assert "routed-fail" in payload["stderr"]
+
+
+def test_implement_v2_routed_run_tests_yielded_closeout_preserves_recovery_metadata(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time, pathlib; time.sleep(2); pathlib.Path('late.txt').write_text('late')",
+        ]
+    )
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": f"{command} && test -f late.txt",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 0,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "yielded shell verifier routed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "interrupted"
+    assert payload["effective_tool_name"] == "run_command"
+    assert payload["tool_contract_recovery"]["kind"] == "run_tests_shell_surface_routed_to_run_command"
+
+
+def test_implement_v2_live_json_does_not_route_run_tests_when_run_command_unavailable_for_mode(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "write mode should not execute verifier",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": "printf routed > routed.txt && test -f routed.txt",
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "do not run verifier in write mode"},
+            lane_config={
+                "mode": "write",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "invalid"
+    assert "not available in implement_v2 write mode" in payload["reason"]
+    assert not (tmp_path / "routed.txt").exists()
+
+
 def test_implement_v2_run_tests_simple_argv_command_still_runs(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(

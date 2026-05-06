@@ -127,6 +127,8 @@ def run_live_json_implement_v2(
     exec_runtime = ImplementV2ManagedExecRuntime(
         workspace=lane_input.workspace,
         allowed_roots=_allowed_read_roots(lane_input),
+        allow_shell=bool(lane_input.lane_config.get("allow_shell")),
+        run_command_available=_v2_tool_available(lane_input, "run_command"),
     )
     transcript: list[ImplementLaneTranscriptEvent] = []
     tool_calls: list[object] = []
@@ -728,6 +730,8 @@ def run_fake_exec_implement_v2(
         exec_runtime = ImplementV2ManagedExecRuntime(
             workspace=lane_input.workspace,
             allowed_roots=_allowed_read_roots(lane_input),
+            allow_shell=bool(lane_input.lane_config.get("allow_shell")),
+            run_command_available=_v2_tool_available(lane_input, "run_command"),
         )
         try:
             tool_results = tuple(
@@ -850,6 +854,8 @@ def run_fake_write_implement_v2(
         exec_runtime = ImplementV2ManagedExecRuntime(
             workspace=lane_input.workspace,
             allowed_roots=_allowed_read_roots(lane_input),
+            allow_shell=bool(lane_input.lane_config.get("allow_shell")),
+            run_command_available=_v2_tool_available(lane_input, "run_command"),
         )
         write_runtime = ImplementV2WriteRuntime(
             workspace=lane_input.workspace,
@@ -1058,6 +1064,7 @@ def _project_command_closeouts(
         cleanup_payload = cleanup_by_run_id.get(command_run_id)
         payload = closeout_payload or cleanup_payload
         if result.status == "yielded" and payload:
+            payload = _preserve_result_command_context(result, payload)
             status = _projected_command_closeout_status(payload)
             evidence_refs = result.evidence_refs
             if status == "completed" and result.tool_name in EXEC_TOOL_NAMES and not evidence_refs:
@@ -1081,6 +1088,16 @@ def _project_command_closeouts(
         else:
             projected.append(result)
     return tuple(projected)
+
+
+def _preserve_result_command_context(result: ToolResultEnvelope, payload: dict[str, object]) -> dict[str, object]:
+    preserved = dict(payload)
+    previous_payload = next((item for item in result.content if isinstance(item, dict)), {})
+    for key in ("tool_name", "effective_tool_name", "command_source", "tool_contract_recovery"):
+        if key in previous_payload and key not in preserved:
+            value = previous_payload.get(key)
+            preserved[key] = dict(value) if isinstance(value, dict) else value
+    return preserved
 
 
 def _project_orphaned_command_cleanup(
@@ -1256,6 +1273,11 @@ def _execute_live_json_tool(
     exec_runtime: ImplementV2ManagedExecRuntime,
     write_runtime: ImplementV2WriteRuntime,
 ):
+    if not _v2_tool_available(lane_input, call.tool_name):
+        return build_invalid_tool_result(
+            call,
+            reason=f"{call.tool_name} is not available in implement_v2 {str(lane_input.lane_config.get('mode') or 'full')} mode",
+        )
     if call.tool_name in WRITE_TOOL_NAMES:
         if not _allowed_write_roots(lane_input):
             return build_invalid_tool_result(call, reason="write tools are disabled; pass --allow-write PATH")
@@ -1271,6 +1293,11 @@ def _execute_live_json_tool(
         workspace=lane_input.workspace,
         allowed_roots=_allowed_read_roots(lane_input),
     )
+
+
+def _v2_tool_available(lane_input: ImplementLaneInput, tool_name: object) -> bool:
+    mode = lane_input.lane_config.get("mode") or "full"
+    return str(tool_name or "") in {spec.name for spec in list_v2_tool_specs_for_mode(mode)}
 
 
 def _tool_call_identity_errors(
