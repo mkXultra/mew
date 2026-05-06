@@ -286,6 +286,16 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   instructed it to use `run_command` for shell orchestration. Codex and
   Claude Code reference traces for the same task are captured in
   `docs/M6_24_REFERENCE_TRACE_MAKE_DOOM_FOR_MIPS_2026-05-06.md`.
+- The tool-contract replay repair makes current-head replay classify both
+  structured and legacy reason-only `run_tests` shell-surface failures as the
+  same recoverable tool-contract gap. It also fixed the hard-runtime frontier
+  compactor's numeric type check so the tool-contract recovery emulator runs
+  under the current Python runtime. Focused UT, exact replay with a
+  `recover run_tests shell-surface verifier through run_command` assertion,
+  terminal-bench replay dogfood, both selected emulators, scoped ruff,
+  `git diff --check`, and codex-ultra review session
+  `019dfc7a-2c56-7d91-a1f4-0562b4ad801d` passed. After this commit, run one
+  same-shape `make-doom-for-mips` `implement_v2` speed_1.
 
 ## Repair Trigger
 

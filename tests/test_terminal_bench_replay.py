@@ -544,6 +544,55 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertIn("recover run_tests shell-surface verifier through run_command", next_action)
             self.assertNotIn("compiled/native source frontier", next_action)
 
+    def test_replay_terminal_bench_job_routes_legacy_run_tests_shell_surface_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "legacy-final-shell-verifier",
+                                "tool_name": "run_tests",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "reason": (
+                                            "run_tests executes one argv command without a shell; "
+                                            "use run_command for shell orchestration"
+                                        )
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+            next_action = trial["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["tool_contract_shell_surface_misuse"])
+            self.assertTrue(current_v2["tool_contract_shell_surface_misuse_seen"])
+            self.assertFalse(current_v2["tool_contract_recovery_observed"])
+            self.assertIn("recover run_tests shell-surface verifier through run_command", next_action)
+
     def test_replay_terminal_bench_job_prefers_later_real_terminal_failure_over_old_tool_contract_misuse(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_replay_fixture(tmp)

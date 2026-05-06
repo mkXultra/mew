@@ -333,16 +333,7 @@ def _implement_v2_active_command_closeout_failed(failed_results):
 
 def _implement_v2_tool_contract_shell_surface_misuse(failed_results):
     result = _implement_v2_latest_failed_terminal_result(failed_results)
-    if str(result.get("tool_name") or "") != "run_tests":
-        return False
-    content = result.get("content")
-    first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
-    return (
-        first_content.get("failure_class") == "tool_contract_misuse"
-        and first_content.get("failure_subclass") == "run_tests_shell_surface"
-        and first_content.get("recoverable_tool_contract_misuse") is True
-        and first_content.get("suggested_tool") == "run_command"
-    )
+    return _implement_v2_tool_result_is_run_tests_shell_surface_misuse(result)
 
 
 def _implement_v2_any_tool_contract_shell_surface_misuse(failed_results):
@@ -358,11 +349,18 @@ def _implement_v2_tool_result_is_run_tests_shell_surface_misuse(result):
         return False
     content = result.get("content")
     first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
-    return (
+    structured = (
         first_content.get("failure_class") == "tool_contract_misuse"
         and first_content.get("failure_subclass") == "run_tests_shell_surface"
         and first_content.get("recoverable_tool_contract_misuse") is True
         and first_content.get("suggested_tool") == "run_command"
+    )
+    if structured:
+        return True
+    reason = str(first_content.get("reason") or "").casefold()
+    return (
+        "run_tests executes one argv command without a shell" in reason
+        and "use run_command for shell orchestration" in reason
     )
 
 

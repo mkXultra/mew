@@ -614,7 +614,7 @@ the semantics are clear. It does not import Codex architecture wholesale.
 
 ```sh
 uv run pytest --no-testmon -q tests/test_implement_lane.py -k 'run_tests and (shell or contract or route or recovery)'
-uv run pytest --no-testmon -q tests/test_implement_lane.py -k 'tool_contract_recovery and terminal_failure_reaction'
+uv run pytest --no-testmon -q tests/test_implement_lane.py -k 'tool_contract_recovery or terminal_failure_reaction'
 uv run pytest --no-testmon -q tests/test_implement_lane.py -k 'hard_runtime or frontier or evidence_ref'
 uv run pytest --no-testmon -q tests/test_terminal_bench_replay.py -k 'implement_v2 or tool_contract'
 uv run pytest --no-testmon -q tests/test_dogfood.py -k 'implement_v2_tool_contract or terminal_failure_reaction'

@@ -1898,7 +1898,7 @@ def _frontier_compact_value(value: object, *, key: str = "", depth: int = 0) -> 
             for item in list(value)[:_FRONTIER_LIST_LIMIT]
             if item not in (None, "", [], {})
         ]
-    if isinstance(value, bool) or isinstance(value, int | float):
+    if isinstance(value, bool) or isinstance(value, (int, float)):
         return value
     limit = _FRONTIER_COMMAND_TEXT_LIMIT if key in {"command", "preserved_command"} else _FRONTIER_TEXT_LIMIT
     return _frontier_clip_text(value, limit=limit)
