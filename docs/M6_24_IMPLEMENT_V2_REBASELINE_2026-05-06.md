@@ -63,7 +63,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `feal-differential-cryptanalysis` | 5/5 | pass 1/1 after model-json repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0413-json-repair` | proof_5 deferred until controller selects close proof |
 | `feal-linear-cryptanalysis` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-linear-cryptanalysis-speed1-20260506-0426` | proof_5 deferred until controller selects close proof |
 | `fix-git` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-fix-git-speed1-20260506-0435` | proof_5 deferred until controller selects close proof |
-| `hf-model-inference` | 5/5 | pending | none | run v2 speed_1 |
+| `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pending | none | run v2 speed_1 |
 | `largest-eigenval` | 5/5 | pending | none | run v2 speed_1 |
 | `make-doom-for-mips` | 1/5 | pending | none | run v2 speed_1 |
@@ -117,6 +117,17 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
   `replay_valid=true`, `model_turns=9`, `tool_calls=12`, `tool_results=12`,
   and external verifier `2/2` passing. Exact replay and matching
+  terminal-bench replay dogfood passed.
+- `hf-model-inference` first two v2 attempts were harness/infra-invalid before
+  product scoring: Docker image extraction failed with `no space left on
+  device`, first while pulling and then while registering the `libtriton.so`
+  layer. After freeing host Docker capacity, the same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030`
+  scored reward `1.0` with runner errors `0`, total runtime `5m25s`,
+  `work_exit_code=0`, `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, `model_turns=7`, `tool_calls=7`, `tool_results=7`,
+  and external verifier `4/4` passing. Exact replay and matching
   terminal-bench replay dogfood passed.
 
 ## Repair Trigger
