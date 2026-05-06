@@ -209,6 +209,7 @@ def _implement_v2_replay_summary(report_path, report):
         "tool_contract_shell_surface_misuse": _implement_v2_tool_contract_shell_surface_misuse(failed_results),
         "tool_contract_shell_surface_misuse_seen": _implement_v2_any_tool_contract_shell_surface_misuse(failed_results),
         "tool_contract_recovery_observed": _implement_v2_tool_contract_recovery_observed(tool_results),
+        "runtime_artifact_contract_mismatch": _implement_v2_runtime_artifact_contract_mismatch(failed_results),
         "hard_runtime_frontier_present": isinstance(updated_lane_state.get("lane_hard_runtime_frontier"), dict)
         and bool(updated_lane_state.get("lane_hard_runtime_frontier")),
         "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
@@ -376,6 +377,55 @@ def _implement_v2_tool_contract_recovery_observed(tool_results):
     return False
 
 
+def _implement_v2_runtime_artifact_contract_mismatch(failed_results):
+    result = _implement_v2_latest_failed_terminal_result(failed_results)
+    if not result:
+        return False
+    content = result.get("content")
+    first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+    text = "\n".join(
+        str(first_content.get(key) or "")
+        for key in (
+            "reason",
+            "failure_class",
+            "failure_subclass",
+            "stdout_tail",
+            "stderr_tail",
+            "stdout",
+            "stderr",
+        )
+    ).casefold()
+    runtime_marker = any(
+        marker in text
+        for marker in (
+            "unknown opcode",
+            "illegal instruction",
+            "exec format error",
+            "bad cpu type",
+            "invalid instruction",
+            "unhandled instruction",
+        )
+    )
+    artifact_contract_marker = any(
+        marker in text
+        for marker in (
+            "elf",
+            "readelf",
+            "objdump",
+            "machine:",
+            "entry point",
+            "readuint32le",
+            "readuint32be",
+            "big endian",
+            "little endian",
+            "emulator",
+            " vm.",
+            " vm)",
+        )
+    )
+    return runtime_marker and artifact_contract_marker
+
+
 def _clip_text(text, limit=500):
     text = str(text or "")
     return text[-limit:] if len(text) > limit else text
@@ -420,6 +470,11 @@ def _implement_v2_next_action(summary, *, external_reward=None):
     if summary.get("tool_contract_shell_surface_misuse_seen") and latest:
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
+    if summary.get("runtime_artifact_contract_mismatch"):
+        return (
+            "debug implement_v2 divergence: compare runtime artifact ABI/ISA/endianness/entrypoint "
+            "with the VM/emulator loader contract before another live speed run"
+        )
     if model_error.get("failure_class") == "max_turns_before_finish":
         if latest:
             tool = latest.get("tool_name") or "tool"

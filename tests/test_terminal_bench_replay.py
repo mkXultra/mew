@@ -646,6 +646,158 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertIn("latest failed run_command result", next_action)
             self.assertNotIn("recover run_tests shell-surface", next_action)
 
+    def test_replay_terminal_bench_job_routes_runtime_artifact_contract_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "vm-verify",
+                                "tool_name": "run_command",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "exit_code": 1,
+                                        "stdout_tail": (
+                                            "ELF Header: Data: 2's complement, big endian\n"
+                                            "Machine: MIPS R3000\n"
+                                            "vm.js reads instructions with readUInt32LE\n"
+                                            "Execution error at PC=0x4002e8: Unknown opcode: 0x10\n"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["runtime_artifact_contract_mismatch"])
+            self.assertIn("artifact ABI/ISA/endianness/entrypoint", next_action)
+            self.assertNotIn("compiled/native source frontier", next_action)
+
+    def test_replay_terminal_bench_job_uses_latest_failure_for_runtime_artifact_contract_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "old-vm-verify",
+                                "tool_name": "run_command",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "exit_code": 1,
+                                        "stdout_tail": (
+                                            "ELF Header: Data: 2's complement, big endian\n"
+                                            "Execution error at PC=0x4002e8: Unknown opcode: 0x10\n"
+                                        ),
+                                    }
+                                ],
+                            },
+                            {
+                                "provider_call_id": "later-linker-failure",
+                                "tool_name": "run_command",
+                                "status": "failed",
+                                "content": [{"exit_code": 2, "stderr_tail": "undefined reference to StatDump"}],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertFalse(current_v2["runtime_artifact_contract_mismatch"])
+            self.assertIn("debug implement_v2 divergence", next_action)
+            self.assertNotIn("artifact ABI/ISA/endianness/entrypoint", next_action)
+
+    def test_replay_terminal_bench_job_ignores_runtime_mismatch_markers_in_command_text_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "marker-grep-only",
+                                "tool_name": "run_command",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "command": (
+                                            "grep -nE 'Unknown opcode|readUInt32LE|ELF|big endian' vm.js"
+                                        ),
+                                        "exit_code": 1,
+                                        "stdout_tail": "no vm mismatch found",
+                                        "stderr_tail": "",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertFalse(current_v2["runtime_artifact_contract_mismatch"])
+            self.assertNotIn("artifact ABI/ISA/endianness/entrypoint", next_action)
+
     def test_replay_terminal_bench_job_does_not_debug_completed_implement_v2_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_replay_fixture(tmp)

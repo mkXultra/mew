@@ -102,8 +102,11 @@ def build_implement_v2_prompt_sections(
                     "come from a fresh verifier-shaped run in the final cwd and must ground the required "
                     "stdout/boot markers plus artifact quality such as expected dimensions, reference "
                     "similarity, semantic content, or exact output markers. If the final verifier is expected "
-                    "to create the artifact, remove stale self-check artifacts before finish. If those "
-                    "conditions are not proven, continue or report a precise runtime gap; do not complete."
+                    "to create the artifact, remove stale self-check artifacts before finish. When a binary "
+                    "or runtime-generated artifact fails inside a VM, emulator, interpreter, or loader, compare "
+                    "the artifact ABI/ISA/endianness/entrypoint with the runtime loader contract before another "
+                    "broad rebuild or finish. If those conditions are not proven, continue or report a precise "
+                    "runtime gap; do not complete."
                 ),
                 stability=STABILITY_STATIC,
                 cache_policy=CACHE_POLICY_CACHEABLE,

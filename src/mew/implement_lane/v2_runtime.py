@@ -1866,6 +1866,7 @@ def _compact_hard_runtime_frontier_state(value: object) -> dict[str, object]:
         "prohibited_surrogates",
         "latest_build_failure",
         "latest_runtime_failure",
+        "runtime_artifact_contract_mismatch",
         "next_verifier_shaped_command",
     ):
         if key in value:
@@ -2185,12 +2186,16 @@ def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
             payload.get("command"),
         )
     ).lower()
+    evidence_text = _frontier_failure_evidence_text(payload)
+    if _frontier_runtime_artifact_contract_mismatch(evidence_text):
+        return "runtime_artifact_contract_mismatch"
     if any(marker in text for marker in ("build", "compile", "link", "toolchain", "make ")):
         return "latest_build_failure"
     return "latest_runtime_failure"
 
 
 def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
+    evidence_text = _frontier_failure_evidence_text(payload)
     failure = {
         "command_run_id": _frontier_clip_text(payload.get("command_run_id"), limit=160),
         "exit_code": payload.get("exit_code"),
@@ -2198,9 +2203,67 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
         "stderr_tail": _frontier_clip_text(payload.get("stderr_tail") or payload.get("stderr")),
         "failure_summary": _frontier_failure_summary(payload),
     }
+    if _frontier_runtime_artifact_contract_mismatch(evidence_text):
+        failure["failure_class"] = "runtime_artifact_contract_mismatch"
+        failure["required_next_probe"] = (
+            "Compare the generated artifact ABI/ISA/endianness/entrypoint with the runtime loader or "
+            "emulator contract before rebuilding or finishing."
+        )
     if payload.get("output_ref"):
         failure["output_ref"] = _frontier_clip_text(payload.get("output_ref"), limit=240)
     return _drop_empty_frontier_values(failure)
+
+
+def _frontier_failure_evidence_text(payload: dict[str, object]) -> str:
+    parts = []
+    for key in (
+        "reason",
+        "failure_class",
+        "failure_subclass",
+        "stdout_tail",
+        "stderr_tail",
+        "stdout",
+        "stderr",
+    ):
+        value = payload.get(key)
+        if value not in (None, ""):
+            parts.append(str(value))
+    return "\n".join(parts).casefold()
+
+
+def _frontier_runtime_artifact_contract_mismatch(evidence_text: str) -> bool:
+    """Detect generic VM/emulator artifact-contract failures without task recipes."""
+
+    text = str(evidence_text or "").casefold()
+    runtime_marker = any(
+        marker in text
+        for marker in (
+            "unknown opcode",
+            "illegal instruction",
+            "exec format error",
+            "bad cpu type",
+            "invalid instruction",
+            "unhandled instruction",
+        )
+    )
+    artifact_contract_marker = any(
+        marker in text
+        for marker in (
+            "elf",
+            "readelf",
+            "objdump",
+            "machine:",
+            "entry point",
+            "readuint32le",
+            "readuint32be",
+            "big endian",
+            "little endian",
+            "emulator",
+            " vm.",
+            " vm)",
+        )
+    )
+    return runtime_marker and artifact_contract_marker
 
 
 def _frontier_failure_summary(payload: dict[str, object]) -> str:

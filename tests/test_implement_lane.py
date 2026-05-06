@@ -1908,6 +1908,7 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "provided source" in by_id["implement_v2_hard_runtime_profile"].content
     assert "fresh verifier-shaped run" in by_id["implement_v2_hard_runtime_profile"].content
     assert "reference similarity" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "artifact ABI/ISA/endianness/entrypoint" in by_id["implement_v2_hard_runtime_profile"].content
     assert "implement_v2_hard_runtime_frontier_state" in by_id
     assert "Do not finish from this state alone" in by_id["implement_v2_hard_runtime_frontier_state"].content
 
@@ -1925,6 +1926,10 @@ def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> Non
                 "status": "active",
                 "objective": "preserve source-backed artifact proof",
                 "source_roles": [{"path": "vm.js", "role": "runtime_harness", "state": "hypothesis"}],
+                "runtime_artifact_contract_mismatch": {
+                    "failure_class": "runtime_artifact_contract_mismatch",
+                    "required_next_probe": "compare artifact ABI/ISA/endianness/entrypoint",
+                },
             }
         },
         lane_config={"mode": "full"},
@@ -1939,6 +1944,8 @@ def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> Non
     assert by_id["implement_v2_hard_runtime_frontier_state"]["cache_hint"] == "dynamic"
     assert "preserve source-backed artifact proof" in frontier_section.content
     assert "runtime_harness" in frontier_section.content
+    assert "runtime_artifact_contract_mismatch" in frontier_section.content
+    assert "artifact ABI/ISA/endianness/entrypoint" in frontier_section.content
 
 
 def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> None:
@@ -3201,6 +3208,131 @@ def test_implement_v2_frontier_runtime_failure_overrides_model_claim(tmp_path) -
     assert "real linker error" in failure["stderr_tail"]
     assert result.updated_lane_state["lane_hard_runtime_frontier"]["build_target"]["target"] == "doomgeneric_mips"
     assert result.updated_lane_state["lane_hard_runtime_frontier"]["final_artifact"]["path"] == "build/doomgeneric_mips"
+
+
+def test_implement_v2_frontier_classifies_runtime_artifact_contract_mismatch(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        failure_script = (
+            "import sys; "
+            "print('ELF Header: Data: 2\\'s complement, big endian'); "
+            "print('Machine: MIPS R3000'); "
+            "print('vm.js uses readUInt32LE for instruction fetch'); "
+            "print('Execution error at PC=0x4002e8: Unknown opcode: 0x10'); "
+            "sys.exit(1)"
+        )
+        return {
+            "summary": "runtime artifact contract mismatch",
+            "tool_calls": [
+                {
+                    "id": "vm-verify",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": f"{shlex.quote(sys.executable)} -c {shlex.quote(failure_script)}",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "purpose": "verification",
+                            "stage": "verification",
+                            "proof_role": "runtime",
+                            "target": "vm artifact",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "VM rejected the binary artifact"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source for vm.js so the emulator writes /tmp/frame.bmp "
+                    "from the runtime artifact."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    failure = result.updated_lane_state["lane_hard_runtime_frontier"]["runtime_artifact_contract_mismatch"]
+
+    assert failure["failure_class"] == "runtime_artifact_contract_mismatch"
+    assert "Unknown opcode" in failure["stdout_tail"]
+    assert "artifact ABI/ISA/endianness/entrypoint" in failure["required_next_probe"]
+
+
+def test_implement_v2_frontier_does_not_classify_runtime_mismatch_from_command_text_only(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "diagnostic probe had search markers only in the command text",
+            "tool_calls": [
+                {
+                    "id": "vm-marker-grep",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'no vm mismatch found\\n'; false # Unknown opcode readUInt32LE ELF",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "purpose": "diagnostic",
+                            "stage": "debug",
+                            "proof_role": "runtime",
+                            "target": "vm artifact",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "diagnostic probe failed"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source for vm.js so the emulator writes /tmp/frame.bmp "
+                    "from the runtime artifact."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert "runtime_artifact_contract_mismatch" not in frontier
+    assert frontier["latest_runtime_failure"]["failure_summary"] == "no vm mismatch found"
 
 
 def test_implement_v2_frontier_drops_model_only_latest_failures_and_prefix_artifact_refs(tmp_path) -> None:

@@ -296,6 +296,35 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `git diff --check`, and codex-ultra review session
   `019dfc7a-2c56-7d91-a1f4-0562b4ad801d` passed. After this commit, run one
   same-shape `make-doom-for-mips` `implement_v2` speed_1.
+- The first post-repair speed
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-175436-tool-contract-recovery`
+  scored reward `0.0` with runner errors `0`, but this was classified as a
+  provider/backend miss: the lane stopped after `model_turns=2` because the
+  Codex response did not contain assistant text. Replay exposed
+  `model_backend_error`, so this was not counted as product/lane evidence and
+  one same-shape rerun was allowed without source changes.
+- The provider rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-175853-provider-rerun`
+  scored reward `0.0` with runner errors `0` and total runtime `29m04s`.
+  This is valid product evidence. The v2 lane reached a source-backed MIPS ELF
+  at `/app/doomgeneric_mips`, but `node vm.js` failed with
+  `Execution error at PC=0x4002e8: Unknown opcode: 0x10` and no
+  `/tmp/frame.bmp`. The generic failure shape is runtime artifact contract
+  mismatch: the generated binary/runtime artifact and the VM/emulator loader
+  contract were not reconciled before another build/finish. The repair is not a
+  Doom/MIPS recipe. It classifies `Unknown opcode` / illegal-instruction style
+  VM failures with ELF/ABI/endianness/loader evidence as
+  `runtime_artifact_contract_mismatch`, adds a hard-runtime profile reminder to
+  compare artifact ABI/ISA/endianness/entrypoint against the runtime loader
+  contract, and routes replay/dogfood to the required next probe. Focused
+  implement-lane tests, terminal-bench replay tests, exact replay on the
+  provider-rerun artifact with `artifact ABI/ISA/endianness/entrypoint`,
+  terminal-bench replay dogfood, scoped ruff, and `git diff --check` passed.
+  codex-ultra review session `019dfceb-60ea-7572-b469-4f063dcbe111`
+  first requested compaction, stale-failure, and command-text-only negative
+  regressions; after those were added, it approved.
+  After this repair, run one same-shape `make-doom-for-mips` `implement_v2`
+  speed_1.
 
 ## Repair Trigger
 
