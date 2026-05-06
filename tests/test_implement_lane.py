@@ -1353,6 +1353,85 @@ def test_implement_v2_history_compacts_large_tool_output_for_next_turn() -> None
     assert history_content["content_refs"] == ["implement-v2-exec://lane-v2-1/cmd-1/output"]
 
 
+def test_implement_v2_history_projects_terminal_output_to_tails_for_next_turn() -> None:
+    noisy_stdout = "first line\n" + ("compiler noise\n" * 600) + "final line\n"
+    noisy_stderr = "warning\n" + ("linker warning\n" * 300) + "fatal linker error\n"
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane-v2-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="lane-v2-1:tool:1:1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command_run_id": "cmd-1",
+                "command": "make very-noisy-target",
+                "output_ref": "lane-v2-1/cmd-1/output.log",
+                "output_path": "/tmp/mew/hidden/output.log",
+                "status": "failed",
+                "exit_code": 2,
+                "timed_out": False,
+                "stdout": noisy_stdout,
+                "stderr": noisy_stderr,
+                "stdout_tail": "final line\n",
+                "stderr_tail": "fatal linker error\n",
+                "output_bytes": len(noisy_stdout) + len(noisy_stderr),
+            },
+        ),
+        content_refs=("implement-v2-exec://lane-v2-1/cmd-1/output",),
+    )
+
+    visible = _provider_visible_tool_result_for_history(result)
+    history_content = visible["content"]
+    item = history_content["content"][0]
+
+    assert history_content["history_projected"] is True
+    assert item["provider_history_projection"] == "terminal_result_v0"
+    assert item["command_run_id"] == "cmd-1"
+    assert item["output_ref"] == "lane-v2-1/cmd-1/output.log"
+    assert item["exit_code"] == 2
+    assert item["stdout_tail"] == "final line\n"
+    assert item["stderr_tail"] == "fatal linker error\n"
+    assert item["stdout_chars"] == len(noisy_stdout)
+    assert item["stderr_chars"] == len(noisy_stderr)
+    assert "stdout" not in item
+    assert "stderr" not in item
+    assert "output_path" not in item
+    assert noisy_stdout not in json.dumps(visible)
+    assert noisy_stderr not in json.dumps(visible)
+
+
+def test_implement_v2_history_projection_preserves_terminal_diagnostics_without_output() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane-v2-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="lane-v2-1:tool:1:1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "status": "failed",
+                "reason": "run_command is disabled; pass --allow-shell",
+                "error": "unknown command_run_id: cmd-missing",
+                "failure_class": "tool_policy_denied",
+            },
+        ),
+    )
+
+    visible = _provider_visible_tool_result_for_history(result)
+    item = visible["content"]["content"][0]
+
+    assert item["provider_history_projection"] == "terminal_result_v0"
+    assert item["status"] == "failed"
+    assert item["reason"] == "run_command is disabled; pass --allow-shell"
+    assert item["error"] == "unknown command_run_id: cmd-missing"
+    assert item["failure_class"] == "tool_policy_denied"
+    assert "stdout" not in item
+    assert "stderr" not in item
+
+
 def test_implement_v2_compacts_prompt_history_without_clipping_history_artifact(tmp_path) -> None:
     prompts: list[str] = []
     artifact_dir = tmp_path / "artifacts"
@@ -1415,11 +1494,12 @@ def test_implement_v2_compacts_prompt_history_without_clipping_history_artifact(
     persisted_output = history[0]["tool_results"][0]["content"]["content"][0]["stdout"]
 
     assert result.status == "blocked"
-    assert "history clipped" in prompts[1]
-    assert "stdout_history_truncated" in prompts[1]
+    assert "history_projected" in prompts[1]
+    assert "stdout_stderr_body_omitted" in prompts[1]
     assert persisted_output not in prompts[1]
-    assert "history clipped" not in persisted_output
+    assert "history_projected" not in persisted_output
     assert "final linker error" in persisted_output
+    assert "final linker error" in prompts[1]
 
 
 def test_proof_manifest_serializes_lane_attempt_calls_results_and_metrics() -> None:

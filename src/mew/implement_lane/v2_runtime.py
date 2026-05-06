@@ -41,6 +41,17 @@ _PROVIDER_HISTORY_CLIP_KEYS = {
     "summary",
     "text",
 }
+_PROVIDER_HISTORY_TERMINAL_TOOL_NAMES = {"run_command", "run_tests", "poll_command", "cancel_command"}
+_PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS = (
+    "reason",
+    "error",
+    "message",
+    "failure_class",
+    "diagnostic",
+    "diagnostics",
+    "validation_error",
+    "blocked_reason",
+)
 
 
 def describe_implement_v2_runtime(*, work_session_id: object, task_id: object) -> dict[str, object]:
@@ -1671,7 +1682,10 @@ def _auto_approval_records(lane_input: ImplementLaneInput, tool_calls) -> tuple[
 
 
 def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
-    content = _compact_provider_visible_content_for_history(result.provider_visible_content())
+    visible = result.provider_visible_content()
+    if result.tool_name in _PROVIDER_HISTORY_TERMINAL_TOOL_NAMES:
+        visible = _project_terminal_result_for_provider_history(visible)
+    content = _compact_provider_visible_content_for_history(visible)
     return {
         "provider_call_id": result.provider_call_id,
         "tool_name": result.tool_name,
@@ -1689,6 +1703,80 @@ def _full_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, objec
         "is_error": result.is_error,
         "content": result.provider_visible_content(),
     }
+
+
+def _project_terminal_result_for_provider_history(content: dict[str, object]) -> dict[str, object]:
+    """Keep terminal turn history small while preserving actionable evidence.
+
+    Full stdout/stderr can be tens of thousands of characters and is already
+    persisted through output_ref/content_refs. The next model turn only needs
+    lifecycle metadata plus bounded tails; it can call read_command_output when
+    it intentionally needs more.
+    """
+
+    projected = dict(content)
+    projected_items = []
+    for item in projected.get("content") if isinstance(projected.get("content"), list) else []:
+        if not isinstance(item, dict):
+            projected_items.append(item)
+            continue
+        projected_items.append(_project_terminal_payload_for_provider_history(item))
+    if projected_items:
+        projected["content"] = projected_items
+        projected["history_projected"] = True
+        projected["history_projection_note"] = (
+            "terminal stdout/stderr body omitted from next-turn history; "
+            "use command_run_id/output_ref/read_command_output for full output"
+        )
+    return projected
+
+
+def _project_terminal_payload_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
+    projected: dict[str, object] = {
+        "provider_history_projection": "terminal_result_v0",
+    }
+    for key in (
+        "tool_name",
+        "command_run_id",
+        "status",
+        "exit_code",
+        "timed_out",
+        "timeout_seconds",
+        "duration_seconds",
+        "output_bytes",
+        "output_truncated",
+        "output_ref",
+        "command_source",
+        "kill_status",
+    ):
+        if key in payload:
+            projected[key] = payload.get(key)
+    for key in _PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS:
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        projected_value, clipped = _compact_provider_history_value(value, key=key)
+        projected[key] = projected_value
+        if clipped:
+            projected[f"{key}_history_truncated"] = True
+    command = str(payload.get("command") or "")
+    if command:
+        projected["command_excerpt"] = _clip_provider_history_text(command, limit=900)[0]
+    stdout = str(payload.get("stdout") or "")
+    stderr = str(payload.get("stderr") or "")
+    stdout_tail = str(payload.get("stdout_tail") or "")
+    stderr_tail = str(payload.get("stderr_tail") or "")
+    if stdout_tail or stdout:
+        projected["stdout_tail"] = stdout_tail or _clip_provider_history_text(stdout, limit=900)[0]
+    if stderr_tail or stderr:
+        projected["stderr_tail"] = stderr_tail or _clip_provider_history_text(stderr, limit=900)[0]
+    if stdout or stderr:
+        projected["stdout_stderr_body_omitted"] = True
+        projected["stdout_chars"] = len(stdout)
+        projected["stderr_chars"] = len(stderr)
+    return projected
 
 
 def _compact_provider_visible_content_for_history(content: dict[str, object]) -> dict[str, object]:

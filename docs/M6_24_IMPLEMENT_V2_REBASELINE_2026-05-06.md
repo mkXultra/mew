@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | command-tail evidence repaired; pre-speed pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1420-history-compaction` | run current-head pre-speed, then exactly one same-shape v2 speed_1 if green |
+| `make-doom-for-mips` | 1/5 | terminal-history projection repair reviewed; commit pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1453-terminal-tail` | commit repair, then run current-head pre-speed and exactly one same-shape v2 speed_1 if green |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -259,6 +259,23 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   command results preserve stdout/stderr tails for all terminal outcomes, so
   future replay/dogfood can classify failed build frontiers without another
   live proof. Focused implement-lane and terminal-bench replay tests passed.
+- The terminal-tail evidence rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1453-terminal-tail`
+  scored reward `0.0` with runner errors `0` and total runtime `8m14s`.
+  Replay/dogfood now exposes the latest failed terminal result
+  (`/bin/bash: line 6: file: command not found`), confirming the terminal-tail
+  repair worked. The remaining blocker is another `Codex Web API error:
+  IncompleteRead(3132767 bytes read)` after only `model_turns=7`,
+  `tool_calls=21`, and `prompt_chars_total=379894`. The generic repair projects
+  terminal `run_command`/`run_tests`/`poll_command`/`cancel_command` results in
+  next-turn provider history to lifecycle metadata, bounded tails, and
+  `output_ref`; full stdout/stderr remain in proof artifacts and can be
+  intentionally fetched with `read_command_output`. codex-ultra initially
+  requested preserving non-output diagnostics such as `reason` / `error` /
+  `failure_class`; the fix added those fields and a regression, then
+  codex-ultra review session `019dfbe8-f49c-7341-b9bc-1e0c04975c19`
+  approved. This is a generic provider-history projection repair, not a
+  Doom/MIPS solver.
 
 ## Repair Trigger
 
