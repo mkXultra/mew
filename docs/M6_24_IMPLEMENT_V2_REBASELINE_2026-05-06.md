@@ -458,6 +458,13 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   terminal failure is runtime-artifact missing. This is a generic reentry/state
   repair so the next model turn investigates runtime artifact production
   instead of another broad rebuild or log-proof path.
+- Pre-speed instrumentation update on 2026-05-07 JST: terminal-bench replay
+  dogfood now accepts the same structured replay assertions as the replay CLI:
+  latest structured failure class and expected structured mismatch count. This
+  lets dogfood validate historical artifacts after intentional classifier or
+  normalizer upgrades without requiring old stored classifications to match the
+  current recomputation exactly. On the Phase 7 artifact, the dogfood command
+  passes with `runtime_artifact_missing` and `structured_replay_mismatch_count=7`.
 
 ## Repair Trigger
 

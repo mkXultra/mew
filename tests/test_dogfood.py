@@ -14,6 +14,7 @@ from mew.dogfood import (
     DOGFOOD_SCENARIOS,
     _evaluate_managed_action_projection,
     _repository_test_tail_summary,
+    _write_expected_artifact_contract_emulator_fixture,
     _write_repository_test_tail_emulator_fixture,
     _write_terminal_bench_replay_fixture,
     active_agent_run_ids,
@@ -129,6 +130,10 @@ class DogfoodTests(unittest.TestCase):
                 "0",
                 "--terminal-bench-assert-next-action-contains",
                 "compiled/native source frontier",
+                "--terminal-bench-assert-structured-failure-class",
+                "runtime_artifact_missing",
+                "--terminal-bench-assert-structured-replay-mismatch-count",
+                "7",
                 "--json",
             ]
         )
@@ -142,6 +147,8 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(args.terminal_bench_assert_mew_exit_code, 1)
         self.assertEqual(args.terminal_bench_assert_external_reward, 0.0)
         self.assertEqual(args.terminal_bench_assert_next_action_contains, "compiled/native source frontier")
+        self.assertEqual(args.terminal_bench_assert_structured_failure_class, "runtime_artifact_missing")
+        self.assertEqual(args.terminal_bench_assert_structured_replay_mismatch_count, 7)
 
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()
@@ -1293,6 +1300,45 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(
                 scenario["artifacts"]["current_long_build"]["current_failure_class"],
                 "dependency_strategy_unresolved",
+            )
+
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_structured_assertions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _write_expected_artifact_contract_emulator_fixture(Path(tmp) / "fixture")
+            v2_dir = (
+                Path(fixture)
+                / "make-doom-for-mips__expected-artifact-contract"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            manifest_path = v2_dir / "proof-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["tool_results"][0]["content"][0]["failure_classification"]["class"] = "build_failure"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=str(fixture),
+                terminal_bench_task="make-doom-for-mips",
+                terminal_bench_assert_external_reward=0.0,
+                terminal_bench_assert_next_action_contains="expected runtime artifact",
+                terminal_bench_assert_structured_failure_class="runtime_artifact_missing",
+                terminal_bench_assert_structured_replay_mismatch_count=1,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+            structured_replay = scenario["artifacts"]["structured_execution_replay"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertEqual(structured_replay["mismatch_count"], 1)
+            self.assertEqual(
+                structured_replay["latest_failure_classification"]["class"],
+                "runtime_artifact_missing",
             )
 
     def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_non_compile_task(self):

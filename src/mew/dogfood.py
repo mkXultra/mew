@@ -15702,6 +15702,8 @@ def _m6_24_terminal_bench_replay_assertions(
     mew_exit_code=None,
     external_reward=None,
     next_action_contains=None,
+    structured_failure_class=None,
+    structured_replay_mismatch_count=None,
 ):
     if job_dir:
         assertions = {}
@@ -15726,6 +15728,10 @@ def _m6_24_terminal_bench_replay_assertions(
         assertions["external_reward"] = external_reward
     if next_action_contains:
         assertions["next_action_contains"] = next_action_contains
+    if structured_failure_class:
+        assertions["structured_failure_class"] = structured_failure_class
+    if structured_replay_mismatch_count is not None:
+        assertions["structured_replay_mismatch_count"] = structured_replay_mismatch_count
     return assertions
 
 
@@ -15741,6 +15747,8 @@ def run_m6_24_terminal_bench_replay_scenario(
     mew_exit_code=None,
     external_reward=None,
     next_action_contains=None,
+    structured_failure_class=None,
+    structured_replay_mismatch_count=None,
 ):
     checks = []
     commands = []
@@ -15754,6 +15762,8 @@ def run_m6_24_terminal_bench_replay_scenario(
         mew_exit_code=mew_exit_code,
         external_reward=external_reward,
         next_action_contains=next_action_contains,
+        structured_failure_class=structured_failure_class,
+        structured_replay_mismatch_count=structured_replay_mismatch_count,
     )
     replay = replay_terminal_bench_job(
         source,
@@ -17167,6 +17177,16 @@ def run_dogfood_scenario(args):
                     mew_exit_code=getattr(args, "terminal_bench_assert_mew_exit_code", None),
                     external_reward=getattr(args, "terminal_bench_assert_external_reward", None),
                     next_action_contains=getattr(args, "terminal_bench_assert_next_action_contains", None),
+                    structured_failure_class=getattr(
+                        args,
+                        "terminal_bench_assert_structured_failure_class",
+                        None,
+                    ),
+                    structured_replay_mismatch_count=getattr(
+                        args,
+                        "terminal_bench_assert_structured_replay_mismatch_count",
+                        None,
+                    ),
                 )
             )
         elif name == "m6_24-compile-compcert-emulator":
