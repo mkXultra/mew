@@ -5,6 +5,9 @@ from .timeutil import now_iso
 from .work_session import build_work_session_resume
 
 
+_IMPLEMENT_V2_TERMINAL_TOOLS = {"run_command", "run_tests", "poll_command"}
+
+
 def _read_json(path, default=None):
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -254,13 +257,18 @@ def _normalize_implement_v2_model_error(model_error):
     if not failure_class:
         if "failed to parse json plan" in lowered or "response did not contain json" in lowered:
             failure_class = "model_json_parse_error"
+        elif "max_turns before finish" in lowered or "max turns before finish" in lowered:
+            failure_class = "max_turns_before_finish"
         elif "request timed out" in lowered or "timed out" in lowered or "timeout" in lowered:
             failure_class = "model_timeout"
         else:
             failure_class = "model_backend_error"
+    error_type = str(model_error.get("error_type") or "ModelBackendError")
+    if failure_class == "max_turns_before_finish" and error_type == "ModelBackendError":
+        error_type = "ImplementV2LoopLimit"
     return {
         "failure_class": failure_class,
-        "error_type": str(model_error.get("error_type") or "ModelBackendError"),
+        "error_type": error_type,
         "message": _clip_text(message),
         "raw_excerpt": _clip_text(model_error.get("raw_excerpt") or _raw_excerpt_from_error_text(message)),
     }
@@ -278,6 +286,10 @@ def _implement_v2_latest_failure(failed_results):
     if not failed_results:
         return {}
     result = failed_results[-1]
+    for candidate in reversed(failed_results):
+        if isinstance(candidate, dict) and str(candidate.get("tool_name") or "") in _IMPLEMENT_V2_TERMINAL_TOOLS:
+            result = candidate
+            break
     content = result.get("content")
     first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
     return {
@@ -339,13 +351,21 @@ def _implement_v2_next_action(summary, *, external_reward=None):
     model_error = summary.get("model_error") if isinstance(summary.get("model_error"), dict) else {}
     if model_error.get("failure_class") == "model_json_parse_error":
         return "debug implement_v2 divergence: repair model_json parse failure before another live speed run"
-    if model_error:
-        return "debug implement_v2 divergence: inspect model backend failure before another live speed run"
     latest = summary.get("latest_failure") if isinstance(summary.get("latest_failure"), dict) else {}
-    if not summary.get("compiled_source_frontier_observed"):
-        return "debug implement_v2 divergence: broaden compiled/native source frontier before another live speed run"
     if summary.get("active_command_closeout_failed"):
         return "debug implement_v2 divergence: repair active command closeout before another live speed run"
+    if model_error.get("failure_class") == "max_turns_before_finish":
+        if latest:
+            tool = latest.get("tool_name") or "tool"
+            return (
+                "debug implement_v2 divergence: max-turn limit reached after latest failed "
+                f"{tool} result; resume from that terminal failure before another live speed run"
+            )
+        return "debug implement_v2 divergence: max-turn limit reached before finish; inspect lane loop budget before another live speed run"
+    if model_error:
+        return "debug implement_v2 divergence: inspect model backend failure before another live speed run"
+    if not summary.get("compiled_source_frontier_observed"):
+        return "debug implement_v2 divergence: broaden compiled/native source frontier before another live speed run"
     if latest:
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"

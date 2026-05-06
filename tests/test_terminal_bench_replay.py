@@ -146,6 +146,113 @@ class TerminalBenchReplayTests(unittest.TestCase):
         )
         return trial_dir.parent
 
+    def _write_implement_v2_max_turns_fixture(self, root):
+        trial_dir = Path(root) / "job" / "make-doom-for-mips__v2maxturns"
+        agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+        v2_dir = agent_dir / "implement_v2"
+        verifier_dir = trial_dir / "verifier"
+        v2_dir.mkdir(parents=True)
+        verifier_dir.mkdir(parents=True)
+        (trial_dir / "result.json").write_text(
+            json.dumps(
+                {
+                    "trial_name": "make-doom-for-mips__v2maxturns",
+                    "verifier_result": {"reward": 0.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (verifier_dir / "test-stdout.txt").write_text(
+            "FAILED test_vm_execution - Timeout waiting for expected stdout\n",
+            encoding="utf-8",
+        )
+        (agent_dir / "command-transcript.json").write_text(
+            json.dumps({"exit_code": 1, "timed_out": False}),
+            encoding="utf-8",
+        )
+        max_turns_error = "implement_v2 reached max_turns before finish"
+        (agent_dir / "mew-report.json").write_text(
+            json.dumps(
+                {
+                    "work_exit_code": 1,
+                    "resume": {},
+                    "work_report": {
+                        "stop_reason": "implement_v2_blocked",
+                        "runtime_id": "implement_v2_model_json_tool_loop",
+                        "selected_lane": "implement_v2",
+                        "steps": [
+                            {
+                                "status": "blocked",
+                                "action": {
+                                    "type": "implement_lane",
+                                    "lane": "implement_v2",
+                                    "runtime_id": "implement_v2_model_json_tool_loop",
+                                },
+                                "error": max_turns_error,
+                                "model_turn": {
+                                    "status": "failed",
+                                    "model_metrics": {
+                                        "runtime_id": "implement_v2_model_json_tool_loop",
+                                        "error": max_turns_error,
+                                    },
+                                },
+                            }
+                        ],
+                        "implement_lane_result": {
+                            "lane": "implement_v2",
+                            "status": "blocked",
+                            "metrics": {
+                                "runtime_id": "implement_v2_model_json_tool_loop",
+                                "replay_valid": True,
+                                "terminal_evidence_count": 16,
+                                "write_evidence_count": 0,
+                            },
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (v2_dir / "history.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "turn": 24,
+                        "tool_calls": [
+                            {
+                                "tool_name": "run_command",
+                                "arguments": {"command": "make -f Makefile.mips -j2 && node vm.js"},
+                            }
+                        ],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (v2_dir / "proof-manifest.json").write_text(
+            json.dumps(
+                {
+                    "tool_results": [
+                        {
+                            "provider_call_id": "call-rebuild-runtime-t24",
+                            "tool_name": "run_command",
+                            "status": "failed",
+                            "content": [
+                                {
+                                    "exit_code": 2,
+                                    "stderr": "m_misc.c:82:25: error: 'EISDIR' undeclared\nmake: *** [Makefile.mips:13: build-mips/m_misc.o] Error 1\n",
+                                    "stdout": "mipsel-linux-gnu-gcc -Os -c m_misc.c -o build-mips/m_misc.o\n",
+                                }
+                            ],
+                        }
+                    ],
+                    "metrics": {"model_error": {}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return trial_dir.parent
+
     def test_replay_terminal_bench_job_recomputes_current_resume_from_fixture(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = _write_terminal_bench_replay_fixture(tmp)
@@ -240,6 +347,89 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertTrue(trial["current"]["recomputed"])
             self.assertEqual(current_v2["model_error"]["failure_class"], "model_json_parse_error")
             self.assertIn("model_json parse failure", trial["current"]["next_action"])
+
+    def test_replay_terminal_bench_job_routes_implement_v2_max_turns_to_latest_terminal_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_max_turns_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-doom-for-mips",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+            next_action = trial["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["model_error"]["failure_class"], "max_turns_before_finish")
+            self.assertEqual(current_v2["model_error"]["error_type"], "ImplementV2LoopLimit")
+            self.assertIn("EISDIR", current_v2["latest_failure"]["stderr_tail"])
+            self.assertIn("max-turn limit", next_action)
+            self.assertIn("latest failed run_command result", next_action)
+            self.assertNotIn("model backend", next_action)
+            self.assertNotIn("compiled/native source frontier", next_action)
+
+    def test_replay_terminal_bench_job_prefers_terminal_failure_for_implement_v2_max_turns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_max_turns_fixture(tmp)
+            manifest_path = next(Path(job_dir).rglob("proof-manifest.json"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["tool_results"].append(
+                {
+                    "provider_call_id": "call-read-after-terminal-failure",
+                    "tool_name": "read_file",
+                    "status": "failed",
+                    "content": [{"reason": "missing file after compile failed"}],
+                }
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-doom-for-mips",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["latest_failure"]["tool_name"], "run_command")
+            self.assertIn("EISDIR", current_v2["latest_failure"]["stderr_tail"])
+            self.assertIn("latest failed run_command result", next_action)
+
+    def test_replay_terminal_bench_job_prioritizes_active_command_closeout_over_max_turns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_max_turns_fixture(tmp)
+            manifest_path = next(Path(job_dir).rglob("proof-manifest.json"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["tool_results"] = [
+                {
+                    "provider_call_id": "call-final-command",
+                    "tool_name": "run_command",
+                    "status": "interrupted",
+                    "content": [
+                        {
+                            "reason": "implement_v2 live_json attempt closed before command finalized",
+                            "kill_status": "process_group_terminated",
+                        }
+                    ],
+                }
+            ]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-doom-for-mips",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["active_command_closeout_failed"])
+            self.assertIn("active command closeout", next_action)
+            self.assertNotIn("max-turn limit", next_action)
 
     def test_replay_terminal_bench_job_detects_implement_v2_active_command_closeout_gap(self):
         with tempfile.TemporaryDirectory() as tmp:

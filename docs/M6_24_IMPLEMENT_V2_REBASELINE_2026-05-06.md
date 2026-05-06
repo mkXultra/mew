@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | empty assistant-text retry repair reviewed; speed_1 pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1231-hard-runtime-profile` | commit retry repair, then rerun v2 speed_1 once |
+| `make-doom-for-mips` | 1/5 | max-turn/latest-terminal reentry classifier repair reviewed; commit pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1243-empty-assistant-retry` | commit classifier repair, then select bounded generic repair for the compile frontier / turn-budget gap before another live speed_1 |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -214,6 +214,27 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   retry tests, replay/dogfood on the 1231 artifact, scoped ruff, JSONL
   validation, and codex-ultra review session
   `019dfb5d-dc7f-7a52-989b-c440fe6fc27c` passed.
+- The empty-assistant-retry rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1243-empty-assistant-retry`
+  scored reward `0.0` with runner errors `0` and total runtime `15m47s`.
+  This is progress, not a provider-error repeat: the run preserved the
+  provided source path, reached `model_turns=24`, `tool_calls=36`,
+  `tool_results=36`, attempted the MIPS build, and blocked after the latest
+  terminal command failed with `m_misc.c:82:25: error: 'EISDIR' undeclared`.
+  Replay previously misclassified the top-level
+  `implement_v2 reached max_turns before finish` as `model_backend_error`,
+  which hid the actionable terminal frontier. The current measurement repair
+  classifies it as `max_turns_before_finish` / `ImplementV2LoopLimit`,
+  preserves active-command closeout as a more specific diagnosis, and makes the
+  next action point to the latest failed terminal result rather than a later
+  non-terminal tool failure. Focused implement_v2 replay tests, exact replay on
+  the 1243 artifact with `--assert-next-action-contains 'latest failed
+  run_command'`, matching terminal-bench replay dogfood, scoped ruff, JSONL
+  validation, and `git diff --check` passed. codex-ultra reviewer session
+  `019dfb76-b107-76c3-8613-2c7d5219ec10` requested the closeout/terminal
+  priority fixes and approved the corrected diff. After commit, choose a
+  bounded generic compile-frontier or turn-budget repair before spending
+  another live `make-doom-for-mips` speed item.
 
 ## Repair Trigger
 
