@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | hard-runtime profile repair reviewed; speed_1 pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1214-post-commit` | commit profile repair, then rerun v2 speed_1 once |
+| `make-doom-for-mips` | 1/5 | empty assistant-text retry repair reviewed; speed_1 pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1231-hard-runtime-profile` | commit retry repair, then rerun v2 speed_1 once |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -199,6 +199,21 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   JSONL validation, and codex-ultra review session
   `019dfb51-9ee5-7400-b46f-e07737e056a3` passed. Commit the profile repair,
   then run exactly one same-shape live speed_1.
+- The hard-runtime-profile rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1231-hard-runtime-profile`
+  scored reward `0.0` with runner errors `0` and total runtime `3m42s`. The
+  prompt metrics confirm `implement_v2_hard_runtime_profile` was present. The
+  prior handcrafted surrogate path did not recur; v2 inspected the source,
+  checked and installed MIPS cross compilers, then stopped on
+  `model_backend_error: response did not contain assistant text` before a final
+  artifact. Replay and dogfood pass and classify the artifact as model backend
+  failure. Since `recoverable_work_model_error` already treats this marker as
+  recoverable but `agent.call_model_json_with_retries` did not, the next repair
+  is to add empty assistant-text markers to the shared transient model retry
+  detector and rerun one same-shape speed_1 after focused validation. Focused
+  retry tests, replay/dogfood on the 1231 artifact, scoped ruff, JSONL
+  validation, and codex-ultra review session
+  `019dfb5d-dc7f-7a52-989b-c440fe6fc27c` passed.
 
 ## Repair Trigger
 

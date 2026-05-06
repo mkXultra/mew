@@ -2535,6 +2535,37 @@ class RuntimeTests(unittest.TestCase):
         sleep.assert_called_once_with(0.25)
         self.assertEqual(plan["summary"], "retried successfully")
 
+    def test_think_phase_retries_empty_assistant_text_once(self):
+        state = default_state()
+        event = add_event(state, "github_webhook", "test", {"ref": "main"})
+
+        with patch(
+            "mew.agent.call_model_json",
+            side_effect=[
+                ModelBackendError("response did not contain assistant text"),
+                {"summary": "retried successfully", "decisions": []},
+            ],
+        ) as call_model:
+            with patch("mew.agent.time.sleep") as sleep:
+                plan = think_phase(
+                    state,
+                    event,
+                    "now",
+                    model_auth={"path": "auth.json"},
+                    model="model",
+                    base_url="base",
+                    timeout=1,
+                    ai_ticks=False,
+                    allow_task_execution=False,
+                    guidance="",
+                    policy="",
+                    log_phases=False,
+                )
+
+        self.assertEqual(call_model.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+        self.assertEqual(plan["summary"], "retried successfully")
+
     def test_think_phase_does_not_retry_model_refusal(self):
         state = default_state()
         event = add_event(state, "github_webhook", "test", {"ref": "main"})
