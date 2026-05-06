@@ -134,6 +134,10 @@ def run_live_json_implement_v2(
         task_id=lane_input.task_id,
         lane=IMPLEMENT_V2_LANE,
     )
+    hard_runtime_frontier_state = _initial_hard_runtime_frontier_state(lane_input)
+    hard_runtime_frontier_enabled = bool(hard_runtime_frontier_state) or is_hard_runtime_artifact_task(
+        lane_input.task_contract
+    )
     adapter = JsonModelProviderAdapter()
     exec_runtime = ImplementV2ManagedExecRuntime(
         workspace=lane_input.workspace,
@@ -141,6 +145,8 @@ def run_live_json_implement_v2(
         allow_shell=bool(lane_input.lane_config.get("allow_shell")),
         run_command_available=_v2_tool_available(lane_input, "run_command"),
         route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
+        task_contract=lane_input.task_contract,
+        frontier_state=hard_runtime_frontier_state,
     )
     transcript: list[ImplementLaneTranscriptEvent] = []
     tool_calls: list[object] = []
@@ -165,10 +171,6 @@ def run_live_json_implement_v2(
     tool_contract_recovery_turn_limit = _tool_contract_recovery_turn_limit(lane_input)
     tool_contract_recovery_turns_used = 0
     tool_contract_recovery_instruction = ""
-    hard_runtime_frontier_state = _initial_hard_runtime_frontier_state(lane_input)
-    hard_runtime_frontier_enabled = bool(hard_runtime_frontier_state) or is_hard_runtime_artifact_task(
-        lane_input.task_contract
-    )
     turn_index = 0
 
     def extend_for_terminal_failure_reaction_if_available(
@@ -309,6 +311,14 @@ def run_live_json_implement_v2(
             if frontier_state_update:
                 hard_runtime_frontier_enabled = True
             raw_tool_calls = normalized.get("tool_calls") or ()
+            if raw_tool_calls and frontier_state_update:
+                hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
+                    existing=hard_runtime_frontier_state,
+                    update=frontier_state_update,
+                    tool_results=tuple(tool_results),
+                    artifact_namespace=artifact_namespace,
+                )
+                exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
             if not raw_tool_calls:
                 if hard_runtime_frontier_enabled or frontier_state_update:
                     hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
@@ -317,6 +327,7 @@ def run_live_json_implement_v2(
                         tool_results=tuple(tool_results),
                         artifact_namespace=artifact_namespace,
                     )
+                    exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
                 transcript.extend(
                     adapter.transcript_events_for_turn(
                         lane=IMPLEMENT_V2_LANE,
@@ -434,6 +445,7 @@ def run_live_json_implement_v2(
                     current_results,
                     closeout_payloads=closeout_chunk,
                     cleanup_payloads=cleanup_chunk,
+                    exec_runtime=exec_runtime,
                 )
             tool_calls.extend(current_calls)
             tool_results.extend(current_results)
@@ -444,6 +456,16 @@ def run_live_json_implement_v2(
                     tool_results=tuple(tool_results),
                     artifact_namespace=artifact_namespace,
                 )
+                exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
+            elif _has_structured_frontier_evidence(current_results):
+                hard_runtime_frontier_enabled = True
+                hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
+                    existing=hard_runtime_frontier_state,
+                    update={},
+                    tool_results=tuple(tool_results),
+                    artifact_namespace=artifact_namespace,
+                )
+                exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
             transcript.extend(
                 adapter.transcript_events_for_turn(
                     lane=IMPLEMENT_V2_LANE,
@@ -606,6 +628,7 @@ def run_live_json_implement_v2(
                 tuple(tool_results),
                 closeout_payloads=final_closeout_payloads,
                 cleanup_payloads=final_cleanup_payloads,
+                exec_runtime=exec_runtime,
             )
         )
     if hard_runtime_frontier_enabled or hard_runtime_frontier_state:
@@ -615,6 +638,7 @@ def run_live_json_implement_v2(
             tool_results=tuple(tool_results),
             artifact_namespace=artifact_namespace,
         )
+        exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
 
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
@@ -850,6 +874,8 @@ def run_fake_exec_implement_v2(
             allow_shell=bool(lane_input.lane_config.get("allow_shell")),
             run_command_available=_v2_tool_available(lane_input, "run_command"),
             route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
+            task_contract=lane_input.task_contract,
+            frontier_state=_initial_hard_runtime_frontier_state(lane_input),
         )
         try:
             tool_results = tuple(
@@ -859,7 +885,7 @@ def run_fake_exec_implement_v2(
             cleanup_payloads = exec_runtime.cancel_active_commands(
                 reason="implement_v2 exec attempt closed before command finalized"
             )
-        tool_results = _project_orphaned_command_cleanup(tool_results, cleanup_payloads)
+        tool_results = _project_orphaned_command_cleanup(tool_results, cleanup_payloads, exec_runtime=exec_runtime)
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
         lane_attempt_id=lane_attempt_id,
@@ -975,6 +1001,8 @@ def run_fake_write_implement_v2(
             allow_shell=bool(lane_input.lane_config.get("allow_shell")),
             run_command_available=_v2_tool_available(lane_input, "run_command"),
             route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
+            task_contract=lane_input.task_contract,
+            frontier_state=_initial_hard_runtime_frontier_state(lane_input),
         )
         write_runtime = ImplementV2WriteRuntime(
             workspace=lane_input.workspace,
@@ -996,7 +1024,7 @@ def run_fake_write_implement_v2(
             cleanup_payloads = exec_runtime.cancel_active_commands(
                 reason="implement_v2 write attempt closed before command finalized"
             )
-        tool_results = _project_orphaned_command_cleanup(tool_results, cleanup_payloads)
+        tool_results = _project_orphaned_command_cleanup(tool_results, cleanup_payloads, exec_runtime=exec_runtime)
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
         lane_attempt_id=lane_attempt_id,
@@ -1161,6 +1189,7 @@ def _project_command_closeouts(
     *,
     closeout_payloads: tuple[dict[str, object], ...],
     cleanup_payloads: tuple[dict[str, object], ...],
+    exec_runtime: ImplementV2ManagedExecRuntime | None = None,
 ) -> tuple[ToolResultEnvelope, ...]:
     if not closeout_payloads and not cleanup_payloads:
         return tool_results
@@ -1184,26 +1213,29 @@ def _project_command_closeouts(
         payload = closeout_payload or cleanup_payload
         if result.status == "yielded" and payload:
             payload = _preserve_result_command_context(result, payload)
-            status = _projected_command_closeout_status(payload)
-            evidence_refs = result.evidence_refs
-            if status == "completed" and result.tool_name in EXEC_TOOL_NAMES and not evidence_refs:
-                evidence_refs = (f"implement-v2-exec://{result.lane_attempt_id}/{command_run_id}/terminal",)
-            projected.append(
-                ToolResultEnvelope(
-                    lane_attempt_id=result.lane_attempt_id,
-                    provider_call_id=result.provider_call_id,
-                    mew_tool_call_id=result.mew_tool_call_id,
-                    tool_name=result.tool_name,
-                    status=status,
-                    is_error=status in {"failed", "interrupted"},
-                    content=(payload,),
-                    content_refs=result.content_refs,
-                    evidence_refs=evidence_refs,
-                    side_effects=result.side_effects,
-                    started_at=result.started_at,
-                    finished_at=result.finished_at,
+            if exec_runtime is not None:
+                projected.append(exec_runtime.project_result_payload(result, payload))
+            else:
+                status = _projected_command_closeout_status(payload)
+                evidence_refs = result.evidence_refs
+                if status == "completed" and result.tool_name in EXEC_TOOL_NAMES and not evidence_refs:
+                    evidence_refs = (f"implement-v2-exec://{result.lane_attempt_id}/{command_run_id}/terminal",)
+                projected.append(
+                    ToolResultEnvelope(
+                        lane_attempt_id=result.lane_attempt_id,
+                        provider_call_id=result.provider_call_id,
+                        mew_tool_call_id=result.mew_tool_call_id,
+                        tool_name=result.tool_name,
+                        status=status,
+                        is_error=status in {"failed", "interrupted"},
+                        content=(payload,),
+                        content_refs=result.content_refs,
+                        evidence_refs=evidence_refs,
+                        side_effects=result.side_effects,
+                        started_at=result.started_at,
+                        finished_at=result.finished_at,
+                    )
                 )
-            )
         else:
             projected.append(result)
     return tuple(projected)
@@ -1222,8 +1254,15 @@ def _preserve_result_command_context(result: ToolResultEnvelope, payload: dict[s
 def _project_orphaned_command_cleanup(
     tool_results: tuple[ToolResultEnvelope, ...],
     cleanup_payloads: tuple[dict[str, object], ...],
+    *,
+    exec_runtime: ImplementV2ManagedExecRuntime | None = None,
 ) -> tuple[ToolResultEnvelope, ...]:
-    return _project_command_closeouts(tool_results, closeout_payloads=(), cleanup_payloads=cleanup_payloads)
+    return _project_command_closeouts(
+        tool_results,
+        closeout_payloads=(),
+        cleanup_payloads=cleanup_payloads,
+        exec_runtime=exec_runtime,
+    )
 
 
 def _closeout_active_commands(
@@ -2245,7 +2284,29 @@ def _latest_runtime_frontier_failure(
     return None
 
 
+def _has_structured_frontier_evidence(tool_results: tuple[ToolResultEnvelope, ...]) -> bool:
+    for result in tool_results:
+        payload = next((item for item in result.content if isinstance(item, dict)), {})
+        if _structured_failure_classification(payload):
+            return True
+    return False
+
+
 def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
+    structured = _structured_failure_classification(payload)
+    if structured:
+        failure_class = str(structured.get("class") or structured.get("failure_class") or "")
+        phase = str(structured.get("phase") or "")
+        if failure_class in {"build_failure", "build_artifact_missing"} or phase in {"build", "dependency"}:
+            return "latest_build_failure"
+        if failure_class in {"runtime_failure", "runtime_artifact_missing"} or phase == "runtime":
+            return "latest_runtime_failure"
+        if failure_class == "artifact_validation_failure":
+            if _structured_runtime_inferred_artifact_obligation(payload):
+                return "latest_runtime_failure"
+            return "latest_runtime_failure" if phase in {"runtime", "verification"} else "latest_build_failure"
+        if failure_class == "verification_failure":
+            return "latest_runtime_failure"
     contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
     text = " ".join(
         str(value or "")
@@ -2269,6 +2330,7 @@ def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
 
 
 def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
+    structured = _structured_failure_classification(payload)
     evidence_text = _frontier_failure_evidence_text(payload)
     failure = {
         "command_run_id": _frontier_clip_text(payload.get("command_run_id"), limit=160),
@@ -2277,7 +2339,24 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
         "stderr_tail": _frontier_clip_text(payload.get("stderr_tail") or payload.get("stderr")),
         "failure_summary": _frontier_failure_summary(payload),
     }
-    if _frontier_runtime_artifact_contract_mismatch(evidence_text):
+    if structured:
+        failure["failure_class"] = _frontier_clip_text(
+            structured.get("class") or structured.get("failure_class"),
+            limit=160,
+        )
+        failure["failure_kind"] = _frontier_clip_text(structured.get("kind"), limit=160)
+        failure["failure_phase"] = _frontier_clip_text(structured.get("phase"), limit=160)
+        if structured.get("summary"):
+            failure["failure_summary"] = _frontier_clip_text(structured.get("summary"))
+        if structured.get("required_next_probe"):
+            failure["required_next_probe"] = _frontier_clip_text(
+                structured.get("required_next_probe"),
+                limit=400,
+            )
+        evidence_refs = structured.get("evidence_refs")
+        if isinstance(evidence_refs, list):
+            failure["evidence_refs"] = _frontier_compact_value(evidence_refs, key="evidence_refs")
+    elif _frontier_runtime_artifact_contract_mismatch(evidence_text):
         failure["failure_class"] = "runtime_artifact_contract_mismatch"
         failure["required_next_probe"] = (
             "Compare the generated artifact ABI/ISA/endianness/entrypoint with the runtime loader or "
@@ -2296,6 +2375,29 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
     if payload.get("output_ref"):
         failure["output_ref"] = _frontier_clip_text(payload.get("output_ref"), limit=240)
     return _drop_empty_frontier_values(failure)
+
+
+def _structured_failure_classification(payload: dict[str, object]) -> dict[str, object]:
+    value = payload.get("failure_classification")
+    if not isinstance(value, dict):
+        return {}
+    artifact_evidence = payload.get("artifact_evidence")
+    if not isinstance(artifact_evidence, list) or not artifact_evidence:
+        return {}
+    failure_class = str(value.get("class") or value.get("failure_class") or "")
+    if not failure_class or failure_class == "unknown_failure":
+        return {}
+    return dict(value)
+
+
+def _structured_runtime_inferred_artifact_obligation(payload: dict[str, object]) -> bool:
+    artifacts = payload.get("artifact_evidence")
+    if not isinstance(artifacts, list):
+        return False
+    for item in artifacts:
+        if isinstance(item, dict) and str(item.get("source") or "") == "runtime_inferred":
+            return True
+    return False
 
 
 def _frontier_failure_evidence_text(payload: dict[str, object]) -> str:

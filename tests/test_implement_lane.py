@@ -2668,6 +2668,167 @@ def test_implement_v2_exec_yield_poll_and_read_output(tmp_path) -> None:
     assert result.metrics["terminal_evidence_count"] == 1
 
 
+def test_implement_v2_exec_attaches_structured_artifact_evidence(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "artifact-pass",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "printf artifact-ok > artifact.txt",
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:artifact-pass",
+                        "role": "build",
+                        "stage": "build",
+                        "purpose": "build",
+                        "proof_role": "target_build",
+                        "acceptance_kind": "candidate_artifact_proof",
+                        "expected_artifacts": [
+                            {
+                                "id": "artifact",
+                                "kind": "file",
+                                "path": "artifact.txt",
+                                "freshness": "created_after_run_start",
+                                "checks": [
+                                    {"type": "exists", "severity": "blocking"},
+                                    {"type": "text_contains", "text": "artifact-ok", "severity": "blocking"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "artifact evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+    side_effect_kinds = {effect["kind"] for effect in tool_result["side_effects"]}
+
+    assert tool_result["status"] == "completed"
+    assert "implement-v2-evidence://" in " ".join(tool_result["evidence_refs"])
+    assert payload["command_run"]["command_run_id"] == payload["tool_run_record"]["command_run_id"]
+    assert payload["artifact_evidence"][0]["status"] == "passed"
+    assert payload["verifier_evidence"]["verdict"] == "pass"
+    assert payload["structured_finish_gate"]["blocked"] is False
+    assert {
+        "command_run",
+        "tool_run_record",
+        "artifact_evidence",
+        "verifier_evidence",
+        "failure_classification",
+        "structured_finish_gate",
+    } <= side_effect_kinds
+
+
+def test_implement_v2_exec_missing_expected_artifact_blocks_result(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "artifact-missing",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "true",
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "any"},
+                        "expected_artifacts": [
+                            {
+                                "id": "frame",
+                                "kind": "file",
+                                "path": "frame.bmp",
+                                "freshness": "created_after_run_start",
+                                "checks": [{"type": "exists", "severity": "blocking"}],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "artifact evidence missing"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["exit_code"] == 0
+    assert payload["tool_run_record"]["semantic_exit"]["ok"] is True
+    assert payload["artifact_evidence"][0]["status"] == "failed"
+    assert payload["verifier_evidence"]["verdict"] == "fail"
+    assert payload["failure_classification"]["class"] == "runtime_artifact_missing"
+    assert payload["structured_finish_gate"]["blocked"] is True
+
+
+def test_implement_v2_exec_contract_accepted_nonzero_exit_can_complete(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "accepted-nonzero",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "exit 4",
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:accepted-nonzero",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "code_set", "codes": [4]},
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "nonzero accepted"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["status"] == "failed"
+    assert payload["tool_run_record"]["status"] == "failed"
+    assert payload["tool_run_record"]["semantic_exit"]["ok"] is True
+    assert payload["structured_finish_gate"]["blocked"] is False
+
+
 def test_implement_v2_exec_lifecycle_can_use_known_command_run_id(tmp_path) -> None:
     from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
     from mew.implement_lane.provider import FakeProviderAdapter
@@ -3665,6 +3826,127 @@ def test_implement_v2_frontier_classifies_observed_runtime_missing_artifact_over
     assert runtime_failure["failure_class"] == "runtime_artifact_missing"
     assert "NO_FRAME" in runtime_failure["stdout_tail"]
     assert "output artifact production" in runtime_failure["required_next_probe"]
+
+
+def test_implement_v2_frontier_prefers_structured_missing_runtime_artifact(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "runtime verifier exited without producing declared artifact",
+            "tool_calls": [
+                {
+                    "id": "structured-runtime-missing",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'runtime ended normally without markers\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:structured-runtime-missing",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "freshness": "created_after_run_start",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "runtime artifact missing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Run verifier so it writes frame.bmp."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    runtime_failure = result.updated_lane_state["lane_hard_runtime_frontier"]["latest_runtime_failure"]
+
+    assert runtime_failure["failure_class"] == "runtime_artifact_missing"
+    assert runtime_failure["failure_kind"] == "missing_artifact"
+    assert "NO_FRAME" not in runtime_failure["stdout_tail"]
+    assert "producing substep" in runtime_failure["required_next_probe"]
+
+
+def test_implement_v2_frontier_update_can_infer_same_turn_expected_artifact(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "declare final artifact then run verifier",
+            "frontier_state_update": {
+                "final_artifact": {"path": "frame.bmp", "kind": "file"},
+            },
+            "tool_calls": [
+                {
+                    "id": "runtime-from-frontier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "frontier artifact missing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert payload["artifact_evidence"][0]["artifact_id"] == "frame.bmp"
+    assert payload["artifact_evidence"][0]["source"] == "runtime_inferred"
+    assert tool_result["status"] == "failed"
+    assert result.updated_lane_state["lane_hard_runtime_frontier"]["latest_runtime_failure"]["failure_class"] == (
+        "artifact_validation_failure"
+    )
+    assert "latest_build_failure" not in result.updated_lane_state["lane_hard_runtime_frontier"]
 
 
 def test_implement_v2_frontier_does_not_classify_build_artifact_missing_as_runtime(tmp_path) -> None:

@@ -11,6 +11,16 @@ import time
 from ..acceptance_evidence import split_unquoted_shell_command_segments
 from ..read_tools import resolve_allowed_path
 from ..toolbox import ManagedCommandRunner, is_resident_mew_loop_command, split_command_env
+from .artifact_checks import capture_pre_run_artifact_stats, check_expected_artifacts
+from .execution_evidence import (
+    CommandRun,
+    ToolRunRecord,
+    apply_finish_gate,
+    classify_execution_failure,
+    derive_verifier_evidence,
+    normalize_execution_contract,
+    semantic_exit_from_run,
+)
 from .read_runtime import DEFAULT_V2_READ_RESULT_MAX_CHARS
 from .replay import build_invalid_tool_result
 from .types import ToolCallEnvelope, ToolResultEnvelope
@@ -51,12 +61,16 @@ class ImplementV2ManagedExecRuntime:
         allow_shell: bool = False,
         run_command_available: bool = False,
         route_run_tests_shell_surface: bool = True,
+        task_contract: dict[str, object] | None = None,
+        frontier_state: dict[str, object] | None = None,
     ):
         self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
         self.allowed_roots = tuple(str(root) for root in (allowed_roots or (str(self.workspace),)))
         self.allow_shell = bool(allow_shell)
         self.run_command_available = bool(run_command_available)
         self.route_run_tests_shell_surface = bool(route_run_tests_shell_surface)
+        self.task_contract = dict(task_contract or {})
+        self.frontier_state = dict(frontier_state or {})
         self.runner = ManagedCommandRunner(max_active=max_active)
         self.output_paths: dict[str, str] = {}
         self.command_metadata: dict[str, dict[str, object]] = {}
@@ -156,6 +170,20 @@ class ImplementV2ManagedExecRuntime:
             minimum=0.0,
             maximum=min(30.0, timeout),
         )
+        raw_contract = args.get("execution_contract") if isinstance(args.get("execution_contract"), dict) else {}
+        normalized_contract = _normalize_runtime_contract(
+            raw_contract,
+            task_contract=self.task_contract,
+            frontier_state=self.frontier_state,
+            fallback_id=f"contract:{command_run_id}",
+        )
+        pre_run_artifact_stats = {}
+        if normalized_contract.expected_artifacts:
+            pre_run_artifact_stats = capture_pre_run_artifact_stats(
+                normalized_contract.expected_artifacts,
+                workspace=self.workspace,
+                allowed_roots=self.allowed_roots,
+            )
         self.runner.start(
             command,
             cwd=str(cwd),
@@ -171,6 +199,9 @@ class ImplementV2ManagedExecRuntime:
             "tool_name": call.tool_name,
             "effective_tool_name": effective_tool_name,
             "command_source": command_source,
+            "execution_contract_normalized": normalized_contract.as_dict(),
+            "pre_run_artifact_stats": pre_run_artifact_stats,
+            "tool_run_record_ids": [],
             **({"execution_contract": dict(args["execution_contract"])} if isinstance(args.get("execution_contract"), dict) else {}),
             **({"tool_contract_recovery": dict(tool_contract_recovery)} if tool_contract_recovery is not None else {}),
         }
@@ -238,26 +269,190 @@ class ImplementV2ManagedExecRuntime:
         }
 
     def _result_from_payload(self, call: ToolCallEnvelope, payload: dict[str, object]) -> ToolResultEnvelope:
+        return self._result_from_payload_parts(
+            lane_attempt_id=call.lane_attempt_id,
+            provider_call_id=call.provider_call_id,
+            mew_tool_call_id=call.mew_tool_call_id,
+            tool_name=call.tool_name,
+            payload=payload,
+        )
+
+    def project_result_payload(self, result: ToolResultEnvelope, payload: dict[str, object]) -> ToolResultEnvelope:
+        """Rebuild a yielded command result after live closeout/final cleanup."""
+
+        return self._result_from_payload_parts(
+            lane_attempt_id=result.lane_attempt_id,
+            provider_call_id=result.provider_call_id,
+            mew_tool_call_id=result.mew_tool_call_id,
+            tool_name=result.tool_name,
+            payload=payload,
+            prior_side_effects=result.side_effects,
+        )
+
+    def _result_from_payload_parts(
+        self,
+        *,
+        lane_attempt_id: str,
+        provider_call_id: str,
+        mew_tool_call_id: str,
+        tool_name: str,
+        payload: dict[str, object],
+        prior_side_effects: tuple[dict[str, object], ...] = (),
+    ) -> ToolResultEnvelope:
         status = _tool_result_status(payload)
         is_error = status in {"failed", "interrupted"}
         command_run_id = str(payload.get("command_run_id") or "")
         content_refs = ()
         if payload.get("output_ref"):
-            content_refs = (f"implement-v2-exec://{call.lane_attempt_id}/{command_run_id}/output",)
+            content_refs = (f"implement-v2-exec://{lane_attempt_id}/{command_run_id}/output",)
         evidence_refs = ()
-        if status == "completed" and call.tool_name in {"run_command", "run_tests", "poll_command"}:
-            evidence_refs = (f"implement-v2-exec://{call.lane_attempt_id}/{command_run_id}/terminal",)
+        side_effects: tuple[dict[str, object], ...] = ()
+        structured_payload = dict(payload)
+        if command_run_id and tool_name in {"run_command", "run_tests", "poll_command", "cancel_command"}:
+            side_effects, structured_payload, structured_status = self._structured_execution_evidence(
+                lane_attempt_id=lane_attempt_id,
+                provider_call_id=provider_call_id,
+                tool_name=tool_name,
+                payload=structured_payload,
+                status=status,
+            )
+            side_effects = _merge_lifecycle_side_effects(prior_side_effects, side_effects)
+            status = structured_status
+            is_error = status in {"failed", "interrupted"}
+        if status == "completed" and tool_name in {"run_command", "run_tests", "poll_command"}:
+            evidence_refs = (f"implement-v2-exec://{lane_attempt_id}/{command_run_id}/terminal",)
+        for effect in side_effects:
+            ref = _execution_evidence_ref(lane_attempt_id=lane_attempt_id, effect=effect)
+            if ref and ref not in evidence_refs:
+                evidence_refs = (*evidence_refs, ref)
         return ToolResultEnvelope(
-            lane_attempt_id=call.lane_attempt_id,
-            provider_call_id=call.provider_call_id,
-            mew_tool_call_id=call.mew_tool_call_id,
-            tool_name=call.tool_name,
+            lane_attempt_id=lane_attempt_id,
+            provider_call_id=provider_call_id,
+            mew_tool_call_id=mew_tool_call_id,
+            tool_name=tool_name,
             status=status,
             is_error=is_error,
-            content=(dict(payload),),
+            content=(structured_payload,),
             content_refs=content_refs,
             evidence_refs=evidence_refs,
+            side_effects=side_effects,
+            started_at=str(structured_payload.get("started_at") or ""),
+            finished_at=str(structured_payload.get("finished_at") or ""),
         )
+
+    def _structured_execution_evidence(
+        self,
+        *,
+        lane_attempt_id: str,
+        provider_call_id: str,
+        tool_name: str,
+        payload: dict[str, object],
+        status: str,
+    ) -> tuple[tuple[dict[str, object], ...], dict[str, object], str]:
+        command_run_id = str(payload.get("command_run_id") or "")
+        metadata = self.command_metadata.setdefault(command_run_id, {})
+        contract = _contract_from_payload(
+            payload,
+            metadata=metadata,
+            task_contract=self.task_contract,
+            frontier_state=self.frontier_state,
+            fallback_id=f"contract:{command_run_id}",
+        )
+        record_id = _tool_run_record_id(
+            lane_attempt_id=lane_attempt_id,
+            command_run_id=command_run_id,
+            provider_call_id=provider_call_id,
+            status=status,
+            observation_index=_next_tool_observation_index(metadata),
+        )
+        record = ToolRunRecord(
+            record_id=record_id,
+            command_run_id=command_run_id,
+            provider_call_id=provider_call_id,
+            declared_tool_name=str(payload.get("tool_name") or tool_name),
+            effective_tool_name=str(payload.get("effective_tool_name") or payload.get("tool_name") or tool_name),
+            contract_id=contract.id,
+            started_at=str(payload.get("started_at") or ""),
+            finished_at=str(payload.get("finished_at") or ""),
+            duration_seconds=_optional_float(payload.get("duration_seconds")),
+            status=_tool_run_record_status(payload, envelope_status=status),
+            exit_code=_optional_int(payload.get("exit_code")),
+            timed_out=bool(payload.get("timed_out")),
+            interrupted=status == "interrupted",
+            stdout_ref=(
+                f"implement-v2-exec://{lane_attempt_id}/{command_run_id}/stdout"
+                if payload.get("output_ref")
+                else ""
+            ),
+            stderr_ref=(
+                f"implement-v2-exec://{lane_attempt_id}/{command_run_id}/stderr"
+                if payload.get("output_ref")
+                else ""
+            ),
+            combined_output_ref=(
+                f"implement-v2-exec://{lane_attempt_id}/{command_run_id}/output"
+                if payload.get("output_ref")
+                else ""
+            ),
+            stdout_preview=str(payload.get("stdout_tail") or payload.get("stdout") or ""),
+            stderr_preview=str(payload.get("stderr_tail") or payload.get("stderr") or ""),
+            output_truncated=bool(payload.get("output_truncated")),
+            tool_contract_recovery=(
+                dict(payload["tool_contract_recovery"]) if isinstance(payload.get("tool_contract_recovery"), dict) else None
+            ),
+            terminal_failure_reaction_eligible=not bool(
+                isinstance(payload.get("tool_contract_recovery"), dict)
+                and payload.get("tool_contract_recovery")
+            ),
+        )
+        record = _record_with_semantic_exit(record, contract)
+        record_ids = _append_record_id(metadata, record.record_id)
+        command_run = CommandRun(
+            command_run_id=command_run_id,
+            contract_id=contract.id,
+            started_at=str(payload.get("started_at") or metadata.get("started_at") or ""),
+            status=record.status,
+            record_ids=tuple(record_ids),
+            terminal_record_id=record.record_id if _is_terminal_record(record) else "",
+        )
+        metadata["started_at"] = command_run.started_at
+        artifact_evidence = ()
+        if _is_terminal_record(record) and contract.expected_artifacts:
+            artifact_evidence = check_expected_artifacts(
+                contract,
+                command_run_id=command_run_id,
+                tool_run_record_id=record.record_id,
+                run_started_at=payload.get("started_at") or command_run.started_at,
+                workspace=self.workspace,
+                allowed_roots=self.allowed_roots,
+                pre_run_stats=metadata.get("pre_run_artifact_stats") if isinstance(metadata.get("pre_run_artifact_stats"), dict) else {},
+                previous_evidence=(),
+                stream_outputs=_stream_outputs_from_payload(payload, tool_run_record_id=record.record_id),
+            )
+        verifier = derive_verifier_evidence(contract, (record,), artifact_evidence)
+        classification = classify_execution_failure(record, artifact_evidence, verifier, contract)
+        finish_gate = apply_finish_gate(contract, verifier, (classification,))
+        payload["execution_contract_normalized"] = contract.as_dict()
+        payload["command_run"] = command_run.as_dict()
+        payload["tool_run_record"] = record.as_dict()
+        payload["artifact_evidence"] = [item.as_dict() for item in artifact_evidence]
+        payload["verifier_evidence"] = verifier.as_dict()
+        payload["failure_classification"] = classification.as_dict()
+        payload["structured_finish_gate"] = finish_gate.as_dict()
+        effects = (
+            {"kind": "command_run", "record": command_run.as_dict()},
+            {"kind": "tool_run_record", "record": record.as_dict()},
+            *({"kind": "artifact_evidence", "record": item.as_dict()} for item in artifact_evidence),
+            {"kind": "verifier_evidence", "record": verifier.as_dict()},
+            {"kind": "failure_classification", "record": classification.as_dict()},
+            {"kind": "structured_finish_gate", "record": finish_gate.as_dict()},
+        )
+        if status in {"failed", "interrupted"} and bool(record.semantic_exit.get("ok")) and not finish_gate.blocked:
+            return tuple(effects), payload, "completed"
+        if status == "completed" and finish_gate.blocked:
+            payload["reason"] = "; ".join(finish_gate.reasons) or "structured execution evidence blocked completion"
+            return tuple(effects), payload, "failed"
+        return tuple(effects), payload, status
 
 
 def _tool_result_status(payload: dict[str, object]) -> str:
@@ -273,6 +468,201 @@ def _tool_result_status(payload: dict[str, object]) -> str:
     if payload.get("exit_code") is not None or payload.get("timed_out"):
         return "failed"
     return "failed"
+
+
+def _normalize_runtime_contract(
+    value: object,
+    *,
+    task_contract: dict[str, object],
+    frontier_state: dict[str, object],
+    fallback_id: str,
+):
+    contract = normalize_execution_contract(value, task_contract=task_contract, frontier_state=frontier_state)
+    if contract.id == "contract:unknown":
+        contract = normalize_execution_contract(
+            {**contract.as_dict(), "id": fallback_id},
+            task_contract=task_contract,
+            frontier_state=frontier_state,
+        )
+    return contract
+
+
+def _contract_from_payload(
+    payload: dict[str, object],
+    *,
+    metadata: dict[str, object],
+    task_contract: dict[str, object],
+    frontier_state: dict[str, object],
+    fallback_id: str,
+):
+    normalized = payload.get("execution_contract_normalized") or metadata.get("execution_contract_normalized")
+    if isinstance(normalized, dict):
+        return normalize_execution_contract(normalized, task_contract=task_contract, frontier_state=frontier_state)
+    raw = payload.get("execution_contract") or metadata.get("execution_contract")
+    return _normalize_runtime_contract(
+        raw if isinstance(raw, dict) else {},
+        task_contract=task_contract,
+        frontier_state=frontier_state,
+        fallback_id=fallback_id,
+    )
+
+
+def _next_tool_observation_index(metadata: dict[str, object]) -> int:
+    records = metadata.get("tool_run_record_ids")
+    return len(records) + 1 if isinstance(records, list) else 1
+
+
+def _append_record_id(metadata: dict[str, object], record_id: str) -> list[str]:
+    records = metadata.setdefault("tool_run_record_ids", [])
+    if not isinstance(records, list):
+        records = []
+        metadata["tool_run_record_ids"] = records
+    records.append(record_id)
+    return [str(item) for item in records if str(item)]
+
+
+def _tool_run_record_id(
+    *,
+    lane_attempt_id: str,
+    command_run_id: str,
+    provider_call_id: str,
+    status: str,
+    observation_index: int,
+) -> str:
+    stable = _safe_id_part(provider_call_id, "provider-call")
+    status_part = _safe_id_part(status, "status")
+    digest = hashlib.sha256(
+        f"{lane_attempt_id}:{command_run_id}:{provider_call_id}:{observation_index}:{status}".encode(
+            "utf-8",
+            errors="replace",
+        )
+    ).hexdigest()
+    return f"tool-run-record:{stable}:{observation_index}:{status_part}:{digest[:8]}"
+
+
+def _tool_run_record_status(payload: dict[str, object], *, envelope_status: str):
+    status = str(payload.get("status") or "")
+    if status in {"running", "yielded", "completed", "failed", "timed_out", "killed", "orphaned"}:
+        return status
+    if envelope_status == "interrupted":
+        return "interrupted"
+    if envelope_status == "completed":
+        return "completed"
+    if envelope_status == "yielded":
+        return "yielded"
+    return "failed"
+
+
+def _record_with_semantic_exit(record: ToolRunRecord, contract) -> ToolRunRecord:
+    semantic_exit = semantic_exit_from_run(record, contract)
+    return ToolRunRecord(
+        record_id=record.record_id,
+        command_run_id=record.command_run_id,
+        provider_call_id=record.provider_call_id,
+        declared_tool_name=record.declared_tool_name,
+        effective_tool_name=record.effective_tool_name,
+        contract_id=record.contract_id,
+        substep_id=record.substep_id,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+        duration_seconds=record.duration_seconds,
+        status=record.status,
+        exit_code=record.exit_code,
+        timed_out=record.timed_out,
+        interrupted=record.interrupted,
+        semantic_exit=semantic_exit,
+        stdout_ref=record.stdout_ref,
+        stderr_ref=record.stderr_ref,
+        combined_output_ref=record.combined_output_ref,
+        stdout_preview=record.stdout_preview,
+        stderr_preview=record.stderr_preview,
+        output_truncated=record.output_truncated,
+        tool_contract_recovery=record.tool_contract_recovery,
+        terminal_failure_reaction_eligible=record.terminal_failure_reaction_eligible,
+    )
+
+
+def _is_terminal_record(record: ToolRunRecord) -> bool:
+    return record.status in {"completed", "failed", "timed_out", "interrupted", "killed", "orphaned", "pre_spawn_error", "contract_rejected"}
+
+
+def _stream_outputs_from_payload(payload: dict[str, object], *, tool_run_record_id: str) -> dict[str, object]:
+    stdout = str(payload.get("stdout") or payload.get("stdout_tail") or "")
+    stderr = str(payload.get("stderr") or payload.get("stderr_tail") or "")
+    combined = "\n".join(item for item in (stdout, stderr) if item)
+    return {
+        "stdout": stdout,
+        "stderr": stderr,
+        "output": combined,
+        tool_run_record_id: {
+            "stdout": stdout,
+            "stderr": stderr,
+            "output": combined,
+        },
+    }
+
+
+def _execution_evidence_ref(*, lane_attempt_id: str, effect: dict[str, object]) -> str:
+    kind = str(effect.get("kind") or "")
+    record = effect.get("record")
+    if not isinstance(record, dict):
+        return ""
+    if kind == "command_run":
+        identifier = str(record.get("command_run_id") or "")
+    elif kind == "tool_run_record":
+        identifier = str(record.get("record_id") or "")
+    elif kind == "artifact_evidence":
+        identifier = str(record.get("evidence_id") or "")
+    elif kind == "verifier_evidence":
+        identifier = str(record.get("verifier_id") or "")
+    elif kind == "failure_classification":
+        identifier = str(record.get("classification_id") or "")
+    elif kind == "structured_finish_gate":
+        identifier = "finish-gate"
+    else:
+        identifier = ""
+    if not identifier:
+        return ""
+    return f"implement-v2-evidence://{lane_attempt_id}/{kind}/{_safe_id_part(identifier, kind)}"
+
+
+def _merge_lifecycle_side_effects(
+    prior_side_effects: tuple[dict[str, object], ...],
+    current_side_effects: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    carried = []
+    seen_tool_run_records: set[str] = set()
+    for effect in (*prior_side_effects, *current_side_effects):
+        if effect.get("kind") != "tool_run_record":
+            continue
+        record = effect.get("record")
+        if not isinstance(record, dict):
+            continue
+        record_id = str(record.get("record_id") or "")
+        if not record_id or record_id in seen_tool_run_records:
+            continue
+        seen_tool_run_records.add(record_id)
+        carried.append(dict(effect))
+    non_lifecycle_current = tuple(effect for effect in current_side_effects if effect.get("kind") != "tool_run_record")
+    return (*carried, *non_lifecycle_current)
+
+
+def _optional_float(value: object) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_command_argument(args: dict[str, object]) -> tuple[str, str]:
